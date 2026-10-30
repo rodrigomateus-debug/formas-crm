@@ -32,6 +32,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Búsqueda por nombre, mail, dominio, teléfono, id | ✅ | Lupa de arriba (Ctrl+K) y cada lista |
 | Filtros avanzados (Y / O), por propietario, fechas relativas | ✅ | «Filtros» |
 | Vistas guardadas propias y compartidas, «Todos» / «Míos», en la tabla y en el tablero (con sus filtros) | ✅ | Pestañas de cada lista |
+| Guardar los cambios de una vista (filtros, propietario, columnas, orden, tabla o tablero, pipeline), guardarla como nueva o descartar | ✅ | «Cambios sin guardar» a la derecha de las pestañas; pisar una vista ajena solo puede un administrador |
 | Elegir y ordenar columnas, ordenar por columna, paginado | ✅ | «Columnas» |
 | Editar un campo desde la lista (propietario, mail, desplegables, fechas…), sin entrar a la ficha | ✅ | Lápiz al pasar el mouse por la celda (o doble clic); solo lectura no edita |
 | Vista previa al costado: clic en una tarjeta del tablero o «Vista previa» en la tabla, con acciones rápidas, «Acerca de» editable, asociaciones (agregar existentes, crear nuevos ya asociados, quitar) y última actividad | ✅ | Botón «Ver registro» para la ficha completa |

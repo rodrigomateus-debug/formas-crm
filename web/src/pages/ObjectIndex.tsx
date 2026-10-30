@@ -20,7 +20,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   order: ['pdv_finnegans', 'hs_total_price', 'owner_id', 'hs_order_status', 'createdate'],
 };
 
-interface ViewConfig { q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; pipeline?: string }
+interface ViewConfig { q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; pipeline?: string; mode?: 'table' | 'board' }
 interface SavedView { id: number; name: string; shared: number; user_id: number; config: ViewConfig }
 
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
@@ -94,13 +94,35 @@ function IndexFor({ type }: { type: ObjectType }) {
 
   const applyView = (key: string) => {
     setActiveView(key);
-    setParams((p) => { key === 'all' ? p.delete('v') : p.set('v', key); return p; }, { replace: true });
+    const v = views.data?.find((x) => String(x.id) === key);
+    const pipe = type === 'deal' && v?.config.pipeline && (v.config.pipeline === 'all' || meta.pipelines.some((p) => p.id === v.config.pipeline)) ? v.config.pipeline : null;
+    if (pipe) { setPipelineSelRaw(pipe); try { localStorage.setItem(PIPE_KEY, pipe); } catch { /* ignorar */ } }
+    // Un solo cambio del link: la vista, su modo (tabla o tablero) y su pipeline.
+    setParams((p) => {
+      key === 'all' ? p.delete('v') : p.set('v', key);
+      if (v?.config.mode) v.config.mode === 'board' ? p.set('view', 'board') : p.delete('view');
+      if (pipe) p.set('pipeline', pipe);
+      return p;
+    }, { replace: true });
     if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined }));
     else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: 'me' }));
-    else {
-      const v = views.data?.find((x) => String(x.id) === key);
-      if (v) { setCfg({ ...loadLocal(type), ...v.config }); setQ(v.config.q ?? ''); if (type === 'deal' && v.config.pipeline) setPipelineSel(v.config.pipeline); }
-    }
+    else if (v) { setCfg({ ...loadLocal(type), ...v.config }); setQ(v.config.q ?? ''); }
+  };
+  // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
+  const current: ViewConfig = { q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owner: cfg.owner, mode, ...(type === 'deal' ? { pipeline: pipelineSel } : {}) };
+  const activeSaved = views.data?.find((v) => String(v.id) === activeView);
+  const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
+    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, c.owner ?? '', c.mode ?? base.mode, type === 'deal' ? c.pipeline ?? base.pipeline : '',
+  ]);
+  const dirty = !!activeSaved && norm(current, current) !== norm(activeSaved.config, current);
+  const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
+  const saveView = async () => {
+    if (!activeSaved) return;
+    try {
+      await http('PATCH', `/views/${type}/${activeSaved.id}`, { config: current });
+      toast(`Vista «${activeSaved.name}» guardada`);
+      views.reload();
+    } catch (e) { toast((e as Error).message, true); }
   };
   useEffect(() => { if (views.data && activeView !== 'all' && activeView !== 'mine') applyView(activeView); /* eslint-disable-next-line */ }, [views.data]);
 
@@ -165,6 +187,16 @@ function IndexFor({ type }: { type: ObjectType }) {
           </button>
         ))}
         <button className="tab" onClick={() => setShow('save')}>+ Guardar vista</button>
+        {dirty && (
+          <div className="view-dirty">
+            <span className="small muted">Cambios sin guardar</span>
+            <button className="btn sm ghost" onClick={() => applyView(activeView)}>Descartar</button>
+            <button className="btn sm" onClick={() => setShow('save')}>Guardar como nueva</button>
+            {canSaveView
+              ? <button className="btn sm primary" onClick={saveView}>Guardar</button>
+              : <button className="btn sm primary" disabled title="Solo quien creó la vista (o un administrador) la puede cambiar">Guardar</button>}
+          </div>
+        )}
       </div>
 
       {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview} onOpen={setPreview} reloadKey={boardKey} q={dq} owner={cfg.owner} groups={cfg.groups} tools={<>{filterButton}{filterChips}</>} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} />
@@ -247,7 +279,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'bulk' && <BulkEdit type={type} ids={[...selected]} onClose={() => setShow('')} onDone={() => { setShow(''); setSelected(new Set()); list.reload(); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
-      {show === 'save' && <SaveView type={type} config={{ ...cfg, q, ...(type === 'deal' ? { pipeline: pipelineSel } : {}) }} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
+      {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
     </div>
   );
 }
@@ -410,7 +442,7 @@ function SaveView({ type, config, onClose, onSaved }: { type: ObjectType; config
     </>}>
       <label className="field">Nombre<input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Corporate sin actividad 30 días" /></label>
       <label className="row small"><input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />Compartir con todo el equipo</label>
-      <p className="muted small" style={{ margin: 0 }}>Guarda filtros, columnas, orden y búsqueda actuales.</p>
+      <p className="muted small" style={{ margin: 0 }}>Guarda filtros, propietario, columnas, orden, búsqueda y si se ve en tabla o tablero{type === 'deal' ? ', con el pipeline' : ''}.</p>
     </Modal>
   );
 }

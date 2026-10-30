@@ -99,6 +99,7 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .tab:hover { color: var(--ink); }
 .tab.on { color: var(--navy); border-bottom-color: var(--navy); font-weight: 600; }
 .tab .x { opacity: .5; font-size: 11px; }
+.view-dirty { margin-left: auto; display: flex; gap: 6px; align-items: center; padding: 0 0 6px 12px; white-space: nowrap; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: #e8e8f8; color: var(--navy); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
 .avatar.lg { width: 48px; height: 48px; font-size: 17px; }
 .avatar.company { border-radius: 8px; background: #eaf5dc; color: #3c6b12; }

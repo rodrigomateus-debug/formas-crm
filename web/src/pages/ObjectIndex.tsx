@@ -4,7 +4,7 @@ import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline,
   type CrmRecord, type Filter, type ObjectType,
 } from '../lib';
-import { CreateRecord, Drawer, FilterRow, Modal, PropertyInput, describeFilter, filterableProps, opsFor } from '../components';
+import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
@@ -200,7 +200,9 @@ function IndexFor({ type }: { type: ObjectType }) {
                   <td className="check"><input type="checkbox" aria-label={`Seleccionar ${r.name}`} checked={selected.has(r.id)} onChange={() => {
                     const s = new Set(selected); s.has(r.id) ? s.delete(r.id) : s.add(r.id); setSelected(s);
                   }} /></td>
-                  <td className="name"><Link to={recordUrl(type, r.id)}>{r.name}</Link></td>
+                  <td className="name">{type === 'company'
+                    ? <Link to={recordUrl(type, r.id)} className="with-logo"><Avatar name={r.name} type="company" domain={r.props.domain} />{r.name}</Link>
+                    : <Link to={recordUrl(type, r.id)}>{r.name}</Link>}</td>
                   {columns.map((col) => (
                     <td key={col}>{col === '__company'
                       ? (r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>)

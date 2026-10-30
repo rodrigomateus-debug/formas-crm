@@ -4,8 +4,17 @@ import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor,
 } from './lib';
 
-export function Avatar({ name, type, size }: { name: string; type?: ObjectType; size?: 'lg' }) {
-  return <span className={`avatar ${type && type !== 'contact' ? type : ''} ${size ?? ''}`}>{initials(name)}</span>;
+// Las empresas con dominio muestran su favicon (como el logo de HubSpot); si no tiene, las iniciales.
+const sinLogo = new Set<string>();
+export function Avatar({ name, type, size, domain }: { name: string; type?: ObjectType; size?: 'lg'; domain?: string | null }) {
+  const d = type === 'company' && domain ? String(domain).trim().toLowerCase() : '';
+  const [failed, setFailed] = useState(() => !d || sinLogo.has(d));
+  useEffect(() => { setFailed(!d || sinLogo.has(d)); }, [d]);
+  const cls = `avatar ${type && type !== 'contact' ? type : ''} ${size ?? ''}`;
+  if (!failed) {
+    return <span className={`${cls} logo`}><img src={`/api/favicon/${encodeURIComponent(d)}`} alt="" loading="lazy" onError={() => { sinLogo.add(d); setFailed(true); }} /></span>;
+  }
+  return <span className={cls}>{initials(name)}</span>;
 }
 
 export function Drawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
@@ -140,7 +149,7 @@ export function RecordPicker({ type, onPick, exclude = [], placeholder }: { type
       <div className="stack" style={{ gap: 2 }}>
         {res.filter((r) => !exclude.includes(r.id)).map((r) => (
           <button key={r.id} className="btn ghost" style={{ justifyContent: 'flex-start', height: 'auto', padding: '6px 8px' }} onClick={() => onPick(r)}>
-            <Avatar name={r.name} type={type} />
+            <Avatar name={r.name} type={type} domain={r.props.domain} />
             <span className="stack" style={{ gap: 0, alignItems: 'flex-start', minWidth: 0 }}>
               <span className="ellipsis">{r.name}</span>
               <span className="small muted ellipsis">{r.props.email || r.props.domain || r.props.amount || ''}</span>
@@ -225,7 +234,7 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
         <div className="field">
           <span className="small muted">Empresa asociada{needsCompany ? ' * (obligatoria en este pipeline)' : ''}</span>
           {company
-            ? <div className="row"><Avatar name={company.name} type="company" /><span className="grow">{company.name}</span><button className="btn sm ghost" onClick={() => setCompany(null)}>Quitar</button></div>
+            ? <div className="row"><Avatar name={company.name} type="company" domain={company.props?.domain} /><span className="grow">{company.name}</span><button className="btn sm ghost" onClick={() => setCompany(null)}>Quitar</button></div>
             : pickCompany ? <RecordPicker type="company" onPick={(r) => { setCompany(r); setPickCompany(false); }} />
               : <button className="btn sm" onClick={() => setPickCompany(true)}>Asociar empresa</button>}
         </div>

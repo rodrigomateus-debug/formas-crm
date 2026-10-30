@@ -95,7 +95,7 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
     <>
       <div className="rec-head">
         <div className="crumb"><Link to={`/${OBJECTS[type].path}`}>← {OBJECTS[type].plural}</Link></div>
-        <div className="title"><Avatar name={record.name} type={type} size="lg" />
+        <div className="title"><Avatar name={record.name} type={type} size="lg" domain={record.props.domain} />
           <div className="grow"><h1>{record.name}</h1><div className="muted small">{subtitle(meta, type, record)}</div></div></div>
         <div className="rec-actions">
           {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
@@ -464,7 +464,7 @@ function AssocCard({ type, record, toType, items, onChange }: { type: ObjectType
       {mode === 'create' && <CreateRecord type={toType} associateWith={record.id} onClose={() => setMode('')} onCreated={() => onChange()} />}
       {shown.map((r) => (
         <div key={r.id} className="assoc-item">
-          <Avatar name={r.name} type={toType} />
+          <Avatar name={r.name} type={toType} domain={r.props.domain} />
           <div className="grow" style={{ minWidth: 0 }}>
             <Link to={recordUrl(toType, r.id)} className="ellipsis" style={{ display: 'block' }}>{r.name}</Link>
             <div className="small muted ellipsis">

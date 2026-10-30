@@ -60,7 +60,7 @@ export default function Board({ pipelineId, q, owner, onOwner, search, onSearch 
         {cols.map((c) => (
           <div key={c.stage.id} className={`col${over === c.stage.id ? ' over' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setOver(c.stage.id); }}
-            onDragLeave={() => setOver((o) => (o === c.stage.id ? null : o))}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((o) => (o === c.stage.id ? null : o)); }}
             onDrop={(e) => { e.preventDefault(); setOver(null); if (dragId) move(dragId, c.stage); setDragId(null); }}>
             <div className="col-head">
               <div className="t"><span className="ellipsis">{c.stage.label}</span><span className="n num">{c.total}</span></div>

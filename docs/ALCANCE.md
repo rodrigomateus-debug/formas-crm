@@ -51,13 +51,14 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Crear tareas con vencimiento, tipo, prioridad y responsable | ✅ | Botón «Tarea» |
 | Última actividad, último contacto, próxima actividad | ✅ | Se recalculan solos |
 | Atajos a WhatsApp, Gmail y chat de Darwin | ✅ | Cabecera de la ficha |
+| Logo de la empresa (ícono de su dominio) en la lista, la ficha y las asociaciones | ✅ | Se trae una vez y queda guardado una semana; sin ícono, las iniciales |
 | Links viejos de HubSpot (`/contacts/47666798/record/0-3/…`) | ✅ | Redirigen a la ficha |
 
 ### Negocios y pipelines
 | Función | Estado | Dónde |
 |---|---|---|
 | 8 pipelines con las mismas etapas, ids y probabilidades | ✅ | `src/worker/seed.ts` |
-| Tablero con arrastrar y soltar, totales por etapa, filtro por propietario | ✅ | Negocios → «Tablero» |
+| Tablero con arrastrar y soltar (en cualquier parte de la columna), totales por etapa, filtro por propietario | ✅ | Negocios → «Tablero» |
 | Selector de pipeline grande arriba de Negocios (tabla y tablero), «Todos los pipelines» en la tabla, recordado y en el link | ✅ | Negocios |
 | Tablero de empresas y contactos por etapa del ciclo de vida (o por cualquier desplegable o propietario), arrastrando para cambiar | ✅ | Empresas / Contactos → «Tablero» |
 | Motivo de cierre perdido obligatorio al perder | ✅ | Tablero y barra de etapas |

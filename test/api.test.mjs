@@ -261,3 +261,9 @@ test('formulario web público con configuración', async () => {
   const missing = await call('POST', '/hooks/form/no-existe', { email: 'x@y.com' });
   assert.equal(missing.status, 404);
 });
+
+test('logo de empresa: un dominio inválido no sale a buscar nada', async () => {
+  for (const d of ['no_es_dominio', 'localhost', `${'a'.repeat(250)}.com`]) {
+    assert.equal((await api('GET', `/favicon/${d}`)).status, 404, d);
+  }
+});

@@ -70,7 +70,7 @@ export default function PropBoard({ type, q, owner, onOwner, search, onSearch }:
         {cols.map((c) => (
           <div key={c.value || 'vacio'} className={`col${over === c.value ? ' over' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setOver(c.value); }}
-            onDragLeave={() => setOver((o) => (o === c.value ? null : o))}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((o) => (o === c.value ? null : o)); }}
             onDrop={(e) => { e.preventDefault(); setOver(null); if (dragId) move(dragId, c); setDragId(null); }}>
             <div className="col-head">
               <div className="t"><span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span></div>

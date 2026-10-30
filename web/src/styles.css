@@ -105,6 +105,10 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .avatar.deal { border-radius: 8px; background: #fff1d6; color: #8a5a00; }
 .avatar.order { border-radius: 8px; background: var(--info-soft); color: var(--info); }
 .avatar.sidebar-me { background: #ffffff22; color: #fff; }
+.avatar.logo { background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
+.avatar.logo img { width: 70%; height: 70%; object-fit: contain; }
+.with-logo { display: inline-flex; align-items: center; gap: 8px; }
+.with-logo .avatar { width: 22px; height: 22px; font-size: 9px; border-radius: 6px; }
 
 /* ---------- Paneles ---------- */
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); }
@@ -134,7 +138,8 @@ table.grid td.name a { font-weight: 500; }
 .bulkbar { display: flex; align-items: center; gap: 8px; background: #e8e8f8; border: 1px solid #c9c9ee; border-radius: var(--r-panel); padding: 6px 10px; margin-bottom: 10px; }
 
 /* ---------- Tablero de negocios ---------- */
-.board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: flex-start; min-height: calc(100vh - 210px); }
+/* Las columnas ocupan todo el alto del tablero: se suelta la tarjeta en cualquier parte de la columna, no solo en el título. */
+.board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: stretch; min-height: calc(100vh - 210px); }
 .col { flex: 0 0 272px; background: var(--sunken); border-radius: var(--r-panel); display: flex; flex-direction: column; max-height: calc(100vh - 200px); }
 .col.over { outline: 2px dashed var(--navy); outline-offset: -2px; }
 .col-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--line); }
@@ -143,7 +148,7 @@ table.grid td.name a { font-weight: 500; }
 .col-head .amt { font-size: 12px; color: var(--ink-2); }
 .col-head .prob { height: 3px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
 .col-head .prob i { display: block; height: 100%; background: var(--brand-green); }
-.col-body { padding: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.col-body { padding: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: grab; display: flex; flex-direction: column; gap: 4px; }
 .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-pop); }
 .card.dragging { opacity: .4; }

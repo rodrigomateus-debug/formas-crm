@@ -323,10 +323,10 @@ test('filtro de varios propietarios con «Sin asignar»', async () => {
   assert.equal(await run(['me', 'none']), 2);
 });
 
-test('pedidos: etapa del pipeline de HubSpot y tablero por etapa', async () => {
+test('pedidos: estados generales y tablero por estado', async () => {
   const stage = (await api('GET', '/meta')).data.properties.find((p) => p.object_type === 'order' && p.name === 'hs_pipeline_stage');
   assert.equal(stage?.type, 'enum');
-  assert.equal(stage.options.length, 11);
+  assert.deepEqual(stage.options.map((o) => o.label), ['Pedido confirmado', 'Listo para producción', 'Esperando boceto o confirmación', 'En producción', 'Listo para entregar', 'Entregado parcial', 'Entregado', 'Anulado']);
   const tag = `Ped ${Date.now().toString(36)}`;
   await api('POST', '/records/order', { props: { hs_order_name: tag, hs_pipeline_stage: '1237498994', hs_total_price: 5000 } });
   const b = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(tag)}`)).data;

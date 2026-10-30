@@ -9,6 +9,8 @@ import { hooks } from './hooks';
 import { handleMcp } from './mcp';
 import { migrate } from './migrate';
 import { syncAll } from './gmail';
+import { syncClickup } from './clickup';
+import { syncFacturas } from './finnegans';
 import { StageError } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -62,8 +64,15 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
-  // Cada 10 minutos: registra los mails nuevos del equipo (si Gmail está activado en Configuración).
-  async scheduled(_event, env, ctx) {
-    ctx.waitUntil((async () => { await ensureSeeded(env.DB); await syncAll(env); })());
+  // Cada 10 minutos: los mails nuevos del equipo (si Gmail está activado) y los pedidos de ClickUp; una vez por hora, las
+  // facturas de Finnegans. Cada una corre aunque otra falle (el error queda en su estado, en Configuración → Integraciones).
+  async scheduled(event, env, ctx) {
+    const safe = (fn: () => Promise<unknown>) => fn().catch((e) => console.error((e as Error).message));
+    ctx.waitUntil((async () => {
+      await ensureSeeded(env.DB);
+      await safe(() => syncAll(env));
+      await safe(() => syncClickup(env));
+      if (new Date(event.scheduledTime).getUTCMinutes() < 10) await safe(() => syncFacturas(env));
+    })());
   },
 } satisfies ExportedHandler<Env>;

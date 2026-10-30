@@ -1,0 +1,115 @@
+import type { Ctx, Env, User } from './env';
+import { updateRecord } from './records';
+
+// Facturas de los pedidos, desde Finnegans (solo lectura). Cada hora, por cada pedido con su pedido de Finnegans
+// (`pedido_finnegans`, que trae ClickUp), el reporte de documentos destino dice qué facturas tiene, también las que
+// pasan por un remito (Corporate). Cuando una factura ya tiene CAE («está lista») queda en el pedido con su número;
+// el PDF lo baja aparte una tarea de GitHub (scripts/facturas-pdf.mjs), porque Finnegans lo da solo con sesión de GO.
+
+const API = (env: Env) => env.FINNEGANS_API_URL ?? 'https://api.finneg.com/api';
+const POR_CORRIDA = 40;
+const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
+
+export async function finnegansToken(env: Env) {
+  if (!env.FINNEGANS_CLIENT_ID || !env.FINNEGANS_CLIENT_SECRET) return null;
+  const url = new URL(`${API(env)}/oauth/token`);
+  url.searchParams.set('grant_type', 'client_credentials');
+  url.searchParams.set('client_id', env.FINNEGANS_CLIENT_ID);
+  url.searchParams.set('client_secret', env.FINNEGANS_CLIENT_SECRET);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Finnegans token: HTTP ${res.status}`);
+  return (await res.text()).trim().replace(/^"|"$/g, '');
+}
+
+async function fin<T>(env: Env, token: string, path: string, params: Record<string, string> = {}): Promise<T | null> {
+  const url = new URL(`${API(env)}/${path}`);
+  for (const [k, v] of Object.entries({ ...params, ACCESS_TOKEN: token })) url.searchParams.set(k, v);
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Finnegans ${path.split('/')[0]}: HTTP ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
+// ClickUp trae «PEDVTASTP - 31277»; Finnegans lo guarda como «PEDVTASTP - 00031277» (Shop y Corporate) o tal cual (NoEstres).
+export function pedidoIds(p: string) {
+  const m = p.match(/^([A-Z]+)\s*-\s*(\d+)$/);
+  if (!m) return [p];
+  const padded = `${m[1]} - ${m[2].padStart(8, '0')}`;
+  const plain = `${m[1]} - ${Number(m[2])}`;
+  return m[1] === 'PEDVTANE' ? [plain, padded] : [padded, plain];
+}
+
+// Cliente del pedido (para asociar la empresa por CUIT).
+export async function finnegansPedido(env: Env, token: string, pedido: string) {
+  for (const id of pedidoIds(pedido)) {
+    const p = await fin<{ Cliente?: string }>(env, token, `pedidoVenta/${encodeURIComponent(id)}`);
+    if (!p?.Cliente) continue;
+    const c = await fin<{ IdentificacionTributariaNumero?: string; RazonSocial?: string }>(env, token, `cliente/${encodeURIComponent(p.Cliente)}`);
+    return { cliente: p.Cliente, cuit: c?.IdentificacionTributariaNumero ?? null, razon: c?.RazonSocial ?? null };
+  }
+  return null;
+}
+
+interface Destino {
+  DESTINONOMBRE: string; DESTINOIDENTIFICACIONEXTERNA: string; DESTINOTRANSACCIONID: number; TIPODOCUMENTO: string;
+  CATEGORIATIPODOCUMENTO: number; DESTINOIMPORTETOTAL: number; OBTUVOCAE: string; DESTINOFECHA: string;
+}
+
+// Facturas con CAE de un pedido (directas o a través de un remito). Las notas de crédito y débito no cuentan.
+export async function facturasDelPedido(env: Env, token: string, pedido: string) {
+  for (const id of pedidoIds(pedido)) {
+    const rows = await fin<Destino[]>(env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: id });
+    if (rows?.length) return rows.filter((r) => r.CATEGORIATIPODOCUMENTO === -8 && r.OBTUVOCAE === 'SI' && !/^(NC|ND)/.test(r.TIPODOCUMENTO));
+  }
+  return [];
+}
+
+export interface FinnegansState { cursor?: number; at?: string; revisados?: number; facturas?: number; error?: string | null }
+
+export async function finnegansState(db: D1Database): Promise<FinnegansState> {
+  const r = await db.prepare("SELECT value FROM settings WHERE key = 'finnegans_state'").first<{ value: string }>();
+  return r ? JSON.parse(r.value) : {};
+}
+
+export async function syncFacturas(env: Env) {
+  const db = env.DB;
+  const state = await finnegansState(db);
+  const out: FinnegansState = { ...state, at: new Date().toISOString(), revisados: 0, facturas: 0, error: null };
+  try {
+    const token = await finnegansToken(env);
+    if (!token) return { skipped: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
+    // Pedidos de los últimos 4 meses que no están anulados; se recorren de a tandas (cursor por id) y se vuelve a empezar.
+    const pick = (after: number) => db.prepare(`SELECT id, props FROM records WHERE object_type = 'order' AND archived = 0 AND id > ?
+      AND json_extract(props, '$.pedido_finnegans') IS NOT NULL AND COALESCE(json_extract(props, '$.hs_pipeline_stage'), '') != ?
+      AND updated_at >= ? ORDER BY id LIMIT ?`).bind(after, ANULADO, new Date(Date.now() - 120 * 86_400_000).toISOString(), POR_CORRIDA).all<{ id: number; props: string }>();
+    let rows = (await pick(state.cursor ?? 0)).results;
+    if (!rows.length && state.cursor) rows = (await pick(0)).results;
+    const sys = await db.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<User>();
+    const ctx: Ctx = { user: sys!, source: 'finnegans', sourceDetail: 'Facturas' };
+    for (const r of rows) {
+      const props = JSON.parse(r.props) as Record<string, string>;
+      out.revisados!++;
+      out.cursor = r.id;
+      const facturas = await facturasDelPedido(env, token, props.pedido_finnegans);
+      for (const f of facturas) {
+        const known = await db.prepare("SELECT id FROM files WHERE record_id = ? AND source = 'finnegans' AND source_ref = ?").bind(r.id, f.DESTINOIDENTIFICACIONEXTERNA).first();
+        if (known) continue;
+        const det = await fin<{ NumeroComprobante?: string; Fecha?: string; CAE?: string; CAEFechaVto?: string; RazonSocial?: string }>(
+          env, token, `facturaVenta/${encodeURIComponent(f.DESTINOIDENTIFICACIONEXTERNA)}`);
+        const numero = det?.NumeroComprobante ?? f.DESTINONOMBRE;
+        await db.prepare(`INSERT OR IGNORE INTO files (record_id, kind, name, mime, source, source_ref, meta) VALUES (?, 'factura', ?, 'application/pdf', 'finnegans', ?, ?)`)
+          .bind(r.id, `Factura ${numero}.pdf`, f.DESTINOIDENTIFICACIONEXTERNA, JSON.stringify({
+            numero, documento: f.DESTINONOMBRE, fecha: det?.Fecha ?? null, cae: det?.CAE ?? null, cae_vto: det?.CAEFechaVto ?? null,
+            total: f.DESTINOIMPORTETOTAL, razon_social: det?.RazonSocial ?? null, transaccion_id: f.DESTINOTRANSACCIONID, empresa: 'EMPRE01',
+          })).run();
+        await updateRecord(db, ctx, 'order', r.id, { factura_numero: numero }, { system: true, strict: false });
+        out.facturas!++;
+      }
+    }
+    if (rows.length < POR_CORRIDA) out.cursor = 0;
+  } catch (e) {
+    out.error = (e as Error).message;
+  }
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('finnegans_state', ?)").bind(JSON.stringify(out)).run();
+  return out;
+}

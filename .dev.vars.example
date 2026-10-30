@@ -2,3 +2,9 @@
 DEV_USER_EMAIL=rodrigo.mateus@formaspublicitarias.com
 # Opcional, para probar Gmail (o generar uno de prueba con `node test/gmail-dev-vars.mjs`):
 # GOOGLE_SA_JSON='{"client_email":"…","private_key":"-----BEGIN PRIVATE KEY-----\n…"}'
+# Pruebas de pedidos (test/pedidos.test.mjs): ClickUp y Finnegans simulados en el puerto 8797.
+CLICKUP_TOKEN=prueba
+CLICKUP_API_URL=http://localhost:8797/clickup
+FINNEGANS_CLIENT_ID=prueba
+FINNEGANS_CLIENT_SECRET=prueba
+FINNEGANS_API_URL=http://localhost:8797/fin

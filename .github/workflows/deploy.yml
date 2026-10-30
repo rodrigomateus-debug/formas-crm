@@ -35,6 +35,9 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
+      CLICKUP_TOKEN: ${{ secrets.CLICKUP_TOKEN }}
+      FINNEGANS_CLIENT_ID: ${{ secrets.FINNEGANS_CLIENT_ID }}
+      FINNEGANS_CLIENT_SECRET: ${{ secrets.FINNEGANS_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,3 +51,8 @@ jobs:
       - name: Cuenta de servicio de Gmail (si está cargada en los secretos del repo)
         if: env.GOOGLE_SA_JSON != ''
         run: printf '%s' "$GOOGLE_SA_JSON" | npx wrangler secret put GOOGLE_SA_JSON
+      - name: ClickUp y Finnegans para los pedidos (si están cargados en los secretos del repo)
+        run: |
+          for k in CLICKUP_TOKEN FINNEGANS_CLIENT_ID FINNEGANS_CLIENT_SECRET; do
+            if [ -n "${!k}" ]; then printf '%s' "${!k}" | npx wrangler secret put "$k"; fi
+          done

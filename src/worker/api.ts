@@ -12,6 +12,8 @@ import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updat
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
+import { clickupAttachment, clickupState, syncClickup } from './clickup';
+import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -661,6 +663,51 @@ api.get('/export/:type', async (c) => {
   return new Response('\ufeff' + lines.join('\n'), {
     headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${type}s-${now().slice(0, 10)}.csv"` },
   });
+});
+
+// ---------- Archivos (factura de Finnegans, remito de ClickUp) ----------
+
+api.get('/records/:type/:id/files', async (c) => {
+  const id = Number(c.req.param('id'));
+  const { results } = await c.env.DB.prepare(`SELECT id, kind, name, mime, size, source, meta, created_at, data IS NOT NULL AS has_data
+    FROM files WHERE record_id = ? ORDER BY kind, created_at`).bind(id).all<{ meta: string; has_data: number; source: string }>();
+  return c.json(results.map((f) => ({ ...f, meta: JSON.parse(f.meta || '{}'), ready: !!f.has_data || f.source === 'clickup' })));
+});
+
+// Abrir un archivo: el PDF guardado, o el remito traído de ClickUp en el momento (los links de ClickUp vencen).
+api.get('/files/:id', async (c) => {
+  const f = await c.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(Number(c.req.param('id'))).first<{ name: string; mime: string | null; source: string; source_ref: string; data: ArrayBuffer | null; record_id: number }>();
+  if (!f) throw new HttpError(404, 'No existe el archivo.');
+  const rec = await getRow(c.env.DB, f.record_id);
+  if (rec.object_type === 'deal') await assertDealVisible(new Meta(c.env.DB), c.get('ctx').user, rec.pipeline_id);
+  const disposition = `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`;
+  // D1 devuelve los BLOB como lista de números: se pasan a bytes.
+  if (f.data) return new Response(f.data instanceof ArrayBuffer ? f.data : new Uint8Array(f.data as unknown as number[]), { headers: { 'content-type': f.mime ?? 'application/octet-stream', 'content-disposition': disposition, 'cache-control': 'private, max-age=3600' } });
+  if (f.source === 'clickup') {
+    const [task, att] = f.source_ref.split(':');
+    const a = await clickupAttachment(c.env, task, att);
+    if (!a) throw new HttpError(502, 'ClickUp no devolvió el archivo. Abrilo desde el PDV en ClickUp.');
+    return new Response(a.body, { headers: { 'content-type': a.type, 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(a.name)}` } });
+  }
+  throw new HttpError(404, 'El PDF de la factura todavía no se bajó de Finnegans (se baja solo en la próxima hora).');
+});
+
+// Estado de las conexiones con ClickUp y Finnegans, y correrlas a mano.
+api.get('/integrations/pedidos', async (c) => {
+  const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
+  return c.json({
+    clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupState(c.env.DB)) },
+    finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
+  });
+});
+api.post('/integrations/clickup/sync', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const b = await c.req.json<{ full?: boolean }>().catch(() => ({} as { full?: boolean }));
+  return c.json(await syncClickup(c.env, { full: !!b.full }));
+});
+api.post('/integrations/finnegans/sync', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await syncFacturas(c.env));
 });
 
 // ---------- Administración ----------

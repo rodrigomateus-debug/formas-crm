@@ -1,0 +1,27 @@
+# Facturas de pedidos: baja de Finnegans GO el PDF de las facturas que el CRM ya adjuntó a los pedidos y lo sube al CRM
+# (scripts/facturas-pdf.mjs). Solo lee de Finnegans. Necesita la variable CRM_URL y los secretos CRM_TOKEN (de un
+# administrador), FINNEGANS_GO_USUARIO, FINNEGANS_GO_PASSWORD y FINNEGANS_GO_ESPACIO_DE_TRABAJO.
+name: Facturas de pedidos (PDF)
+
+on:
+  schedule:
+    - cron: '17 11-22 * * 1-5'   # cada hora, de 8 a 19 de Buenos Aires, de lunes a viernes
+  workflow_dispatch:
+
+jobs:
+  pdf:
+    runs-on: ubuntu-latest
+    if: vars.CRM_URL != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save playwright@1.49.1 && npx playwright install --with-deps chromium
+      - run: node scripts/facturas-pdf.mjs
+        env:
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+          FINNEGANS_GO_USUARIO: ${{ secrets.FINNEGANS_GO_USUARIO }}
+          FINNEGANS_GO_PASSWORD: ${{ secrets.FINNEGANS_GO_PASSWORD }}
+          FINNEGANS_GO_ESPACIO_DE_TRABAJO: ${{ secrets.FINNEGANS_GO_ESPACIO_DE_TRABAJO }}

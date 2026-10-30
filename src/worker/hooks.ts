@@ -144,6 +144,29 @@ hooks.post('/linkedin', (c) => run(c.env, c.req.raw, 'linkedin', async (raw, ctx
 // Formularios web (catálogo, ruleta de eventos, contacto). Público: sin token, con trampa anti-bots
 // (campo `_gotcha` vacío) y configuración por formulario en settings (clave `form:<slug>`).
 hooks.options('/form/:slug', () => new Response(null, { headers: cors() }));
+// Para la tarea que baja los PDF de las facturas (scripts/facturas-pdf.mjs, en GitHub): qué facturas faltan y dónde dejarlas.
+async function adminToken(env: Env, req: Request) {
+  if (!/^Bearer fcrm_/.test(req.headers.get('authorization') ?? '')) throw new HttpError(401, 'Falta el token de integración (Authorization: Bearer fcrm_…).');
+  const ctx = await authenticate(env, req);
+  if (ctx.user.role !== 'admin') throw new HttpError(403, 'El token tiene que ser de un administrador.');
+  return ctx;
+}
+hooks.get('/facturas/pendientes', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const { results } = await c.env.DB.prepare("SELECT id, name, meta FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL ORDER BY id LIMIT 50").all<{ id: number; name: string; meta: string }>();
+  return c.json(results.map((f) => { const m = JSON.parse(f.meta || '{}'); return { id: f.id, name: f.name, transaccion_id: m.transaccion_id, empresa: m.empresa, numero: m.numero }; }));
+});
+hooks.put('/facturas/:id/pdf', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const buf = await c.req.arrayBuffer();
+  const head = new TextDecoder().decode(buf.slice(0, 5));
+  if (head !== '%PDF-') throw new HttpError(400, 'No es un PDF.');
+  if (buf.byteLength > 1_900_000) throw new HttpError(400, 'El PDF pesa más de 1,9 MB.');
+  const r = await c.env.DB.prepare("UPDATE files SET data = ?, size = ?, mime = 'application/pdf' WHERE id = ? AND kind = 'factura'").bind(buf, buf.byteLength, Number(c.req.param('id'))).run();
+  if (!r.meta.changes) throw new HttpError(404, 'No existe esa factura.');
+  return c.json({ ok: true, size: buf.byteLength });
+});
+
 hooks.post('/form/:slug', async (c) => {
   const slug = c.req.param('slug');
   const body = await readBody(c.req.raw);

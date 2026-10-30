@@ -29,7 +29,8 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función de HubSpot | Estado | Dónde |
 |---|---|---|
 | Listas de contactos, empresas, negocios, pedidos | ✅ | `/contacts`, `/companies`, `/deals`, `/orders` |
-| Pedidos con la etapa de su pipeline (los 11 ids de HubSpot) en la lista, la vista previa y un tablero por etapa | ✅ | `/orders` → «Tablero»; la migración trae `hs_pipeline_stage` |
+| Pedidos desde ClickUp (lista PEC): cada PDV crea su pedido y su estado general se mueve solo según los artículos; la vendedora solo pasa de «Pedido confirmado» a «Listo para producción» | 🔧 | `docs/PEDIDOS.md`; falta cargar los secretos de ClickUp y Finnegans |
+| Factura de Finnegans (cuando tiene CAE, con su PDF) y remito de ClickUp (al entregar), adjuntos solos en el pedido | 🔧 | Tarjeta «Factura y remito»; mismo pendiente |
 | Búsqueda por nombre, mail, dominio, teléfono, id | ✅ | Lupa de arriba (Ctrl+K) y cada lista |
 | Filtros avanzados (Y / O), por propietario, fechas relativas, por etiqueta y por datos del asociado («Empresa · Ciudad», «Contacto · Origen») | ✅ | «Filtros» |
 | Etiquetas de color por regla (las 7 de HubSpot cargadas), en tarjetas, columna «Etiquetas», ficha, vista previa y filtro rápido | ✅ | Configuración → Etiquetas |

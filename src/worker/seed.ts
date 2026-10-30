@@ -99,21 +99,26 @@ const CORE = { system: true };
 const RO = { system: true, read_only: true };
 const FORM = { in_create_form: true };
 
-// Etapas del pipeline de pedidos de HubSpot («Formas Shop - Pipeline de pedidos»), con los mismos ids.
+// Estados generales del pedido (los mueve ClickUp; la vendedora solo pasa de «Pedido confirmado» a «Listo para producción»).
+// Conservan los ids de HubSpot que siguen; los estados de HubSpot que se juntan se traducen en la migración (ORDER_STAGE_ALIAS).
 // En el CRM la etapa del pedido es un desplegable: el tablero de pedidos se arma con él.
 export const ORDER_STAGES: Array<[string, string]> = [
-  ['4b27b500-f031-4927-9811-68a0b525cbae', 'Pedido Confirmado'],
-  ['937ea84d-0a4f-4dcf-9028-3f9c2aafbf03', '$ Pendiente de Anticipo'],
-  ['aa99e8d0-c1d5-4071-b915-d240bbb1aed9', 'Boceto Digital'],
+  ['4b27b500-f031-4927-9811-68a0b525cbae', 'Pedido confirmado'],
   ['3725360f-519b-4b18-a593-494d60a29c9f', 'Listo para producción'],
-  ['1250237623', 'Producción en revisión'],
+  ['esperando_boceto', 'Esperando boceto o confirmación'],
   ['1237498994', 'En producción'],
-  ['1237498995', '$ Pendiente de Saldo'],
-  ['1237498996', 'Listo para despachar'],
-  ['1237498997', 'Listo para retirar'],
-  ['1237498998', 'Pedido Completo'],
-  ['3c85a297-e9ce-400b-b42e-9f16853d69d6', 'Pedido Cancelado'],
+  ['1237498996', 'Listo para entregar'],
+  ['entregado_parcial', 'Entregado parcial'],
+  ['1237498998', 'Entregado'],
+  ['3c85a297-e9ce-400b-b42e-9f16853d69d6', 'Anulado'],
 ];
+export const ORDER_STAGE_ALIAS: Record<string, string> = {
+  '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03': '4b27b500-f031-4927-9811-68a0b525cbae',
+  'aa99e8d0-c1d5-4071-b915-d240bbb1aed9': 'esperando_boceto',
+  '1250237623': '1237498994',
+  '1237498995': '1237498996',
+  '1237498997': '1237498996',
+};
 export const ORDER_PIPELINES: Array<[string, string]> = [['14a2e10e-5471-408a-906e-c51f3b04369e', 'Formas Shop - Pipeline de pedidos']];
 
 export const PROPERTIES: Record<string, PropDef[]> = {
@@ -270,6 +275,13 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['saldo_pendiente_de_pago_mxn', 'Saldo pendiente de pago (ARS)', 'currency', 'Pedido'],
     ['progreso_pdv', 'Progreso PDV', 'number', 'Pedido'],
     ['items_entregados', 'Ítems entregados', 'string', 'Pedido'],
+    ['unidad_de_negocio', 'Unidad de negocio', 'enum', 'Pedido', ['FORMAS SHOP', 'CORPORATE', 'NO ESTRÉS']],
+    ['cliente_clickup', 'Cliente (ClickUp)', 'string', 'Pedido', [], RO],
+    ['pedido_finnegans', 'Pedido en Finnegans', 'string', 'Pedido', [], RO],
+    ['url_clickup', 'PDV en ClickUp', 'url', 'Pedido', [], RO],
+    ['detalle_produccion', 'Detalle de producción', 'text', 'Pedido', [], RO],
+    ['entregado_el', 'Entregado el', 'date', 'Pedido', [], RO],
+    ['factura_numero', 'Factura', 'string', 'Pedido', [], RO],
     ['hs_billing_address_firstname', 'Nombre (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_lastname', 'Apellido (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_email', 'Email (facturación)', 'email', 'Facturación', [], CORE],

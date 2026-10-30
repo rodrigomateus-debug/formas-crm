@@ -224,7 +224,8 @@ function coerce(p: Property, raw: unknown): unknown {
   }
 }
 
-export async function validateProps(meta: Meta, type: ObjectType, input: Props, opts: { strict?: boolean } = {}) {
+// `system`: lo escribe una sincronización (ClickUp, Finnegans), que sí puede completar las propiedades de solo lectura.
+export async function validateProps(meta: Meta, type: ObjectType, input: Props, opts: { strict?: boolean; system?: boolean } = {}) {
   const out: Props = {};
   const ignored: string[] = [];
   for (const [k, v] of Object.entries(input)) {
@@ -235,7 +236,7 @@ export async function validateProps(meta: Meta, type: ObjectType, input: Props, 
       ignored.push(k);
       continue;
     }
-    if (p.read_only) continue;
+    if (p.read_only && !opts.system) continue;
     out[name] = coerce(p, v);
   }
   return { props: out, ignored };
@@ -294,9 +295,21 @@ export async function getRow(db: D1Database, id: number, type?: ObjectType) {
 
 const TRACK_ON_CREATE = ['dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'amount', 'hs_lead_status'];
 
-export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, input: Props, opts: { strict?: boolean; skipDedupe?: boolean; id?: number; createdAt?: string } = {}) {
+// Estado del pedido: lo mueve ClickUp. A mano, la vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción»
+// (y lo puede volver atrás si se equivocó). Los administradores y las sincronizaciones lo pueden poner en cualquiera.
+export const ORDER_CONFIRMED = '4b27b500-f031-4927-9811-68a0b525cbae';
+export const ORDER_READY = '3725360f-519b-4b18-a593-494d60a29c9f';
+function checkOrderStage(ctx: Ctx, opts: { system?: boolean }, from: unknown, to: unknown) {
+  if (opts.system || ctx.user.role === 'admin' || ['clickup', 'hubspot'].includes(ctx.source)) return;
+  const manual = [ORDER_CONFIRMED, ORDER_READY];
+  if (manual.includes(String(from ?? ORDER_CONFIRMED)) && manual.includes(String(to))) return;
+  throw new HttpError(403, 'El estado del pedido lo mueve ClickUp. A mano solo se pasa de «Pedido confirmado» a «Listo para producción».');
+}
+
+export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, input: Props, opts: { strict?: boolean; system?: boolean; skipDedupe?: boolean; id?: number; createdAt?: string } = {}) {
   const meta = new Meta(db);
   const { props } = await validateProps(meta, type, input, opts);
+  if (type === 'order' && props.hs_pipeline_stage != null) checkOrderStage(ctx, opts, ORDER_CONFIRMED, props.hs_pipeline_stage);
   for (const p of await meta.properties(type)) {
     if (p.required && (props[p.name] == null || props[p.name] === '') && !(type === 'deal' && ['pipeline', 'dealstage'].includes(p.name))) {
       throw new HttpError(400, `Falta "${p.label}".`);
@@ -334,11 +347,12 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   return row!;
 }
 
-export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, id: number, input: Props, opts: { strict?: boolean } = {}) {
+export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, id: number, input: Props, opts: { strict?: boolean; system?: boolean } = {}) {
   const meta = new Meta(db);
   const row = await getRow(db, id, type);
   const current = JSON.parse(row.props) as Props;
   const { props } = await validateProps(meta, type, input, opts);
+  if (type === 'order' && 'hs_pipeline_stage' in props && props.hs_pipeline_stage !== current.hs_pipeline_stage) checkOrderStage(ctx, opts, current.hs_pipeline_stage, props.hs_pipeline_stage);
   const next: Props = { ...current, ...props };
   if (type === 'deal' && ('pipeline' in props || 'dealstage' in props)) {
     const stagePart: Props = { pipeline: props.pipeline ?? current.pipeline, dealstage: props.dealstage };
@@ -429,6 +443,7 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     db.prepare('DELETE FROM associations WHERE from_id = ? OR to_id = ?').bind(loserId, loserId),
     db.prepare('INSERT OR IGNORE INTO activity_links (activity_id, record_id, object_type) SELECT activity_id, ?, object_type FROM activity_links WHERE record_id = ?').bind(primaryId, loserId),
     db.prepare('DELETE FROM activity_links WHERE record_id = ?').bind(loserId),
+    db.prepare('UPDATE OR IGNORE files SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
     db.prepare('UPDATE records SET archived = 1, merged_into = ?, updated_at = ? WHERE id = ?').bind(primaryId, ts, loserId),
     db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, 'merged', ?, ?, ?, ?, ?)")
       .bind(primaryId, String(loserId), loser.name, ts, ctx.user.id, ctx.source),

@@ -13,6 +13,14 @@ export interface Env {
   // Solo para pruebas: otras URLs de Google.
   GOOGLE_TOKEN_URL?: string;
   GMAIL_API_URL?: string;
+  // ClickUp (lista PEC): los pedidos y su estado. Solo lectura.
+  CLICKUP_TOKEN?: string;
+  // Finnegans: las facturas de los pedidos. Solo lectura.
+  FINNEGANS_CLIENT_ID?: string;
+  FINNEGANS_CLIENT_SECRET?: string;
+  // Solo para pruebas: ClickUp y Finnegans simulados.
+  CLICKUP_API_URL?: string;
+  FINNEGANS_API_URL?: string;
 }
 
 export interface User {

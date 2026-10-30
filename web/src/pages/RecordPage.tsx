@@ -38,6 +38,7 @@ export default function RecordPage() {
           <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
         </section>
         <aside className="right">
+          {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
         {peek && <RecordPreview type={peek.type} id={peek.id} onClose={() => setPeek(null)} onChange={refresh} />}
@@ -156,6 +157,7 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
           {type === 'contact' && record.props.mobilephone && <a className="btn sm" href={`https://wa.me/${String(record.props.mobilephone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
           {type === 'deal' && safeUrl(record.props.link_a_darwin) && <a className="btn sm" href={safeUrl(record.props.link_a_darwin)} target="_blank" rel="noreferrer">Chat en Darwin</a>}
+          {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
           <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>
           {type === 'deal' && meta.me.role !== 'viewer' && (
             <button className="btn sm ghost" title="Crea una copia con los mismos datos y asociaciones, en la primera etapa" onClick={async () => {
@@ -299,7 +301,7 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
 // ---------- Línea de tiempo y registro de actividades ----------
 
 const FILTERS: Array<[string, string]> = [['', 'Actividad'], ['note', 'Notas'], ['email', 'Emails'], ['call', 'Llamadas'], ['task', 'Tareas'], ['meeting', 'Reuniones'], ['whatsapp', 'WhatsApp']];
-const CHANGE_LABEL: Record<string, string> = { dealstage: 'Etapa', pipeline: 'Pipeline', owner_id: 'Propietario', lifecyclestage: 'Ciclo de vida', amount: 'Monto', archived: 'Borrado', merged: 'Combinado con' };
+const CHANGE_LABEL: Record<string, string> = { dealstage: 'Etapa', pipeline: 'Pipeline', owner_id: 'Propietario', lifecyclestage: 'Ciclo de vida', amount: 'Monto', archived: 'Borrado', merged: 'Combinado con', hs_pipeline_stage: 'Estado del pedido', factura_numero: 'Factura' };
 
 function Timeline({ type, record, associations, onChange }: { type: ObjectType; record: CrmRecord; associations: Assoc; onChange: () => void }) {
   const { meta } = useMeta();
@@ -515,6 +517,35 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 
 // ---------- Columna derecha: asociaciones ----------
 
+// Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
+interface FileRow { id: number; kind: string; name: string; source: string; created_at: string; ready: boolean; meta: Record<string, any> }
+function FilesCard({ recordId }: { recordId: number }) {
+  const files = useAsync(() => http<FileRow[]>('GET', `/records/order/${recordId}/files`), [recordId]);
+  const list = files.data ?? [];
+  const label = (f: FileRow) => (f.kind === 'factura' ? 'Factura' : f.kind === 'remito' ? 'Remito' : 'Archivo');
+  return (
+    <div className="panel assoc-card">
+      <div className="panel-head"><h3>Factura y remito <span className="muted small">({list.length})</span></h3></div>
+      {list.map((f) => (
+        <div key={f.id} className="assoc-item">
+          <span className={`tag ${f.kind === 'factura' ? 'info' : 'ok'}`}>{label(f)}</span>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="ellipsis">{f.kind === 'factura' ? f.meta.numero ?? f.name : f.name}</div>
+            <div className="small muted ellipsis">
+              {f.kind === 'factura'
+                ? [f.meta.fecha && fmtDate(f.meta.fecha), f.meta.total != null && fmtMoney(f.meta.total), f.meta.cae && `CAE ${f.meta.cae}`].filter(Boolean).join(' · ')
+                : `ClickUp · ${fmtDate(f.meta.date ?? f.created_at)}`}
+            </div>
+          </div>
+          {f.ready ? <a className="btn sm" href={`/api/files/${f.id}`} target="_blank" rel="noreferrer">Ver</a>
+            : <span className="small muted" title="Se baja sola de Finnegans en la próxima hora">PDF en camino</span>}
+        </div>
+      ))}
+      {!list.length && <div className="panel-body muted small">{files.loading ? 'Cargando…' : 'Cuando Finnegans tenga la factura con CAE y ClickUp el remito, aparecen acá solos.'}</div>}
+    </div>
+  );
+}
+
 function AssocCard({ type, record, toType, items, onChange, onPeek }: {
   type: ObjectType; record: CrmRecord; toType: ObjectType; items: Array<CrmRecord & { primary: boolean; label: string | null }>; onChange: () => void; onPeek?: (t: ObjectType, id: number) => void;
 }) {
@@ -679,6 +710,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
+        {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
         {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}
         <div className="panel">

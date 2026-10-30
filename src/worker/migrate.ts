@@ -1,9 +1,10 @@
 import { Hono } from 'hono';
-import type { Ctx, Env, ObjectType } from './env';
+import type { Ctx, Env, ObjectType, User } from './env';
 import { HttpError, now } from './env';
 import { requireRole } from './auth';
 import { Meta, type Property } from './meta';
-import { displayName, emailDomain, normDomain, normPhone, splitName, type Props } from './records';
+import { displayName, emailDomain, mergeRecords, normDomain, normPhone, splitName, updateRecord, NATIVE_ID_START, type Props } from './records';
+import { ORDER_STAGE_ALIAS } from './seed';
 
 // Carga masiva desde HubSpot (la usa scripts/migrate-hubspot.mjs). Conserva los ids de HubSpot en registros,
 // actividades y (si el usuario no existía) propietarios, así los links y los tableros siguen valiendo.
@@ -35,6 +36,10 @@ function convert(p: Property | undefined, v: unknown, owners: Map<string, number
     default: return s;
   }
 }
+
+// Lo que manda ClickUp en un pedido (ver clickup.ts): en un pedido migrado vale más que lo que traía HubSpot.
+const CLICKUP_PROPS = ['hs_pipeline_stage', 'unidad_de_negocio', 'cliente_clickup', 'pedido_finnegans', 'url_clickup', 'detalle_produccion', 'entregado_el', 'factura_numero'];
+const clickupOrders: Array<{ id: number; pdv: string }> = [];
 
 migrate.post('/', async (c) => {
   const db = c.env.DB;
@@ -75,6 +80,8 @@ migrate.post('/', async (c) => {
         const cur = existing.find((x) => x.object_type === type && x.name === name);
         const options = (p.options ?? []).map((o: { value: string; label: string }) => ({ value: o.value, label: o.label }));
         if (cur) {
+          // El estado del pedido tiene sus estados generales (los de HubSpot se traducen en ORDER_STAGE_ALIAS): no se suman.
+          if (type === 'order' && name === 'hs_pipeline_stage') continue;
           if (['enum', 'multienum'].includes(cur.type) && options.length) {
             const merged = [...cur.options, ...options.filter((o: { value: string }) => !cur.options.some((x) => x.value === o.value))];
             if (merged.length !== cur.options.length) {
@@ -92,6 +99,7 @@ migrate.post('/', async (c) => {
     }
     case 'records': {
       const owners = await ownerIds(db);
+      clickupOrders.length = 0;
       for (const r of items) {
         const type = HS_TYPES[r.type] ?? r.type as ObjectType;
         const defs = await meta.properties(type);
@@ -104,6 +112,8 @@ migrate.post('/', async (c) => {
           if (v != null) props[name] = v;
         }
         if (type === 'contact' && props.firstname && props.lastname) Object.assign(props, splitName(props.firstname, props.lastname));
+        if (type === 'order' && props.hs_pipeline_stage) props.hs_pipeline_stage = ORDER_STAGE_ALIAS[String(props.hs_pipeline_stage)] ?? props.hs_pipeline_stage;
+        if (type === 'order' && props.pdv_finnegans) clickupOrders.push({ id: Number(r.hs_id), pdv: String(props.pdv_finnegans).replace(/\D/g, '') });
         // El workflow de Darwin inventaba mails (incompleto<teléfono>@gmail.com) para no duplicar: acá el contacto se busca por teléfono.
         if (type === 'contact' && /^incompleto[^@]*@gmail\.com$/i.test(String(props.email ?? ''))) delete props.email;
         const id = Number(r.hs_id);
@@ -192,5 +202,22 @@ migrate.post('/', async (c) => {
       throw new HttpError(400, `Tipo de lote desconocido: ${body.kind}`);
   }
   for (let i = 0; i < stmts.length; i += 400) await db.batch(stmts.slice(i, i + 400));
-  return c.json({ ok: true, statements: stmts.length });
+  // Pedidos que ClickUp ya había creado en el CRM antes de migrar: se queda el de HubSpot (por sus asociaciones) con lo
+  // que sabe ClickUp (estado, detalle, factura, remito) y el creado por ClickUp se combina en él.
+  let merged = 0;
+  if (body.kind === 'records' && clickupOrders.length) {
+    const ctx = { user: (await db.prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").first<User>())!, source: 'hubspot' };
+    for (const o of clickupOrders) {
+      if (!o.pdv) continue;
+      const dup = await db.prepare(`SELECT id, props FROM records WHERE object_type = 'order' AND archived = 0 AND id >= ? AND id != ?
+        AND CAST(json_extract(props, '$.pdv_finnegans') AS TEXT) = ?`).bind(NATIVE_ID_START, o.id, o.pdv).first<{ id: number; props: string }>();
+      if (!dup) continue;
+      const p = JSON.parse(dup.props) as Props;
+      await mergeRecords(db, ctx, 'order', o.id, dup.id);
+      const keep = Object.fromEntries(CLICKUP_PROPS.filter((k) => p[k] != null && p[k] !== '').map((k) => [k, p[k]]));
+      if (Object.keys(keep).length) await updateRecord(db, ctx, 'order', o.id, keep, { system: true, strict: false });
+      merged++;
+    }
+  }
+  return c.json({ ok: true, statements: stmts.length, merged });
 });

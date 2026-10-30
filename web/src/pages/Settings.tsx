@@ -291,6 +291,40 @@ function NewPipeline({ onClose, onCreated }: { onClose: () => void; onCreated: (
   );
 }
 
+// Pedidos: ClickUp (estado, cada 10 minutos) y Finnegans (facturas, cada hora). Solo leen; acá se ve cómo vienen.
+interface SyncState { configured: boolean; at?: string; error?: string | null; creados?: number; actualizados?: number; pendientes?: number; revisados?: number; facturas?: number; pdf_pendientes?: number }
+function Pedidos() {
+  const toast = useToast();
+  const st = useAsync(() => http<{ clickup: SyncState; finnegans: SyncState }>('GET', '/integrations/pedidos'), []);
+  const [busy, setBusy] = useState('');
+  const go = async (what: string, path: string, body?: unknown) => {
+    setBusy(what);
+    try { const r = await http<SyncState & { skipped?: string }>('POST', path, body ?? {}); toast(r.skipped ?? (r.error ? `Error: ${r.error}` : 'Listo')); st.reload(); }
+    catch (e) { toast((e as Error).message, true); } finally { setBusy(''); }
+  };
+  const c = st.data?.clickup;
+  const f = st.data?.finnegans;
+  const when = (s?: SyncState) => (s?.at ? fmtDate(s.at, true) : 'nunca');
+  return (
+    <div className="panel"><div className="panel-head"><h2>Pedidos: ClickUp y Finnegans</h2></div><div className="panel-body stack small">
+      <p style={{ margin: 0 }}>Los pedidos salen de la lista PEC de ClickUp: cada PDV nuevo crea su pedido y su estado se mueve solo según los artículos. La vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción». Cuando la factura de Finnegans tiene CAE se adjunta sola, y el remito cuando lo suben a ClickUp al entregar. ClickUp y Finnegans solo se leen.</p>
+      <div className="row wrap">
+        <b style={{ width: 90 }}>ClickUp</b>
+        {c?.configured ? <span className="grow">Última vez: {when(c)}{c.at ? ` · ${c.creados ?? 0} creados, ${c.actualizados ?? 0} actualizados${c.pendientes ? `, ${c.pendientes} para la próxima` : ''}` : ''}{c.error ? <span className="danger-text"> · {c.error}</span> : null}</span>
+          : <span className="grow muted">Falta el secreto CLICKUP_TOKEN en el repo (se carga en el próximo despliegue).</span>}
+        <button className="btn sm" disabled={!c?.configured || !!busy} onClick={() => go('cu', '/integrations/clickup/sync')}>{busy === 'cu' ? 'Sincronizando…' : 'Sincronizar ahora'}</button>
+        <button className="btn sm ghost" disabled={!c?.configured || !!busy} onClick={() => go('cufull', '/integrations/clickup/sync', { full: true })} title="Revisa todos los PDV abiertos y los entregados de los últimos 45 días">Revisar todo</button>
+      </div>
+      <div className="row wrap">
+        <b style={{ width: 90 }}>Finnegans</b>
+        {f?.configured ? <span className="grow">Última vez: {when(f)}{f.at ? ` · ${f.revisados ?? 0} pedidos revisados, ${f.facturas ?? 0} facturas nuevas` : ''}{f.pdf_pendientes ? ` · ${f.pdf_pendientes} PDF por bajar` : ''}{f.error ? <span className="danger-text"> · {f.error}</span> : null}</span>
+          : <span className="grow muted">Faltan los secretos FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET en el repo.</span>}
+        <button className="btn sm" disabled={!f?.configured || !!busy} onClick={() => go('fin', '/integrations/finnegans/sync')}>{busy === 'fin' ? 'Buscando…' : 'Buscar facturas ahora'}</button>
+      </div>
+    </div></div>
+  );
+}
+
 function Integrations() {
   const toast = useToast();
   const tokens = useAsync(() => http<Array<{ id: number; name: string; source: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string }>>('GET', '/tokens'), []);
@@ -299,6 +333,7 @@ function Integrations() {
   const origin = window.location.origin;
   return (
     <div className="stack" style={{ gap: 16 }}>
+      <Pedidos />
       <Gmail />
       <OutboundHooks />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">

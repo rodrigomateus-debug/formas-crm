@@ -1,32 +1,38 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtRelative, recordUrl, userName, propsOf, Icon, type CrmRecord, type ObjectType, type Filter } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, Icon, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
 import { Avatar } from '../components';
+import { SortPick, useCollapsed, useFillHeight } from './Board';
 
 interface Column { value: string; label: string; total: number; records: CrmRecord[] }
 
-// Tablero de empresas o contactos agrupado por una propiedad (por defecto, la etapa del ciclo de vida).
+// Por qué propiedad se agrupa cada tablero si la vista no dice otra cosa: los pedidos por su etapa, el resto por ciclo de vida.
+export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecyclestage', company: 'lifecyclestage', deal: 'dealstage', order: 'hs_pipeline_stage' };
+
+// Tablero de empresas, contactos o pedidos agrupado por una propiedad (etapa del ciclo de vida, etapa del pedido…).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, q, owner, groups, tools, onOwner, search, onSearch, openId, onOpen, reloadKey }: {
-  type: ObjectType; q: string; owner?: string; groups?: Filter[][]; tools?: ReactNode; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void;
-  openId?: number | null; onOpen?: (id: number) => void; reloadKey?: number;
+export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey }: {
+  type: ObjectType; prop?: string; onProp: (p: string) => void; q: string; groups?: Filter[][];
+  sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
+  tools?: ReactNode; search: string; onSearch: (s: string) => void;
+  openId?: number | null; onOpen?: (id: number, compose?: Activity['type']) => void; reloadKey?: number;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const key = `crm.board.prop.${type}`;
   const groupable = propsOf(meta, type).filter((p) => ['enum', 'bool', 'owner'].includes(p.type) && !p.read_only);
-  const [prop, setProp] = useState(() => {
-    let saved: string | null = null;
-    try { saved = localStorage.getItem(key); } catch { /* sin preferencia guardada */ }
-    return saved && groupable.some((p) => p.name === saved) ? saved : 'lifecyclestage';
-  });
-  useEffect(() => { try { localStorage.setItem(key, prop); } catch { /* ignorar */ } }, [key, prop]);
-  const board = useAsync(() => http<{ columns: Column[] }>('GET', `/board-prop/${type}${qs({ prop, q, owner, groups: groups?.length ? groups : undefined })}`), [type, prop, q, owner, JSON.stringify(groups ?? []), reloadKey]);
+  const prop = propIn && groupable.some((p) => p.name === propIn) ? propIn
+    : groupable.some((p) => p.name === DEFAULT_BOARD_PROP[type]) ? DEFAULT_BOARD_PROP[type] : groupable[0]?.name ?? 'owner_id';
+  const params = { prop, q, groups: groups?.length ? groups : undefined, sort, dir };
+  const board = useAsync(() => http<{ columns: Column[] }>('GET', `/board-prop/${type}${qs(params)}`), [type, prop, q, JSON.stringify(groups ?? []), sort, dir, reloadKey]);
   const [cols, setCols] = useState<Column[]>([]);
   useEffect(() => { if (board.data) setCols(board.data.columns); }, [board.data]);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState<string | null>(null);
+  const [collapsed, toggleCol] = useCollapsed(`crm.board.collapsed.${type}.${prop}`);
+  const [boardRef, boardStyle] = useFillHeight();
   const def = groupable.find((p) => p.name === prop);
+  const total = cols.reduce((n, c) => n + c.total, 0);
 
   const move = async (id: number, to: Column) => {
     const from = cols.find((c) => c.records.some((r) => r.id === id));
@@ -44,61 +50,86 @@ export default function PropBoard({ type, q, owner, groups, tools, onOwner, sear
     }
   };
 
-  const subtitle = (r: CrmRecord) => (type === 'company'
-    ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
-    : [r.props.jobtitle, r.props.company || r.props.email].filter(Boolean).join(' · '));
+  const loadMore = async (c: Column) => {
+    setLoadingMore(c.value);
+    try {
+      const r = await http<{ records: CrmRecord[] }>('GET', `/board-prop/${type}${qs({ ...params, value: c.value, offset: c.records.length })}`);
+      setCols((cs) => cs.map((x) => (x.value === c.value ? { ...x, records: [...x.records, ...r.records.filter((d) => !x.records.some((y) => y.id === d.id))] } : x)));
+    } catch (e) { toast((e as Error).message, true); } finally { setLoadingMore(null); }
+  };
+
+  const drop = (c: Column) => ({
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); setOver(c.value); },
+    onDragLeave: (e: React.DragEvent) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((o) => (o === c.value ? null : o)); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); setOver(null); if (dragId) move(dragId, c); setDragId(null); },
+  });
+
+  const subtitle = (r: CrmRecord) => (type === 'company' ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
+    : type === 'order' ? [fmtMoney(r.props.hs_total_price, r.props.hs_currency_code), r.props.pdv_finnegans && `PDV ${r.props.pdv_finnegans}`].filter(Boolean).join(' · ')
+      : [r.props.jobtitle, r.props.company || r.props.email].filter(Boolean).join(' · '));
 
   return (
     <>
       <div className="toolbar">
         <label className="row small" style={{ fontWeight: 600 }}>Agrupar por
-          <select className="input" style={{ width: 260 }} value={prop} onChange={(e) => setProp(e.target.value)} aria-label="Agrupar por">
+          <select className="input" style={{ width: 240 }} value={prop} onChange={(e) => onProp(e.target.value)} aria-label="Agrupar por">
             {groupable.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
           </select>
         </label>
-        <div className="search" style={{ width: 240 }}><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
-        {prop !== 'owner_id' && (
-          <select className="input" style={{ width: 215 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
-            <option value="">Todos los propietarios</option>
-            <option value="me">Míos</option>
-            <option value="none">Sin asignar</option>
-            {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        )}
+        <div className="search" style={{ width: 220 }}><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
+        <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />
         {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
+        <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero</span>
       </div>
-      <div className="board">
-        {cols.map((c) => (
-          <div key={c.value || 'vacio'} className={`col${over === c.value ? ' over' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setOver(c.value); }}
-            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setOver((o) => (o === c.value ? null : o)); }}
-            onDrop={(e) => { e.preventDefault(); setOver(null); if (dragId) move(dragId, c); setDragId(null); }}>
+      <div className={`board${boardStyle ? ' fill' : ''}`} ref={boardRef} style={boardStyle}>
+        {cols.map((c) => (collapsed.has(c.value) ? (
+          <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
+            title={`${c.label}: ${c.total}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
+            <Icon name="chevron" size={14} />
+            <span className="n num">{c.total}</span>
+            <span className="vlabel">{c.label}</span>
+          </div>
+        ) : (
+          <div key={c.value || 'vacio'} className={`col${over === c.value ? ' over' : ''}`} {...drop(c)}>
             <div className="col-head">
-              <div className="t"><span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span></div>
+              <div className="t">
+                <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
+                <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>
+              </div>
             </div>
             <div className="col-body">
               {c.records.map((r) => {
                 const stale = r.props.notes_last_updated && Date.now() - Date.parse(r.props.notes_last_updated) > 30 * 86_400_000;
+                const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen?.(r.id, t); };
                 return (
                   <div key={r.id} className={`card${dragId === r.id ? ' dragging' : ''}${openId === r.id ? ' on' : ''}`} draggable onClick={() => onOpen?.(r.id)}
                     onDragStart={(e) => { setDragId(r.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>
                     <Link className="t" to={recordUrl(type, r.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{r.name}</Link>
                     {subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
                     <div className="meta">
-                      <Avatar name={userName(meta, r.props.owner_id)} />
-                      <span className={`grow ellipsis${stale ? ' stale' : ''}`} title="Última actividad">
-                        {r.props.notes_last_updated ? `Actividad ${fmtRelative(r.props.notes_last_updated)}` : 'Sin actividad'}
+                      <Avatar name={userName(meta, r.props.owner_id) || '—'} />
+                      <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>
+                    </div>
+                    <div className="card-actions">
+                      <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
+                      <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
+                      <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title="Última actividad">
+                        {r.props.notes_last_updated ? fmtRelative(r.props.notes_last_updated) : 'Sin actividad'}
                       </span>
                     </div>
                   </div>
                 );
               })}
-              {c.total > c.records.length && <div className="muted small" style={{ textAlign: 'center' }}>y {c.total - c.records.length} más (usá la tabla o filtrá)</div>}
+              {c.total > c.records.length && (
+                <button className="btn sm ghost more" disabled={loadingMore === c.value} onClick={() => loadMore(c)}>
+                  {loadingMore === c.value ? 'Cargando…' : `Cargar más (quedan ${(c.total - c.records.length).toLocaleString('es-AR')})`}
+                </button>
+              )}
               {!c.total && <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>Vacío</div>}
             </div>
           </div>
-        ))}
+        )))}
       </div>
     </>
   );

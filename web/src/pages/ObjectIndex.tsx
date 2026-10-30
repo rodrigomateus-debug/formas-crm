@@ -3,13 +3,14 @@ import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline,
-  type CrmRecord, type Filter, type ObjectType,
+  type Activity, type CrmRecord, type Filter, type ObjectType,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
+import { QuickFilterBar, quickFilters } from './QuickFilters';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -17,17 +18,22 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', 'lifecyclestage', 'notes_last_updated', 'createdate'],
   company: ['domain', 'owner_id', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'notes_last_updated', 'createdate'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', 'notes_last_updated', 'createdate'],
-  order: ['pdv_finnegans', 'hs_total_price', 'owner_id', 'hs_order_status', 'createdate'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'createdate'],
 };
 
-interface ViewConfig { q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; pipeline?: string; mode?: 'table' | 'board' }
+// `owner` es de las vistas viejas (un solo propietario); ahora van `owners` (varios) y `dates` (filtros rápidos de fecha).
+interface ViewConfig {
+  q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>;
+  pipeline?: string; mode?: 'table' | 'board'; boardProp?: string;
+}
+const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
 interface SavedView { id: number; name: string; shared: number; user_id: number; config: ViewConfig }
 
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
 function loadLocal(t: ObjectType): ViewConfig {
   try {
     const v = JSON.parse(localStorage.getItem(storeKey(t)) ?? '');
-    if (v && Array.isArray(v.columns)) return v;
+    if (v && Array.isArray(v.columns)) return withOwners(v);
   } catch { /* sin vista guardada */ }
   return { groups: [], columns: DEFAULT_COLUMNS[t], sort: 'hs_lastmodifieddate', dir: 'desc' };
 }
@@ -43,7 +49,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   // Tablero: negocios por etapa del pipeline; empresas y contactos por etapa del ciclo de vida (u otra propiedad).
-  const mode = type !== 'order' && params.get('view') === 'board' ? 'board' : 'table';
+  const mode = params.get('view') === 'board' ? 'board' : 'table';
   // Negocios: en qué pipeline estás. Sale del link (?pipeline=), si no de la última elección, si no del equipo.
   const [pipelineSel, setPipelineSelRaw] = useState<string>(() => {
     const valid = (v: string | null) => !!v && (v === 'all' || meta.pipelines.some((p) => p.id === v));
@@ -70,27 +76,33 @@ function IndexFor({ type }: { type: ObjectType }) {
   const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   // Vista previa al costado (clic en una tarjeta del tablero o «Vista previa» en la tabla), como en HubSpot.
-  const [preview, setPreview] = useState<number | null>(null);
+  const [preview, setPreviewState] = useState<{ id: number; compose?: Activity['type'] } | null>(null);
+  const setPreview = (id: number | null, compose?: Activity['type']) => setPreviewState(id ? { id, compose } : null);
   const [boardKey, setBoardKey] = useState(0);
   const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'bulk' | 'save' | 'import'>('');
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
 
   useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owner, cfg.sort, cfg.dir, pipelineSel]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.sort, cfg.dir, pipelineSel]);
 
+  // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
+  const viewGroups = useMemo(() => {
+    const quick = quickFilters(cfg.owners, cfg.dates);
+    return (cfg.groups.length ? cfg.groups : [[]]).map((g) => [...g, ...quick]).filter((g) => g.length);
+  }, [cfg.groups, cfg.owners, cfg.dates]);
+  // La tabla además filtra por el pipeline elegido.
   const groups = useMemo(() => {
-    const base = cfg.groups.length ? cfg.groups : [[]];
-    const own: Filter[] = cfg.owner ? [{ prop: 'owner_id', op: cfg.owner === 'none' ? 'unknown' : 'eq', value: cfg.owner }] : [];
     const pipe: Filter[] = type === 'deal' && pipelineSel !== 'all' ? [{ prop: 'pipeline', op: 'eq', value: pipelineSel }] : [];
-    return base.map((g) => [...g, ...own, ...pipe]).filter((g) => g.length);
-  }, [cfg.groups, cfg.owner, pipelineSel, type]);
+    return (viewGroups.length ? viewGroups : [[]]).map((g) => [...g, ...pipe]).filter((g) => g.length);
+  }, [viewGroups, pipelineSel, type]);
   // Con «Todos los pipelines» la tabla muestra de qué pipeline es cada negocio.
   const columns = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
 
-  const list = useAsync(() => http<{ results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number }>('GET', `/records/${type}${qs({
+  type ListRes = { results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number };
+  const list = useAsync(() => (mode === 'board' ? Promise.resolve(undefined as unknown as ListRes) : http<ListRes>('GET', `/records/${type}${qs({
     q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, limit: pageSize, offset: page * pageSize,
     with: cfg.columns.includes('__company') ? 'company' : undefined,
-  })}`), [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), mode]);
+  })}`)), [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), mode]);
 
   const applyView = (key: string) => {
     setActiveView(key);
@@ -104,17 +116,21 @@ function IndexFor({ type }: { type: ObjectType }) {
       if (pipe) p.set('pipeline', pipe);
       return p;
     }, { replace: true });
-    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined }));
-    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: 'me' }));
-    else if (v) { setCfg({ ...loadLocal(type), ...v.config }); setQ(v.config.q ?? ''); }
+    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: [], dates: {} }));
+    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: ['me'], dates: {} }));
+    else if (v) { setCfg(withOwners({ ...loadLocal(type), owners: [], dates: {}, ...v.config })); setQ(v.config.q ?? ''); }
   };
   // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
-  const current: ViewConfig = { q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owner: cfg.owner, mode, ...(type === 'deal' ? { pipeline: pipelineSel } : {}) };
+  const current: ViewConfig = {
+    q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, mode,
+    ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
+  };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
-    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, c.owner ?? '', c.mode ?? base.mode, type === 'deal' ? c.pipeline ?? base.pipeline : '',
+    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, c.mode ?? base.mode,
+    c.boardProp ?? base.boardProp ?? '', type === 'deal' ? c.pipeline ?? base.pipeline : '',
   ]);
-  const dirty = !!activeSaved && norm(current, current) !== norm(activeSaved.config, current);
+  const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(activeSaved.config), current);
   const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
   const saveView = async () => {
     if (!activeSaved) return;
@@ -138,7 +154,12 @@ function IndexFor({ type }: { type: ObjectType }) {
   const rows = (list.data?.results ?? []).map((r) => (patched[r.id] ? { ...r, ...patched[r.id] } : r));
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
-  const filterButton = <button className="btn" onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
+  const quickBar = (
+    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} extra={cfg.groups.length > 0}
+      onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))}
+      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, groups: [] }))} />
+  );
+  const filterButton = <button className={`btn${mode === 'board' ? ' sm' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
   const filterChips = (
     <>
       {cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
@@ -166,7 +187,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         ) : (
           <h1>{OBJECTS[type].plural} <span className="muted small num">{list.data ? list.data.total.toLocaleString('es-AR') : ''}</span></h1>
         )}
-        {type !== 'order' && (
+        {(
           <div className="row" role="group" aria-label="Vista">
             <button className={`btn sm ${mode === 'table' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.delete('view'); return p; })}><Icon name="table" size={14} />Tabla</button>
             <button className={`btn sm ${mode === 'board' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.set('view', 'board'); return p; })}><Icon name="board" size={14} />Tablero</button>
@@ -199,16 +220,14 @@ function IndexFor({ type }: { type: ObjectType }) {
         )}
       </div>
 
-      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview} onOpen={setPreview} reloadKey={boardKey} q={dq} owner={cfg.owner} groups={cfg.groups} tools={<>{filterButton}{filterChips}</>} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} />
-        : mode === 'board' ? <PropBoard type={type} openId={preview} onOpen={setPreview} reloadKey={boardKey} q={dq} owner={cfg.owner} groups={cfg.groups} tools={<>{filterButton}{filterChips}</>} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} /> : <>
+      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} reloadKey={boardKey} q={dq} groups={viewGroups}
+        sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
+        : mode === 'board' ? <PropBoard type={type} prop={cfg.boardProp} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
+          reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
+          tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>
         <div className="toolbar">
           <div className="search" style={{ width: 280 }}><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <select className="input" style={{ width: 215 }} value={cfg.owner ?? ''} onChange={(e) => setCfg((c) => ({ ...c, owner: e.target.value || undefined }))} aria-label="Propietario">
-            <option value="">Todos los propietarios</option>
-            <option value="me">Yo</option>
-            <option value="none">Sin asignar</option>
-            {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          {quickBar}
           {filterButton}
           <button className="btn" onClick={() => setShow('columns')}><Icon name="columns" size={16} />Columnas</button>
           {filterChips}
@@ -273,7 +292,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
       </>}
 
-      {preview && <RecordPreview type={type} id={preview} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
+      {preview && <RecordPreview key={`${preview.id}-${preview.compose ?? ''}`} type={type} id={preview.id} compose={preview.compose} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
       {show === 'create' && <CreateRecord type={type} onClose={() => setShow('')} onCreated={() => list.reload()} defaults={type === 'deal' ? { pipeline: boardPipeline } : undefined} />}
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} onClose={() => setShow('')} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}

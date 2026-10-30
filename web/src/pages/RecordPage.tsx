@@ -55,7 +55,7 @@ const KEY_PROPS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', 'mobilephone', 'jobtitle', 'owner_id', 'lifecyclestage', 'hs_lead_status', 'origen_del_contacto', 'tipo_de_origen'],
   company: ['domain', 'phone', 'owner_id', 'industry', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'objetivo_economico_anual', 'cuit'],
   deal: ['amount', 'closedate', 'pipeline', 'dealstage', 'owner_id', 'producto', 'cantidad', 'tipo_de_producto', 'origen_del_negocio', 'hs_next_step'],
-  order: ['pdv_finnegans', 'hs_total_price', 'owner_id', 'hs_order_status', 'hs_billing_address_email', 'hs_billing_address_phone'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'hs_billing_address_email', 'hs_billing_address_phone'],
 };
 
 function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r: CrmRecord) {
@@ -493,12 +493,12 @@ function AssocCard({ type, record, toType, items, onChange }: { type: ObjectType
 
 // Vista previa en un panel lateral, como al hacer clic en una tarjeta del tablero de HubSpot: lo principal del
 // registro, las acciones rápidas, «Acerca de» editable, con quién está asociado y la última actividad.
-export function RecordPreview({ type, id, onClose, onChange }: { type: ObjectType; id: number; onClose: () => void; onChange?: () => void }) {
+export function RecordPreview({ type, id, compose: composeIn, onClose, onChange }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void }) {
   const { meta } = useMeta();
   const toast = useToast();
   const data = useAsync(() => http<Loaded>('GET', `/records/${type}/${id}`), [type, id]);
   const tl = useAsync(() => http<{ activities: Activity[] }>('GET', `/records/${type}/${id}/timeline${qs({ limit: 5 })}`), [type, id]);
-  const [compose, setCompose] = useState<Activity['type'] | null>(null);
+  const [compose, setCompose] = useState<Activity['type'] | null>(composeIn ?? null);
   const [hist, setHist] = useState<string | null>(null);
   const record = data.data?.record;
   const associations = data.data?.associations;
@@ -512,7 +512,7 @@ export function RecordPreview({ type, id, onClose, onChange }: { type: ObjectTyp
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
   const keyProps = ((pipeKeys?.length ? pipeKeys : KEY_PROPS[type]).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
-    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)));
+    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans'].includes(p.name)));
   const summary: Array<[string, ReactNode]> = !record ? [] : type === 'deal' ? [
     ['Valor', fmtMoney(record.props.amount, record.props.deal_currency_code) || '—'],
     ['Fecha de cierre', record.props.closedate ? fmtDate(record.props.closedate) : '—'],
@@ -525,7 +525,12 @@ export function RecordPreview({ type, id, onClose, onChange }: { type: ObjectTyp
     ['Email', record.props.email || '—'],
     ['Celular', record.props.mobilephone || record.props.phone || '—'],
     ['Propietario', userName(meta, record.props.owner_id) || '—'],
-  ] : [['PDV', record.props.pdv_finnegans || '—']];
+  ] : [
+    ['Total', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
+    ['Etapa', formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage) || '—'],
+    ['PDV', record.props.pdv_finnegans || '—'],
+    ['Comprador', [record.props.hs_billing_address_firstname, record.props.hs_billing_address_lastname].filter(Boolean).join(' ') || associations?.contact?.[0]?.name || '—'],
+  ];
   return (
     <Drawer clear title={`Vista previa · ${OBJECTS[type].single}`} onClose={onClose}
       footer={<Link className="btn primary" style={{ flex: 1, justifyContent: 'center' }} to={recordUrl(type, id)}>Ver registro</Link>}>

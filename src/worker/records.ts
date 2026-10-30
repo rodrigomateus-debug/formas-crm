@@ -481,11 +481,15 @@ async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, bind
     case 'not_contains': binds.push(`%${f.value}%`); return `(${expr} IS NULL OR ${expr} NOT LIKE ?)`;
     case 'in':
     case 'not_in': {
-      const vs = (f.values ?? String(f.value ?? '').split(';')).map(val);
-      if (!vs.length) return f.op === 'in' ? '0' : '1';
+      const raw = f.values ?? String(f.value ?? '').split(';');
+      // Propietario: «none» es «Sin asignar» y se puede elegir junto con otros (filtro rápido de varios propietarios).
+      const withNull = f.op === 'in' && f.prop === 'owner_id' && raw.includes('none');
+      const vs = raw.filter((v) => !(withNull && v === 'none')).map(val);
+      const empty = `(${expr} IS NULL OR ${expr} = '')`;
+      if (!vs.length) return f.op === 'in' ? (withNull ? empty : '0') : '1';
       binds.push(...vs);
       const list = vs.map(() => '?').join(', ');
-      return f.op === 'in' ? `${expr} IN (${list})` : `(${expr} IS NULL OR ${expr} NOT IN (${list}))`;
+      return f.op === 'in' ? (withNull ? `(${expr} IN (${list}) OR ${empty})` : `${expr} IN (${list})`) : `(${expr} IS NULL OR ${expr} NOT IN (${list}))`;
     }
     case 'gt': binds.push(val(f.value)); return `${expr} > ?`;
     case 'gte': binds.push(val(f.value)); return `${expr} >= ?`;

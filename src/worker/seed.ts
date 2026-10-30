@@ -99,6 +99,23 @@ const CORE = { system: true };
 const RO = { system: true, read_only: true };
 const FORM = { in_create_form: true };
 
+// Etapas del pipeline de pedidos de HubSpot («Formas Shop - Pipeline de pedidos»), con los mismos ids.
+// En el CRM la etapa del pedido es un desplegable: el tablero de pedidos se arma con él.
+export const ORDER_STAGES: Array<[string, string]> = [
+  ['4b27b500-f031-4927-9811-68a0b525cbae', 'Pedido Confirmado'],
+  ['937ea84d-0a4f-4dcf-9028-3f9c2aafbf03', '$ Pendiente de Anticipo'],
+  ['aa99e8d0-c1d5-4071-b915-d240bbb1aed9', 'Boceto Digital'],
+  ['3725360f-519b-4b18-a593-494d60a29c9f', 'Listo para producción'],
+  ['1250237623', 'Producción en revisión'],
+  ['1237498994', 'En producción'],
+  ['1237498995', '$ Pendiente de Saldo'],
+  ['1237498996', 'Listo para despachar'],
+  ['1237498997', 'Listo para retirar'],
+  ['1237498998', 'Pedido Completo'],
+  ['3c85a297-e9ce-400b-b42e-9f16853d69d6', 'Pedido Cancelado'],
+];
+export const ORDER_PIPELINES: Array<[string, string]> = [['14a2e10e-5471-408a-906e-c51f3b04369e', 'Formas Shop - Pipeline de pedidos']];
+
 export const PROPERTIES: Record<string, PropDef[]> = {
   contact: [
     ['firstname', 'Nombre', 'string', 'Información del contacto', [], { ...CORE, ...FORM }],
@@ -244,7 +261,9 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['hs_total_price', 'Total', 'currency', 'Pedido', [], CORE],
     ['hs_currency_code', 'Moneda', 'enum', 'Pedido', ['ARS', 'USD'], CORE],
     ['hs_external_order_id', 'Número de pedido web', 'string', 'Pedido', [], CORE],
-    ['hs_order_status', 'Estado', 'string', 'Pedido', [], CORE],
+    ['hs_pipeline_stage', 'Etapa del pedido', 'enum', 'Pedido', ORDER_STAGES, { ...CORE, ...FORM }],
+    ['hs_pipeline', 'Pipeline del pedido', 'enum', 'Pedido', ORDER_PIPELINES, CORE],
+    ['hs_order_status', 'Estado (web)', 'string', 'Pedido', [], CORE],
     ['hs_billing_address_firstname', 'Nombre (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_lastname', 'Apellido (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_email', 'Email (facturación)', 'email', 'Facturación', [], CORE],

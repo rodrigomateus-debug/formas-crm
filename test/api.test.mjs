@@ -288,3 +288,49 @@ test('el tablero respeta los filtros de la vista (grupos)', async () => {
   const names = b.columns.flatMap((c) => c.deals.map((d) => d.name));
   assert.deepEqual(names, [`${tag} grande`]);
 });
+
+test('tablero: ponderado, «Cargar más», orden y datos de la tarjeta', async () => {
+  const tag = `Tab ${Date.now().toString(36)}`;
+  const pipe = (await api('GET', '/meta')).data.pipelines.find((p) => p.id === '740095901');
+  const st = pipe.stages[1];
+  const con = (await api('POST', '/records/contact', { props: { firstname: 'Tarjeta', lastname: tag, email: `t.${Date.now()}@formas.ar` } })).data;
+  const ids = [];
+  for (const amount of [1000, 3000, 2000]) {
+    ids.push((await api('POST', '/records/deal', { props: { dealname: `${tag} ${amount}`, pipeline: pipe.id, dealstage: st.id, amount }, associations: [con.id] })).data.id);
+  }
+  await api('POST', '/activities', { type: 'task', subject: `Llamar ${tag}`, due_at: new Date(Date.now() + 86_400_000).toISOString(), links: [ids[0]] });
+  const q = `pipeline=${pipe.id}&q=${encodeURIComponent(tag)}`;
+  const b = (await api('GET', `/board?${q}&per_stage=2&sort=amount&dir=desc`)).data;
+  const col = b.columns.find((c) => c.stage.id === st.id);
+  assert.equal(col.total, 3);
+  assert.equal(col.amount, 6000);
+  assert.equal(Math.round(col.weighted), Math.round(6000 * st.probability));
+  assert.deepEqual(col.deals.map((d) => d.props.amount), [3000, 2000], 'ordenado por monto, de mayor a menor, y corta en 2');
+  assert.equal(col.deals[0].card.contact.name, `Tarjeta ${tag}`);
+  const more = (await api('GET', `/board?${q}&per_stage=2&sort=amount&dir=desc&stage=${st.id}&offset=2`)).data;
+  assert.deepEqual(more.deals.map((d) => d.props.amount), [1000], '«Cargar más» trae la que faltaba');
+  assert.equal(more.deals[0].card.next.subject, `Llamar ${tag}`, 'próxima actividad en la tarjeta');
+});
+
+test('filtro de varios propietarios con «Sin asignar»', async () => {
+  const tag = `Own ${Date.now().toString(36)}`;
+  await api('POST', '/records/company', { props: { name: `${tag} mío`, domain: `${tag.replace(' ', '-').toLowerCase()}-a.com.ar` } });
+  const nadie = (await api('POST', '/records/company', { props: { name: `${tag} nadie`, domain: `${tag.replace(' ', '-').toLowerCase()}-b.com.ar` } })).data;
+  await api('PATCH', `/records/company/${nadie.id}`, { props: { owner_id: null } });
+  const run = async (values) => (await api('GET', `/records/company?q=${encodeURIComponent(tag)}&groups=${encodeURIComponent(JSON.stringify([[{ prop: 'owner_id', op: 'in', values }]]))}`)).data.total;
+  assert.equal(await run(['me']), 1);
+  assert.equal(await run(['none']), 1);
+  assert.equal(await run(['me', 'none']), 2);
+});
+
+test('pedidos: etapa del pipeline de HubSpot y tablero por etapa', async () => {
+  const stage = (await api('GET', '/meta')).data.properties.find((p) => p.object_type === 'order' && p.name === 'hs_pipeline_stage');
+  assert.equal(stage?.type, 'enum');
+  assert.equal(stage.options.length, 11);
+  const tag = `Ped ${Date.now().toString(36)}`;
+  await api('POST', '/records/order', { props: { hs_order_name: tag, hs_pipeline_stage: '1237498994', hs_total_price: 5000 } });
+  const b = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(tag)}`)).data;
+  assert.equal(b.columns.find((c) => c.value === '1237498994').records[0].name, tag);
+  const more = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(tag)}&value=1237498994&offset=0`)).data;
+  assert.equal(more.records.length, 1);
+});

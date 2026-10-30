@@ -150,15 +150,41 @@ table.grid td.editable .cell-edit:hover { border-color: var(--navy); }
 
 /* ---------- Tablero de negocios ---------- */
 /* Las columnas ocupan todo el alto del tablero: se suelta la tarjeta en cualquier parte de la columna, no solo en el título. */
-.board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: stretch; min-height: calc(100vh - 210px); }
-.col { flex: 0 0 272px; background: var(--sunken); border-radius: var(--r-panel); display: flex; flex-direction: column; max-height: calc(100vh - 200px); }
+.board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: stretch; min-height: calc(100vh - 250px); }
+.col { flex: 0 0 272px; background: var(--sunken); border-radius: var(--r-panel); display: flex; flex-direction: column; max-height: calc(100vh - 240px); }
 .col.over { outline: 2px dashed var(--navy); outline-offset: -2px; }
+.board.fill { min-height: 0; }
+.board.fill .col { max-height: none; min-height: 0; }
 .col-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--line); }
 .col-head .t { font-weight: 600; font-size: 13px; display: flex; gap: 6px; }
 .col-head .t .n { margin-left: auto; color: var(--ink-3); font-weight: 500; }
 .col-head .amt { font-size: 12px; color: var(--ink-2); }
 .col-head .prob { height: 3px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
 .col-head .prob i { display: block; height: 100%; background: var(--brand-green); }
+.col-head .t .col-fold { border: 0; background: none; color: var(--ink-3); cursor: pointer; padding: 0 2px; display: grid; place-items: center; }
+.col-head .t .col-fold:hover { color: var(--navy); }
+.col.collapsed { flex: 0 0 44px; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; color: var(--ink-2); }
+.col.collapsed svg { transform: rotate(180deg); }
+.col.collapsed .n { font-size: 12px; font-weight: 600; }
+.col.collapsed .vlabel { writing-mode: vertical-rl; transform: rotate(180deg); font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 60vh; }
+.col.collapsed:hover { color: var(--navy); background: var(--line); }
+.col-foot { border-top: 1px solid var(--line); padding: 8px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; }
+.col-body .more { align-self: center; }
+.qf { position: relative; }
+.qf-btn { gap: 6px; height: 32px; font-size: 13px; padding: 0 10px; }
+.qf-btn.on { border-color: var(--navy); background: #eef0ff; color: var(--navy); }
+.qf-btn .caret { font-size: 10px; color: var(--ink-3); }
+.qf-pop { top: calc(100% + 4px); left: 0; min-width: 240px; }
+.qf-pop label.opt { font-size: 13px; }
+.board-sum { margin-left: auto; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.board-sum .sep { margin: 0 6px; color: var(--ink-3); }
+.card .next { display: flex; gap: 6px; align-items: center; font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; color: var(--ink-2); }
+.card .next.none { border-color: #f2d48a; background: #fffaf0; color: #8a5a00; }
+.card .next.late { border-color: #f0b4b4; background: #fff5f5; color: var(--bad); }
+.card .days { font-size: 11px; color: var(--ink-3); border: 1px solid var(--line); border-radius: 10px; padding: 0 6px; white-space: nowrap; }
+.card .card-actions { display: flex; gap: 2px; align-items: center; margin: 0 -4px -4px; }
+.card .card-actions .btn.sm { height: 26px; padding: 0 6px; }
+.card .card-actions .btn.icon { width: 26px; }
 .col-body { padding: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: grab; display: flex; flex-direction: column; gap: 4px; }
 .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-pop); }
@@ -289,3 +315,5 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
 .pipe-switch .caret { font-size: 13px; }
 .pipe-menu { min-width: 320px; }
 .pipe-menu .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); padding: 8px 10px 2px; }
+
+.toolbar .qf + .btn, .toolbar .btn.qf-clear { height: 32px; font-size: 13px; }

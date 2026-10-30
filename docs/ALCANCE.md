@@ -16,7 +16,7 @@ la lista de control: cada fila es algo que hoy se usa, con el dato que lo respal
 | Reuniones | 337 | Links de agenda de cada vendedora. |
 | Llamadas | 15 | Casi sin uso. |
 | Tickets, cotizaciones, productos, líneas | 5 / 10 / 0 / 1 | Sin uso real. |
-| Pedidos (Order) | — | Los lee el tablero de Formas Shop (`pdv_finnegans`). |
+| Pedidos (Order) | 425 | Pipeline «Formas Shop - Pipeline de pedidos» (11 etapas). Los lee el tablero de Formas Shop (`pdv_finnegans`). |
 
 Propiedades custom con datos: 37 en negocios, 31 en contactos, 13 en empresas (todas en `src/worker/seed.ts`; la
 migración crea cualquier otra que aparezca). Equipos: Corporate (Grandes Cuentas), Formas Shop, NOESTRES. 22 propietarios.
@@ -29,6 +29,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función de HubSpot | Estado | Dónde |
 |---|---|---|
 | Listas de contactos, empresas, negocios, pedidos | ✅ | `/contacts`, `/companies`, `/deals`, `/orders` |
+| Pedidos con la etapa de su pipeline (los 11 ids de HubSpot) en la lista, la vista previa y un tablero por etapa | ✅ | `/orders` → «Tablero»; la migración trae `hs_pipeline_stage` |
 | Búsqueda por nombre, mail, dominio, teléfono, id | ✅ | Lupa de arriba (Ctrl+K) y cada lista |
 | Filtros avanzados (Y / O), por propietario, fechas relativas | ✅ | «Filtros» |
 | Vistas guardadas propias y compartidas, «Todos» / «Míos», en la tabla y en el tablero (con sus filtros) | ✅ | Pestañas de cada lista |
@@ -61,7 +62,10 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función | Estado | Dónde |
 |---|---|---|
 | 8 pipelines con las mismas etapas, ids y probabilidades | ✅ | `src/worker/seed.ts` |
-| Tablero con arrastrar y soltar (en cualquier parte de la columna), totales por etapa, filtro por propietario | ✅ | Negocios → «Tablero» |
+| Tablero con arrastrar y soltar (en cualquier parte de la columna), total y monto ponderado por columna, contador de negocios | ✅ | Negocios → «Tablero» |
+| Tablero: «Cargar más» por columna, achicar columnas, «Ordenar por» cualquier propiedad (se guarda en la vista) | ✅ | Todos los tableros |
+| Tarjeta de negocio: contacto y empresa, próxima actividad (vencida en rojo, «Sin próximas actividades»), propietario, días en la etapa, atajos de nota y tarea, link a Darwin | ✅ | Negocios → «Tablero» |
+| Filtros rápidos: varios propietarios (con «Sin asignar»), fecha de creación, última actividad y fecha de cierre con rangos listos, «Borrar todo»; se guardan en la vista | ✅ | Tabla y tablero de las cuatro listas |
 | Selector de pipeline grande arriba de Negocios (tabla y tablero), «Todos los pipelines» en la tabla, recordado y en el link | ✅ | Negocios |
 | Tablero de empresas y contactos por etapa del ciclo de vida (o por cualquier desplegable o propietario), arrastrando para cambiar | ✅ | Empresas / Contactos → «Tablero» |
 | Motivo de cierre perdido obligatorio al perder | ✅ | Tablero y barra de etapas |

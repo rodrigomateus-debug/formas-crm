@@ -310,6 +310,35 @@ api.get('/tasks', async (c) => {
 
 // ---------- Tablero de negocios ----------
 
+// Datos extra de las tarjetas del tablero, en tres consultas para todas: el contacto y la empresa asociados
+// (los principales primero) y la próxima actividad (tarea abierta o reunión por venir), como en HubSpot.
+type CardInfo = { contact?: { id: number; name: string }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } };
+async function cardInfo(db: D1Database, ids: number[]) {
+  const info = new Map<number, CardInfo>(ids.map((id) => [id, {}]));
+  if (!ids.length) return info;
+  const list = JSON.stringify(ids);
+  const [contacts, companies, next] = await db.batch([
+    db.prepare(`SELECT a.from_id, r.id, r.name FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
+      WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'contact' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
+    db.prepare(`SELECT a.from_id, r.id, r.name FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
+      WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
+    db.prepare(`SELECT l.record_id, a.type, a.subject, COALESCE(a.due_at, a.occurred_at) AS at FROM activity_links l JOIN activities a ON a.id = l.activity_id
+      WHERE l.record_id IN (SELECT value FROM json_each(?)) AND a.archived = 0
+        AND ((a.type = 'task' AND COALESCE(a.status, '') != 'COMPLETED') OR (a.type = 'meeting' AND a.occurred_at > ?))
+      ORDER BY at`).bind(list, now()),
+  ]);
+  for (const r of contacts.results as Array<{ from_id: number; id: number; name: string }>) { const i = info.get(r.from_id); if (i && !i.contact) i.contact = { id: r.id, name: r.name }; }
+  for (const r of companies.results as Array<{ from_id: number; id: number; name: string }>) { const i = info.get(r.from_id); if (i && !i.company) i.company = { id: r.id, name: r.name }; }
+  for (const r of next.results as Array<{ record_id: number; type: string; subject: string; at: string }>) { const i = info.get(r.record_id); if (i && !i.next) i.next = { type: r.type, subject: r.subject, at: r.at }; }
+  return info;
+}
+
+// Orden de las tarjetas de un tablero: cualquier propiedad (como «Ordenar por» de HubSpot); por defecto, la última modificación.
+async function boardOrder(meta: Meta, type: ObjectType, q: Record<string, string>) {
+  const expr = q.sort ? (await sqlFor(meta, type, q.sort)).expr : 'r.updated_at';
+  return `(${expr} IS NULL), ${expr} ${q.dir === 'asc' ? 'ASC' : 'DESC'}, r.id DESC`;
+}
+
 api.get('/board', async (c) => {
   const q = c.req.query();
   const db = c.env.DB;
@@ -328,23 +357,36 @@ api.get('/board', async (c) => {
   const groups = extra.groups?.length ? extra.groups.map((g) => [...g, ...filters]) : undefined;
   const { whereSql, binds } = await buildWhere(meta, ctx, 'deal', { q: extra.q, filters, groups });
   const perStage = Math.min(Number(q.per_stage) || 50, 200);
+  const order = await boardOrder(meta, 'deal', q);
   // Las etapas cerradas muestran lo reciente (90 días por defecto) para que el tablero no se llene de historia.
   const since = q.closed_all ? '0000' : new Date(Date.now() - (Number(q.closed_days) || 90) * 86_400_000).toISOString();
   const visible = `${whereSql} AND (s.is_closed = 0 OR r.stage_entered_at >= ?)`;
-  // Dos consultas en un solo viaje a la base: las tarjetas (las primeras N por etapa) y los totales por etapa.
+  const withInfo = async (rows: RecordRow[]) => {
+    const info = await cardInfo(db, rows.map((r) => r.id));
+    return rows.map((r) => ({ ...rowToRecord(r), card: info.get(r.id) }));
+  };
+  // «Cargar más» de una columna: las siguientes tarjetas de esa etapa.
+  if (q.stage) {
+    const { results } = await db.prepare(`SELECT r.* FROM records r JOIN stages s ON s.id = r.stage_id WHERE ${visible} AND r.stage_id = ?
+      ORDER BY ${order} LIMIT ? OFFSET ?`).bind(...binds, since, q.stage, perStage, Math.max(0, Number(q.offset) || 0)).all();
+    return c.json({ deals: await withInfo(results as unknown as RecordRow[]) });
+  }
+  // Dos consultas en un solo viaje a la base: las tarjetas (las primeras N por etapa) y los totales por etapa,
+  // con el monto ponderado por la probabilidad de cada etapa.
   const [cards, totals] = await db.batch([
-    db.prepare(`SELECT * FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.stage_id ORDER BY r.updated_at DESC) AS rn
+    db.prepare(`SELECT * FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.stage_id ORDER BY ${order}) AS rn
       FROM records r JOIN stages s ON s.id = r.stage_id WHERE ${visible}) WHERE rn <= ${perStage}`).bind(...binds, since),
-    db.prepare(`SELECT r.stage_id, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r JOIN stages s ON s.id = r.stage_id
-      WHERE ${visible} GROUP BY r.stage_id`).bind(...binds, since),
+    db.prepare(`SELECT r.stage_id, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount, COALESCE(SUM(r.amount * s.probability), 0) AS weighted
+      FROM records r JOIN stages s ON s.id = r.stage_id WHERE ${visible} GROUP BY r.stage_id`).bind(...binds, since),
   ]);
-  const rows = cards.results as unknown as RecordRow[];
-  const tot = new Map((totals.results as Array<{ stage_id: string; n: number; amount: number }>).map((t) => [t.stage_id, t]));
+  const rows = await withInfo(cards.results as unknown as RecordRow[]);
+  const tot = new Map((totals.results as Array<{ stage_id: string; n: number; amount: number; weighted: number }>).map((t) => [t.stage_id, t]));
   const columns = pipeline.stages.map((st) => ({
     stage: st,
     total: tot.get(st.id)?.n ?? 0,
     amount: tot.get(st.id)?.amount ?? 0,
-    deals: rows.filter((r) => r.stage_id === st.id).map(rowToRecord),
+    weighted: tot.get(st.id)?.weighted ?? 0,
+    deals: rows.filter((r) => r.props.dealstage === st.id),
   }));
   return c.json({ pipeline, columns });
 });
@@ -367,8 +409,15 @@ api.get('/board-prop/:type', async (c) => {
   const { whereSql, binds } = await buildWhere(meta, ctx, type, { q: extra.q, filters, groups });
   const { expr } = await sqlFor(meta, type, propName);
   const perColumn = Math.min(Number(q.per_column) || 40, 200);
+  const order = await boardOrder(meta, type, q);
+  // «Cargar más» de una columna: las siguientes tarjetas con ese valor ('' es «Sin dato»).
+  if (q.value !== undefined) {
+    const { results } = await db.prepare(`SELECT r.* FROM records r WHERE ${whereSql} AND COALESCE(CAST(${expr} AS TEXT), '') = ?
+      ORDER BY ${order} LIMIT ? OFFSET ?`).bind(...binds, q.value, perColumn, Math.max(0, Number(q.offset) || 0)).all();
+    return c.json({ records: (results as unknown as RecordRow[]).map(rowToRecord) });
+  }
   const [cards, totals] = await db.batch([
-    db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY r.updated_at DESC) AS rn
+    db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
       FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`).bind(...binds),
     db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
   ]);

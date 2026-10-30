@@ -18,7 +18,7 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 export interface User { id: number; email: string; name: string; role: string; team_id: number | null; extra_teams?: string; active: number }
-export interface Meta { me: User; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }> }
+export interface Meta { me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }> }
 export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean }
 export interface Activity {
   id: number; type: 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp'; occurred_at: string; owner_id: number | null; subject: string; body: string;
@@ -101,8 +101,11 @@ export function stageOf(meta: Meta, id?: string) {
   return null;
 }
 // Cada equipo arranca en su pipeline (Corporate en Corporate, Formas Shop en Formas Shop).
+// Pipeline con el que arranca Negocios: el de su equipo; si no tiene, donde tiene más negocios; si no, el primero.
 export function defaultPipeline(meta: Meta) {
-  return meta.pipelines.find((p) => p.team_id != null && p.team_id === meta.me.team_id) ?? meta.pipelines[0];
+  return meta.pipelines.find((p) => p.team_id != null && p.team_id === meta.me.team_id)
+    ?? meta.pipelines.find((p) => p.id === meta.me.deal_pipelines?.[0])
+    ?? meta.pipelines[0];
 }
 // Quién ve un pipeline (misma regla que el servidor): sin equipos, todos; si no, sus equipos y los administradores.
 export function userTeams(u: User) {

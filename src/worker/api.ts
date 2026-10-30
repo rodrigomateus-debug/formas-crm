@@ -49,15 +49,20 @@ api.get('/me', (c) => c.json(c.get('ctx').user));
 api.get('/meta', async (c) => {
   const db = c.env.DB;
   const meta = new Meta(db);
-  const [users, teams, tags] = await db.batch([
+  const me = c.get('ctx').user;
+  const [users, teams, tags, mine] = await db.batch([
     db.prepare('SELECT id, email, name, role, team_id, extra_teams, active FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color FROM tags ORDER BY name'),
+    // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
+    db.prepare(`SELECT pipeline_id FROM records WHERE object_type = 'deal' AND owner_id = ? AND archived = 0
+      GROUP BY pipeline_id ORDER BY COUNT(*) DESC`).bind(me.id),
   ]);
+  const pipelines = (await meta.pipelines()).filter((p) => canSee(me, p));
   return c.json({
-    me: c.get('ctx').user,
+    me: { ...me, deal_pipelines: (mine.results as Array<{ pipeline_id: string }>).map((r) => r.pipeline_id).filter((id) => pipelines.some((p) => p.id === id)) },
     properties: await meta.properties(),
-    pipelines: (await meta.pipelines()).filter((p) => canSee(c.get('ctx').user, p)),
+    pipelines,
     users: users.results,
     teams: teams.results,
     tags: tags.results,

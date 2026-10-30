@@ -170,3 +170,14 @@ test('entra solo quien está en la lista de usuarios y activo', async () => {
   assert.equal((await api('GET', '/me')).status, 403, 'desactivado: no entra');
   asUser = null;
 });
+
+test('sin equipo, Negocios arranca en el pipeline donde tiene más negocios', async () => {
+  const u = await api('POST', '/users', { email: `sinequipo.${RUN}@formas.ar`, name: `Sin equipo ${RUN}`, role: 'member' });
+  for (const pipeline of ['740095901', '740095901', '687889576']) {
+    const d = await api('POST', '/records/deal', { props: { dealname: `Mío ${pipeline} ${RUN}`, pipeline, owner_id: u.data.id } });
+    assert.equal(d.status, 201, JSON.stringify(d.data));
+  }
+  asUser = `sinequipo.${RUN}@formas.ar`;
+  assert.deepEqual((await api('GET', '/meta')).data.me.deal_pipelines, ['740095901', '687889576']);
+  asUser = null;
+});

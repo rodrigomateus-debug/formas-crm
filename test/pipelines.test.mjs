@@ -181,3 +181,65 @@ test('sin equipo, Negocios arranca en el pipeline donde tiene más negocios', as
   assert.deepEqual((await api('GET', '/meta')).data.me.deal_pipelines, ['740095901', '687889576']);
   asUser = null;
 });
+
+test('acciones masivas: todos los filtrados, tareas en lote y errores parciales sin cortar la tanda', async () => {
+  asUser = null;
+  const tag = `Masivo ${RUN}`;
+  const pipe = (await api('GET', '/meta')).data.pipelines.find((p) => p.id === 'default');
+  const lost = pipe.stages.find((s) => s.is_closed && !s.is_won);
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push((await api('POST', '/records/deal', { props: { dealname: `${tag} ${i}`, pipeline: 'default', amount: 100 } })).data.id);
+  await api('PATCH', `/records/deal/${ids[0]}`, { props: { motivo_de_cierre_perdido: (await api('GET', '/meta')).data.properties.find((p) => p.object_type === 'deal' && p.name === 'motivo_de_cierre_perdido').options[0].value } });
+  const all = (await api('GET', `/records/deal/ids?q=${encodeURIComponent(tag)}`)).data.ids;
+  assert.deepEqual([...all].sort(), [...ids].sort());
+  // Pasar a perdido: el que tiene motivo pasa, los otros dos se informan y no frenan la tanda.
+  const r = (await api('POST', '/records/deal/batch', { ids: all, props: { dealstage: lost.id } })).data;
+  assert.equal(r.updated, 1);
+  assert.equal(r.failed.length, 2);
+  assert.ok(r.failed.every((f) => f.name.startsWith(tag) && f.error));
+  const t = (await api('POST', '/records/deal/batch', { ids: all, task: { subject: 'Seguimiento: {nombre}', due_at: new Date().toISOString() } })).data;
+  assert.equal(t.tasks, 3);
+  const tasks = (await api('GET', `/records/deal/${ids[1]}/timeline?types=task`)).data.activities;
+  assert.ok(tasks.some((a) => a.subject === `Seguimiento: ${tag} 1`));
+  assert.equal((await api('POST', '/records/deal/batch', { ids: Array.from({ length: 201 }, (_, i) => i + 1), props: {} })).status, 400, 'más de 200 por pedido');
+});
+
+test('clonar negocio: mismos datos y asociaciones, en la primera etapa', async () => {
+  asUser = null;
+  const comp = (await api('POST', '/records/company', { props: { name: `Clon ${RUN}`, domain: `clon-${RUN}.com.ar` } })).data;
+  const won = (await api('GET', '/meta')).data.pipelines.find((p) => p.id === 'default').stages.find((s) => s.is_won);
+  const d = (await api('POST', '/records/deal', { props: { dealname: `Pedido ${RUN}`, pipeline: 'default', dealstage: won.id, amount: 5000, producto: 'Mochilas' }, associations: [comp.id] })).data;
+  const c = await api('POST', `/records/deal/${d.id}/clone`);
+  assert.equal(c.status, 201);
+  assert.equal(c.data.name, `Pedido ${RUN} (copia)`);
+  assert.equal(c.data.props.producto, 'Mochilas');
+  assert.equal(c.data.props.amount, 5000);
+  assert.notEqual(c.data.props.dealstage, won.id);
+  assert.ok(!c.data.props.closedate);
+  assert.equal((await api('GET', `/records/deal/${c.data.id}`)).data.associations.company[0].id, comp.id);
+});
+
+test('exportar se lee como en pantalla: propietario, etapa, pipeline y empresa', async () => {
+  asUser = null;
+  const comp = (await api('POST', '/records/company', { props: { name: `Expo ${RUN}`, domain: `expo-${RUN}.com.ar` } })).data;
+  await api('POST', '/records/deal', { props: { dealname: `Export ${RUN}`, pipeline: 'default' }, associations: [comp.id] });
+  const res = await fetch(`${BASE}/api/export/deal?q=${encodeURIComponent(`Export ${RUN}`)}&columns=dealstage,pipeline,owner_id,__company`);
+  const csv = await res.text();
+  const row = csv.split('\n')[1];
+  const pipe = (await api('GET', '/meta')).data.pipelines.find((p) => p.id === 'default');
+  assert.ok(row.includes(pipe.stages[0].label) && row.includes(pipe.label) && row.includes(`Expo ${RUN}`), row);
+  assert.ok(!/,\d+,/.test(row.split(',').slice(1).join(',')), 'sin ids internos');
+});
+
+test('vistas compartidas con un equipo: las ve ese equipo y nadie más', async () => {
+  asUser = null;
+  const v = (await api('POST', '/views/company', { name: `Solo Corporate ${RUN}`, team_id: 58079782, config: { groups: [], columns: [], sort: 'createdate', dir: 'desc' } })).data;
+  await api('POST', '/users', { email: `corp.${RUN}@formas.ar`, name: `Corp ${RUN}`, role: 'member', team_id: 58079782 });
+  await api('POST', '/users', { email: `otro.${RUN}@formas.ar`, name: `Otro ${RUN}`, role: 'member', team_id: 57132078 });
+  asUser = `corp.${RUN}@formas.ar`;
+  assert.ok((await api('GET', '/views/company')).data.some((x) => x.id === v.id));
+  asUser = `otro.${RUN}@formas.ar`;
+  assert.ok(!(await api('GET', '/views/company')).data.some((x) => x.id === v.id));
+  assert.equal((await api('PATCH', `/views/company/${v.id}`, { name: 'x' })).status, 403);
+  asUser = null;
+});

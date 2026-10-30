@@ -99,6 +99,11 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .tab:hover { color: var(--ink); }
 .tab.on { color: var(--navy); border-bottom-color: var(--navy); font-weight: 600; }
 .tab .x { opacity: .5; font-size: 11px; }
+.tab-wrap { display: inline-flex; align-items: center; }
+.tab-wrap .tab svg { margin-right: 2px; vertical-align: -2px; }
+.view-menu { position: relative; }
+.view-menu .popover { min-width: 200px; }
+.danger-text { color: var(--bad); }
 .view-dirty { margin-left: auto; display: flex; gap: 6px; align-items: center; padding: 0 0 6px 12px; white-space: nowrap; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: #e8e8f8; color: var(--navy); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
 .avatar.lg { width: 48px; height: 48px; font-size: 17px; }
@@ -185,6 +190,12 @@ table.grid td.editable .cell-edit:hover { border-color: var(--navy); }
 .card .card-actions { display: flex; gap: 2px; align-items: center; margin: 0 -4px -4px; }
 .card .card-actions .btn.sm { height: 26px; padding: 0 6px; }
 .card .card-actions .btn.icon { width: 26px; }
+.card { position: relative; }
+.card .card-check { position: absolute; top: 10px; right: 10px; display: none; margin: 0; }
+.card:hover .card-check, .card.sel .card-check, .board.selecting .card-check { display: block; }
+.card.sel { border-color: var(--navy); box-shadow: 0 0 0 2px #00008533; background: #f5f6ff; }
+.card .t { padding-right: 18px; }
+.card-actions svg { vertical-align: -2px; }
 .col-body { padding: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: grab; display: flex; flex-direction: column; gap: 4px; }
 .card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-pop); }
@@ -206,6 +217,8 @@ table.grid td.editable .cell-edit:hover { border-color: var(--navy); }
 .rec-head .title h1 { font-size: 18px; line-height: 1.25; word-break: break-word; }
 .rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .preview-sum { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; }
+.preview-sum select.input { height: 30px; font-size: 13px; width: auto; max-width: 100%; display: inline-block; }
+.warn-text { color: #8a5a00; }
 .act-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-2); background: none; border: 0; cursor: pointer; width: 46px; padding: 0; }
 .act-btn span.ic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; background: var(--surface); }
 .act-btn:hover span.ic { border-color: var(--navy); color: var(--navy); background: var(--sunken); }
@@ -238,6 +251,7 @@ table.grid td.editable .cell-edit:hover { border-color: var(--navy); }
 .assoc-item:last-child { border-bottom: 0; }
 .assoc-item .x { margin-left: auto; visibility: hidden; }
 .assoc-item:hover .x { visibility: visible; }
+@media (hover: none) { .assoc-item .x, .card .card-check { visibility: visible; display: block; } }
 
 /* ---------- Línea de tiempo ---------- */
 .composer { margin-bottom: 16px; }

@@ -6,16 +6,25 @@ import { SortPick, useCollapsed, useFillHeight } from './Board';
 
 interface Column { value: string; label: string; total: number; records: CrmRecord[] }
 
+// Fecha de entrega de un pedido contada desde hoy, como «7 días a partir de ahora» en HubSpot.
+const daysTo = (v: string) => { const d = new Date(`${String(v).slice(0, 10)}T00:00:00`); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d.getTime() - t.getTime()) / 86_400_000); };
+const deliveryLate = (v: string) => daysTo(v) < 0;
+function deliveryText(v: string) {
+  const n = daysTo(v);
+  return n === 0 ? 'Entrega hoy' : n === 1 ? 'Entrega mañana' : n > 1 ? `Entrega en ${n} días` : `Entrega vencida hace ${-n} ${n === -1 ? 'día' : 'días'}`;
+}
+
 // Por qué propiedad se agrupa cada tablero si la vista no dice otra cosa: los pedidos por su etapa, el resto por ciclo de vida.
 export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecyclestage', company: 'lifecyclestage', deal: 'dealstage', order: 'hs_pipeline_stage' };
 
 // Tablero de empresas, contactos o pedidos agrupado por una propiedad (etapa del ciclo de vida, etapa del pedido…).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey }: {
+export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate }: {
   type: ObjectType; prop?: string; onProp: (p: string) => void; q: string; groups?: Filter[][];
   sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
   openId?: number | null; onOpen?: (id: number, compose?: Activity['type']) => void; reloadKey?: number;
+  selected?: Set<number>; onSelect?: (id: number) => void; onTotal?: (n: number) => void; onCreate?: (defaults: Record<string, unknown>) => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -33,6 +42,7 @@ export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort,
   const [boardRef, boardStyle] = useFillHeight();
   const def = groupable.find((p) => p.name === prop);
   const total = cols.reduce((n, c) => n + c.total, 0);
+  useEffect(() => { if (board.data) onTotal?.(total); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [total, board.data]);
 
   const move = async (id: number, to: Column) => {
     const from = cols.find((c) => c.records.some((r) => r.id === id));
@@ -95,6 +105,7 @@ export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort,
             <div className="col-head">
               <div className="t">
                 <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
+                {onCreate && c.value !== '' && def?.type !== 'owner' && <button className="col-fold" title={`Crear en «${c.label}»`} aria-label={`Crear en ${c.label}`} onClick={() => onCreate({ [prop]: c.value })}><Icon name="plus" size={14} /></button>}
                 <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>
               </div>
             </div>
@@ -103,10 +114,18 @@ export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort,
                 const stale = r.props.notes_last_updated && Date.now() - Date.parse(r.props.notes_last_updated) > 30 * 86_400_000;
                 const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen?.(r.id, t); };
                 return (
-                  <div key={r.id} className={`card${dragId === r.id ? ' dragging' : ''}${openId === r.id ? ' on' : ''}`} draggable onClick={() => onOpen?.(r.id)}
+                  <div key={r.id} className={`card${dragId === r.id ? ' dragging' : ''}${openId === r.id ? ' on' : ''}${selected?.has(r.id) ? ' sel' : ''}`} draggable
+                    onClick={(e) => (onSelect && (e.metaKey || e.ctrlKey || e.shiftKey || selected?.size) ? onSelect(r.id) : onOpen?.(r.id))}
                     onDragStart={(e) => { setDragId(r.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>
+                    {onSelect && <input type="checkbox" className="card-check" checked={!!selected?.has(r.id)} aria-label={`Seleccionar ${r.name}`} onClick={(e) => e.stopPropagation()} onChange={() => onSelect(r.id)} />}
                     <Link className="t" to={recordUrl(type, r.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{r.name}</Link>
                     {subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
+                    {type === 'order' && (r.props.tipo_de_pedido || r.props.fecha_de_entrega) && (
+                      <div className="meta">
+                        {r.props.tipo_de_pedido && <span className={`tag ${r.props.tipo_de_pedido === 'EVENTO' ? 'warn' : 'info'}`}>{r.props.tipo_de_pedido}</span>}
+                        {r.props.fecha_de_entrega && <span className={`ellipsis${deliveryLate(r.props.fecha_de_entrega) ? ' stale' : ''}`} title="Fecha de entrega">{deliveryText(r.props.fecha_de_entrega)}</span>}
+                      </div>
+                    )}
                     <div className="meta">
                       <Avatar name={userName(meta, r.props.owner_id) || '—'} />
                       <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>

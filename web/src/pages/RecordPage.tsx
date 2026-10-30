@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
-import { Avatar, CreateRecord, Drawer, Modal, PropertyInput, RecordPicker, toLocalInput } from '../components';
+import { Avatar, CreateRecord, Drawer, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
 import { StageProps } from './Board';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
@@ -22,6 +22,7 @@ export default function RecordPage() {
   const navigate = useNavigate();
   const data = useAsync(() => http<Loaded>('GET', `/records/${type}/${id}`), [type, id]);
   const [tlKey, setTlKey] = useState(0);
+  const [peek, setPeek] = useState<{ type: ObjectType; id: number } | null>(null);
   useEffect(() => { if (data.data?.redirect) navigate(recordUrl(type, data.data.redirect), { replace: true }); }, [data.data, navigate, type]);
   if (data.error) return <div className="content"><div className="empty">{data.error} <Link to={`/${objectPath}`}>Volver</Link></div></div>;
   if (!data.data?.record) return <div className="content"><div className="empty">Cargando…</div></div>;
@@ -37,8 +38,9 @@ export default function RecordPage() {
           <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
         </section>
         <aside className="right">
-          {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} />)}
+          {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
+        {peek && <RecordPreview type={peek.type} id={peek.id} onClose={() => setPeek(null)} onChange={refresh} />}
       </div>
     </div>
   );
@@ -107,6 +109,12 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
           {type === 'deal' && safeUrl(record.props.link_a_darwin) && <a className="btn sm" href={safeUrl(record.props.link_a_darwin)} target="_blank" rel="noreferrer">Chat en Darwin</a>}
           <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>
+          {type === 'deal' && meta.me.role !== 'viewer' && (
+            <button className="btn sm ghost" title="Crea una copia con los mismos datos y asociaciones, en la primera etapa" onClick={async () => {
+              try { const r = await http<CrmRecord>('POST', `/records/deal/${record.id}/clone`); toast('Negocio clonado'); navigate(recordUrl('deal', r.id)); }
+              catch (e) { toast((e as Error).message, true); }
+            }}>Clonar</button>
+          )}
           {['admin', 'manager'].includes(meta.me.role) && !record.archived && (
             <button className="btn sm ghost danger" onClick={async () => {
               if (!confirm(`¿Borrar «${record.name}»? Se puede restaurar.`)) return;
@@ -440,7 +448,9 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 
 // ---------- Columna derecha: asociaciones ----------
 
-function AssocCard({ type, record, toType, items, onChange }: { type: ObjectType; record: CrmRecord; toType: ObjectType; items: Array<CrmRecord & { primary: boolean; label: string | null }>; onChange: () => void }) {
+function AssocCard({ type, record, toType, items, onChange, onPeek }: {
+  type: ObjectType; record: CrmRecord; toType: ObjectType; items: Array<CrmRecord & { primary: boolean; label: string | null }>; onChange: () => void; onPeek?: (t: ObjectType, id: number) => void;
+}) {
   const { meta } = useMeta();
   const toast = useToast();
   const [mode, setMode] = useState<'' | 'pick' | 'create'>('');
@@ -475,6 +485,7 @@ function AssocCard({ type, record, toType, items, onChange }: { type: ObjectType
             {r.primary && toType === 'company' && <span className="tag info">Principal</span>}
           </div>
           <div className="x row">
+            {onPeek && <button className="btn ghost sm" title="Vista previa" aria-label={`Vista previa de ${r.name}`} onClick={() => onPeek(toType, r.id)}>Ver</button>}
             {toType === 'company' && !r.primary && type !== 'company' && (
               <button className="btn ghost sm" title="Marcar como principal" onClick={async () => { await http('POST', '/associations', { from_id: record.id, to_id: r.id, primary: true }); onChange(); }}>★</button>
             )}
@@ -493,8 +504,22 @@ function AssocCard({ type, record, toType, items, onChange }: { type: ObjectType
 
 // Vista previa en un panel lateral, como al hacer clic en una tarjeta del tablero de HubSpot: lo principal del
 // registro, las acciones rápidas, «Acerca de» editable, con quién está asociado y la última actividad.
-export function RecordPreview({ type, id, compose: composeIn, onClose, onChange }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void }) {
+export function RecordPreview({ type, id, compose, onClose, onChange }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void }) {
+  // Desde la vista previa se puede abrir la de un asociado (contacto, empresa…) y volver, como en HubSpot.
+  const [stack, setStack] = useState<Array<{ type: ObjectType; id: number }>>([]);
+  const cur = stack[stack.length - 1] ?? { type, id };
+  return (
+    <PreviewBody key={`${cur.type}-${cur.id}`} type={cur.type} id={cur.id} compose={stack.length ? undefined : compose} onClose={onClose} onChange={onChange}
+      onBack={stack.length ? () => setStack((s) => s.slice(0, -1)) : undefined} onPeek={(t, i) => setStack((s) => [...s, { type: t, id: i }])} />
+  );
+}
+
+function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, onPeek }: {
+  type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; onBack?: () => void; onPeek: (t: ObjectType, id: number) => void;
+}) {
   const { meta } = useMeta();
+  const navigate = useNavigate();
+  const [ask, setAsk] = useState<{ stage: Stage; missing: string[] } | null>(null);
   const toast = useToast();
   const data = useAsync(() => http<Loaded>('GET', `/records/${type}/${id}`), [type, id]);
   const tl = useAsync(() => http<{ activities: Activity[] }>('GET', `/records/${type}/${id}/timeline${qs({ limit: 5 })}`), [type, id]);
@@ -512,12 +537,37 @@ export function RecordPreview({ type, id, compose: composeIn, onClose, onChange 
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
   const keyProps = ((pipeKeys?.length ? pipeKeys : KEY_PROPS[type]).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
-    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans'].includes(p.name)));
+    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans', 'hs_pipeline_stage'].includes(p.name)));
+  // Cambiar la etapa desde la vista previa; si la etapa pide datos (motivo de pérdida…), se piden antes.
+  const moveTo = async (stageId: string, extra: Record<string, unknown> = {}) => {
+    const st = stageOf(meta, stageId)?.stage;
+    if (!record || !st || stageId === record.props.dealstage) return;
+    const missing = missingFor(st, { ...record.props, ...extra });
+    if (missing.length) { setAsk({ stage: st, missing }); return; }
+    try {
+      await http('PATCH', `/records/deal/${id}`, { props: { dealstage: stageId, ...extra } });
+      toast(`Pasó a ${st.label}`);
+      changed();
+    } catch (e) {
+      const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
+      if (m?.length) setAsk({ stage: st, missing: m }); else toast((e as Error).message, true);
+    }
+  };
+  const clone = async () => {
+    try {
+      const r = await http<CrmRecord>('POST', `/records/${type}/${id}/clone`);
+      toast('Negocio clonado');
+      onChange?.();
+      navigate(recordUrl(type, r.id));
+    } catch (e) { toast((e as Error).message, true); }
+  };
+  const next = record?.props.notes_next_activity_date;
   const summary: Array<[string, ReactNode]> = !record ? [] : type === 'deal' ? [
     ['Valor', fmtMoney(record.props.amount, record.props.deal_currency_code) || '—'],
     ['Fecha de cierre', record.props.closedate ? fmtDate(record.props.closedate) : '—'],
     ['Pipeline', meta.pipelines.find((p) => p.id === record.props.pipeline)?.label ?? '—'],
-    ['Etapa', stageOf(meta, record.props.dealstage)?.stage.label ?? '—'],
+    ['Etapa', <StageSelect key="st" value={record.props.dealstage} pipelineId={record.props.pipeline} onChange={(v) => moveTo(v)} />],
+    ['Próxima actividad', next ? fmtDate(next) : <span className="warn-text">Sin próximas actividades</span>],
   ] : type === 'company' ? [
     ['Dominio', record.props.domain || '—'],
     ['Propietario', userName(meta, record.props.owner_id) || '—'],
@@ -528,12 +578,19 @@ export function RecordPreview({ type, id, compose: composeIn, onClose, onChange 
   ] : [
     ['Total', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
     ['Etapa', formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage) || '—'],
-    ['PDV', record.props.pdv_finnegans || '—'],
+    ['Tipo', record.props.tipo_de_pedido || '—'],
+    ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
+    ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],
     ['Comprador', [record.props.hs_billing_address_firstname, record.props.hs_billing_address_lastname].filter(Boolean).join(' ') || associations?.contact?.[0]?.name || '—'],
+    ['Saldo pendiente', fmtMoney(record.props.saldo_pendiente_de_pago_mxn) || '—'],
   ];
   return (
     <Drawer clear title={`Vista previa · ${OBJECTS[type].single}`} onClose={onClose}
-      footer={<Link className="btn primary" style={{ flex: 1, justifyContent: 'center' }} to={recordUrl(type, id)}>Ver registro</Link>}>
+      footer={<>
+        {onBack && <button className="btn" onClick={onBack}>← Volver</button>}
+        {type === 'deal' && meta.me.role !== 'viewer' && <button className="btn" onClick={clone} title="Crea una copia con los mismos datos y asociaciones">Clonar</button>}
+        <Link className="btn primary" style={{ flex: 1, justifyContent: 'center' }} to={recordUrl(type, id)}>Ver registro</Link>
+      </>}>
       {!record ? <div className="muted">{data.error ?? 'Cargando…'}</div> : <>
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
@@ -555,7 +612,7 @@ export function RecordPreview({ type, id, compose: composeIn, onClose, onChange 
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
-        {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} />)}
+        {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}
         <div className="panel">
           <div className="panel-head"><h3>Última actividad</h3></div>
           <div className="panel-body stack">
@@ -565,6 +622,7 @@ export function RecordPreview({ type, id, compose: composeIn, onClose, onChange 
         </div>
       </>}
       {hist && <HistoryModal type={type} id={id} prop={hist} onClose={() => setHist(null)} />}
+      {ask && record && <StageProps deal={record} stage={ask.stage} missing={ask.missing} onClose={() => setAsk(null)} onSave={(extra) => { const a = ask; setAsk(null); moveTo(a.stage.id, extra); }} />}
     </Drawer>
   );
 }

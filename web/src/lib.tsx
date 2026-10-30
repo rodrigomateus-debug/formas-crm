@@ -253,6 +253,7 @@ const paths: Record<string, string> = {
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   chevron: 'M15 18l-6-6 6-6',
+  timer: 'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z',
 };
 export function Icon({ name, size }: { name: keyof typeof paths | string; size?: number }) {
   return (

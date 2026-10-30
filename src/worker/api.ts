@@ -11,7 +11,7 @@ import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
-import { assertDealVisible, canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
+import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -156,6 +156,17 @@ api.post('/records/:type', async (c) => {
   return c.json(rowToRecord(await getRow(c.env.DB, row.id)), 201);
 });
 
+// Los ids de todo lo que coincide con un filtro, para «Seleccionar los N» (hasta 10.000).
+api.get('/records/:type/ids', async (c) => {
+  const type = assertType(c.req.param('type'));
+  const meta = new Meta(c.env.DB);
+  const p = parseSearch(c.req.query());
+  const { whereSql, binds } = await buildWhere(meta, c.get('ctx'), type, p);
+  const { results } = await c.env.DB.prepare(`SELECT r.id FROM records r WHERE ${whereSql} ORDER BY r.id LIMIT 10001`).bind(...binds).all<{ id: number }>();
+  if (results.length > 10000) throw new HttpError(400, 'Son más de 10.000 registros: filtrá un poco más para hacerlo de una vez.');
+  return c.json({ ids: results.map((r) => r.id) });
+});
+
 api.get('/records/:type/:id', async (c) => {
   const type = assertType(c.req.param('type'));
   const row = await getRow(c.env.DB, Number(c.req.param('id')), type);
@@ -192,21 +203,70 @@ api.post('/records/:type/:id/restore', async (c) => {
   return c.json({ ok: true });
 });
 
+// Acciones masivas: editar, asignar, crear tareas o borrar. De a 200 por pedido (la pantalla manda de a tandas);
+// cada registro se procesa por separado y se informa cuáles no se pudieron y por qué, sin dejar la tanda por la mitad.
 api.post('/records/:type/batch', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
-  const body = await c.req.json<{ ids: number[]; props?: Record<string, unknown>; archive?: boolean }>();
+  const body = await c.req.json<{ ids: number[]; props?: Record<string, unknown>; archive?: boolean; task?: { subject: string; due_at?: string; task_type?: string; priority?: string; body?: string; owner?: 'record' | 'me' } }>();
+  const ids = [...new Set((body.ids ?? []).map(Number).filter(Number.isInteger))];
+  if (ids.length > 200) throw new HttpError(400, 'Mandá hasta 200 registros por vez.');
   if (body.archive) {
     requireRole(ctx, 'admin', 'manager');
-    return c.json({ archived: await archiveRecords(c.env.DB, ctx, body.ids) });
+    return c.json({ archived: await archiveRecords(c.env.DB, ctx, ids), failed: [] });
   }
+  const failed: Array<{ id: number; name?: string; error: string; missing?: string[] }> = [];
   let updated = 0;
-  for (const id of body.ids.slice(0, 500)) {
-    await updateRecord(c.env.DB, ctx, type, id, body.props ?? {});
-    updated++;
+  let tasks = 0;
+  for (const id of ids) {
+    try {
+      if (body.task) {
+        const row = await getRow(c.env.DB, id, type);
+        if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, row.pipeline_id);
+        await createActivity(c.env.DB, ctx, {
+          type: 'task', subject: body.task.subject.replace('{nombre}', row.name), body: body.task.body ?? '', due_at: body.task.due_at, task_type: body.task.task_type ?? 'todo',
+          priority: (body.task.priority as ActivityInput['priority']) ?? 'none', owner_id: body.task.owner === 'me' ? ctx.user.id : row.owner_id ?? ctx.user.id, links: [id],
+        });
+        tasks++;
+      } else {
+        if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, id, type)).pipeline_id);
+        await updateRecord(c.env.DB, ctx, type, id, body.props ?? {});
+        updated++;
+      }
+    } catch (e) {
+      const err = e as Error & { missing?: string[] };
+      const name = (await c.env.DB.prepare('SELECT name FROM records WHERE id = ?').bind(id).first<{ name: string }>())?.name;
+      failed.push({ id, name, error: err.message, ...(err.missing ? { missing: err.missing } : {}) });
+    }
   }
-  return c.json({ updated });
+  return c.json({ updated, tasks, failed });
+});
+
+// Clonar un negocio (como «Clonar» de HubSpot), por ejemplo para repetir un pedido: mismos datos y asociaciones,
+// en la primera etapa abierta del pipeline, sin fecha ni motivos de cierre.
+api.post('/records/:type/:id/clone', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const type = assertType(c.req.param('type'));
+  const src = rowToRecord(await getRow(c.env.DB, Number(c.req.param('id')), type));
+  const meta = new Meta(c.env.DB);
+  if (type === 'deal') await assertDealVisible(meta, ctx.user, String(src.props.pipeline));
+  const defs = await meta.properties(type);
+  const skip = new Set(['closedate', 'closed_lost_reason', 'closed_won_reason', 'motivo_de_cierre_perdido', 'hs_object_id', 'email', 'domain']);
+  const props: Record<string, unknown> = {};
+  for (const d of defs) if (!d.read_only && !skip.has(d.name) && src.props[d.name] != null && src.props[d.name] !== '') props[d.name] = src.props[d.name];
+  const nameProp = type === 'deal' ? 'dealname' : type === 'order' ? 'hs_order_name' : 'name';
+  if (type !== 'contact') props[nameProp] = `${src.name} (copia)`;
+  if (type === 'deal') {
+    const pipe = (await meta.pipelines()).find((p) => p.id === src.props.pipeline);
+    const open = pipe?.stages.find((s) => !s.is_closed);
+    if (open) props.dealstage = open.id;
+  }
+  const row = await createRecord(c.env.DB, ctx, type, props);
+  const { results } = await c.env.DB.prepare("SELECT to_id, is_primary FROM associations WHERE from_id = ? AND to_type IN ('contact', 'company')").bind(src.id).all<{ to_id: number; is_primary: number }>();
+  for (const a of results) await associate(c.env.DB, ctx, row.id, a.to_id, { primary: !!a.is_primary });
+  return c.json(rowToRecord(await getRow(c.env.DB, row.id)), 201);
 });
 
 api.post('/records/:type/:id/merge', async (c) => {
@@ -471,29 +531,35 @@ function todayBounds(): [string, string, string] {
 
 // ---------- Vistas guardadas ----------
 
+// Vistas guardadas: propias, compartidas con todos o con un equipo (como «Administrar lo que se comparte» de HubSpot).
 api.get('/views/:type', async (c) => {
   const type = assertType(c.req.param('type'));
-  const { results } = await c.env.DB.prepare('SELECT * FROM views WHERE object_type = ? AND (shared = 1 OR user_id = ?) ORDER BY display_order, id')
-    .bind(type, c.get('ctx').user.id).all<{ config: string }>();
+  const user = c.get('ctx').user;
+  const { results } = await c.env.DB.prepare(`SELECT * FROM views WHERE object_type = ?
+    AND (shared = 1 OR user_id = ? OR team_id IN (SELECT value FROM json_each(?))) ORDER BY display_order, id`)
+    .bind(type, user.id, JSON.stringify([...teamsOf(user)])).all<{ config: string }>();
   return c.json(results.map((v) => ({ ...v, config: JSON.parse(v.config) })));
 });
 
 api.post('/views/:type', async (c) => {
   const type = assertType(c.req.param('type'));
-  const b = await c.req.json<{ name: string; shared?: boolean; config: unknown }>();
-  const row = await c.env.DB.prepare('INSERT INTO views (object_type, name, user_id, shared, config) VALUES (?, ?, ?, ?, ?) RETURNING *')
-    .bind(type, b.name, c.get('ctx').user.id, b.shared ? 1 : 0, JSON.stringify(b.config ?? {})).first();
+  const b = await c.req.json<{ name: string; shared?: boolean; team_id?: number | null; config: unknown }>();
+  if (!b.name?.trim()) throw new HttpError(400, 'Falta el nombre de la vista.');
+  const row = await c.env.DB.prepare('INSERT INTO views (object_type, name, user_id, shared, team_id, config) VALUES (?, ?, ?, ?, ?, ?) RETURNING *')
+    .bind(type, b.name.trim(), c.get('ctx').user.id, b.shared ? 1 : 0, b.shared ? null : b.team_id ?? null, JSON.stringify(b.config ?? {})).first();
   return c.json(row, 201);
 });
 
 api.patch('/views/:type/:id', async (c) => {
-  const b = await c.req.json<{ name?: string; shared?: boolean; config?: unknown }>();
+  const b = await c.req.json<{ name?: string; shared?: boolean; team_id?: number | null; config?: unknown }>();
   const ctx = c.get('ctx');
-  const cur = await c.env.DB.prepare('SELECT * FROM views WHERE id = ?').bind(Number(c.req.param('id'))).first<{ user_id: number; name: string; shared: number; config: string }>();
+  const cur = await c.env.DB.prepare('SELECT * FROM views WHERE id = ?').bind(Number(c.req.param('id'))).first<{ user_id: number; name: string; shared: number; team_id: number | null; config: string }>();
   if (!cur) throw new HttpError(404, 'No existe la vista.');
   if (cur.user_id !== ctx.user.id && ctx.user.role !== 'admin') throw new HttpError(403, 'Solo quien creó la vista la puede cambiar.');
-  await c.env.DB.prepare('UPDATE views SET name = ?, shared = ?, config = ? WHERE id = ?')
-    .bind(b.name ?? cur.name, b.shared === undefined ? cur.shared : b.shared ? 1 : 0, b.config ? JSON.stringify(b.config) : cur.config, Number(c.req.param('id'))).run();
+  const shared = b.shared === undefined ? cur.shared : b.shared ? 1 : 0;
+  const team = shared ? null : b.team_id === undefined ? cur.team_id : b.team_id;
+  await c.env.DB.prepare('UPDATE views SET name = ?, shared = ?, team_id = ?, config = ? WHERE id = ?')
+    .bind(b.name?.trim() || cur.name, shared, team, b.config ? JSON.stringify(b.config) : cur.config, Number(c.req.param('id'))).run();
   return c.json({ ok: true });
 });
 
@@ -540,25 +606,50 @@ api.post('/import/:type', async (c) => {
   return c.json(result);
 });
 
+// Exportar a CSV con los filtros de la lista. Sale como se lee en pantalla: nombre del propietario, de la etapa y del
+// pipeline, la etiqueta de cada opción y la empresa asociada (no los números internos).
 api.get('/export/:type', async (c) => {
   const type = assertType(c.req.param('type'));
   const params = parseSearch(c.req.query());
   const cols = (c.req.query('columns') ?? '').split(',').filter(Boolean);
-  const meta = new Meta(c.env.DB);
+  const db = c.env.DB;
+  const meta = new Meta(db);
   const props = await meta.properties(type);
+  const pipelines = await meta.pipelines();
+  const users = new Map((await db.prepare('SELECT id, name FROM users').all<{ id: number; name: string }>()).results.map((u) => [String(u.id), u.name]));
+  const stages = new Map(pipelines.flatMap((p) => p.stages.map((st) => [st.id, st.label] as const)));
+  const pipeNames = new Map(pipelines.map((p) => [p.id, p.label]));
   const columns = cols.length ? cols : props.filter((p) => !p.read_only).map((p) => p.name);
-  const label = (n: string) => props.find((p) => p.name === n)?.label ?? n;
+  const label = (n: string) => (n === '__company' ? 'Empresa' : props.find((p) => p.name === n)?.label ?? n);
+  const show = (n: string, v: unknown) => {
+    if (v == null || v === '') return '';
+    if (type === 'deal' && n === 'dealstage') return stages.get(String(v)) ?? v;
+    if (type === 'deal' && n === 'pipeline') return pipeNames.get(String(v)) ?? v;
+    const d = props.find((p) => p.name === n);
+    if (d?.type === 'owner') return users.get(String(v)) ?? v;
+    if (d?.type === 'bool') return v === true || v === 'true' ? 'Sí' : 'No';
+    if (d?.type === 'enum') return d.options.find((o) => o.value === String(v))?.label ?? v;
+    if (d?.type === 'multienum') return String(v).split(';').map((x) => d.options.find((o) => o.value === x)?.label ?? x).join('; ');
+    return v;
+  };
   const esc = (v: unknown) => {
     const s = v == null ? '' : String(v);
     return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [['ID', ...columns.map(label)].map(esc).join(',')];
   for (let offset = 0; offset < 20000; offset += 500) {
-    const page = await searchRecords(c.env.DB, c.get('ctx'), type, { ...params, limit: 500, offset });
-    for (const r of page.results) lines.push([r.id, ...columns.map((k) => r.props[k])].map(esc).join(','));
+    const page = await searchRecords(db, c.get('ctx'), type, { ...params, limit: 500, offset });
+    // Empresa principal de cada registro de la página, en una sola consulta.
+    const companies = new Map<number, string>();
+    if (columns.includes('__company') && page.results.length) {
+      const { results } = await db.prepare(`SELECT a.from_id, r.name FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
+        WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'company' ORDER BY a.is_primary DESC`).bind(JSON.stringify(page.results.map((r) => r.id))).all<{ from_id: number; name: string }>();
+      for (const r of results) if (!companies.has(r.from_id)) companies.set(r.from_id, r.name);
+    }
+    for (const r of page.results) lines.push([r.id, ...columns.map((k) => (k === '__company' ? companies.get(r.id) ?? '' : show(k, r.props[k])))].map(esc).join(','));
     if (page.results.length < 500) break;
   }
-  return new Response('﻿' + lines.join('\n'), {
+  return new Response('\ufeff' + lines.join('\n'), {
     headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${type}s-${now().slice(0, 10)}.csv"` },
   });
 });

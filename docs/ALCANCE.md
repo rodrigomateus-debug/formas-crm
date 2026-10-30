@@ -34,13 +34,15 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Filtros avanzados (Y / O), por propietario, fechas relativas | ✅ | «Filtros» |
 | Vistas guardadas propias y compartidas, «Todos» / «Míos», en la tabla y en el tablero (con sus filtros) | ✅ | Pestañas de cada lista |
 | Guardar los cambios de una vista (filtros, propietario, columnas, orden, tabla o tablero, pipeline), guardarla como nueva o descartar | ✅ | «Cambios sin guardar» a la derecha de las pestañas; pisar una vista ajena solo puede un administrador |
+| Vistas: compartir con solo yo, todos o un equipo; renombrar, copiar link, abrir por defecto, borrar; ícono de tablero en la pestaña | ✅ | «⋯» de la vista abierta |
 | Elegir y ordenar columnas, ordenar por columna, paginado | ✅ | «Columnas» |
 | Editar un campo desde la lista (propietario, mail, desplegables, fechas…), sin entrar a la ficha | ✅ | Lápiz al pasar el mouse por la celda (o doble clic); solo lectura no edita |
 | Vista previa al costado: clic en una tarjeta del tablero o «Vista previa» en la tabla, con acciones rápidas, «Acerca de» editable, asociaciones (agregar existentes, crear nuevos ya asociados, quitar) y última actividad | ✅ | Botón «Ver registro» para la ficha completa |
-| Edición masiva, borrar y restaurar | ✅ | Selección en la lista |
+| Acciones masivas: Asignar, Editar (la etapa pide de una vez lo obligatorio), Crear tareas, Borrar; «Seleccionar los N» de todas las páginas; informa cuáles no se pudieron y por qué | ✅ | Barra de selección en tabla y tablero (Ctrl/Cmd + clic o la casilla de la tarjeta) |
 | Importar CSV con mapeo y dedupe (mail/teléfono, dominio/nombre) | ✅ | «Importar» |
-| Exportar CSV con los filtros aplicados | ✅ | «Exportar» |
+| Exportar CSV con los filtros aplicados, legible (propietario, etapa, pipeline y opciones por nombre; empresa asociada) | ✅ | «Exportar» |
 | Combinar duplicados (asociaciones, actividad y datos pasan al principal) | ✅ | Ficha → «Combinar» |
+| Clonar un negocio (mismos datos y asociaciones, en la primera etapa), para repetir un pedido | ✅ | Ficha y vista previa → «Clonar» |
 | Crear y asociar empresa por dominio del mail | ✅ | Automático en toda alta |
 | Dedupe de contactos por mail y de empresas por dominio | ✅ | Alta, importación, integraciones |
 
@@ -114,6 +116,15 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Seguimiento de aperturas de mails | ⏳ | Lo da la extensión de HubSpot; hoy no lo usan los tableros (solo cuentan aperturas en formas-tablero) |
 | Workflows de HubSpot | ⏳ | No se pueden leer por el conector: hay que listar cuáles están activos (Automatización → Workflows). Hay al menos uno: completa el origen de los negocios de Darwin (eso ya lo hace el CRM) |
 | Avisos por mail (tareas, asignaciones) | ⏳ | Ver «Tareas» |
+
+### Relevamiento de pantallas en el HubSpot de Formas (30/10/2026)
+Recorrido con el navegador (solo lectura) más documentación de HubSpot. Lo que define cómo replicar:
+- **Etiquetas de negocio (7):** las 6 de Corporate salen 1 a 1 del «Tipo de producto» (Producción simple 940, Productos importados 820, Mix de categorías 322, Desarrollos especiales 111, Importación especial 53); NETWORKING es «Origen manual = Networking» (36 negocios); «Oportunidad Tier 3» (142) no coincide exacto con «Tier de negocio» y la pone un workflow (hay que ver cuál).
+- **Tarjeta de Formas Shop (Inbound):** Valor, Fecha de creación, Link a Darwin, Fecha pospuesta, Propietario, contacto y empresa, píldora de actividad; acciones rápidas Vista previa, Resumen (IA), Correo, Nota. «Acerca de»: Link a Darwin, Producto, Cantidad, Eventos especiales, Último contacto, Origen manual. Cargado así en el CRM (`0006_relevamiento.sql`).
+- **Pedidos:** los crea el workflow «Formas Shop – Pedido confirmado a Operaciones» en «Pedido Confirmado» y los mueve Elizabeth Reynoso a mano (412 de 425). Tarjeta: propietario, PDV, Tipo de pedido, Fecha de entrega. Hecho en el CRM.
+- **Adjuntos:** casi no se usa el objeto Cotización (3); se marca «Cotización adjuntada al negocio» (Sí 2.590) y el PDF va como archivo. ⏳ Adjuntos en la ficha (necesita un bucket R2).
+- **LinkedIn:** las vistas «Reply Heyreach» confirman que la herramienta es HeyReach.
+- **Deal Score (IA)**, segmentos, secuencias, marcador automático y «Rellenar propiedades inteligentes»: no se replican.
 
 ### Fuera de alcance (sin uso real)
 Tickets (5), cotizaciones de HubSpot (10, se cotiza en formas.shop), productos y líneas de pedido, marketing

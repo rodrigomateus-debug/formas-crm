@@ -65,10 +65,11 @@ export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact'
 }
 
 // Tablero de negocios por pipeline: arrastrar una tarjeta a otra columna cambia la etapa.
-export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey }: {
+export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate }: {
   pipelineId: string; q: string; groups?: Filter[][]; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
   openId?: number | null; onOpen?: (id: number, compose?: Activity['type']) => void; reloadKey?: number;
+  selected?: Set<number>; onSelect?: (id: number) => void; onTotal?: (n: number) => void; onCreate?: (defaults: Record<string, unknown>) => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -87,6 +88,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
   const cardProps = pipe?.config.card_props?.length ? pipe.config.card_props : ['amount', 'closedate'];
   useEffect(() => { if (board.data) setCols(board.data.columns); }, [board.data]);
   const sum = cols.reduce((a, c) => ({ n: a.n + c.total, amount: a.amount + c.amount, weighted: a.weighted + c.weighted }), { n: 0, amount: 0, weighted: 0 });
+  useEffect(() => { if (board.data) onTotal?.(sum.n); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sum.n, board.data]);
 
   const move = async (dealId: number, stage: Stage, extra: Record<string, unknown> = {}) => {
     const from = cols.find((c) => c.deals.some((d) => d.id === dealId));
@@ -158,12 +160,14 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
             <div className="col-head">
               <div className="t">
                 <span className="ellipsis">{c.stage.label}</span><span className="n num">{c.total}</span>
+                {onCreate && <button className="col-fold" title={`Crear un negocio en «${c.stage.label}»`} aria-label={`Crear un negocio en ${c.stage.label}`} onClick={() => onCreate({ pipeline: pipelineId, dealstage: c.stage.id })}><Icon name="plus" size={14} /></button>}
                 <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.stage.label}`} onClick={() => toggleCol(c.stage.id)}><Icon name="chevron" size={14} /></button>
               </div>
               <div className="prob" title={`Probabilidad ${Math.round(c.stage.probability * 100)}%`}><i style={{ width: `${c.stage.probability * 100}%` }} /></div>
             </div>
             <div className="col-body">
               {c.deals.map((d) => <DealCard key={d.id} d={d} cardProps={cardProps} on={openId === d.id} dragging={dragId === d.id} onOpen={onOpen}
+                sel={!!selected?.has(d.id)} selecting={!!selected?.size} onSelect={onSelect}
                 onDragStart={() => setDragId(d.id)} onDragEnd={() => setDragId(null)} />)}
               {c.total > c.deals.length && (
                 <button className="btn sm ghost more" disabled={loadingMore === c.stage.id} onClick={() => loadMore(c)}>
@@ -185,8 +189,9 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
 
 // Tarjeta de negocio, como en HubSpot: datos del pipeline, con quién es, la próxima actividad, propietario,
 // días en la etapa y atajos (Darwin, nota, tarea).
-function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd }: {
+function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd, sel, selecting, onSelect }: {
   d: Card; cardProps: string[]; on: boolean; dragging: boolean; onOpen?: (id: number, compose?: Activity['type']) => void; onDragStart: () => void; onDragEnd: () => void;
+  sel: boolean; selecting: boolean; onSelect?: (id: number) => void;
 }) {
   const { meta } = useMeta();
   const day = 86_400_000;
@@ -200,8 +205,10 @@ function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd }
   const with_ = [d.card?.contact?.name, d.card?.company?.name].filter(Boolean).join(' · ');
   const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen?.(d.id, t); };
   return (
-    <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}`} draggable onClick={() => onOpen?.(d.id)}
+    <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable
+      onClick={(e) => (onSelect && (e.metaKey || e.ctrlKey || e.shiftKey || selecting) ? onSelect(d.id) : onOpen?.(d.id))}
       onDragStart={(e) => { onDragStart(); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={onDragEnd}>
+      {onSelect && <input type="checkbox" className="card-check" checked={sel} aria-label={`Seleccionar ${d.name}`} onClick={(e) => e.stopPropagation()} onChange={() => onSelect(d.id)} />}
       <Link className="t" to={recordUrl('deal', d.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{d.name}</Link>
       {cardProps.map((k) => {
         if (k === 'link_a_darwin') return null;
@@ -221,10 +228,11 @@ function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd }
       </div>
       <div className="card-actions">
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${d.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
+        <button className="btn ghost sm icon" title="Escribir un mail" aria-label={`Mail en ${d.name}`} onClick={(e) => act(e, 'email')}><Icon name="email" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${d.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
         {darwin && <a className="btn ghost sm" href={darwin} target="_blank" rel="noreferrer" title="Abrir el chat en Darwin" onClick={(e) => e.stopPropagation()}>Darwin</a>}
-        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title="Última actividad">
-          {d.props.notes_last_updated ? fmtRelative(d.props.notes_last_updated) : 'Sin actividad'}
+        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={stale ? 'Inactivo hace más de 14 días' : 'Última actividad'}>
+          {stale && <Icon name="timer" size={12} />} {d.props.notes_last_updated ? fmtRelative(d.props.notes_last_updated) : 'Sin actividad'}
         </span>
       </div>
     </div>

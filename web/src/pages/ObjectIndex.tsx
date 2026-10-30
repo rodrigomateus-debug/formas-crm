@@ -10,6 +10,7 @@ import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
+import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
 
 const PIPE_KEY = 'crm.deals.pipeline';
@@ -27,7 +28,10 @@ interface ViewConfig {
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string;
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
-interface SavedView { id: number; name: string; shared: number; user_id: number; config: ViewConfig }
+interface SavedView { id: number; name: string; shared: number; team_id: number | null; user_id: number; config: ViewConfig }
+// Vista que se abre al entrar a cada lista (elegida por cada uno, en este navegador).
+const defaultViewKey = (t: ObjectType) => `crm.view.default.${t}`;
+const readDefault = (t: ObjectType) => { try { return localStorage.getItem(defaultViewKey(t)); } catch { return null; } };
 
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
 function loadLocal(t: ObjectType): ViewConfig {
@@ -69,21 +73,28 @@ function IndexFor({ type }: { type: ObjectType }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [cfg, setCfg] = useState<ViewConfig>(() => loadLocal(type));
-  const [activeView, setActiveView] = useState<string>(params.get('v') ?? 'all');
+  const [activeView, setActiveView] = useState<string>(params.get('v') ?? readDefault(type) ?? 'all');
   const [q, setQ] = useState(cfg.q ?? '');
   const dq = useDebounced(q, 300);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelectedRaw] = useState<Set<number>>(new Set());
+  // «Seleccionar los N»: la acción masiva va sobre todo lo filtrado, no solo lo que se ve.
+  const [selAll, setSelAll] = useState(false);
+  const setSelected = (s: Set<number>) => { setSelectedRaw(s); if (!s.size) setSelAll(false); };
+  const toggleSel = (id: number) => { const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s); setSelAll(false); };
+  const [boardTotal, setBoardTotal] = useState<number>();
+  const [createDefaults, setCreateDefaults] = useState<Record<string, unknown> | undefined>();
+  const createIn = (d: Record<string, unknown>) => { setCreateDefaults(d); setShow('create'); };
   // Vista previa al costado (clic en una tarjeta del tablero o «Vista previa» en la tabla), como en HubSpot.
   const [preview, setPreviewState] = useState<{ id: number; compose?: Activity['type'] } | null>(null);
   const setPreview = (id: number | null, compose?: Activity['type']) => setPreviewState(id ? { id, compose } : null);
   const [boardKey, setBoardKey] = useState(0);
-  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'bulk' | 'save' | 'import'>('');
+  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'save' | 'import'>('');
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
 
   useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.sort, cfg.dir, pipelineSel]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.sort, cfg.dir, pipelineSel, mode]);
 
   // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
   const viewGroups = useMemo(() => {
@@ -171,7 +182,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   );
 
   const exportCsv = () => {
-    const url = `/api/export/${type}${qs({ q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, columns: cfg.columns.filter((c) => !c.startsWith('__')).join(',') })}`;
+    const url = `/api/export/${type}${qs({ q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, columns: columns.filter((c) => !c.startsWith('__') || c === '__company').join(',') })}`;
     window.location.href = url;
   };
 
@@ -203,9 +214,14 @@ function IndexFor({ type }: { type: ObjectType }) {
         <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
         <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
         {views.data?.map((v) => (
-          <button key={v.id} className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}>
-            {v.name}{v.shared ? <span className="x">(equipo)</span> : null}
-          </button>
+          <div key={v.id} className={`tab-wrap${activeView === String(v.id) ? ' on' : ''}`}>
+            <button className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}
+              title={v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}>
+              {v.config.mode === 'board' && <Icon name="board" size={13} />}{v.name}
+              {(v.shared || v.team_id) ? <span className="x">{v.shared ? '(todos)' : `(${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'equipo'})`}</span> : null}
+            </button>
+            {activeView === String(v.id) && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView('all'); }} />}
+          </div>
         ))}
         <button className="tab" onClick={() => setShow('save')}>+ Guardar vista</button>
         {dirty && (
@@ -220,9 +236,15 @@ function IndexFor({ type }: { type: ObjectType }) {
         )}
       </div>
 
-      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} reloadKey={boardKey} q={dq} groups={viewGroups}
+      {selected.size > 0 && (
+        <BulkBar type={type} sel={{ ids: selected, all: selAll }} total={mode === 'board' ? boardTotal : list.data?.total}
+          query={mode === 'board' ? { q: dq, groups: type === 'deal' ? (viewGroups.length ? viewGroups : [[]]).map((g) => [...g, { prop: 'pipeline', op: 'eq', value: boardPipeline }]) : viewGroups } : { q: dq, groups }}
+          onSelectAll={() => setSelAll(true)} onClear={() => setSelected(new Set())}
+          onDone={() => { setSelected(new Set()); list.reload(); setBoardKey((k) => k + 1); }} />
+      )}
+      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
-        : mode === 'board' ? <PropBoard type={type} prop={cfg.boardProp} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
+        : mode === 'board' ? <PropBoard type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
           tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>
         <div className="toolbar">
@@ -232,21 +254,6 @@ function IndexFor({ type }: { type: ObjectType }) {
           <button className="btn" onClick={() => setShow('columns')}><Icon name="columns" size={16} />Columnas</button>
           {filterChips}
         </div>
-
-        {selected.size > 0 && (
-          <div className="bulkbar">
-            <b>{selected.size} seleccionados</b>
-            <button className="btn sm" onClick={() => setShow('bulk')}>Editar</button>
-            {['admin', 'manager'].includes(meta.me.role) && (
-              <button className="btn sm danger" onClick={async () => {
-                if (!confirm(`¿Borrar ${selected.size} registros? Se pueden restaurar desde la ficha.`)) return;
-                await http('POST', `/records/${type}/batch`, { ids: [...selected], archive: true });
-                toast('Registros borrados'); setSelected(new Set()); list.reload();
-              }}><Icon name="trash" size={14} />Borrar</button>
-            )}
-            <button className="btn sm ghost" onClick={() => setSelected(new Set())}>Deseleccionar</button>
-          </div>
-        )}
 
         <div className="table-wrap">
           <table className="grid">
@@ -264,9 +271,7 @@ function IndexFor({ type }: { type: ObjectType }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id} className={selected.has(r.id) ? 'sel' : ''}>
-                  <td className="check"><input type="checkbox" aria-label={`Seleccionar ${r.name}`} checked={selected.has(r.id)} onChange={() => {
-                    const s = new Set(selected); s.has(r.id) ? s.delete(r.id) : s.add(r.id); setSelected(s);
-                  }} /></td>
+                  <td className="check"><input type="checkbox" aria-label={`Seleccionar ${r.name}`} checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} /></td>
                   <td className="name">{type === 'company' || type === 'contact'
                     ? <Link to={recordUrl(type, r.id)} className="with-logo"><Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} />{r.name}</Link>
                     : <Link to={recordUrl(type, r.id)}>{r.name}</Link>}
@@ -293,10 +298,9 @@ function IndexFor({ type }: { type: ObjectType }) {
       </>}
 
       {preview && <RecordPreview key={`${preview.id}-${preview.compose ?? ''}`} type={type} id={preview.id} compose={preview.compose} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
-      {show === 'create' && <CreateRecord type={type} onClose={() => setShow('')} onCreated={() => list.reload()} defaults={type === 'deal' ? { pipeline: boardPipeline } : undefined} />}
+      {show === 'create' && <CreateRecord type={type} onClose={() => { setShow(''); setCreateDefaults(undefined); }} onCreated={() => { list.reload(); setBoardKey((k) => k + 1); }} defaults={createDefaults ?? (type === 'deal' ? { pipeline: boardPipeline } : undefined)} />}
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} onClose={() => setShow('')} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
-      {show === 'bulk' && <BulkEdit type={type} ids={[...selected]} onClose={() => setShow('')} onDone={() => { setShow(''); setSelected(new Set()); list.reload(); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
       {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
     </div>
@@ -422,45 +426,90 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
   );
 }
 
-function BulkEdit({ type, ids, onClose, onDone }: { type: ObjectType; ids: number[]; onClose: () => void; onDone: () => void }) {
+// Con quién se comparte una vista: solo yo, todos, o un equipo (Corporate, Formas Shop, NOESTRES).
+const shareBody = (v: string) => (v === 'all' ? { shared: true, team_id: null } : v === 'me' ? { shared: false, team_id: null } : { shared: false, team_id: Number(v) });
+const shareOf = (v: SavedView) => (v.shared ? 'all' : v.team_id ? String(v.team_id) : 'me');
+function ShareSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { meta } = useMeta();
+  return (
+    <label className="field">Quién la ve
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="me">Solo yo</option>
+        <option value="all">Todo el equipo</option>
+        {meta.teams.map((t) => <option key={t.id} value={t.id}>Equipo {t.name}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// Menú de la vista abierta (como ⚙ «Ver configuración» de HubSpot): renombrar, compartir, copiar el link,
+// abrirla por defecto y borrarla. Cambiar o borrar una vista ajena solo puede un administrador.
+function ViewMenu({ type, view, onChanged, onDeleted }: { type: ObjectType; view: SavedView; onChanged: () => void; onDeleted: () => void }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const editable = propsOf(meta, type).filter((p) => !p.read_only && !['name', 'dealname', 'email', 'hs_order_name'].includes(p.name));
-  const [prop, setProp] = useState(editable.find((p) => p.name === 'owner_id')?.name ?? editable[0].name);
-  const [value, setValue] = useState<any>(null);
-  const p = editable.find((x) => x.name === prop)!;
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(false);
+  const [name, setName] = useState(view.name);
+  const [share, setShare] = useState(shareOf(view));
+  const [isDefault, setIsDefault] = useState(readDefault(type) === String(view.id));
+  const ref = useRef<HTMLDivElement>(null);
+  const mine = view.user_id === meta.me.id || meta.me.role === 'admin';
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const toggleDefault = () => {
+    try { isDefault ? localStorage.removeItem(defaultViewKey(type)) : localStorage.setItem(defaultViewKey(type), String(view.id)); } catch { /* ignorar */ }
+    setIsDefault(!isDefault);
+    toast(isDefault ? 'Ya no se abre por defecto' : `«${view.name}» se abre por defecto`);
+  };
   return (
-    <Modal title={`Editar ${ids.length} registros`} onClose={onClose} footer={<>
-      <button className="btn" onClick={onClose}>Cancelar</button>
-      <button className="btn primary" onClick={async () => {
-        try { await http('POST', `/records/${type}/batch`, { ids, props: { [prop]: value } }); toast('Listo'); onDone(); }
-        catch (e) { toast((e as Error).message, true); }
-      }}>Actualizar</button>
-    </>}>
-      <label className="field">Propiedad
-        <select className="input" value={prop} onChange={(e) => { setProp(e.target.value); setValue(null); }}>
-          {editable.map((x) => <option key={x.name} value={x.name}>{x.label}</option>)}
-        </select>
-      </label>
-      <label className="field">Nuevo valor<PropertyInput prop={p} type={type} value={value} onChange={setValue} /></label>
-    </Modal>
+    <div className="view-menu" ref={ref}>
+      <button className="btn ghost sm icon" aria-label={`Opciones de la vista ${view.name}`} title="Opciones de la vista" onClick={() => setOpen(!open)}>⋯</button>
+      {open && (
+        <div className="popover" style={{ top: 'calc(100% + 4px)', right: 0 }}>
+          {mine && <div className="opt" onClick={() => { setEdit(true); setOpen(false); }}>Renombrar o compartir…</div>}
+          <div className="opt" onClick={() => { navigator.clipboard?.writeText(window.location.href); toast('Link copiado'); setOpen(false); }}>Copiar link</div>
+          <div className="opt" onClick={() => { toggleDefault(); setOpen(false); }}>{isDefault ? '✓ Se abre por defecto' : 'Abrir por defecto'}</div>
+          {mine && <div className="opt danger-text" onClick={async () => {
+            setOpen(false);
+            if (!confirm(`¿Borrar la vista «${view.name}»? A quienes la ven compartida también les desaparece.`)) return;
+            try { await http('DELETE', `/views/${type}/${view.id}`); toast('Vista borrada'); onDeleted(); } catch (e) { toast((e as Error).message, true); }
+          }}>Borrar vista</div>}
+        </div>
+      )}
+      {edit && (
+        <Modal title="Vista" onClose={() => setEdit(false)} footer={<>
+          <button className="btn" onClick={() => setEdit(false)}>Cancelar</button>
+          <button className="btn primary" disabled={!name.trim()} onClick={async () => {
+            try { await http('PATCH', `/views/${type}/${view.id}`, { name, ...shareBody(share) }); toast('Vista actualizada'); setEdit(false); onChanged(); }
+            catch (e) { toast((e as Error).message, true); }
+          }}>Guardar</button>
+        </>}>
+          <label className="field">Nombre<input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <ShareSelect value={share} onChange={setShare} />
+        </Modal>
+      )}
+    </div>
   );
 }
 
 function SaveView({ type, config, onClose, onSaved }: { type: ObjectType; config: ViewConfig; onClose: () => void; onSaved: (id: number) => void }) {
   const [name, setName] = useState('');
-  const [shared, setShared] = useState(false);
+  const [share, setShare] = useState('me');
   const toast = useToast();
   return (
     <Modal title="Guardar vista" onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Cancelar</button>
       <button className="btn primary" disabled={!name.trim()} onClick={async () => {
-        try { const v = await http<{ id: number }>('POST', `/views/${type}`, { name, shared, config }); toast('Vista guardada'); onSaved(v.id); }
+        try { const v = await http<{ id: number }>('POST', `/views/${type}`, { name, ...shareBody(share), config }); toast('Vista guardada'); onSaved(v.id); }
         catch (e) { toast((e as Error).message, true); }
       }}>Guardar</button>
     </>}>
       <label className="field">Nombre<input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Corporate sin actividad 30 días" /></label>
-      <label className="row small"><input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />Compartir con todo el equipo</label>
+      <ShareSelect value={share} onChange={setShare} />
       <p className="muted small" style={{ margin: 0 }}>Guarda filtros, propietario, columnas, orden, búsqueda y si se ve en tabla o tablero{type === 'deal' ? ', con el pipeline' : ''}.</p>
     </Modal>
   );

@@ -264,6 +264,12 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['hs_pipeline_stage', 'Etapa del pedido', 'enum', 'Pedido', ORDER_STAGES, { ...CORE, ...FORM }],
     ['hs_pipeline', 'Pipeline del pedido', 'enum', 'Pedido', ORDER_PIPELINES, CORE],
     ['hs_order_status', 'Estado (web)', 'string', 'Pedido', [], CORE],
+    ['tipo_de_pedido', 'Tipo de pedido', 'enum', 'Pedido', ['PEDIDO NORMAL', 'EVENTO'], FORM],
+    ['fecha_de_entrega', 'Fecha de entrega', 'date', 'Pedido', [], FORM],
+    ['url_pdv_finnegans', 'URL PDV Finnegans', 'url', 'Pedido'],
+    ['saldo_pendiente_de_pago_mxn', 'Saldo pendiente de pago (ARS)', 'currency', 'Pedido'],
+    ['progreso_pdv', 'Progreso PDV', 'number', 'Pedido'],
+    ['items_entregados', 'Ítems entregados', 'string', 'Pedido'],
     ['hs_billing_address_firstname', 'Nombre (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_lastname', 'Apellido (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_email', 'Email (facturación)', 'email', 'Facturación', [], CORE],
@@ -295,6 +301,7 @@ export const COMPUTED: Record<string, PropDef[]> = {
   deal: [
     ['createdate', 'Fecha de creación', 'datetime', 'Actividad', [], RO],
     ['notes_last_updated', 'Última actividad', 'datetime', 'Actividad', [], RO],
+    ['notes_last_contacted', 'Último contacto', 'datetime', 'Actividad', [], RO],
     ['notes_next_activity_date', 'Próxima actividad', 'datetime', 'Actividad', [], RO],
     ['hs_v2_date_entered_current_stage', 'Entró a la etapa', 'datetime', 'Actividad', [], RO],
     ['source', 'Origen del registro', 'string', 'Actividad', [], RO],
@@ -392,7 +399,9 @@ export async function seedConfig(db: D1Database) {
   }
   PIPELINES.forEach((p, i) => {
     const sales = !['765787061', '833718584'].includes(p.id);
-    const config = p.id === '674405796' ? { rules: { require_company: true } } : {};
+    // Corporate pide empresa; Formas Shop (Inbound) arranca con la tarjeta y el «Acerca de» que tiene en HubSpot.
+    const config = p.id === '674405796' ? { rules: { require_company: true } }
+      : p.id === 'default' ? { card_props: ['amount', 'createdate', 'fecha_pospuesta'], key_props: ['link_a_darwin', 'producto', 'cantidad', 'eventos_especiales', 'notes_last_contacted', 'origen', 'owner_id'] } : {};
     stmts.push(db.prepare('INSERT OR IGNORE INTO pipelines (id, object_type, label, display_order, team_id, config) VALUES (?, ?, ?, ?, ?, ?)')
       .bind(p.id, 'deal', p.label, i, p.team ?? null, JSON.stringify(config)));
     p.stages.forEach(([id, label, probability], j) => {

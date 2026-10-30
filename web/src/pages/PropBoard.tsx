@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtRelative, recordUrl, userName, propsOf, Icon, type CrmRecord, type ObjectType } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, fmtRelative, recordUrl, userName, propsOf, Icon, type CrmRecord, type ObjectType, type Filter } from '../lib';
 import { Avatar } from '../components';
 
 interface Column { value: string; label: string; total: number; records: CrmRecord[] }
 
 // Tablero de empresas o contactos agrupado por una propiedad (por defecto, la etapa del ciclo de vida).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, q, owner, onOwner, search, onSearch }: {
-  type: ObjectType; q: string; owner?: string; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void;
+export default function PropBoard({ type, q, owner, groups, tools, onOwner, search, onSearch, openId, onOpen, reloadKey }: {
+  type: ObjectType; q: string; owner?: string; groups?: Filter[][]; tools?: ReactNode; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void;
+  openId?: number | null; onOpen?: (id: number) => void; reloadKey?: number;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -20,7 +21,7 @@ export default function PropBoard({ type, q, owner, onOwner, search, onSearch }:
     return saved && groupable.some((p) => p.name === saved) ? saved : 'lifecyclestage';
   });
   useEffect(() => { try { localStorage.setItem(key, prop); } catch { /* ignorar */ } }, [key, prop]);
-  const board = useAsync(() => http<{ columns: Column[] }>('GET', `/board-prop/${type}${qs({ prop, q, owner })}`), [type, prop, q, owner]);
+  const board = useAsync(() => http<{ columns: Column[] }>('GET', `/board-prop/${type}${qs({ prop, q, owner, groups: groups?.length ? groups : undefined })}`), [type, prop, q, owner, JSON.stringify(groups ?? []), reloadKey]);
   const [cols, setCols] = useState<Column[]>([]);
   useEffect(() => { if (board.data) setCols(board.data.columns); }, [board.data]);
   const [dragId, setDragId] = useState<number | null>(null);
@@ -64,6 +65,7 @@ export default function PropBoard({ type, q, owner, onOwner, search, onSearch }:
             {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         )}
+        {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
       </div>
       <div className="board">
@@ -79,9 +81,9 @@ export default function PropBoard({ type, q, owner, onOwner, search, onSearch }:
               {c.records.map((r) => {
                 const stale = r.props.notes_last_updated && Date.now() - Date.parse(r.props.notes_last_updated) > 30 * 86_400_000;
                 return (
-                  <div key={r.id} className={`card${dragId === r.id ? ' dragging' : ''}`} draggable
+                  <div key={r.id} className={`card${dragId === r.id ? ' dragging' : ''}${openId === r.id ? ' on' : ''}`} draggable onClick={() => onOpen?.(r.id)}
                     onDragStart={(e) => { setDragId(r.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>
-                    <Link className="t" to={recordUrl(type, r.id)} draggable={false}>{r.name}</Link>
+                    <Link className="t" to={recordUrl(type, r.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{r.name}</Link>
                     {subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
                     <div className="meta">
                       <Avatar name={userName(meta, r.props.owner_id)} />

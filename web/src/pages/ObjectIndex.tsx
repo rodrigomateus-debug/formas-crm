@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline,
   type CrmRecord, type Filter, type ObjectType,
 } from '../lib';
-import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, describeFilter, filterableProps, opsFor } from '../components';
+import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
+import { RecordPreview } from './RecordPage';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -67,6 +69,9 @@ function IndexFor({ type }: { type: ObjectType }) {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Vista previa al costado (clic en una tarjeta del tablero o «Vista previa» en la tabla), como en HubSpot.
+  const [preview, setPreview] = useState<number | null>(null);
+  const [boardKey, setBoardKey] = useState(0);
   const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'bulk' | 'save' | 'import'>('');
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
 
@@ -105,8 +110,22 @@ function IndexFor({ type }: { type: ObjectType }) {
   };
   const label = (col: string) => col === '__company' ? 'Empresa' : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
-  const rows = list.data?.results ?? [];
+  // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
+  const [patched, setPatched] = useState<Record<number, CrmRecord>>({});
+  useEffect(() => { setPatched({}); }, [list.data]);
+  const rows = (list.data?.results ?? []).map((r) => (patched[r.id] ? { ...r, ...patched[r.id] } : r));
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
+
+  const filterButton = <button className="btn" onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
+  const filterChips = (
+    <>
+      {cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
+        <span key={`${gi}-${fi}`} className="chip on">{gi > 0 && fi === 0 ? 'o ' : ''}{describeFilter(meta, type, f)}
+          <button aria-label="Quitar" onClick={() => setCfg((c) => ({ ...c, groups: c.groups.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg).filter((gg) => gg.length) }))}>×</button>
+        </span>
+      )))}
+    </>
+  );
 
   const exportCsv = () => {
     const url = `/api/export/${type}${qs({ q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, columns: cfg.columns.filter((c) => !c.startsWith('__')).join(',') })}`;
@@ -136,19 +155,20 @@ function IndexFor({ type }: { type: ObjectType }) {
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
-      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} q={dq} owner={cfg.owner} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} />
-        : mode === 'board' ? <PropBoard type={type} q={dq} owner={cfg.owner} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} /> : <>
-        <div className="tabs">
-          <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
-          <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
-          {views.data?.map((v) => (
-            <button key={v.id} className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}>
-              {v.name}{v.shared ? <span className="x">(equipo)</span> : null}
-            </button>
-          ))}
-          <button className="tab" onClick={() => setShow('save')}>+ Guardar vista</button>
-        </div>
+      {/* Las vistas (Todos, Míos, guardadas) y los filtros valen para la tabla y para el tablero, como en HubSpot. */}
+      <div className="tabs">
+        <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
+        <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
+        {views.data?.map((v) => (
+          <button key={v.id} className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}>
+            {v.name}{v.shared ? <span className="x">(equipo)</span> : null}
+          </button>
+        ))}
+        <button className="tab" onClick={() => setShow('save')}>+ Guardar vista</button>
+      </div>
 
+      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview} onOpen={setPreview} reloadKey={boardKey} q={dq} owner={cfg.owner} groups={cfg.groups} tools={<>{filterButton}{filterChips}</>} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} />
+        : mode === 'board' ? <PropBoard type={type} openId={preview} onOpen={setPreview} reloadKey={boardKey} q={dq} owner={cfg.owner} groups={cfg.groups} tools={<>{filterButton}{filterChips}</>} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} /> : <>
         <div className="toolbar">
           <div className="search" style={{ width: 280 }}><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           <select className="input" style={{ width: 215 }} value={cfg.owner ?? ''} onChange={(e) => setCfg((c) => ({ ...c, owner: e.target.value || undefined }))} aria-label="Propietario">
@@ -157,13 +177,9 @@ function IndexFor({ type }: { type: ObjectType }) {
             <option value="none">Sin asignar</option>
             {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
-          <button className="btn" onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>
+          {filterButton}
           <button className="btn" onClick={() => setShow('columns')}><Icon name="columns" size={16} />Columnas</button>
-          {cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
-            <span key={`${gi}-${fi}`} className="chip on">{gi > 0 && fi === 0 ? 'o ' : ''}{describeFilter(meta, type, f)}
-              <button aria-label="Quitar" onClick={() => setCfg((c) => ({ ...c, groups: c.groups.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg).filter((gg) => gg.length) }))}>×</button>
-            </span>
-          )))}
+          {filterChips}
         </div>
 
         {selected.size > 0 && (
@@ -202,12 +218,11 @@ function IndexFor({ type }: { type: ObjectType }) {
                   }} /></td>
                   <td className="name">{type === 'company' || type === 'contact'
                     ? <Link to={recordUrl(type, r.id)} className="with-logo"><Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} />{r.name}</Link>
-                    : <Link to={recordUrl(type, r.id)}>{r.name}</Link>}</td>
-                  {columns.map((col) => (
-                    <td key={col}>{col === '__company'
-                      ? (r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>)
-                      : formatValue(meta, type, col, r.props[col], r.props) || <span className="muted">—</span>}</td>
-                  ))}
+                    : <Link to={recordUrl(type, r.id)}>{r.name}</Link>}
+                    <button className="btn sm peek" onClick={() => setPreview(r.id)}>Vista previa</button></td>
+                  {columns.map((col) => (col === '__company'
+                    ? <td key={col}>{r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>}</td>
+                    : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
               ))}
             </tbody>
@@ -226,6 +241,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
       </>}
 
+      {preview && <RecordPreview type={type} id={preview} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
       {show === 'create' && <CreateRecord type={type} onClose={() => setShow('')} onCreated={() => list.reload()} defaults={type === 'deal' ? { pipeline: boardPipeline } : undefined} />}
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} onClose={() => setShow('')} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
@@ -233,6 +249,57 @@ function IndexFor({ type }: { type: ObjectType }) {
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
       {show === 'save' && <SaveView type={type} config={{ ...cfg, q, ...(type === 'deal' ? { pipeline: pipelineSel } : {}) }} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
     </div>
+  );
+}
+
+// Edición en la celda, como en HubSpot: el lápiz (o doble clic) abre el campo. Los desplegables guardan al elegir;
+// el resto con Guardar o Enter. Quien es de solo lectura no ve el lápiz (y el servidor tampoco lo deja).
+function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: CrmRecord; col: string; onSaved: (r: CrmRecord) => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const prop = propOf(meta, type, col);
+  const [at, setAt] = useState<DOMRect | null>(null);
+  const [val, setVal] = useState<unknown>(null);
+  const [saving, setSaving] = useState(false);
+  const shown = formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
+  if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td>{shown}</td>;
+  const instant = ['owner', 'enum', 'bool'].includes(prop.type) || col === 'dealstage';
+  const open = (e: React.MouseEvent) => { setVal(record.props[col]); setAt((e.currentTarget.closest('td') as HTMLElement).getBoundingClientRect()); };
+  const save = async (v: unknown) => {
+    if (String(v ?? '') === String(record.props[col] ?? '')) { setAt(null); return; }
+    setSaving(true);
+    try {
+      onSaved(await http<CrmRecord>('PATCH', `/records/${type}/${record.id}`, { props: { [col]: v } }));
+      setAt(null);
+      toast(`${prop.label}: guardado`);
+    } catch (e) {
+      const missing = (e as Error & { data?: { missing?: string[] } }).data?.missing;
+      toast(missing?.length ? `Para esa etapa falta: ${missing.map((m) => propOf(meta, type, m)?.label ?? m).join(', ')}. Completalo desde la ficha o el tablero.` : (e as Error).message, true);
+    } finally { setSaving(false); }
+  };
+  return (
+    <td className="editable" onDoubleClick={open}>
+      <span className="cell-v">{shown}</span>
+      <button className="cell-edit" title={`Editar ${prop.label}`} aria-label={`Editar ${prop.label} de ${record.name}`} onClick={open}><Icon name="edit" size={14} /></button>
+      {at && createPortal(
+        <>
+          <div className="cell-veil" onClick={() => setAt(null)} />
+          <form className="popover cell-pop" style={{ top: Math.min(at.bottom + 4, window.innerHeight - 220), left: Math.min(at.left, window.innerWidth - 300), minWidth: Math.max(at.width, 280) }}
+            onKeyDown={(e) => { if (e.key === 'Escape') setAt(null); }}
+            onSubmit={(e) => { e.preventDefault(); save(val); }}>
+            <div className="small" style={{ fontWeight: 600 }}>{prop.label}</div>
+            {col === 'dealstage'
+              ? <StageSelect value={String(val ?? '')} pipelineId={record.props.pipeline} onChange={(v) => save(v)} />
+              : <PropertyInput prop={prop} type={type} value={val} autoFocus onChange={(v) => (instant ? save(v) : setVal(v))} />}
+            {!instant && (
+              <div className="row" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn sm" onClick={() => setAt(null)}>Cancelar</button>
+                <button type="submit" className="btn sm primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
+              </div>
+            )}
+          </form>
+        </>, document.body)}
+    </td>
   );
 }
 

@@ -270,3 +270,21 @@ test('logo de empresa y foto de contacto: un dominio o mail inválido no sale a 
     assert.equal((await api('GET', `/avatar/${encodeURIComponent(e)}`)).status, 404, e);
   }
 });
+
+test('crear con una asociación que no existe no deja el registro creado', async () => {
+  const name = `Suelto ${Date.now().toString(36)}`;
+  const r = await api('POST', '/records/deal', { props: { dealname: name, pipeline: '740095901' }, associations: [123] });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /No existe el registro 123/);
+  assert.equal((await api('GET', `/records/deal?q=${encodeURIComponent(name)}`)).data.total, 0);
+});
+
+test('el tablero respeta los filtros de la vista (grupos)', async () => {
+  const tag = `Vista ${Date.now().toString(36)}`;
+  await api('POST', '/records/deal', { props: { dealname: `${tag} grande`, pipeline: '740095901', amount: 900000 } });
+  await api('POST', '/records/deal', { props: { dealname: `${tag} chico`, pipeline: '740095901', amount: 1000 } });
+  const groups = JSON.stringify([[{ prop: 'amount', op: 'gte', value: 500000 }]]);
+  const b = (await api('GET', `/board?pipeline=740095901&q=${encodeURIComponent(tag)}&groups=${encodeURIComponent(groups)}`)).data;
+  const names = b.columns.flatMap((c) => c.deals.map((d) => d.name));
+  assert.deepEqual(names, [`${tag} grande`]);
+});

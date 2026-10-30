@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
-import { Avatar, CreateRecord, Modal, PropertyInput, RecordPicker, toLocalInput } from '../components';
+import { Avatar, CreateRecord, Drawer, Modal, PropertyInput, RecordPicker, toLocalInput } from '../components';
 import { StageProps } from './Board';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
@@ -488,5 +488,90 @@ function AssocCard({ type, record, toType, items, onChange }: { type: ObjectType
       {!items.length && mode === '' && <div className="panel-body muted small">Nada asociado todavía.</div>}
       {items.length > 5 && <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)}>{all ? 'Ver menos' : `Ver los ${items.length}`}</button></div>}
     </div>
+  );
+}
+
+// Vista previa en un panel lateral, como al hacer clic en una tarjeta del tablero de HubSpot: lo principal del
+// registro, las acciones rápidas, «Acerca de» editable, con quién está asociado y la última actividad.
+export function RecordPreview({ type, id, onClose, onChange }: { type: ObjectType; id: number; onClose: () => void; onChange?: () => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const data = useAsync(() => http<Loaded>('GET', `/records/${type}/${id}`), [type, id]);
+  const tl = useAsync(() => http<{ activities: Activity[] }>('GET', `/records/${type}/${id}/timeline${qs({ limit: 5 })}`), [type, id]);
+  const [compose, setCompose] = useState<Activity['type'] | null>(null);
+  const [hist, setHist] = useState<string | null>(null);
+  const record = data.data?.record;
+  const associations = data.data?.associations;
+  const changed = () => { data.reload(); tl.reload(); onChange?.(); };
+  const save = async (name: string, value: unknown) => {
+    try {
+      await http('PATCH', `/records/${type}/${id}`, { props: { [name]: value } });
+      toast('Guardado');
+      changed();
+    } catch (e) { toast((e as Error).message, true); throw e; }
+  };
+  const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
+  const keyProps = ((pipeKeys?.length ? pipeKeys : KEY_PROPS[type]).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
+    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)));
+  const summary: Array<[string, ReactNode]> = !record ? [] : type === 'deal' ? [
+    ['Valor', fmtMoney(record.props.amount, record.props.deal_currency_code) || '—'],
+    ['Fecha de cierre', record.props.closedate ? fmtDate(record.props.closedate) : '—'],
+    ['Pipeline', meta.pipelines.find((p) => p.id === record.props.pipeline)?.label ?? '—'],
+    ['Etapa', stageOf(meta, record.props.dealstage)?.stage.label ?? '—'],
+  ] : type === 'company' ? [
+    ['Dominio', record.props.domain || '—'],
+    ['Propietario', userName(meta, record.props.owner_id) || '—'],
+  ] : type === 'contact' ? [
+    ['Email', record.props.email || '—'],
+    ['Celular', record.props.mobilephone || record.props.phone || '—'],
+    ['Propietario', userName(meta, record.props.owner_id) || '—'],
+  ] : [['PDV', record.props.pdv_finnegans || '—']];
+  return (
+    <Drawer clear title={`Vista previa · ${OBJECTS[type].single}`} onClose={onClose}
+      footer={<Link className="btn primary" style={{ flex: 1, justifyContent: 'center' }} to={recordUrl(type, id)}>Ver registro</Link>}>
+      {!record ? <div className="muted">{data.error ?? 'Cargando…'}</div> : <>
+        <div className="row" style={{ alignItems: 'flex-start' }}>
+          <Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
+          <div className="grow" style={{ minWidth: 0 }}>
+            <h2 style={{ margin: 0, fontSize: 18, lineHeight: 1.3 }}><Link to={recordUrl(type, id)}>{record.name}</Link></h2>
+            <div className="preview-sum">
+              {summary.map(([k, v]) => <div key={k}><span className="muted">{k}:</span> {v}</div>)}
+            </div>
+          </div>
+        </div>
+        <div className="rec-actions">
+          {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
+            <button key={t} className="act-btn" onClick={() => setCompose(t)}><span className="ic"><Icon name={t} /></span>{ACTIVITY_LABEL[t]}</button>
+          ))}
+        </div>
+        {compose && <Composer type={compose} record={record} associations={associations!} onClose={() => setCompose(null)} onSaved={() => { setCompose(null); changed(); }} />}
+        <div className="panel">
+          <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
+          <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
+        </div>
+        {RELATED[type].filter((t) => associations?.[t]?.length).map((t) => (
+          <div key={t} className="panel">
+            <div className="panel-head"><h3>{OBJECTS[t].plural} <span className="muted small">({associations![t].length})</span></h3></div>
+            {associations![t].slice(0, 5).map((r) => (
+              <div key={r.id} className="assoc-item">
+                <Avatar name={r.name} type={t} domain={r.props.domain} email={r.props.email} />
+                <div className="grow" style={{ minWidth: 0 }}>
+                  <Link to={recordUrl(t, r.id)} className="ellipsis" style={{ display: 'block' }}>{r.name}</Link>
+                  <div className="small muted ellipsis">{t === 'deal' ? stageOf(meta, r.props.dealstage)?.stage.label : t === 'contact' ? r.props.email || r.props.mobilephone : t === 'company' ? r.props.domain : r.props.pdv_finnegans}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+        <div className="panel">
+          <div className="panel-head"><h3>Última actividad</h3></div>
+          <div className="panel-body stack">
+            {tl.data?.activities.length ? tl.data.activities.map((a) => <ActivityItem key={a.id} a={a} currentId={id} onChange={changed} />)
+              : <div className="muted small">{tl.loading ? 'Cargando…' : 'Todavía no hay actividad registrada.'}</div>}
+          </div>
+        </div>
+      </>}
+      {hist && <HistoryModal type={type} id={id} prop={hist} onClose={() => setHist(null)} />}
+    </Drawer>
   );
 }

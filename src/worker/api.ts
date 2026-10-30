@@ -133,6 +133,12 @@ api.post('/records/:type', async (c) => {
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown>; associations?: number[] }>();
   const assoc = [...new Set((body.associations ?? []).map(Number))];
+  // Se revisa antes de crear: si un registro para asociar no existe, no queda creado uno suelto.
+  for (const id of assoc) {
+    if (!Number.isInteger(id) || !(await c.env.DB.prepare('SELECT 1 FROM records WHERE id = ? AND archived = 0').bind(id).first())) {
+      throw new HttpError(400, `No existe el registro ${body.associations?.[assoc.indexOf(id)] ?? id} para asociar.`);
+    }
+  }
   if (type === 'deal') {
     // Como HubSpot: el negocio se asocia también a la empresa principal de sus contactos.
     const companies = await companiesFor(c.env.DB, assoc);
@@ -316,9 +322,11 @@ api.get('/board', async (c) => {
   await assertDealVisible(meta, ctx.user, pipeline.id);
   const extra = parseSearch(q);
   const filters: Filter[] = [{ prop: 'pipeline', op: 'eq', value: pipeline.id }, ...(extra.filters ?? [])];
-  if (q.owner) filters.push({ prop: 'owner_id', op: 'eq', value: q.owner });
+  if (q.owner) filters.push({ prop: 'owner_id', op: q.owner === 'none' ? 'unknown' : 'eq', value: q.owner });
   if (q.created_days) filters.push({ prop: 'createdate', op: 'within_last', value: Number(q.created_days) });
-  const { whereSql, binds } = await buildWhere(meta, ctx, 'deal', { q: extra.q, filters });
+  // Los filtros de la vista (grupos O) se suman a los del tablero en cada grupo.
+  const groups = extra.groups?.length ? extra.groups.map((g) => [...g, ...filters]) : undefined;
+  const { whereSql, binds } = await buildWhere(meta, ctx, 'deal', { q: extra.q, filters, groups });
   const perStage = Math.min(Number(q.per_stage) || 50, 200);
   // Las etapas cerradas muestran lo reciente (90 días por defecto) para que el tablero no se llene de historia.
   const since = q.closed_all ? '0000' : new Date(Date.now() - (Number(q.closed_days) || 90) * 86_400_000).toISOString();
@@ -355,7 +363,8 @@ api.get('/board-prop/:type', async (c) => {
   const extra = parseSearch(q);
   const filters: Filter[] = [...(extra.filters ?? [])];
   if (q.owner) filters.push({ prop: 'owner_id', op: q.owner === 'none' ? 'unknown' : 'eq', value: q.owner });
-  const { whereSql, binds } = await buildWhere(meta, ctx, type, { q: extra.q, filters });
+  const groups = extra.groups?.length ? extra.groups.map((g) => [...g, ...filters]) : undefined;
+  const { whereSql, binds } = await buildWhere(meta, ctx, type, { q: extra.q, filters, groups });
   const { expr } = await sqlFor(meta, type, propName);
   const perColumn = Math.min(Number(q.per_column) || 40, 200);
   const [cards, totals] = await db.batch([

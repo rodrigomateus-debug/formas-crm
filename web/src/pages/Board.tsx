@@ -1,20 +1,23 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, type CrmRecord, type Stage, type Pipeline, missingFor, formatValue, propOf, type Property } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, type CrmRecord, type Stage, type Pipeline, missingFor, formatValue, propOf, type Property, type Filter } from '../lib';
 import { Avatar, Modal, PropertyInput } from '../components';
 
 interface Column { stage: Stage; total: number; amount: number; deals: CrmRecord[] }
 
 
 // Tablero de negocios por pipeline: arrastrar una tarjeta a otra columna cambia la etapa.
-export default function Board({ pipelineId, q, owner, onOwner, search, onSearch }: { pipelineId: string; q: string; owner?: string; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void }) {
+export default function Board({ pipelineId, q, owner, groups, tools, onOwner, search, onSearch, openId, onOpen, reloadKey }: {
+  pipelineId: string; q: string; owner?: string; groups?: Filter[][]; tools?: ReactNode; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void;
+  openId?: number | null; onOpen?: (id: number) => void; reloadKey?: number;
+}) {
   const { meta } = useMeta();
   const toast = useToast();
   const [closedDays, setClosedDays] = useState(90);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [ask, setAsk] = useState<{ deal: CrmRecord; stage: Stage; missing: string[] } | null>(null);
-  const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', `/board${qs({ pipeline: pipelineId, owner, q, closed_days: closedDays })}`), [pipelineId, owner, q, closedDays]);
+  const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', `/board${qs({ pipeline: pipelineId, owner, q, closed_days: closedDays, groups: groups?.length ? groups : undefined })}`), [pipelineId, owner, q, closedDays, JSON.stringify(groups ?? []), reloadKey]);
   const [cols, setCols] = useState<Column[]>([]);
   const pipe = meta.pipelines.find((p) => p.id === pipelineId);
   const cardProps = pipe?.config.card_props?.length ? pipe.config.card_props : ['amount', 'closedate'];
@@ -47,6 +50,7 @@ export default function Board({ pipelineId, q, owner, onOwner, search, onSearch 
         <select className="input" style={{ width: 215 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
           <option value="">Todos los propietarios</option>
           <option value="me">Mis negocios</option>
+          <option value="none">Sin asignar</option>
           {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
         <select className="input" style={{ width: 230 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados">
@@ -54,6 +58,7 @@ export default function Board({ pipelineId, q, owner, onOwner, search, onSearch 
           <option value={90}>Cerrados: últimos 90 días</option>
           <option value={365}>Cerrados: último año</option>
         </select>
+        {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
       </div>
       <div className="board">
@@ -71,9 +76,9 @@ export default function Board({ pipelineId, q, owner, onOwner, search, onSearch 
               {c.deals.map((d) => {
                 const stale = d.props.notes_last_updated && Date.now() - Date.parse(d.props.notes_last_updated) > 14 * 86_400_000;
                 return (
-                  <div key={d.id} className={`card${dragId === d.id ? ' dragging' : ''}`} draggable
+                  <div key={d.id} className={`card${dragId === d.id ? ' dragging' : ''}${openId === d.id ? ' on' : ''}`} draggable onClick={() => onOpen?.(d.id)}
                     onDragStart={(e) => { setDragId(d.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>
-                    <Link className="t" to={recordUrl('deal', d.id)} draggable={false}>{d.name}</Link>
+                    <Link className="t" to={recordUrl('deal', d.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{d.name}</Link>
                     {cardProps.map((k) => {
                       const v = k === 'amount' ? fmtMoney(d.props.amount, d.props.deal_currency_code) || 'Sin monto' : formatValue(meta, 'deal', k, d.props[k], d.props);
                       if (!v) return null;

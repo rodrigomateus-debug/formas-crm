@@ -18,14 +18,14 @@ export function Avatar({ name, type, size, domain, email }: { name: string; type
   return <span className={cls}>{initials(name)}</span>;
 }
 
-export function Drawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Drawer({ title, onClose, children, footer, clear }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; clear?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
   return (
-    <div className="overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`overlay${clear ? ' clear' : ''}`} onMouseDown={(e) => !clear && e.target === e.currentTarget && onClose()}>
       <div className="drawer" role="dialog" aria-label={title}>
         <div className="drawer-head"><h2>{title}</h2><button className="btn ghost icon" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={18} /></button></div>
         <div className="drawer-body">{children}</div>

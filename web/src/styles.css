@@ -136,6 +136,13 @@ table.grid tr:hover td { background: #f8f9fc; }
 table.grid tr.sel td { background: #f0f0fb; }
 table.grid td.check, table.grid th.check { width: 36px; padding: 0 0 0 12px; }
 table.grid td.name a { font-weight: 500; }
+/* Edición en la celda: el lápiz aparece al pasar el mouse por la fila. */
+table.grid td.editable { position: relative; padding-right: 30px; }
+table.grid td.editable .cell-edit { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--surface); color: var(--navy); display: none; place-items: center; cursor: pointer; padding: 0; }
+table.grid tr:hover td.editable .cell-edit, table.grid td.editable .cell-edit:focus-visible { display: grid; }
+table.grid td.editable .cell-edit:hover { border-color: var(--navy); }
+.cell-veil { position: fixed; inset: 0; z-index: 39; }
+.cell-pop { position: fixed; display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 .sort-ind { font-size: 10px; margin-left: 4px; color: var(--navy); }
 .pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end; padding: 10px 2px; color: var(--ink-2); font-size: 13px; }
 .bulkbar { display: flex; align-items: center; gap: 8px; background: #e8e8f8; border: 1px solid #c9c9ee; border-radius: var(--r-panel); padding: 6px 10px; margin-bottom: 10px; }
@@ -171,6 +178,7 @@ table.grid td.name a { font-weight: 500; }
 .rec-head .title { display: flex; gap: 12px; align-items: center; }
 .rec-head .title h1 { font-size: 18px; line-height: 1.25; word-break: break-word; }
 .rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.preview-sum { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; }
 .act-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-2); background: none; border: 0; cursor: pointer; width: 46px; padding: 0; }
 .act-btn span.ic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-strong); display: grid; place-items: center; background: var(--surface); }
 .act-btn:hover span.ic { border-color: var(--navy); color: var(--navy); background: var(--sunken); }
@@ -226,6 +234,13 @@ table.grid td.name a { font-weight: 500; }
 /* ---------- Modal y panel lateral ---------- */
 .overlay { position: fixed; inset: 0; background: #12143a55; z-index: 50; display: flex; justify-content: flex-end; }
 .overlay.center { justify-content: center; align-items: flex-start; padding-top: 8vh; }
+/* Vista previa: panel al costado sin oscurecer, se puede seguir usando la lista o el tablero. */
+.overlay.clear { background: transparent; pointer-events: none; z-index: 45; }
+.overlay.clear .drawer { pointer-events: auto; width: min(440px, 100%); border-left: 1px solid var(--line); }
+.card.on { border-color: var(--navy); box-shadow: 0 0 0 2px #00008522; background: #f5f6ff; }
+table.grid td.name { position: relative; padding-right: 96px; }
+table.grid td.name .peek { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: none; }
+table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { display: inline-flex; }
 .drawer { width: min(520px, 100%); height: 100%; background: var(--surface); display: flex; flex-direction: column; box-shadow: -8px 0 30px #12143a33; }
 .modal { width: min(640px, calc(100% - 32px)); max-height: 84vh; background: var(--surface); border-radius: var(--r-panel); display: flex; flex-direction: column; box-shadow: var(--shadow-pop); }
 .drawer-head, .modal-head { display: flex; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); gap: 8px; }

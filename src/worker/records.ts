@@ -68,6 +68,28 @@ export function normPhone(v: unknown): string | null {
   return d.slice(-10);
 }
 
+// Perfil de LinkedIn → "linkedin.com/in/<slug>" (sin protocolo, www, parámetros ni barra final; acentos decodificados).
+export function normLinkedin(v: unknown): string | null {
+  let s = String(v ?? '').trim();
+  if (!s) return null;
+  try { s = decodeURIComponent(s); } catch { /* queda como vino */ }
+  const m = s.toLowerCase().match(/linkedin\.com\/(in|company)\/([^/?#\s]+)/);
+  return m ? `linkedin.com/${m[1]}/${m[2]}` : null;
+}
+
+// "Maria Valentina Di Lorenzo" + "Di Lorenzo" → nombre "Maria Valentina", apellido "Di Lorenzo".
+export function splitName(first?: unknown, last?: unknown, full?: unknown) {
+  let f = String(first ?? '').trim();
+  let l = String(last ?? '').trim();
+  if (!f && !l && full) {
+    const parts = String(full).trim().split(/\s+/);
+    f = parts.slice(0, Math.max(1, parts.length - 1)).join(' ');
+    l = parts.length > 1 ? parts[parts.length - 1] : '';
+  }
+  if (l && f.toLowerCase().endsWith(` ${l.toLowerCase()}`)) f = f.slice(0, -(l.length + 1)).trim();
+  return { firstname: f || undefined, lastname: l || undefined };
+}
+
 export function displayName(type: ObjectType, p: Props): string {
   const s = (k: string) => (p[k] == null ? '' : String(p[k]).trim());
   switch (type) {

@@ -193,7 +193,8 @@ function Integrations() {
       </div></div>
       <div className="panel"><div className="panel-head"><h2>Webhooks y API</h2></div><div className="panel-body stack small">
         <div><b>Darwin (WhatsApp, hoy por Pipedream):</b> <code>POST {origin}/hooks/darwin</code> con <code>Authorization: Bearer &lt;token&gt;</code>. Arma el negocio «Nombre - Producto - Cantidad - Darwin» en Formas Shop (Inbound) / Lead calificado.</div>
-        <div><b>Zapier y cualquier integración:</b> <code>POST {origin}/hooks/bundle</code> con {'{ contact, company, deal, note, task, owner_email }'}. Busca antes de crear y asocia todo.</div>
+        <div><b>Prospección por LinkedIn (reemplaza a Zapier):</b> <code>POST {origin}/hooks/linkedin</code> con el lead (URL del perfil, nombre, empresa, cargo). No duplica el mismo perfil.</div>
+        <div><b>Cualquier otra integración:</b> <code>POST {origin}/hooks/bundle</code> con {'{ contact, company, deal, note, task, owner_email }'}. Busca antes de crear y asocia todo.</div>
         <div><b>Formularios web:</b> <code>POST {origin}/hooks/form/&lt;formulario&gt;</code> (público, se configura en la base).</div>
         <div><b>Tableros (compatibilidad HubSpot):</b> cambiar <code>https://api.hubapi.com</code> por <code>{origin}/hubspot</code> y usar un token de tipo «API».</div>
       </div></div>
@@ -201,7 +202,7 @@ function Integrations() {
         <div className="row wrap">
           <input className="input" style={{ width: 260 }} placeholder="Nombre (ej. Cowork Rodrigo)" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
           <select className="input" style={{ width: 200 }} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
-            <option value="mcp">Claude (MCP)</option><option value="darwin">Darwin</option><option value="zapier">Zapier</option><option value="api">API / tableros</option>
+            <option value="mcp">Claude (MCP)</option><option value="darwin">Darwin</option><option value="linkedin">LinkedIn</option><option value="api">API / tableros</option>
           </select>
           <button className="btn primary" disabled={!f.name.trim()} onClick={async () => {
             try { const r = await http<{ token: string }>('POST', '/tokens', f); setFresh({ token: r.token, source: f.source }); setF({ name: '', source: f.source }); tokens.reload(); } catch (e) { toast((e as Error).message, true); }

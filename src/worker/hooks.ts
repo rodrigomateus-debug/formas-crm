@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
-import { applyBundle, type Bundle } from './upsert';
+import { applyBundle, findCompany, type Bundle } from './upsert';
+import { normLinkedin, splitName } from './records';
 
-// Lo que entra solo: Darwin (vía Pipedream), Zapier, formularios web y cualquier integración con token.
+// Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
 
 type App = { Bindings: Env };
@@ -89,11 +90,30 @@ hooks.post('/darwin', (c) => run(c.env, c.req.raw, 'darwin', async (b) => {
   };
 }));
 
-// Zapier (pedidos y altas de formas.shop): mismo formato que /bundle, más atajos planos.
-hooks.post('/zapier', (c) => run(c.env, c.req.raw, 'zapier', async (b) => {
-  if (b.contact || b.deal || b.company) return { ...b, owner_id: await ownerFrom(c.env, b) } as Bundle;
-  const { owner_id: _o, owner_email: _e, note, ...flat } = b;
-  return { owner_id: await ownerFrom(c.env, b), contact: flat, note };
+// Prospección por LinkedIn (reemplaza al Zap): HeyReach u otra herramienta manda el lead directo.
+// Deduplica por la URL del perfil (el Zap creaba el mismo perfil varias veces) y separa bien nombre y apellido.
+// Acepta el lead plano o dentro de `lead`, en camelCase o snake_case.
+hooks.post('/linkedin', (c) => run(c.env, c.req.raw, 'linkedin', async (raw, ctx) => {
+  const b: Record<string, any> = { ...raw, ...(raw.lead ?? {}), ...(raw.contact ?? {}) };
+  const pick = (...keys: string[]) => keys.map((k) => b[k]).find((v) => v != null && v !== '');
+  const url = pick('linkedin_url', 'linkedinUrl', 'profile_url', 'profileUrl', 'linkedin', 'url');
+  if (!normLinkedin(url) && !pick('email', 'emailAddress', 'email_address')) throw new HttpError(400, 'Falta la URL del perfil de LinkedIn (o un email).');
+  const name = splitName(pick('firstname', 'first_name', 'firstName'), pick('lastname', 'last_name', 'lastName'), pick('full_name', 'fullName', 'name'));
+  const company = pick('company', 'company_name', 'companyName');
+  const message = pick('message', 'message_text', 'messageText', 'reply', 'lastMessage');
+  const owner = (await ownerFrom(c.env, b)) ?? ctx.user.id;
+  // Si la empresa ya está en el CRM, se asocia; si no, queda como texto (no se crea una empresa por cada lead).
+  const existing = company ? await findCompany(c.env.DB, { name: company }) : null;
+  return {
+    owner_id: owner,
+    contact: {
+      ...name, linkedin_url: url, email: pick('email', 'emailAddress', 'email_address'), jobtitle: pick('jobtitle', 'position', 'headline', 'title'),
+      company, city: pick('city', 'location'), origen_del_contacto: 'Linkedin', prospect_source: 'LinkedIn', campaign_name: pick('campaign_name', 'campaignName', 'campaign') ?? 'Outbound',
+      tipo_de_origen: 'Prospección', estado_de_lead___outbound: 'Nuevo', outbound_lead_status: 'New', lifecyclestage: 'lead',
+    },
+    company: existing ? { name: existing.name } : undefined,
+    activity: message ? { type: 'note', subject: 'Mensaje de LinkedIn', body: String(message) } : undefined,
+  };
 }));
 
 // Formularios web (catálogo, ruleta de eventos, contacto). Público: sin token, con trampa anti-bots

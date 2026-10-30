@@ -16,7 +16,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | `src/worker/` | API (Hono) sobre D1 (SQLite). Modelo genérico como HubSpot: `records` con propiedades en JSON, `associations`, `activities`, `changes` (historial). |
 | `web/` | Interfaz en React. Se compila a `dist/` y el Worker la sirve. Usa el Design System de Formas (Poppins, navy, verde). |
 | `/mcp` | Servidor MCP para Claude y Cowork (`src/worker/mcp.ts`). |
-| `/hooks/*` | Entradas de Darwin, Zapier, formularios web (`src/worker/hooks.ts`). |
+| `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
 | `/api/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`). |
 | Cron cada 10 min | Registro automático de mails de Gmail (`src/worker/gmail.ts`). |
@@ -100,7 +100,8 @@ con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, ta
 |---|---|---|
 | Claude / Cowork (prospección diaria, cargas) | Conector de HubSpot | Conector personalizado en claude.ai con la URL `https://<crm>/mcp/<token>` (token tipo «Claude (MCP)»). |
 | Darwin (WhatsApp) | Pipedream → HubSpot | Pipedream → `POST https://<crm>/hooks/darwin` con `Authorization: Bearer <token>` y `{ name, phone, email, producto, cantidad, conversation_id, utm_source, utm_campaign, owner_email, summary }`. |
-| Zapier (formas.shop) | Zap → HubSpot | Zap → `POST https://<crm>/hooks/zapier` (o `/hooks/bundle` con `{ contact, company, deal, note, task }`). |
+| Prospección por LinkedIn | Zapier → HubSpot (~300 leads por mes, con perfiles duplicados) | La herramienta de LinkedIn → `POST https://<crm>/hooks/linkedin` directo, con token tipo «LinkedIn». Deduplica por URL del perfil. Zapier se da de baja. |
+| Cualquier otra | — | `POST https://<crm>/hooks/bundle` con `{ contact, company, deal, note, task, owner_email }`. |
 | Formularios web | Formularios de HubSpot | `POST https://<crm>/hooks/form/<nombre>`; cada formulario se configura con la clave `form:<nombre>` en `settings`. |
 | Mails | Conexión de bandeja de HubSpot | Gmail: ver abajo. |
 | Tableros | API de HubSpot | Ver [docs/CAMBIO-TABLEROS.md](docs/CAMBIO-TABLEROS.md). |

@@ -1,6 +1,6 @@
 import type { Ctx } from './env';
 import { HttpError } from './env';
-import { createRecord, updateRecord, normDomain, normPhone, emailDomain, rowToRecord, type Props, type RecordRow } from './records';
+import { createRecord, updateRecord, normDomain, normPhone, normLinkedin, emailDomain, rowToRecord, type Props, type RecordRow } from './records';
 import { associate, primaryCompanyId } from './associations';
 import { createActivity, type ActivityInput } from './activities';
 
@@ -18,6 +18,12 @@ export async function findContact(db: D1Database, p: Props) {
       const r = await db.prepare("SELECT * FROM records WHERE object_type = 'contact' AND archived = 0 AND phone = ? ORDER BY updated_at DESC LIMIT 1").bind(ph).first<RecordRow>();
       if (r) return r;
     }
+  }
+  const li = normLinkedin(p.linkedin_url);
+  if (li) {
+    const r = await db.prepare("SELECT * FROM records WHERE object_type = 'contact' AND archived = 0 AND json_extract(props, '$.linkedin_url') LIKE ? ORDER BY created_at LIMIT 1")
+      .bind(`%${li}%`).first<RecordRow>();
+    if (r) return r;
   }
   return null;
 }

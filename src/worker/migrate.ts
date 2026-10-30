@@ -3,7 +3,7 @@ import type { Ctx, Env, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { requireRole } from './auth';
 import { Meta, type Property } from './meta';
-import { displayName, emailDomain, normDomain, normPhone, type Props } from './records';
+import { displayName, emailDomain, normDomain, normPhone, splitName, type Props } from './records';
 
 // Carga masiva desde HubSpot (la usa scripts/migrate-hubspot.mjs). Conserva los ids de HubSpot en registros,
 // actividades y (si el usuario no existía) propietarios, así los links y los tableros siguen valiendo.
@@ -101,6 +101,7 @@ migrate.post('/', async (c) => {
           const v = convert(def, raw, owners);
           if (v != null) props[name] = v;
         }
+        if (type === 'contact' && props.firstname && props.lastname) Object.assign(props, splitName(props.firstname, props.lastname));
         const id = Number(r.hs_id);
         const created = r.created_at ?? now();
         const updated = r.updated_at ?? created;

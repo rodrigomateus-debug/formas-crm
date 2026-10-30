@@ -7,7 +7,7 @@ la lista de control: cada fila es algo que hoy se usa, con el dato que lo respal
 
 | Objeto | Registros | Uso actual |
 |---|---|---|
-| Contactos | 10.450 | Alta por integraciones (Zapier 948 y Pipedream/Darwin 185 desde julio), extensión de Gmail (601), a mano (335), formularios (174), conector de Claude (51). |
+| Contactos | 10.450 | Alta por integraciones (Zapier 948 —leads de LinkedIn— y Pipedream/Darwin 185 desde julio), extensión de Gmail (601), a mano (335), formularios (174), conector de Claude (51). |
 | Empresas | 2.011 | Conector de Claude (532 desde julio), asociación automática por dominio (212), a mano. |
 | Negocios | 9.686 | ~500 por mes. 8 pipelines. De los últimos 200: Pipedream/Darwin 109, Claude 34, a mano 55. |
 | Mails registrados | 40.641 | 3.000 a 5.000 por mes, casi todos por la conexión de bandeja (`EMAIL`). |
@@ -75,7 +75,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 |---|---|---|
 | Claude / Cowork leen y actualizan el CRM | 🔧 | MCP en `/mcp/<token>`; falta cargar el conector en claude.ai y repuntar la prospección diaria |
 | Darwin crea contacto + negocio desde WhatsApp | 🔧 | `/hooks/darwin` (mismo formato de negocio que hoy); falta cambiar el paso de Pipedream |
-| Zapier (formas.shop) | 🔧 | `/hooks/zapier`; falta cambiar el Zap |
+| Leads de prospección por LinkedIn (hoy por Zapier: 4.712 en total, ~300 por mes) | 🔧 | `/hooks/linkedin` directo, sin Zapier; deduplica por perfil y separa bien nombre y apellido. Falta apuntar la herramienta de LinkedIn y dar de baja el Zap |
 | Formularios web (ruleta de eventos, descarga de catálogos) | 🔧 | `/hooks/form/<nombre>`; falta cambiar el formulario de la web |
 | Registro automático de mails de la bandeja | 🔧 | Gmail cada 10 min; falta la delegación de la cuenta de servicio |
 | Tableros que leen HubSpot (formas-tablero, formas-shop-tablero) | 🔧 | API compatible en la misma ruta; ver `docs/CAMBIO-TABLEROS.md` |

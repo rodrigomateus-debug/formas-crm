@@ -26,7 +26,7 @@ export interface User {
 
 export interface Ctx {
   user: User;
-  // De dónde viene el cambio: 'crm' (pantalla), 'mcp' (Claude), 'api', 'darwin', 'zapier', 'form', 'import', 'hubspot'.
+  // De dónde viene el cambio: 'crm' (pantalla), 'mcp' (Claude), 'api', 'darwin', 'linkedin', 'gmail', 'form', 'import', 'hubspot'.
   source: string;
   sourceDetail?: string;
 }

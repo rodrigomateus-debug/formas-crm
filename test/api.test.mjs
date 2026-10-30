@@ -148,6 +148,22 @@ test('webhook de Darwin crea contacto + negocio y no duplica', async () => {
   assert.match(deal.data.record.props.link_a_darwin, /getdarwin/);
 });
 
+test('LinkedIn directo (sin Zapier): deduplica por perfil y arregla el nombre', async () => {
+  const h = { authorization: `Bearer ${state.token}` };
+  const url = `https://www.linkedin.com/in/maría-valentina-${RUN}/`;
+  const first = await call('POST', '/hooks/linkedin', { firstName: `Maria Valentina Di Lorenzo${RUN}`, lastName: `Di Lorenzo${RUN}`, profileUrl: url, companyName: `Acme ${RUN}`, position: 'CEO' }, h);
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.equal(first.data.contact.created, true);
+  assert.equal(first.data.company.id, state.company, 'la empresa existente se asocia');
+  const again = await call('POST', '/hooks/linkedin', { lead: { first_name: 'Maria', last_name: `Di Lorenzo${RUN}`, profile_url: encodeURI(url.replace('https://www.', 'http://')), message_text: 'Hola! Me interesa' } }, h);
+  assert.equal(again.data.contact.id, first.data.contact.id, 'mismo perfil con otra forma de URL');
+  const rec = await api('GET', `/records/contact/${first.data.contact.id}`);
+  assert.equal(rec.data.record.props.firstname, 'Maria Valentina');
+  assert.equal(rec.data.record.props.campaign_name, 'Outbound');
+  const tl = await api('GET', `/records/contact/${first.data.contact.id}/timeline?types=note`);
+  assert.equal(tl.data.activities[0].body, 'Hola! Me interesa');
+});
+
 test('API compatible con HubSpot (lo que usan los tableros)', async () => {
   const h = { authorization: `Bearer ${state.token}` };
   const search = await call('POST', '/hubspot/crm/v3/objects/deals/search', {

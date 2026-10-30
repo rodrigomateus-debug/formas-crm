@@ -25,7 +25,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
 // `owner` es de las vistas viejas (un solo propietario); ahora van `owners` (varios) y `dates` (filtros rápidos de fecha).
 interface ViewConfig {
   q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[];
-  pipeline?: string; mode?: 'table' | 'board'; boardProp?: string;
+  pipeline?: string; mode?: 'table' | 'board'; boardProp?: string; cardProps?: string[];
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
 interface SavedView { id: number; name: string; shared: number; team_id: number | null; user_id: number; config: ViewConfig }
@@ -135,12 +135,12 @@ function IndexFor({ type }: { type: ObjectType }) {
   // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
   const current: ViewConfig = {
     q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], mode,
-    ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
+    ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), c.mode ?? base.mode,
-    c.boardProp ?? base.boardProp ?? '', type === 'deal' ? c.pipeline ?? base.pipeline : '',
+    c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '',
   ]);
   const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(activeSaved.config), current);
   const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
@@ -245,7 +245,8 @@ function IndexFor({ type }: { type: ObjectType }) {
       )}
       {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
-        : mode === 'board' ? <PropBoard type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
+        : mode === 'board' ? <PropBoard type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
+          cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
           tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>
         <div className="toolbar">

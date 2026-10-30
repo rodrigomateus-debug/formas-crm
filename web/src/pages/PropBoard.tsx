@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, Icon, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
-import { Avatar } from '../components';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
+import { Avatar, MultiPick } from '../components';
 import { SortPick, useCollapsed, useFillHeight } from './Board';
 
 interface Column { value: string; label: string; total: number; records: CrmRecord[] }
@@ -19,8 +19,8 @@ export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecy
 
 // Tablero de empresas, contactos o pedidos agrupado por una propiedad (etapa del ciclo de vida, etapa del pedido…).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate }: {
-  type: ObjectType; prop?: string; onProp: (p: string) => void; q: string; groups?: Filter[][];
+export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate }: {
+  type: ObjectType; prop?: string; onProp: (p: string) => void; cardProps?: string[]; onCardProps: (p: string[]) => void; q: string; groups?: Filter[][];
   sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
   openId?: number | null; onOpen?: (id: number, compose?: Activity['type']) => void; reloadKey?: number;
@@ -88,6 +88,11 @@ export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort,
         </label>
         <div className="search" style={{ width: 220 }}><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
         <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />
+        <div className="row small" title="Datos que muestra cada tarjeta (se guarda en la vista)">
+          <span style={{ fontWeight: 600 }}>Tarjeta</span>
+          <MultiPick small options={propsOf(meta, type).filter((p) => !['name', 'hs_order_name'].includes(p.name)).map((p) => ({ value: p.name, label: p.label }))}
+            values={cardProps ?? []} onChange={(v) => onCardProps(v.slice(0, 5))} />
+        </div>
         {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
         <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero</span>
@@ -119,8 +124,10 @@ export default function PropBoard({ type, prop: propIn, onProp, q, groups, sort,
                     onDragStart={(e) => { setDragId(r.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>
                     {onSelect && <input type="checkbox" className="card-check" checked={!!selected?.has(r.id)} aria-label={`Seleccionar ${r.name}`} onClick={(e) => e.stopPropagation()} onChange={() => onSelect(r.id)} />}
                     <Link className="t" to={recordUrl(type, r.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{r.name}</Link>
-                    {subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
-                    {type === 'order' && (r.props.tipo_de_pedido || r.props.fecha_de_entrega) && (
+                    {cardProps?.length
+                      ? cardProps.map((k) => { const v = formatValue(meta, type, k, r.props[k], r.props); return v ? <div key={k} className="meta" title={propOf(meta, type, k)?.label}><span className="ellipsis">{v}</span></div> : null; })
+                      : subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
+                    {type === 'order' && !cardProps?.length && (r.props.tipo_de_pedido || r.props.fecha_de_entrega) && (
                       <div className="meta">
                         {r.props.tipo_de_pedido && <span className={`tag ${r.props.tipo_de_pedido === 'EVENTO' ? 'warn' : 'info'}`}>{r.props.tipo_de_pedido}</span>}
                         {r.props.fecha_de_entrega && <span className={`ellipsis${deliveryLate(r.props.fecha_de_entrega) ? ' stale' : ''}`} title="Fecha de entrega">{deliveryText(r.props.fecha_de_entrega)}</span>}

@@ -68,6 +68,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | 8 pipelines con las mismas etapas, ids y probabilidades | ✅ | `src/worker/seed.ts` |
 | Tablero con arrastrar y soltar (en cualquier parte de la columna), total y monto ponderado por columna, contador de negocios | ✅ | Negocios → «Tablero» |
 | Tablero: «Cargar más» por columna, achicar columnas, «Ordenar por» cualquier propiedad (se guarda en la vista) | ✅ | Todos los tableros |
+| Datos de las tarjetas: por pipeline en negocios; elegidos en el tablero (y guardados en la vista) en empresas, contactos y pedidos | ✅ | Configuración → Pipelines / «Tarjeta» en el tablero |
 | Tarjeta de negocio: contacto y empresa, próxima actividad (vencida en rojo, «Sin próximas actividades»), propietario, días en la etapa, atajos de nota y tarea, link a Darwin | ✅ | Negocios → «Tablero» |
 | Filtros rápidos: varios propietarios (con «Sin asignar»), fecha de creación, última actividad y fecha de cierre con rangos listos, «Borrar todo»; se guardan en la vista | ✅ | Tabla y tablero de las cuatro listas |
 | Selector de pipeline grande arriba de Negocios (tabla y tablero), «Todos los pipelines» en la tabla, recordado y en el link | ✅ | Negocios |

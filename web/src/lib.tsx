@@ -116,6 +116,14 @@ export function fmtRelative(v: unknown) {
   if (abs < 86400 * 30) return rtf.format(-Math.round(diff / 86400), 'day');
   return fmtDate(v);
 }
+// Solo links http(s): un valor cargado por una integración no puede ejecutar código al hacer clic.
+export function safeUrl(v: unknown) {
+  const s = String(v ?? '').trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^[\w.-]+\.[a-z]{2,}(\/|$)/i.test(s)) return `https://${s}`;
+  return undefined;
+}
+
 export function initials(name: string) {
   return name.split(/\s+/).filter((w) => /^[\p{L}\p{N}]/u.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '·';
 }

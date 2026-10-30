@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf,
-  fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, type Activity, type CrmRecord, type ObjectType, type Property,
+  fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, type Activity, type CrmRecord, type ObjectType, type Property,
 } from '../lib';
 import { Avatar, CreateRecord, Modal, PropertyInput, RecordPicker, toLocalInput } from '../components';
 import { LostReason } from './Board';
@@ -105,7 +105,7 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
         <div className="row wrap">
           {type === 'contact' && record.props.mobilephone && <a className="btn sm" href={`https://wa.me/${String(record.props.mobilephone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
-          {type === 'deal' && record.props.link_a_darwin && <a className="btn sm" href={record.props.link_a_darwin} target="_blank" rel="noreferrer">Chat en Darwin</a>}
+          {type === 'deal' && safeUrl(record.props.link_a_darwin) && <a className="btn sm" href={safeUrl(record.props.link_a_darwin)} target="_blank" rel="noreferrer">Chat en Darwin</a>}
           <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>
           {['admin', 'manager'].includes(meta.me.role) && !record.archived && (
             <button className="btn sm ghost danger" onClick={async () => {
@@ -154,7 +154,7 @@ function PropRow({ type, prop, record, onSave, onHistory }: { type: ObjectType; 
     <div className={`prop${ro ? ' ro' : ''}`} onClick={() => !ro && (setVal(record.props[prop.name]), setEdit(true))} title={prop.description || undefined}>
       <div className="k">{prop.label}<button className="hist btn ghost sm" style={{ height: 18, padding: '0 4px' }} onClick={(e) => { e.stopPropagation(); onHistory(prop.name); }}>Historial</button></div>
       <div className={`v${shown ? '' : ' blank'}`}>
-        {shown && prop.type === 'url' ? <a href={String(record.props[prop.name])} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{shown}</a>
+        {shown && prop.type === 'url' && safeUrl(record.props[prop.name]) ? <a href={safeUrl(record.props[prop.name])} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{shown}</a>
           : shown && prop.type === 'email' ? <a href={`mailto:${shown}`} onClick={(e) => e.stopPropagation()}>{shown}</a>
             : shown || '—'}
       </div>

@@ -4,15 +4,16 @@ import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor,
 } from './lib';
 
-// Las empresas con dominio muestran su favicon (como el logo de HubSpot); si no tiene, las iniciales.
-const sinLogo = new Set<string>();
-export function Avatar({ name, type, size, domain }: { name: string; type?: ObjectType; size?: 'lg'; domain?: string | null }) {
-  const d = type === 'company' && domain ? String(domain).trim().toLowerCase() : '';
-  const [failed, setFailed] = useState(() => !d || sinLogo.has(d));
-  useEffect(() => { setFailed(!d || sinLogo.has(d)); }, [d]);
+// Las empresas muestran el favicon de su dominio y los contactos la foto de su mail, como en HubSpot; si no hay, las iniciales.
+const sinImagen = new Set<string>();
+export function Avatar({ name, type, size, domain, email }: { name: string; type?: ObjectType; size?: 'lg'; domain?: string | null; email?: string | null }) {
+  const src = type === 'company' && domain ? `/api/favicon/${encodeURIComponent(String(domain).trim().toLowerCase())}`
+    : type === 'contact' && email ? `/api/avatar/${encodeURIComponent(String(email).trim().toLowerCase())}` : '';
+  const [failed, setFailed] = useState(() => !src || sinImagen.has(src));
+  useEffect(() => { setFailed(!src || sinImagen.has(src)); }, [src]);
   const cls = `avatar ${type && type !== 'contact' ? type : ''} ${size ?? ''}`;
   if (!failed) {
-    return <span className={`${cls} logo`}><img src={`/api/favicon/${encodeURIComponent(d)}`} alt="" loading="lazy" onError={() => { sinLogo.add(d); setFailed(true); }} /></span>;
+    return <span className={`${cls} ${type === 'company' ? 'logo' : 'photo'}`}><img src={src} alt="" loading="lazy" onError={() => { sinImagen.add(src); setFailed(true); }} /></span>;
   }
   return <span className={cls}>{initials(name)}</span>;
 }
@@ -149,7 +150,7 @@ export function RecordPicker({ type, onPick, exclude = [], placeholder }: { type
       <div className="stack" style={{ gap: 2 }}>
         {res.filter((r) => !exclude.includes(r.id)).map((r) => (
           <button key={r.id} className="btn ghost" style={{ justifyContent: 'flex-start', height: 'auto', padding: '6px 8px' }} onClick={() => onPick(r)}>
-            <Avatar name={r.name} type={type} domain={r.props.domain} />
+            <Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} />
             <span className="stack" style={{ gap: 0, alignItems: 'flex-start', minWidth: 0 }}>
               <span className="ellipsis">{r.name}</span>
               <span className="small muted ellipsis">{r.props.email || r.props.domain || r.props.amount || ''}</span>

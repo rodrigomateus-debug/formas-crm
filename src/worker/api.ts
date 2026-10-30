@@ -69,26 +69,39 @@ api.get('/meta', async (c) => {
   });
 });
 
-// ---------- Logo de las empresas ----------
+// ---------- Logo de las empresas y foto de los contactos ----------
 
-// Favicon del dominio (como el logo de HubSpot), traído de Google y guardado en la caché de Cloudflare una semana.
-// Si el dominio no tiene ícono responde 404 y la pantalla muestra las iniciales.
+// Trae una imagen de afuera una sola vez y la guarda en la caché de Cloudflare (una semana; un día si no hay).
+// Si no hay imagen responde 404 y la pantalla muestra las iniciales.
+async function cachedImage(c: { executionCtx: { waitUntil(p: Promise<unknown>): void } }, key: string, url: string) {
+  const cache = (caches as unknown as { default: Cache }).default;
+  const req = new Request(`https://imagenes.formas-crm/${key}`);
+  let res = await cache.match(req);
+  if (!res) {
+    const r = await fetch(url).catch(() => null);
+    const ok = !!r && r.status === 200 && (r.headers.get('content-type') ?? '').startsWith('image/');
+    res = new Response(ok ? await r!.arrayBuffer() : null, {
+      status: ok ? 200 : 404,
+      headers: { 'content-type': ok ? r!.headers.get('content-type')! : 'text/plain', 'cache-control': `public, max-age=${ok ? 604800 : 86400}` },
+    });
+    c.executionCtx.waitUntil(cache.put(req, res.clone()));
+  }
+  return new Response(res.body, { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'image/png', 'cache-control': `private, max-age=${res.status === 200 ? 604800 : 86400}` } });
+}
+
+// Logo de la empresa: el favicon de su dominio (como HubSpot), de Google.
 api.get('/favicon/:domain', async (c) => {
   const domain = c.req.param('domain').toLowerCase();
   if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) || domain.length > 253) return c.body(null, 404);
-  const key = new Request(`https://favicon.formas-crm/${domain}`);
-  const cache = (caches as unknown as { default: Cache }).default;
-  let res = await cache.match(key);
-  if (!res) {
-    const g = await fetch(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`).catch(() => null);
-    const ok = !!g && g.status === 200 && (g.headers.get('content-type') ?? '').startsWith('image/');
-    res = new Response(ok ? await g!.arrayBuffer() : null, {
-      status: ok ? 200 : 404,
-      headers: { 'content-type': ok ? g!.headers.get('content-type')! : 'text/plain', 'cache-control': `public, max-age=${ok ? 604800 : 86400}` },
-    });
-    c.executionCtx.waitUntil(cache.put(key, res.clone()));
-  }
-  return new Response(res.body, { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'image/png', 'cache-control': `private, max-age=${res.status === 200 ? 604800 : 86400}` } });
+  return cachedImage(c, `favicon/${domain}`, `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`);
+});
+
+// Foto del contacto: la de Gravatar asociada a su mail (la misma fuente que usa HubSpot). Sale solo el hash del mail.
+api.get('/avatar/:email', async (c) => {
+  const email = c.req.param('email').trim().toLowerCase();
+  if (!/^[^@\s]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(email) || email.length > 254) return c.body(null, 404);
+  const hash = await sha256(email);
+  return cachedImage(c, `avatar/${hash}`, `https://gravatar.com/avatar/${hash}?d=404&s=96`);
 });
 
 // ---------- Registros ----------

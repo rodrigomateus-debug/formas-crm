@@ -107,8 +107,11 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .avatar.sidebar-me { background: #ffffff22; color: #fff; }
 .avatar.logo { background: var(--surface); border: 1px solid var(--line); overflow: hidden; }
 .avatar.logo img { width: 70%; height: 70%; object-fit: contain; }
+.avatar.photo { overflow: hidden; background: var(--sunken); }
+.avatar.photo img { width: 100%; height: 100%; object-fit: cover; }
 .with-logo { display: inline-flex; align-items: center; gap: 8px; }
-.with-logo .avatar { width: 22px; height: 22px; font-size: 9px; border-radius: 6px; }
+.with-logo .avatar { width: 22px; height: 22px; font-size: 9px; }
+.with-logo .avatar.company { border-radius: 6px; }
 
 /* ---------- Paneles ---------- */
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel); }

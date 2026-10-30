@@ -200,8 +200,8 @@ function IndexFor({ type }: { type: ObjectType }) {
                   <td className="check"><input type="checkbox" aria-label={`Seleccionar ${r.name}`} checked={selected.has(r.id)} onChange={() => {
                     const s = new Set(selected); s.has(r.id) ? s.delete(r.id) : s.add(r.id); setSelected(s);
                   }} /></td>
-                  <td className="name">{type === 'company'
-                    ? <Link to={recordUrl(type, r.id)} className="with-logo"><Avatar name={r.name} type="company" domain={r.props.domain} />{r.name}</Link>
+                  <td className="name">{type === 'company' || type === 'contact'
+                    ? <Link to={recordUrl(type, r.id)} className="with-logo"><Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} />{r.name}</Link>
                     : <Link to={recordUrl(type, r.id)}>{r.name}</Link>}</td>
                   {columns.map((col) => (
                     <td key={col}>{col === '__company'

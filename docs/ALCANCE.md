@@ -51,7 +51,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Crear tareas con vencimiento, tipo, prioridad y responsable | ✅ | Botón «Tarea» |
 | Última actividad, último contacto, próxima actividad | ✅ | Se recalculan solos |
 | Atajos a WhatsApp, Gmail y chat de Darwin | ✅ | Cabecera de la ficha |
-| Logo de la empresa (ícono de su dominio) en la lista, la ficha y las asociaciones | ✅ | Se trae una vez y queda guardado una semana; sin ícono, las iniciales |
+| Logo de la empresa (ícono de su dominio) y foto del contacto (Gravatar de su mail) en la lista, la ficha y las asociaciones | ✅ | Se trae una vez y queda guardado una semana; si no hay, las iniciales |
 | Links viejos de HubSpot (`/contacts/47666798/record/0-3/…`) | ✅ | Redirigen a la ficha |
 
 ### Negocios y pipelines

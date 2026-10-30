@@ -262,8 +262,11 @@ test('formulario web público con configuración', async () => {
   assert.equal(missing.status, 404);
 });
 
-test('logo de empresa: un dominio inválido no sale a buscar nada', async () => {
+test('logo de empresa y foto de contacto: un dominio o mail inválido no sale a buscar nada', async () => {
   for (const d of ['no_es_dominio', 'localhost', `${'a'.repeat(250)}.com`]) {
     assert.equal((await api('GET', `/favicon/${d}`)).status, 404, d);
+  }
+  for (const e of ['no-es-mail', 'sin@dominio', `${'a'.repeat(250)}@formas.ar`]) {
+    assert.equal((await api('GET', `/avatar/${encodeURIComponent(e)}`)).status, 404, e);
   }
 });

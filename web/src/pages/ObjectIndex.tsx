@@ -1,0 +1,313 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import {
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon,
+  type CrmRecord, type Filter, type ObjectType,
+} from '../lib';
+import { CreateRecord, Drawer, FilterRow, Modal, PropertyInput, describeFilter, filterableProps, opsFor } from '../components';
+import Board from './Board';
+import ImportModal from './Import';
+
+const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
+  contact: ['email', 'phone', '__company', 'owner_id', 'lifecyclestage', 'notes_last_updated', 'createdate'],
+  company: ['domain', 'owner_id', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'notes_last_updated', 'createdate'],
+  deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', 'notes_last_updated', 'createdate'],
+  order: ['pdv_finnegans', 'hs_total_price', 'owner_id', 'hs_order_status', 'createdate'],
+};
+
+interface ViewConfig { q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string }
+interface SavedView { id: number; name: string; shared: number; user_id: number; config: ViewConfig }
+
+const storeKey = (t: ObjectType) => `crm.view.${t}`;
+function loadLocal(t: ObjectType): ViewConfig {
+  try {
+    const v = JSON.parse(localStorage.getItem(storeKey(t)) ?? '');
+    if (v && Array.isArray(v.columns)) return v;
+  } catch { /* sin vista guardada */ }
+  return { groups: [], columns: DEFAULT_COLUMNS[t], sort: 'hs_lastmodifieddate', dir: 'desc' };
+}
+
+export default function ObjectIndex() {
+  const { objectPath = 'contacts' } = useParams();
+  const type = typeFromPath(objectPath);
+  return <IndexFor key={type} type={type} />;
+}
+
+function IndexFor({ type }: { type: ObjectType }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const mode = type === 'deal' && params.get('view') === 'board' ? 'board' : 'table';
+  const [cfg, setCfg] = useState<ViewConfig>(() => loadLocal(type));
+  const [activeView, setActiveView] = useState<string>(params.get('v') ?? 'all');
+  const [q, setQ] = useState(cfg.q ?? '');
+  const dq = useDebounced(q, 300);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'bulk' | 'save' | 'import'>('');
+  const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
+
+  useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owner, cfg.sort, cfg.dir]);
+
+  const groups = useMemo(() => {
+    const base = cfg.groups.length ? cfg.groups : [[]];
+    const own: Filter[] = cfg.owner ? [{ prop: 'owner_id', op: cfg.owner === 'none' ? 'unknown' : 'eq', value: cfg.owner }] : [];
+    return base.map((g) => [...g, ...own]).filter((g) => g.length);
+  }, [cfg.groups, cfg.owner]);
+
+  const list = useAsync(() => http<{ results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number }>('GET', `/records/${type}${qs({
+    q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, limit: pageSize, offset: page * pageSize,
+    with: cfg.columns.includes('__company') ? 'company' : undefined,
+  })}`), [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), mode]);
+
+  const applyView = (key: string) => {
+    setActiveView(key);
+    setParams((p) => { key === 'all' ? p.delete('v') : p.set('v', key); return p; }, { replace: true });
+    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined }));
+    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: 'me' }));
+    else {
+      const v = views.data?.find((x) => String(x.id) === key);
+      if (v) { setCfg({ ...loadLocal(type), ...v.config }); setQ(v.config.q ?? ''); }
+    }
+  };
+  useEffect(() => { if (views.data && activeView !== 'all' && activeView !== 'mine') applyView(activeView); /* eslint-disable-next-line */ }, [views.data]);
+
+  const sortBy = (col: string) => {
+    const prop = col === '__name' ? (type === 'contact' || type === 'company' ? 'name' : OBJECTS[type].nameProp) : col;
+    setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
+  };
+  const label = (col: string) => col === '__company' ? 'Empresa' : propOf(meta, type, col)?.label ?? col;
+  const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
+  const rows = list.data?.results ?? [];
+  const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
+
+  const exportCsv = () => {
+    const url = `/api/export/${type}${qs({ q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, columns: cfg.columns.filter((c) => !c.startsWith('__')).join(',') })}`;
+    window.location.href = url;
+  };
+
+  return (
+    <div className="content">
+      <div className="page-head">
+        <h1>{OBJECTS[type].plural} <span className="muted small num">{list.data ? list.data.total.toLocaleString('es-AR') : ''}</span></h1>
+        {type === 'deal' && (
+          <div className="row" role="group" aria-label="Vista">
+            <button className={`btn sm ${mode === 'table' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.delete('view'); return p; })}><Icon name="table" size={14} />Tabla</button>
+            <button className={`btn sm ${mode === 'board' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.set('view', 'board'); return p; })}><Icon name="board" size={14} />Tablero</button>
+          </div>
+        )}
+        <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>
+        <button className="btn" onClick={exportCsv}><Icon name="download" size={16} />Exportar</button>
+        <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
+      </div>
+
+      {mode === 'board' ? <Board q={dq} owner={cfg.owner} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} /> : <>
+        <div className="tabs">
+          <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
+          <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
+          {views.data?.map((v) => (
+            <button key={v.id} className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}>
+              {v.name}{v.shared ? <span className="x">(equipo)</span> : null}
+            </button>
+          ))}
+          <button className="tab" onClick={() => setShow('save')}>+ Guardar vista</button>
+        </div>
+
+        <div className="toolbar">
+          <div className="search" style={{ width: 280 }}><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+          <select className="input" style={{ width: 190 }} value={cfg.owner ?? ''} onChange={(e) => setCfg((c) => ({ ...c, owner: e.target.value || undefined }))} aria-label="Propietario">
+            <option value="">Todos los propietarios</option>
+            <option value="me">Yo</option>
+            <option value="none">Sin asignar</option>
+            {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+          <button className="btn" onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>
+          <button className="btn" onClick={() => setShow('columns')}><Icon name="columns" size={16} />Columnas</button>
+          {cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
+            <span key={`${gi}-${fi}`} className="chip on">{gi > 0 && fi === 0 ? 'o ' : ''}{describeFilter(meta, type, f)}
+              <button aria-label="Quitar" onClick={() => setCfg((c) => ({ ...c, groups: c.groups.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg).filter((gg) => gg.length) }))}>×</button>
+            </span>
+          )))}
+        </div>
+
+        {selected.size > 0 && (
+          <div className="bulkbar">
+            <b>{selected.size} seleccionados</b>
+            <button className="btn sm" onClick={() => setShow('bulk')}>Editar</button>
+            {['admin', 'manager'].includes(meta.me.role) && (
+              <button className="btn sm danger" onClick={async () => {
+                if (!confirm(`¿Borrar ${selected.size} registros? Se pueden restaurar desde la ficha.`)) return;
+                await http('POST', `/records/${type}/batch`, { ids: [...selected], archive: true });
+                toast('Registros borrados'); setSelected(new Set()); list.reload();
+              }}><Icon name="trash" size={14} />Borrar</button>
+            )}
+            <button className="btn sm ghost" onClick={() => setSelected(new Set())}>Deseleccionar</button>
+          </div>
+        )}
+
+        <div className="table-wrap">
+          <table className="grid">
+            <thead>
+              <tr>
+                <th className="check nosort"><input type="checkbox" aria-label="Seleccionar todo" checked={allSel} onChange={() => setSelected(allSel ? new Set() : new Set(rows.map((r) => r.id)))} /></th>
+                <th onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}</th>
+                {cfg.columns.map((col) => (
+                  <th key={col} className={col.startsWith('__') ? 'nosort' : ''} onClick={() => !col.startsWith('__') && sortBy(col)}>
+                    {label(col)}{cfg.sort === col && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className={selected.has(r.id) ? 'sel' : ''}>
+                  <td className="check"><input type="checkbox" aria-label={`Seleccionar ${r.name}`} checked={selected.has(r.id)} onChange={() => {
+                    const s = new Set(selected); s.has(r.id) ? s.delete(r.id) : s.add(r.id); setSelected(s);
+                  }} /></td>
+                  <td className="name"><Link to={recordUrl(type, r.id)}>{r.name}</Link></td>
+                  {cfg.columns.map((col) => (
+                    <td key={col}>{col === '__company'
+                      ? (r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>)
+                      : formatValue(meta, type, col, r.props[col], r.props) || <span className="muted">—</span>}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!list.loading && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
+          {list.error && <div className="empty">{list.error}</div>}
+        </div>
+        <div className="pager">
+          <span>Por página</span>
+          <select className="input" style={{ width: 80, height: 30 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
+            {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
+          </select>
+          <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>
+          <button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button>
+          <button className="btn sm" disabled={!list.data || (page + 1) * pageSize >= list.data.total} onClick={() => setPage(page + 1)}>Siguiente</button>
+        </div>
+      </>}
+
+      {show === 'create' && <CreateRecord type={type} onClose={() => setShow('')} onCreated={() => list.reload()} />}
+      {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} onClose={() => setShow('')} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); }} />}
+      {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
+      {show === 'bulk' && <BulkEdit type={type} ids={[...selected]} onClose={() => setShow('')} onDone={() => { setShow(''); setSelected(new Set()); list.reload(); }} />}
+      {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
+      {show === 'save' && <SaveView type={type} config={{ ...cfg, q }} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
+    </div>
+  );
+}
+
+function FiltersDrawer({ type, groups, onClose, onApply }: { type: ObjectType; groups: Filter[][]; onClose: () => void; onApply: (g: Filter[][]) => void }) {
+  const { meta } = useMeta();
+  const [draft, setDraft] = useState<Filter[][]>(groups.length ? groups : [[]]);
+  const first = filterableProps(meta, type)[0];
+  const blank = (): Filter => ({ prop: first.name, op: opsFor(first)[0][0] });
+  return (
+    <Drawer title="Filtros avanzados" onClose={onClose} footer={<>
+      <button className="btn" onClick={() => onApply([])}>Limpiar</button>
+      <button className="btn primary" onClick={() => onApply(draft.map((g) => g.filter((f) => f.prop)).filter((g) => g.length))}>Aplicar</button>
+    </>}>
+      <p className="muted small" style={{ margin: 0 }}>Dentro de un grupo se cumplen todos los filtros (Y). Entre grupos alcanza con uno (O).</p>
+      {draft.map((g, gi) => (
+        <div key={gi} className="panel">
+          <div className="panel-head"><h3>Grupo {gi + 1}</h3>
+            {draft.length > 1 && <button className="btn sm ghost" onClick={() => setDraft(draft.filter((_, i) => i !== gi))}>Quitar grupo</button>}</div>
+          <div className="panel-body stack">
+            {g.map((f, fi) => (
+              <FilterRow key={fi} type={type} f={f}
+                onChange={(nf) => setDraft(draft.map((gg, i) => i === gi ? gg.map((x, j) => j === fi ? nf : x) : gg))}
+                onRemove={() => setDraft(draft.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg))} />
+            ))}
+            <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setDraft(draft.map((gg, i) => i === gi ? [...gg, blank()] : gg))}>+ Agregar filtro</button>
+          </div>
+        </div>
+      ))}
+      <button className="btn" onClick={() => setDraft([...draft, [blank()]])}>+ Agregar grupo (O)</button>
+    </Drawer>
+  );
+}
+
+function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; columns: string[]; onClose: () => void; onApply: (c: string[]) => void }) {
+  const { meta } = useMeta();
+  const [sel, setSel] = useState<string[]>(columns);
+  const [f, setF] = useState('');
+  const options = [...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []), ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name))];
+  const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };
+  return (
+    <Modal title="Editar columnas" onClose={onClose} footer={<>
+      <button className="btn" onClick={() => setSel(DEFAULT_COLUMNS[type])}>Restablecer</button>
+      <button className="btn primary" onClick={() => onApply(sel)}>Aplicar</button>
+    </>}>
+      <div className="grid-2">
+        <div className="stack">
+          <input className="input" placeholder="Buscar propiedad…" value={f} onChange={(e) => setF(e.target.value)} />
+          <div className="stack" style={{ maxHeight: 360, overflow: 'auto', gap: 0 }}>
+            {options.filter((p) => p.label.toLowerCase().includes(f.toLowerCase())).map((p) => (
+              <label key={p.name} className="row small" style={{ padding: '3px 0' }}>
+                <input type="checkbox" checked={sel.includes(p.name)} onChange={(e) => setSel(e.target.checked ? [...sel, p.name] : sel.filter((x) => x !== p.name))} />{p.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="stack">
+          <b className="small">Columnas elegidas ({sel.length})</b>
+          {sel.map((c, i) => (
+            <div key={c} className="row small">
+              <span className="grow ellipsis">{options.find((o) => o.name === c)?.label ?? c}</span>
+              <button className="btn sm ghost" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Subir">↑</button>
+              <button className="btn sm ghost" disabled={i === sel.length - 1} onClick={() => move(i, 1)} aria-label="Bajar">↓</button>
+              <button className="btn sm ghost" onClick={() => setSel(sel.filter((x) => x !== c))} aria-label="Quitar">×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function BulkEdit({ type, ids, onClose, onDone }: { type: ObjectType; ids: number[]; onClose: () => void; onDone: () => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const editable = propsOf(meta, type).filter((p) => !p.read_only && !['name', 'dealname', 'email', 'hs_order_name'].includes(p.name));
+  const [prop, setProp] = useState(editable.find((p) => p.name === 'owner_id')?.name ?? editable[0].name);
+  const [value, setValue] = useState<any>(null);
+  const p = editable.find((x) => x.name === prop)!;
+  return (
+    <Modal title={`Editar ${ids.length} registros`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn primary" onClick={async () => {
+        try { await http('POST', `/records/${type}/batch`, { ids, props: { [prop]: value } }); toast('Listo'); onDone(); }
+        catch (e) { toast((e as Error).message, true); }
+      }}>Actualizar</button>
+    </>}>
+      <label className="field">Propiedad
+        <select className="input" value={prop} onChange={(e) => { setProp(e.target.value); setValue(null); }}>
+          {editable.map((x) => <option key={x.name} value={x.name}>{x.label}</option>)}
+        </select>
+      </label>
+      <label className="field">Nuevo valor<PropertyInput prop={p} type={type} value={value} onChange={setValue} /></label>
+    </Modal>
+  );
+}
+
+function SaveView({ type, config, onClose, onSaved }: { type: ObjectType; config: ViewConfig; onClose: () => void; onSaved: (id: number) => void }) {
+  const [name, setName] = useState('');
+  const [shared, setShared] = useState(false);
+  const toast = useToast();
+  return (
+    <Modal title="Guardar vista" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn primary" disabled={!name.trim()} onClick={async () => {
+        try { const v = await http<{ id: number }>('POST', `/views/${type}`, { name, shared, config }); toast('Vista guardada'); onSaved(v.id); }
+        catch (e) { toast((e as Error).message, true); }
+      }}>Guardar</button>
+    </>}>
+      <label className="field">Nombre<input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Corporate sin actividad 30 días" /></label>
+      <label className="row small"><input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />Compartir con todo el equipo</label>
+      <p className="muted small" style={{ margin: 0 }}>Guarda filtros, columnas, orden y búsqueda actuales.</p>
+    </Modal>
+  );
+}

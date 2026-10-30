@@ -60,7 +60,18 @@ api.get('/meta', async (c) => {
 
 api.get('/records/:type', async (c) => {
   const type = assertType(c.req.param('type'));
-  return c.json(await searchRecords(c.env.DB, c.get('ctx'), type, parseSearch(c.req.query())));
+  const res = await searchRecords(c.env.DB, c.get('ctx'), type, parseSearch(c.req.query()));
+  // Columna "Empresa asociada" de las listas: la principal de cada registro, en una sola consulta.
+  if (c.req.query('with') === 'company' && res.results.length) {
+    const { results } = await c.env.DB.prepare(
+      `SELECT a.from_id, r.id, r.name FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
+       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at`,
+    ).bind(JSON.stringify(res.results.map((r) => r.id))).all<{ from_id: number; id: number; name: string }>();
+    const byRec = new Map<number, { id: number; name: string }>();
+    for (const r of results) if (!byRec.has(r.from_id)) byRec.set(r.from_id, { id: r.id, name: r.name });
+    return c.json({ ...res, results: res.results.map((r) => ({ ...r, company: byRec.get(r.id) ?? null })) });
+  }
+  return c.json(res);
 });
 
 api.post('/records/:type/search', async (c) => {

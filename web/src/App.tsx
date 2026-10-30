@@ -1,0 +1,130 @@
+import { useEffect, useRef, useState } from 'react';
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { http, qs, useMeta, useDebounced, recordUrl, OBJECTS, Icon, type CrmRecord, type ObjectType } from './lib';
+import { Avatar, CreateRecord } from './components';
+import Home from './pages/Home';
+import ObjectIndex from './pages/ObjectIndex';
+import RecordPage from './pages/RecordPage';
+import Tasks from './pages/Tasks';
+import Settings from './pages/Settings';
+
+export default function App() {
+  const { meta } = useMeta();
+  const [menu, setMenu] = useState(false);
+  const loc = useLocation();
+  useEffect(() => setMenu(false), [loc.pathname]);
+  const [tasks, setTasks] = useState<number | null>(null);
+  useEffect(() => {
+    http<{ total: number }>('GET', `/tasks${qs({ due: 'today', limit: 1 })}`).then((r) => setTasks(r.total)).catch(() => {});
+  }, [loc.pathname]);
+
+  return (
+    <div className="shell">
+      <nav className={`sidebar${menu ? ' open' : ''}`} aria-label="Menú principal">
+        <div className="brand"><img src="/formas-logo-white.png" alt="Formas" /><span>CRM</span></div>
+        <NavLink to="/" end className="nav-link"><Icon name="home" />Inicio</NavLink>
+        <NavLink to="/tasks" className="nav-link"><Icon name="task" />Tareas{tasks ? <span className="count">{tasks}</span> : null}</NavLink>
+        <div className="nav-group">CRM</div>
+        <NavLink to="/contacts" className="nav-link"><Icon name="contact" />Contactos</NavLink>
+        <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>
+        <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>
+        <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
+        {meta.me.role === 'admin' && <>
+          <div className="nav-group">Cuenta</div>
+          <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>
+        </>}
+        <div className="me"><Avatar name={meta.me.name} /><div><b>{meta.me.name}</b>{meta.me.email}</div></div>
+      </nav>
+      <div className="main">
+        <header className="topbar">
+          <button className="btn ghost icon menu-btn" onClick={() => setMenu(!menu)} aria-label="Abrir menú"><Icon name="menu" size={20} /></button>
+          <GlobalSearch />
+          <span className="grow" />
+          <CreateMenu />
+        </header>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/settings/*" element={<Settings />} />
+          <Route path="/:objectPath" element={<ObjectIndex />} />
+          <Route path="/:objectPath/:id" element={<RecordPage />} />
+        </Routes>
+      </div>
+    </div>
+  );
+}
+
+function GlobalSearch() {
+  const [q, setQ] = useState('');
+  const dq = useDebounced(q, 200);
+  const [open, setOpen] = useState(false);
+  const [res, setRes] = useState<Record<ObjectType, CrmRecord[]> | null>(null);
+  const navigate = useNavigate();
+  const ref = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (dq.trim().length < 2) { setRes(null); return; }
+    http<Record<ObjectType, CrmRecord[]>>('GET', `/search${qs({ q: dq })}`).then(setRes).catch(() => {});
+  }, [dq]);
+  useEffect(() => {
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const k = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); input.current?.focus(); setOpen(true); }
+    };
+    document.addEventListener('mousedown', h);
+    window.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', h); window.removeEventListener('keydown', k); };
+  }, []);
+  const go = (t: ObjectType, id: number) => { setOpen(false); setQ(''); navigate(recordUrl(t, id)); };
+  const all = res ? (Object.entries(res) as Array<[ObjectType, CrmRecord[]]>).filter(([, l]) => l.length) : [];
+  return (
+    <div className="gsearch" ref={ref}>
+      <div className="search"><Icon name="search" />
+        <input ref={input} className="input" placeholder="Buscar contactos, empresas, negocios… (Ctrl+K)" value={q}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && all[0]) go(all[0][0], all[0][1][0].id); }} />
+      </div>
+      {open && res && (
+        <div className="popover">
+          {!all.length && <div className="opt muted">Sin resultados para «{dq}»</div>}
+          {all.map(([t, list]) => (
+            <div key={t}>
+              <div className="grp">{OBJECTS[t].plural}</div>
+              {list.map((r) => (
+                <div key={r.id} className="opt" onClick={() => go(t, r.id)}>
+                  <Avatar name={r.name} type={t} />
+                  <div className="grow"><div className="ellipsis">{r.name}</div>
+                    <div className="small muted ellipsis">{r.props.email || r.props.domain || r.props.company || ''}</div></div>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CreateMenu() {
+  const [open, setOpen] = useState(false);
+  const [type, setType] = useState<ObjectType | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button className="btn primary" onClick={() => setOpen(!open)}><Icon name="plus" size={16} />Crear</button>
+      {open && (
+        <div className="popover" style={{ right: 0, top: 42 }}>
+          {(Object.keys(OBJECTS) as ObjectType[]).map((t) => (
+            <div key={t} className="opt" onClick={() => { setType(t); setOpen(false); }}><Icon name={t} size={16} />{OBJECTS[t].single}</div>
+          ))}
+        </div>
+      )}
+      {type && <CreateRecord type={type} onClose={() => setType(null)} />}
+    </div>
+  );
+}

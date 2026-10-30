@@ -65,13 +65,9 @@ La prueba de Gmail necesita las variables de `node test/gmail-dev-vars.mjs` (y r
 
 3. Cloudflare Access (Zero Trust → Access → Applications): una aplicación «Formas CRM» sobre el dominio del CRM con
    la misma política de mails que el tablero, y estas rutas **sin** Access (Bypass), porque entran con token propio:
-   `/mcp*`, `/hooks/*`, `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. Copiar el «Application Audience (AUD) Tag» y cargarlo:
-
-   ```bash
-   npx wrangler secret put ACCESS_AUD
-   ```
-
-   `ACCESS_TEAM_DOMAIN` ya está en `wrangler.jsonc` (el equipo de Access que usa Formas Studio).
+   `/mcp*`, `/hooks/*`, `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. El «Application Audience (AUD) Tag» va en
+   `ACCESS_AUD` dentro de `wrangler.jsonc` (no es secreto), junto con `ACCESS_TEAM_DOMAIN` (el equipo de Access que usa
+   Formas Studio). Si se recrea la aplicación de Access, cambia el AUD y hay que actualizarlo ahí.
 4. Entrar con el mail de `ADMIN_EMAIL`: queda como administrador. Los demás entran como «Miembro» y se ajustan en
    Configuración → Usuarios (la migración ya los trae con su equipo).
 

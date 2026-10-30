@@ -34,7 +34,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      ACCESS_AUD: ${{ secrets.ACCESS_AUD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +44,3 @@ jobs:
       - name: Base de datos (la crea si no existe)
         run: node scripts/ensure-d1.mjs
       - run: npm run deploy
-      - name: Clave de Cloudflare Access (si está cargada en los secretos del repo)
-        if: env.ACCESS_AUD != ''
-        run: echo "$ACCESS_AUD" | npx wrangler secret put ACCESS_AUD

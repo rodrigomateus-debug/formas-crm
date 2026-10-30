@@ -41,4 +41,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Base de datos (la crea si no existe)
+        run: node scripts/ensure-d1.mjs
       - run: npm run deploy
+      - name: Clave de Cloudflare Access (si está cargada en los secretos del repo)
+        if: env.ACCESS_AUD != ''
+        env:
+          ACCESS_AUD: ${{ secrets.ACCESS_AUD }}
+        run: echo "$ACCESS_AUD" | npx wrangler secret put ACCESS_AUD

@@ -24,5 +24,8 @@
     "ADMIN_EMAIL": "rodrigo.mateus@formaspublicitarias.com"
   },
   "triggers": { "crons": ["*/10 * * * *"] },
+  // La base D1 no tiene región en Sudamérica: con Smart Placement el Worker corre al lado de la base y cada pantalla
+  // hace un solo viaje largo (navegador → Worker) en vez de uno por consulta.
+  "placement": { "mode": "smart" },
   "observability": { "enabled": true }
 }

@@ -6,6 +6,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 
 - Qué cubre y qué falta para reemplazar el 90 % de HubSpot: [docs/ALCANCE.md](docs/ALCANCE.md).
 - Cómo pasar los tableros (formas-tablero, formas-shop-tablero) al CRM: [docs/CAMBIO-TABLEROS.md](docs/CAMBIO-TABLEROS.md).
+- Por qué Cloudflare, cuánto aguanta (prueba con el volumen de 5 años) y cuándo revisarlo: [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 
 ## Cómo está hecho
 

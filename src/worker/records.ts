@@ -485,8 +485,8 @@ async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, bind
   }
 }
 
-export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, params: SearchParams) {
-  const meta = new Meta(db);
+// Arma el WHERE de una búsqueda (texto, asociación y filtros Y/O). Lo usan la búsqueda y el tablero.
+export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params: SearchParams) {
   const binds: unknown[] = [type];
   const where = ['r.object_type = ?'];
   if (!params.includeArchived) where.push('r.archived = 0');
@@ -513,16 +513,23 @@ export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, 
     }
     if (ors.length) where.push(`(${ors.join(' OR ')})`);
   }
+  return { whereSql: where.join(' AND '), binds };
+}
+
+export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, params: SearchParams & { noCount?: boolean }) {
+  const meta = new Meta(db);
+  const { whereSql, binds } = await buildWhere(meta, ctx, type, params);
   const sortProp = params.sort || 'hs_lastmodifieddate';
   const { expr: sortExpr } = await sqlFor(meta, type, sortProp);
   const dir = params.dir === 'asc' ? 'ASC' : 'DESC';
   const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 500);
   const offset = Math.max(Number(params.offset) || 0, 0);
-  const whereSql = where.join(' AND ');
-  const [list, count] = await db.batch([
-    db.prepare(`SELECT r.* FROM records r WHERE ${whereSql} ORDER BY ${sortExpr} IS NULL, ${sortExpr} ${dir}, r.id DESC LIMIT ${limit} OFFSET ${offset}`).bind(...binds),
-    db.prepare(`SELECT COUNT(*) AS n FROM records r WHERE ${whereSql}`).bind(...binds),
-  ]);
+  const listSql = db.prepare(`SELECT r.* FROM records r WHERE ${whereSql} ORDER BY ${sortExpr} IS NULL, ${sortExpr} ${dir}, r.id DESC LIMIT ${limit} OFFSET ${offset}`).bind(...binds);
+  if (params.noCount) {
+    const { results } = await listSql.all<RecordRow>();
+    return { results: results.map(rowToRecord), total: results.length, offset, limit };
+  }
+  const [list, count] = await db.batch([listSql, db.prepare(`SELECT COUNT(*) AS n FROM records r WHERE ${whereSql}`).bind(...binds)]);
   const rows = list.results as unknown as RecordRow[];
   return { results: rows.map(rowToRecord), total: (count.results[0] as { n: number }).n, offset, limit };
 }

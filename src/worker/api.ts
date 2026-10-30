@@ -4,7 +4,7 @@ import { assertType, HttpError, now, OBJECT_TYPES } from './env';
 import { requireRole, canWrite, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
-  archiveRecords, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, updateRecord,
+  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, updateRecord,
   type Filter, type RecordRow, type SearchParams,
 } from './records';
 import { associate, associationsOf, dissociate } from './associations';
@@ -179,7 +179,8 @@ api.get('/search', async (c) => {
   if (q.trim().length < 2) return c.json({ contact: [], company: [], deal: [], order: [] });
   const ctx = c.get('ctx');
   const out: Record<string, unknown> = {};
-  for (const t of OBJECT_TYPES) out[t] = (await searchRecords(c.env.DB, ctx, t, { q, limit: 6 })).results;
+  const found = await Promise.all(OBJECT_TYPES.map((t) => searchRecords(c.env.DB, ctx, t, { q, limit: 6, noCount: true })));
+  OBJECT_TYPES.forEach((t, i) => { out[t] = found[i].results; });
   return c.json(out);
 });
 
@@ -251,23 +252,30 @@ api.get('/board', async (c) => {
   const meta = new Meta(db);
   const pipelines = await meta.pipelines();
   const pipeline = pipelines.find((p) => p.id === q.pipeline) ?? pipelines[0];
-  const filters: Filter[] = [{ prop: 'pipeline', op: 'eq', value: pipeline.id }];
+  const extra = parseSearch(q);
+  const filters: Filter[] = [{ prop: 'pipeline', op: 'eq', value: pipeline.id }, ...(extra.filters ?? [])];
   if (q.owner) filters.push({ prop: 'owner_id', op: 'eq', value: q.owner });
   if (q.created_days) filters.push({ prop: 'createdate', op: 'within_last', value: Number(q.created_days) });
-  const extra = parseSearch(q);
+  const { whereSql, binds } = await buildWhere(meta, ctx, 'deal', { q: extra.q, filters });
   const perStage = Math.min(Number(q.per_stage) || 50, 200);
-  const columns = [];
-  for (const st of pipeline.stages) {
-    const stageFilters = [...filters, ...(extra.filters ?? []), { prop: 'dealstage', op: 'eq', value: st.id } as Filter];
-    // Las etapas cerradas muestran lo reciente (90 días) para que el tablero no se llene de historia.
-    if (st.is_closed && !q.closed_all) stageFilters.push({ prop: 'hs_v2_date_entered_current_stage', op: 'within_last', value: Number(q.closed_days) || 90 });
-    const res = await searchRecords(db, ctx, 'deal', { q: extra.q, filters: stageFilters, sort: q.sort || 'hs_lastmodifieddate', dir: 'desc', limit: perStage });
-    const sum = await db.prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS total FROM records WHERE object_type = 'deal' AND archived = 0 AND pipeline_id = ? AND stage_id = ?
-       ${q.owner ? 'AND owner_id = ?' : ''}`,
-    ).bind(...[pipeline.id, st.id, ...(q.owner ? [Number(q.owner === 'me' ? ctx.user.id : q.owner)] : [])]).first<{ total: number }>();
-    columns.push({ stage: st, total: res.total, amount: sum?.total ?? 0, deals: res.results });
-  }
+  // Las etapas cerradas muestran lo reciente (90 días por defecto) para que el tablero no se llene de historia.
+  const since = q.closed_all ? '0000' : new Date(Date.now() - (Number(q.closed_days) || 90) * 86_400_000).toISOString();
+  const visible = `${whereSql} AND (s.is_closed = 0 OR r.stage_entered_at >= ?)`;
+  // Dos consultas en un solo viaje a la base: las tarjetas (las primeras N por etapa) y los totales por etapa.
+  const [cards, totals] = await db.batch([
+    db.prepare(`SELECT * FROM (SELECT r.*, ROW_NUMBER() OVER (PARTITION BY r.stage_id ORDER BY r.updated_at DESC) AS rn
+      FROM records r JOIN stages s ON s.id = r.stage_id WHERE ${visible}) WHERE rn <= ${perStage}`).bind(...binds, since),
+    db.prepare(`SELECT r.stage_id, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r JOIN stages s ON s.id = r.stage_id
+      WHERE ${visible} GROUP BY r.stage_id`).bind(...binds, since),
+  ]);
+  const rows = cards.results as unknown as RecordRow[];
+  const tot = new Map((totals.results as Array<{ stage_id: string; n: number; amount: number }>).map((t) => [t.stage_id, t]));
+  const columns = pipeline.stages.map((st) => ({
+    stage: st,
+    total: tot.get(st.id)?.n ?? 0,
+    amount: tot.get(st.id)?.amount ?? 0,
+    deals: rows.filter((r) => r.stage_id === st.id).map(rowToRecord),
+  }));
   return c.json({ pipeline, columns });
 });
 

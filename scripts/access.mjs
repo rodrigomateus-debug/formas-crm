@@ -19,17 +19,24 @@ async function api(method, path, body) {
   return data.result;
 }
 
-let account = process.env.CLOUDFLARE_ACCOUNT_ID;
-if (!account) {
-  const cuentas = await api('GET', '/accounts');
-  if (cuentas.length !== 1) throw new Error('El token ve varias cuentas: cargar CLOUDFLARE_ACCOUNT_ID.');
-  account = cuentas[0].id;
+// Busca la aplicación en la cuenta de CLOUDFLARE_ACCOUNT_ID y, si no está, en las demás cuentas que vea el token.
+const cuentas = await api('GET', '/accounts').catch(() => []);
+const ids = [...new Set([process.env.CLOUDFLARE_ACCOUNT_ID, ...cuentas.map((c) => c.id)].filter(Boolean))];
+let account, app;
+for (const id of ids) {
+  const nombre = cuentas.find((c) => c.id === id)?.name ?? id;
+  try {
+    const apps = await api('GET', `/accounts/${id}/access/apps?per_page=100`);
+    console.log(`Cuenta «${nombre}»: ${apps.length} aplicaciones de Access${apps.length ? ` (${apps.map((a) => a.domain).join(', ')})` : ''}.`);
+    app = apps.find((a) => a.domain === HOST) ?? apps.find((a) => (a.self_hosted_domains ?? []).includes(HOST));
+    if (app) { account = id; break; }
+  } catch (e) {
+    console.log(`Cuenta «${nombre}»: no se pudo leer Access (${e.message}).`);
+  }
 }
-
-const apps = await api('GET', `/accounts/${account}/access/apps?per_page=100`);
-const app = apps.find((a) => a.domain === HOST) ?? apps.find((a) => (a.self_hosted_domains ?? []).includes(HOST));
 if (!app) {
-  console.error(`No hay una aplicación de Access para ${HOST}. Aplicaciones: ${apps.map((a) => a.domain).join(', ')}`);
+  console.error(`No encontré la aplicación de Access de ${HOST}. Si arriba dice 0 aplicaciones, al token le falta el permiso`
+    + ' «Access: Apps and Policies → Edit» (Cloudflare → My Profile → API Tokens → editar el token del repo).');
   process.exit(1);
 }
 const ruta = `/accounts/${account}/access/apps/${app.id}/policies`;

@@ -110,9 +110,6 @@ la misma de `GOOGLE_SA_JSON` de formas-tablero). En la consola de administració
 API → Delegación de todo el dominio) hay que darle a su Client ID el permiso
 `https://www.googleapis.com/auth/gmail.readonly`. Después:
 
-```bash
-npx wrangler secret put GOOGLE_SA_JSON
-```
-
-y en Configuración → Integraciones → «Mails (Gmail)» se prende. Cada 10 minutos guarda los mails con contactos
+el JSON de la cuenta se carga como secreto `GOOGLE_SA_JSON` del repo en GitHub (la próxima publicación se lo pasa al
+CRM), y en Configuración → Integraciones → «Mails (Gmail)» se prende. Cada 10 minutos guarda los mails con contactos
 (recibidos de contactos existentes; enviados, creando el contacto si no existe), deduplicados entre bandejas.

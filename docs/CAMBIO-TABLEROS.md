@@ -17,6 +17,16 @@ BASE = os.environ.get("HUBSPOT_BASE", "https://api.hubapi.com")
 
 y en `.github/workflows/tablero.yml` y `rapido.yml` pasar `HUBSPOT_BASE=https://<crm>` y `HUBSPOT_TOKEN=${{ secrets.CRM_TOKEN }}`.
 
+**Importante:** `_req` (línea ~149) arma el pedido con `urllib.request` sin `User-Agent`. Cloudflare rechaza el
+agente por defecto de urllib («Python-urllib») con un 403 «error code: 1010» antes de que llegue al CRM (probado el
+30/10/2026). Agregar el header en ese mismo `Request`:
+
+```python
+headers={"Authorization": "Bearer " + _token.tok, "Content-Type": "application/json", "User-Agent": "formas-tablero/1.0"}
+```
+
+`shop.py` usa `http.client`, que no manda agente, y pasa sin cambios (probado).
+
 ## formas-shop-tablero
 
 - `shop.py` abre `http.client.HTTPSConnection("api.hubapi.com")` en 8 lugares (líneas 408, 1526, 1700, 1765, 1799,

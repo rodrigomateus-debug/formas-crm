@@ -11,7 +11,7 @@ interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number }
 
 const RELATED: Record<ObjectType, ObjectType[]> = {
   contact: ['company', 'deal', 'order'],
-  company: ['contact', 'deal', 'company'],
+  company: ['contact', 'deal', 'order', 'company'],
   deal: ['contact', 'company', 'order'],
   order: ['contact', 'deal', 'company'],
 };
@@ -549,20 +549,8 @@ export function RecordPreview({ type, id, onClose, onChange }: { type: ObjectTyp
           <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
-        {RELATED[type].filter((t) => associations?.[t]?.length).map((t) => (
-          <div key={t} className="panel">
-            <div className="panel-head"><h3>{OBJECTS[t].plural} <span className="muted small">({associations![t].length})</span></h3></div>
-            {associations![t].slice(0, 5).map((r) => (
-              <div key={r.id} className="assoc-item">
-                <Avatar name={r.name} type={t} domain={r.props.domain} email={r.props.email} />
-                <div className="grow" style={{ minWidth: 0 }}>
-                  <Link to={recordUrl(t, r.id)} className="ellipsis" style={{ display: 'block' }}>{r.name}</Link>
-                  <div className="small muted ellipsis">{t === 'deal' ? stageOf(meta, r.props.dealstage)?.stage.label : t === 'contact' ? r.props.email || r.props.mobilephone : t === 'company' ? r.props.domain : r.props.pdv_finnegans}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
+        {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
+        {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} />)}
         <div className="panel">
           <div className="panel-head"><h3>Última actividad</h3></div>
           <div className="panel-body stack">

@@ -237,6 +237,8 @@ table.grid td.editable .cell-edit:hover { border-color: var(--navy); }
 /* Vista previa: panel al costado sin oscurecer, se puede seguir usando la lista o el tablero. */
 .overlay.clear { background: transparent; pointer-events: none; z-index: 45; }
 .overlay.clear .drawer { pointer-events: auto; width: min(440px, 100%); border-left: 1px solid var(--line); }
+.overlay.clear .drawer-body { overflow-x: hidden; overflow-wrap: anywhere; }
+.overlay.clear .drawer-body > * { min-width: 0; }
 .card.on { border-color: var(--navy); box-shadow: 0 0 0 2px #00008522; background: #f5f6ff; }
 table.grid td.name { position: relative; padding-right: 96px; }
 table.grid td.name .peek { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); display: none; }

@@ -34,7 +34,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Vistas guardadas propias y compartidas, «Todos» / «Míos», en la tabla y en el tablero (con sus filtros) | ✅ | Pestañas de cada lista |
 | Elegir y ordenar columnas, ordenar por columna, paginado | ✅ | «Columnas» |
 | Editar un campo desde la lista (propietario, mail, desplegables, fechas…), sin entrar a la ficha | ✅ | Lápiz al pasar el mouse por la celda (o doble clic); solo lectura no edita |
-| Vista previa al costado: clic en una tarjeta del tablero o «Vista previa» en la tabla, con acciones rápidas, «Acerca de» editable, asociaciones y última actividad | ✅ | Botón «Ver registro» para la ficha completa |
+| Vista previa al costado: clic en una tarjeta del tablero o «Vista previa» en la tabla, con acciones rápidas, «Acerca de» editable, asociaciones (agregar existentes, crear nuevos ya asociados, quitar) y última actividad | ✅ | Botón «Ver registro» para la ficha completa |
 | Edición masiva, borrar y restaurar | ✅ | Selección en la lista |
 | Importar CSV con mapeo y dedupe (mail/teléfono, dominio/nombre) | ✅ | «Importar» |
 | Exportar CSV con los filtros aplicados | ✅ | «Exportar» |

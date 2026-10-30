@@ -15,6 +15,7 @@ const OWNERS = [
   { id: String(1_400_000_000 + seed), email: `vendedora${seed}@formas.ar`, firstName: 'Vende', lastName: `Dora ${seed}`, teams: [{ id: '58079782', primary: true }] },
 ];
 const COMPANY = { id: id(1), properties: { name: `Migrada SA ${seed}`, domain: `migrada${seed}.com.ar`, hubspot_owner_id: OWNERS[1].id, tipo_de_empresa_cotizacion: 'a_cotizacion_mensual', createdate: '2025-03-01T10:00:00Z', hs_lastmodifieddate: '2026-01-01T10:00:00Z', campo_nuevo_hs: 'valor raro' } };
+const DARWIN_CONTACT = { id: id(7), properties: { firstname: 'Juan Pérez', lastname: 'Pérez', email: `incompleto549351${seed}@gmail.com`, mobilephone: `549351${seed}`, createdate: '2026-10-01T10:00:00Z', lastmodifieddate: '2026-10-01T10:00:00Z' } };
 const CONTACT = { id: id(2), properties: { firstname: 'Marta', lastname: `Migrada ${seed}`, email: `marta@migrada${seed}.com.ar`, mobilephone: '+54 9 351 555-0000', hubspot_owner_id: OWNERS[1].id, lifecyclestage: 'customer', createdate: '2025-03-02T10:00:00Z', lastmodifieddate: '2026-01-01T10:00:00Z' },
   associations: { companies: { results: [{ id: id(1), type: 'contact_to_company' }] } } };
 const DEAL = { id: id(3), properties: { dealname: `Remeras migradas ${seed}`, pipeline: '674405796', dealstage: '989921333', amount: '1500000', closedate: '2026-02-01T00:00:00Z', hubspot_owner_id: OWNERS[1].id, motivo_de_cierre_perdido: '', createdate: '2025-12-01T10:00:00Z', hs_lastmodifieddate: '2026-01-15T10:00:00Z', hs_v2_date_entered_989921330: '2025-12-01T10:00:00Z', hs_v2_date_entered_989921333: '2026-01-10T10:00:00Z', hs_object_source_label: 'INTEGRATION', hs_object_source_detail_1: 'Pipedream' },
@@ -23,7 +24,7 @@ const NOTE = { id: id(4), properties: { hs_timestamp: '2026-01-11T12:00:00Z', hs
 const EMAIL = { id: id(5), properties: { hs_timestamp: '2026-01-12T12:00:00Z', hs_email_subject: 'Cotización', hs_email_text: 'Te paso la cotización', hs_email_direction: 'EMAIL', hs_email_from_email: OWNERS[1].email, hs_email_to_email: CONTACT.properties.email, hubspot_owner_id: OWNERS[1].id }, associations: { contacts: { results: [{ id: id(2) }] }, companies: { results: [{ id: id(1) }] } } };
 const TASK = { id: id(6), properties: { hs_timestamp: new Date(Date.now() + 86400000).toISOString(), hs_task_subject: `Prospectar Migrada ${seed}`, hs_task_body: 'Persona objetivo: Marta', hs_task_status: 'NOT_STARTED', hs_task_priority: 'HIGH', hs_task_type: 'TODO', hubspot_owner_id: OWNERS[1].id }, associations: { companies: { results: [{ id: id(1) }] } } };
 
-const OBJECTS = { companies: [COMPANY], contacts: [CONTACT], deals: [DEAL], orders: [], notes: [NOTE], emails: [EMAIL], tasks: [TASK], calls: [], meetings: [], communications: [] };
+const OBJECTS = { companies: [COMPANY], contacts: [CONTACT, DARWIN_CONTACT], deals: [DEAL], orders: [], notes: [NOTE], emails: [EMAIL], tasks: [TASK], calls: [], meetings: [], communications: [] };
 const PROPS = {
   companies: [{ name: 'name', label: 'Name', type: 'string', hubspotDefined: true }, { name: 'campo_nuevo_hs', label: 'Campo nuevo', type: 'string', fieldType: 'text' },
     { name: 'tipo_de_empresa_cotizacion', label: 'Tipo', type: 'enumeration', fieldType: 'select', options: [{ value: 'a_cotizacion_mensual', label: 'A' }, { value: 'd_anual', label: 'D - anual' }] }],
@@ -102,6 +103,10 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   assert.equal(compat.total, 1);
   assert.equal(compat.results[0].properties.hubspot_owner_id, OWNERS[1].id);
   assert.equal(compat.results[0].properties.hs_v2_date_entered_989921333, '2026-01-10T10:00:00.000Z');
+
+  const darwin = await api(`/records/contact/${id(7)}`);
+  assert.equal(darwin.record.props.email, undefined, 'sin el mail inventado por Darwin');
+  assert.equal(darwin.record.props.firstname, 'Juan', 'sin el apellido repetido');
 
   // Repetir la migración no duplica nada.
   await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });

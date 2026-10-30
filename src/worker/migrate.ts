@@ -102,6 +102,8 @@ migrate.post('/', async (c) => {
           if (v != null) props[name] = v;
         }
         if (type === 'contact' && props.firstname && props.lastname) Object.assign(props, splitName(props.firstname, props.lastname));
+        // El workflow de Darwin inventaba mails (incompleto<teléfono>@gmail.com) para no duplicar: acá el contacto se busca por teléfono.
+        if (type === 'contact' && /^incompleto[^@]*@gmail\.com$/i.test(String(props.email ?? ''))) delete props.email;
         const id = Number(r.hs_id);
         const created = r.created_at ?? now();
         const updated = r.updated_at ?? created;

@@ -154,3 +154,19 @@ test('quién ve cada pipeline: por equipo (principal o extra); los administrador
   assert.equal((await api('GET', `/records/deal/${deal.data.id}`)).status, 200);
   asUser = null;
 });
+
+test('entra solo quien está en la lista de usuarios y activo', async () => {
+  asUser = `nuevo.${RUN}@formas.ar`;
+  const denied = await api('GET', '/me');
+  assert.equal(denied.status, 403);
+  assert.match(denied.data.error, /no tiene usuario en el CRM/);
+  asUser = null;
+  const u = await api('POST', '/users', { email: `nuevo.${RUN}@formas.ar`, name: `Nuevo ${RUN}`, role: 'member' });
+  asUser = `nuevo.${RUN}@formas.ar`;
+  assert.equal((await api('GET', '/me')).status, 200, 'agregado: entra');
+  asUser = null;
+  await api('PATCH', `/users/${u.data.id}`, { active: false });
+  asUser = `nuevo.${RUN}@formas.ar`;
+  assert.equal((await api('GET', '/me')).status, 403, 'desactivado: no entra');
+  asUser = null;
+});

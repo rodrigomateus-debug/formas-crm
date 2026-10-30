@@ -68,8 +68,11 @@ La prueba de Gmail necesita las variables de `node test/gmail-dev-vars.mjs` (y r
    `/mcp*`, `/hooks/*`, `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. El «Application Audience (AUD) Tag» va en
    `ACCESS_AUD` dentro de `wrangler.jsonc` (no es secreto), junto con `ACCESS_TEAM_DOMAIN` (el equipo de Access que usa
    Formas Studio). Si se recrea la aplicación de Access, cambia el AUD y hay que actualizarlo ahí.
-4. Entrar con el mail de `ADMIN_EMAIL`: queda como administrador. Los demás entran como «Miembro» y se ajustan en
-   Configuración → Usuarios (la migración ya los trae con su equipo).
+4. Entrar con el mail de `ADMIN_EMAIL`: queda como administrador.
+
+**Quién entra:** la política de Access deja pasar los mails de Formas (regla «Emails ending in»: `@formas.ar`,
+`@formaspublicitarias.com`) y el CRM deja entrar solo a quien está en Configuración → Usuarios y activo. Para dar acceso
+a alguien, se lo agrega ahí; para sacárselo, se lo desactiva. La migración trae a los propietarios de HubSpot con su equipo.
 
 ## Migrar desde HubSpot
 

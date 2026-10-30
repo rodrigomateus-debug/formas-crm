@@ -40,7 +40,7 @@ function Users() {
   };
   return (
     <>
-      <div className="toolbar"><span className="muted small grow">Entran con su mail de Formas por Cloudflare Access. Quien entra por primera vez queda como «Miembro».</span>
+      <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas (login de Cloudflare Access). Para dar acceso, agregalo; para sacarlo, desactivalo.</span>
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
         <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Rol</th><th className="nosort">Equipo</th><th className="nosort">Otros equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th></tr></thead>

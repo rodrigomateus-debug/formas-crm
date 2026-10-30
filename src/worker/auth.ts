@@ -73,11 +73,13 @@ async function userByEmail(env: Env, email: string): Promise<User> {
     if (!found.active) throw new HttpError(403, 'Tu usuario está desactivado en el CRM.');
     return found;
   }
-  // Si Access lo dejó pasar, es del equipo: se crea como miembro. El primero (o ADMIN_EMAIL) es admin.
+  // Quién entra lo decide la lista de Configuración → Usuarios: Access solo verifica que el mail sea de Formas.
+  // Las únicas altas automáticas son el primer usuario y ADMIN_EMAIL, para que el CRM nunca quede sin administrador.
   const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
   const isAdmin = (count?.n ?? 0) === 0 || (env.ADMIN_EMAIL && env.ADMIN_EMAIL.toLowerCase() === email.toLowerCase());
+  if (!isAdmin) throw new HttpError(403, `Tu mail (${email}) no tiene usuario en el CRM. Pedile a un administrador que te agregue en Configuración → Usuarios.`);
   return (await env.DB.prepare('INSERT INTO users (email, name, role) VALUES (?, ?, ?) RETURNING *')
-    .bind(email, nameFromEmail(email), isAdmin ? 'admin' : 'member').first<User>())!;
+    .bind(email, nameFromEmail(email), 'admin').first<User>())!;
 }
 
 export async function authenticate(env: Env, req: Request, pathToken?: string): Promise<Ctx> {

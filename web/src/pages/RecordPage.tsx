@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
 import { StageProps } from './Board';
@@ -60,6 +60,53 @@ const KEY_PROPS: Record<ObjectType, string[]> = {
   order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'hs_billing_address_email', 'hs_billing_address_phone'],
 };
 
+// «Acerca de» de cada objeto: lo elegido en «Elegir datos» o, si nadie eligió, lo de siempre.
+function keyPropsFor(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType) {
+  const chosen = meta.key_props?.[type];
+  return chosen?.length ? chosen : KEY_PROPS[type];
+}
+
+function KeyPropsModal({ type, onClose }: { type: ObjectType; onClose: () => void }) {
+  const { meta, reload } = useMeta();
+  const toast = useToast();
+  const [sel, setSel] = useState<string[]>(keyPropsFor(meta, type));
+  const [f, setF] = useState('');
+  const all = propsOf(meta, type);
+  const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };
+  return (
+    <Modal title={`«Acerca de» de ${OBJECTS[type].plural.toLowerCase()}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={() => setSel(KEY_PROPS[type])}>Restablecer</button>
+      <button className="btn primary" onClick={async () => {
+        try { await http('PUT', `/key-props/${type}`, { props: sel }); toast('Listo: se ve así para todos'); reload(); onClose(); } catch (e) { toast((e as Error).message, true); }
+      }}>Guardar</button>
+    </>}>
+      <p className="muted small" style={{ margin: 0 }}>Lo que se ve arriba de la ficha y en la vista previa, para todo el equipo.</p>
+      <div className="grid-2">
+        <div className="stack">
+          <input className="input" placeholder="Buscar propiedad…" value={f} onChange={(e) => setF(e.target.value)} />
+          <div className="stack" style={{ maxHeight: 320, overflow: 'auto', gap: 0 }}>
+            {all.filter((p) => p.label.toLowerCase().includes(f.toLowerCase())).map((p) => (
+              <label key={p.name} className="row small" style={{ padding: '3px 0' }}>
+                <input type="checkbox" checked={sel.includes(p.name)} onChange={(e) => setSel(e.target.checked ? [...sel, p.name] : sel.filter((x) => x !== p.name))} />{p.label}
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="stack">
+          <b className="small">En este orden ({sel.length})</b>
+          {sel.map((n, i) => (
+            <div key={n} className="row small">
+              <span className="grow ellipsis">{propOf(meta, type, n)?.label ?? n}</span>
+              <button className="btn ghost sm" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Subir">↑</button>
+              <button className="btn ghost sm" disabled={i === sel.length - 1} onClick={() => move(i, 1)} aria-label="Bajar">↓</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r: CrmRecord) {
   if (type === 'contact') return [r.props.jobtitle, r.props.company].filter(Boolean).join(' · ') || r.props.email;
   if (type === 'company') return r.props.domain;
@@ -92,13 +139,14 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
   };
   const quick = (t: Activity['type']) => window.dispatchEvent(new CustomEvent('crm:compose', { detail: t }));
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record.props.pipeline)?.config.key_props : undefined;
-  const keyProps = (pipeKeys?.length ? pipeKeys : KEY_PROPS[type]).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[];
+  const keyProps = (pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[];
+  const [cfgKeys, setCfgKeys] = useState(false);
   return (
     <>
       <div className="rec-head">
         <div className="crumb"><Link to={`/${OBJECTS[type].path}`}>← {OBJECTS[type].plural}</Link></div>
         <div className="title"><Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
-          <div className="grow"><h1>{record.name}</h1><div className="muted small">{subtitle(meta, type, record)}</div></div></div>
+          <div className="grow"><h1>{record.name}</h1><div className="muted small">{subtitle(meta, type, record)}</div><TagChips meta={meta} ids={record.tags} /></div></div>
         <div className="rec-actions">
           {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
             <button key={t} className="act-btn" onClick={() => quick(t)}><span className="ic"><Icon name={t} /></span>{ACTIVITY_LABEL[t]}</button>
@@ -124,7 +172,9 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
         </div>
       </div>
       <details className="prop-group" open>
-        <summary>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</summary>
+        <summary>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}
+          {meta.me.role === 'admin' && type !== 'deal' && <button className="btn ghost sm" style={{ marginLeft: 'auto' }} title="Elegir qué datos se ven acá y en la vista previa" onClick={(e) => { e.preventDefault(); setCfgKeys(true); }}>Elegir datos</button>}
+        </summary>
         <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
       </details>
       <div style={{ padding: '10px 16px 4px' }}><input className="input" placeholder="Buscar propiedad…" value={filter} onChange={(e) => setFilter(e.target.value)} /></div>
@@ -136,6 +186,7 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
       ))}
       {hist && <HistoryModal type={type} id={record.id} prop={hist} onClose={() => setHist(null)} />}
       {merge && <MergeModal type={type} record={record} onClose={() => setMerge(false)} onDone={() => { setMerge(false); onChange(); }} />}
+      {cfgKeys && <KeyPropsModal type={type} onClose={() => setCfgKeys(false)} />}
     </>
   );
 }
@@ -256,18 +307,22 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
   const [rollup, setRollup] = useState(true);
   const [compose, setCompose] = useState<Activity['type'] | null>(null);
   const [limit, setLimit] = useState(50);
+  // Buscar en la actividad y filtrar por responsable (con 3.000 a 5.000 mails por mes, la de una empresa se hace larga).
+  const [search, setSearch] = useState('');
+  const dsearch = useDebounced(search, 300);
+  const [owner, setOwner] = useState('');
   const tl = useAsync(() => http<{ activities: Activity[]; changes: Array<{ prop: string; old_value: string; new_value: string; changed_at: string; user_name: string; source: string }>; counts: Record<string, number> }>(
-    'GET', `/records/${type}/${record.id}/timeline${qs({ types: filter || undefined, rollup: rollup ? undefined : 0, limit })}`), [record.id, filter, rollup, limit]);
+    'GET', `/records/${type}/${record.id}/timeline${qs({ types: filter || undefined, rollup: rollup ? undefined : 0, limit, q: dsearch || undefined, owner: owner || undefined })}`), [record.id, filter, rollup, limit, dsearch, owner]);
   useEffect(() => {
     const h = (e: Event) => setCompose((e as CustomEvent).detail);
     window.addEventListener('crm:compose', h);
     return () => window.removeEventListener('crm:compose', h);
   }, []);
   const items = useMemo(() => {
-    const acts = (tl.data?.activities ?? []).map((a) => ({ kind: 'a' as const, at: a.type === 'task' && a.status !== 'COMPLETED' ? '9999' : (a.type === 'task' ? a.completed_at ?? a.due_at ?? a.occurred_at : a.occurred_at), a }));
-    const chs = filter ? [] : (tl.data?.changes ?? []).map((c) => ({ kind: 'c' as const, at: c.changed_at, c }));
+    const acts = (tl.data?.activities ?? []).map((a) => ({ kind: 'a' as const, at: a.meta?.pinned ? 'ZZZZ' : a.type === 'task' && a.status !== 'COMPLETED' ? '9999' : (a.type === 'task' ? a.completed_at ?? a.due_at ?? a.occurred_at : a.occurred_at), a }));
+    const chs = filter || dsearch || owner ? [] : (tl.data?.changes ?? []).map((c) => ({ kind: 'c' as const, at: c.changed_at, c }));
     return [...acts, ...chs].sort((x, y) => String(y.at).localeCompare(String(x.at)));
-  }, [tl.data, filter]);
+  }, [tl.data, filter, dsearch, owner]);
   const reload = () => { tl.reload(); onChange(); };
   let lastDay = '';
   return (
@@ -276,6 +331,13 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
         {FILTERS.map(([k, l]) => (
           <button key={k} className={`tab ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}{k && tl.data?.counts[k] ? <span className="x">{tl.data.counts[k]}</span> : null}</button>
         ))}
+      </div>
+      <div className="row wrap" style={{ marginBottom: 8 }}>
+        <div className="search grow" style={{ minWidth: 180 }}><Icon name="search" /><input className="input sm" placeholder="Buscar en la actividad…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
+        <select className="input sm" style={{ width: 200 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
+          <option value="">Todos los responsables</option>
+          {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
       </div>
       {type !== 'contact' && (
         <label className="row small muted" style={{ marginBottom: 10 }}>
@@ -290,9 +352,9 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
         </div>
       )}
       {tl.loading && !tl.data && <div className="muted">Cargando actividad…</div>}
-      {!tl.loading && !items.length && <div className="empty panel">Todavía no hay actividad registrada.</div>}
+      {!tl.loading && !items.length && <div className="empty panel">{dsearch || owner ? 'Nada coincide con la búsqueda.' : 'Todavía no hay actividad registrada.'}</div>}
       {items.map((it) => {
-        const day = it.at === '9999' ? 'Pendientes' : new Date(it.at).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        const day = it.at === 'ZZZZ' ? 'Fijadas' : it.at === '9999' ? 'Pendientes' : new Date(it.at).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         const head = day !== lastDay ? <div className="tl-day">{day}</div> : null;
         lastDay = day;
         if (it.kind === 'c') {
@@ -323,6 +385,10 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
   const toggle = async () => {
     try { await http('PATCH', `/activities/${a.id}`, { status: done ? 'NOT_STARTED' : 'COMPLETED' }); onChange(); } catch (e) { toast((e as Error).message, true); }
   };
+  // Fijar una actividad arriba de todo (como «Actividad anclada» de HubSpot).
+  const pin = async () => {
+    try { await http('PATCH', `/activities/${a.id}`, { meta: { pinned: !a.meta?.pinned } }); toast(a.meta?.pinned ? 'Desfijada' : 'Fijada arriba'); onChange(); } catch (e) { toast((e as Error).message, true); }
+  };
   return (
     <div className={`tl-item ${a.type}${done ? ' done' : ''}`}>
       <div className="h">
@@ -331,6 +397,7 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
           : <span className="ic"><Icon name={a.type} /></span>}
         <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· {userName(meta, a.owner_id)}{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
         <span className={`when${overdue ? ' overdue' : ''}`}>{a.type === 'task' ? `Vence ${fmtDate(a.due_at, true)}` : fmtDate(a.occurred_at, true)}</span>
+        <button className="btn ghost sm" onClick={pin} title={a.meta?.pinned ? 'Desfijar' : 'Fijar arriba de todo'}>{a.meta?.pinned ? 'Desfijar' : 'Fijar'}</button>
         <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
@@ -536,7 +603,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     } catch (e) { toast((e as Error).message, true); throw e; }
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
-  const keyProps = ((pipeKeys?.length ? pipeKeys : KEY_PROPS[type]).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
+  const keyProps = ((pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
     .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans', 'hs_pipeline_stage'].includes(p.name)));
   // Cambiar la etapa desde la vista previa; si la etapa pide datos (motivo de pérdida…), se piden antes.
   const moveTo = async (stageId: string, extra: Record<string, unknown> = {}) => {
@@ -596,6 +663,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
           <div className="grow" style={{ minWidth: 0 }}>
             <h2 style={{ margin: 0, fontSize: 18, lineHeight: 1.3 }}><Link to={recordUrl(type, id)}>{record.name}</Link></h2>
+            <TagChips meta={meta} ids={record.tags} />
             <div className="preview-sum">
               {summary.map(([k, v]) => <div key={k}><span className="muted">{k}:</span> {v}</div>)}
             </div>

@@ -331,3 +331,24 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
 .pipe-menu .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); padding: 8px 10px 2px; }
 
 .toolbar .qf + .btn, .toolbar .btn.qf-clear { height: 32px; font-size: 13px; }
+
+/* Etiquetas de color (reglas en Configuración → Etiquetas). */
+.tag-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.tag-chip { display: inline-block; border: 1px solid; border-radius: var(--r-pill); padding: 0 8px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.tag-chips.small .tag-chip { font-size: 11px; line-height: 18px; padding: 0 6px; }
+table.grid td .tag-chips { margin-top: 0; flex-wrap: nowrap; }
+.tag-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 2px; flex: none; }
+.swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.swatch.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--surface) inset; }
+
+/* Tabla: casilla y nombre fijos al desplazar a los costados; menú ⋮ en cada encabezado. */
+table.grid th.check, table.grid td.check { position: sticky; left: 0; z-index: 2; }
+table.grid th.namecol, table.grid td.name { position: sticky; left: 36px; z-index: 1; box-shadow: 1px 0 0 var(--line); }
+table.grid th.check { z-index: 4; }
+table.grid th.namecol { z-index: 3; }
+table.grid td.check, table.grid td.name { background: var(--surface); }
+table.grid th.has-menu { position: sticky; padding-right: 26px; }
+table.grid th .col-menu { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 15px; width: 20px; height: 24px; border-radius: 4px; visibility: hidden; }
+table.grid th:hover .col-menu, table.grid th .col-menu:focus-visible { visibility: visible; }
+table.grid th .col-menu:hover { background: var(--line); color: var(--navy); }
+@media (hover: none) { table.grid th .col-menu { visibility: visible; } }

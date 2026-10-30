@@ -252,6 +252,8 @@ export const OPS: Record<string, Array<[string, string]>> = {
   number: [['gte', 'mayor o igual a'], ['lte', 'menor o igual a'], ['eq', 'igual a'], ['between', 'entre'], ['known', 'tiene valor'], ['unknown', 'está vacío']],
   date: [['within_last', 'en los últimos (días)'], ['within_next', 'en los próximos (días)'], ['before_days_ago', 'hace más de (días)'], ['gte', 'desde'], ['lte', 'hasta'], ['known', 'tiene valor'], ['unknown', 'está vacío']],
 };
+// Operadores que pueden venir de reglas o de la API aunque no estén en el desplegable de ese tipo de propiedad.
+const OP_WORDS: Record<string, string> = { eq: 'es', neq: 'no es', gt: 'mayor a', lt: 'menor a', gte: 'desde', lte: 'hasta', in: 'es alguno de', not_in: 'no es ninguno de' };
 export function opsFor(p?: { type: string; name: string }) {
   if (!p) return OPS.text;
   if (['enum', 'bool', 'owner', 'multienum'].includes(p.type) || p.name === 'dealstage' || p.name === 'pipeline') return OPS.enum;
@@ -260,9 +262,19 @@ export function opsFor(p?: { type: string; name: string }) {
   return OPS.text;
 }
 
+// Lo que se puede filtrar: las propiedades del objeto, «Etiqueta» (si tiene) y datos del asociado
+// («Empresa · Tipo de empresa», «Contacto · Origen»…), como el bloque «Asociación» de los filtros de HubSpot.
+const ASSOC_FILTERS: Partial<Record<ObjectType, Array<[ObjectType, string]>>> = {
+  deal: [['company', 'Empresa'], ['contact', 'Contacto']], contact: [['company', 'Empresa']], company: [['deal', 'Negocio'], ['contact', 'Contacto']], order: [['contact', 'Contacto'], ['company', 'Empresa']],
+};
 export function filterableProps(meta: Meta, type: ObjectType) {
-  const extra: Property[] = type === 'deal' ? [] : [];
-  return [...propsOf(meta, type), ...extra].filter((p) => !['source'].includes(p.name));
+  const own = propsOf(meta, type).filter((p) => !['source'].includes(p.name));
+  const tags = meta.tags?.filter((t) => t.object_type === type) ?? [];
+  const tagProp: Property[] = tags.length ? [{ ...own[0], name: '__tag', label: 'Etiqueta', type: 'enum', options: tags.map((t) => ({ value: String(t.id), label: t.name })), group_name: 'Etiquetas' }] : [];
+  const assoc = (ASSOC_FILTERS[type] ?? []).flatMap(([t, l]) => propsOf(meta, t)
+    .filter((p) => !['source', 'pipeline', 'dealstage'].includes(p.name) && !p.name.startsWith('num_'))
+    .map((p) => ({ ...p, name: `${t}.${p.name}`, label: `${l} · ${p.label}`, group_name: `${l} asociada` })));
+  return [...own, ...tagProp, ...assoc];
 }
 
 export function optionsFor(meta: Meta, type: ObjectType, p: Property) {
@@ -333,8 +345,8 @@ export function MultiPick({ options, values, onChange, small }: { options: { val
 }
 
 export function describeFilter(meta: Meta, type: ObjectType, f: Filter) {
-  const p = propOf(meta, type, f.prop);
-  const op = opsFor(p).find(([v]) => v === f.op)?.[1] ?? f.op;
+  const p = propOf(meta, type, f.prop) ?? filterableProps(meta, type).find((x) => x.name === f.prop);
+  const op = opsFor(p).find(([v]) => v === f.op)?.[1] ?? OP_WORDS[f.op] ?? f.op;
   const opts = p ? optionsFor(meta, type, p) : [];
   const val = f.values ? f.values.map((v) => opts.find((o) => o.value === String(v))?.label ?? v).join(', ') : f.value ?? '';
   return `${p?.label ?? f.prop} ${op} ${val}`.trim();

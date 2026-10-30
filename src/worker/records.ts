@@ -1,6 +1,6 @@
 import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
-import { Meta, type Property } from './meta';
+import { Meta, type Property, type Tag } from './meta';
 import { emitDealEvent } from './events';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 
@@ -466,7 +466,65 @@ export interface SearchParams {
   includeArchived?: boolean;
 }
 
+const ASSOC_PREFIX: Record<string, ObjectType> = { company: 'company', contact: 'contact', deal: 'deal' };
+
+// Condición de una etiqueta (sus pipelines y sus grupos de filtros), sobre el registro `r`.
+export async function tagSql(meta: Meta, ctx: Ctx, tag: Tag, binds: unknown[]): Promise<string> {
+  const parts: string[] = [];
+  if (tag.rule.pipelines?.length) { parts.push('r.pipeline_id IN (SELECT value FROM json_each(?))'); binds.push(JSON.stringify(tag.rule.pipelines)); }
+  const groups = (tag.rule.groups ?? []).map((g) => g.filter((f) => f.prop !== '__tag')).filter((g) => g.length) as Filter[][];
+  const g = await groupsSql(meta, ctx, tag.object_type as ObjectType, groups, binds);
+  if (!g) return '0';
+  parts.push(g);
+  return `(${parts.join(' AND ')})`;
+}
+
+async function groupsSql(meta: Meta, ctx: Ctx, type: ObjectType, groups: Filter[][], binds: unknown[]) {
+  const ors: string[] = [];
+  for (const g of groups) {
+    const ands: string[] = [];
+    for (const f of g) ands.push(await filterSql(meta, ctx, type, f, binds));
+    if (ands.length) ors.push(`(${ands.join(' AND ')})`);
+  }
+  return ors.length ? `(${ors.join(' OR ')})` : null;
+}
+
+// Etiquetas que le tocan a cada registro de una lista: una consulta por etiqueta, todas en un solo viaje.
+export async function tagsFor(db: D1Database, ctx: Ctx, type: ObjectType, ids: number[]) {
+  const meta = new Meta(db);
+  const tags = await meta.tags(type);
+  const out = new Map<number, number[]>();
+  if (!tags.length || !ids.length) return out;
+  const stmts: D1PreparedStatement[] = [];
+  for (const t of tags) {
+    const binds: unknown[] = [JSON.stringify(ids)];
+    const cond = await tagSql(meta, ctx, t, binds);
+    stmts.push(db.prepare(`SELECT r.id FROM records r WHERE r.id IN (SELECT value FROM json_each(?)) AND ${cond}`).bind(...binds));
+  }
+  const res = await db.batch(stmts);
+  res.forEach((r, i) => { for (const row of r.results as Array<{ id: number }>) out.set(row.id, [...(out.get(row.id) ?? []), tags[i].id]); });
+  return out;
+}
+
 async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, binds: unknown[]): Promise<string> {
+  // Por etiqueta: «tiene la etiqueta X» es cumplir su regla.
+  if (f.prop === '__tag') {
+    const all = await meta.tags(type);
+    const want = f.op === 'known' || f.op === 'unknown' ? all.map((t) => String(t.id)) : (f.values ?? String(f.value ?? '').split(';')).map(String);
+    const conds: string[] = [];
+    for (const t of all.filter((x) => want.includes(String(x.id)))) conds.push(await tagSql(meta, ctx, t, binds));
+    const any = conds.length ? `(${conds.join(' OR ')})` : '0';
+    return ['neq', 'not_in', 'unknown'].includes(f.op) ? `NOT ${any}` : any;
+  }
+  // Por un dato del registro asociado («empresa.tipo_de_empresa_cotizacion»): alguno de sus asociados de ese tipo lo cumple.
+  const dot = f.prop.indexOf('.');
+  if (dot > 0 && ASSOC_PREFIX[f.prop.slice(0, dot)]) {
+    const other = ASSOC_PREFIX[f.prop.slice(0, dot)];
+    const inner: unknown[] = [];
+    const cond = (await filterSql(meta, ctx, other, { ...f, prop: f.prop.slice(dot + 1) }, inner)).replace(/\br\./g, 'x.');
+    binds.push(other, ...inner);
+    return `EXISTS (SELECT 1 FROM associations ax JOIN records x ON x.id = ax.to_id AND x.archived = 0 WHERE ax.from_id = r.id AND ax.to_type = ? AND ${cond})`;
+  }
   const { expr, numeric } = await sqlFor(meta, type, f.prop);
   const val = (v: unknown) => {
     if (v === 'me') return ctx.user.id;
@@ -528,15 +586,8 @@ export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params:
     binds.push(params.associatedWith);
   }
   const groups = params.groups?.length ? params.groups : params.filters?.length ? [params.filters] : [];
-  if (groups.length) {
-    const ors: string[] = [];
-    for (const g of groups) {
-      const ands: string[] = [];
-      for (const f of g) ands.push(await filterSql(meta, ctx, type, f, binds));
-      if (ands.length) ors.push(`(${ands.join(' AND ')})`);
-    }
-    if (ors.length) where.push(`(${ors.join(' OR ')})`);
-  }
+  const g = await groupsSql(meta, ctx, type, groups, binds);
+  if (g) where.push(g);
   return { whereSql: where.join(' AND '), binds };
 }
 

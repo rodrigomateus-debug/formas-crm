@@ -4,7 +4,7 @@ import { assertType, HttpError, now, OBJECT_TYPES } from './env';
 import { requireRole, canWrite, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
-  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, updateRecord,
+  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
   type Filter, type RecordRow, type SearchParams,
 } from './records';
 import { associate, associationsOf, dissociate } from './associations';
@@ -50,13 +50,14 @@ api.get('/meta', async (c) => {
   const db = c.env.DB;
   const meta = new Meta(db);
   const me = c.get('ctx').user;
-  const [users, teams, tags, mine] = await db.batch([
+  const [users, teams, tags, mine, keyProps] = await db.batch([
     db.prepare('SELECT id, email, name, role, team_id, extra_teams, active FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
-    db.prepare('SELECT id, name, color FROM tags ORDER BY name'),
+    db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
     db.prepare(`SELECT pipeline_id FROM records WHERE object_type = 'deal' AND owner_id = ? AND archived = 0
       GROUP BY pipeline_id ORDER BY COUNT(*) DESC`).bind(me.id),
+    db.prepare("SELECT value FROM settings WHERE key = 'key_props'"),
   ]);
   const pipelines = (await meta.pipelines()).filter((p) => canSee(me, p));
   return c.json({
@@ -65,7 +66,9 @@ api.get('/meta', async (c) => {
     pipelines,
     users: users.results,
     teams: teams.results,
-    tags: tags.results,
+    tags: (tags.results as Array<{ rule: string }>).map((t) => ({ ...t, rule: JSON.parse(t.rule || '{}') })),
+    // «Acerca de» de contactos, empresas y pedidos, elegido en la ficha (los negocios lo tienen por pipeline).
+    key_props: JSON.parse((keyProps.results[0] as { value?: string } | undefined)?.value ?? '{}'),
   });
 });
 
@@ -108,7 +111,10 @@ api.get('/avatar/:email', async (c) => {
 
 api.get('/records/:type', async (c) => {
   const type = assertType(c.req.param('type'));
-  const res = await searchRecords(c.env.DB, c.get('ctx'), type, parseSearch(c.req.query()));
+  const found = await searchRecords(c.env.DB, c.get('ctx'), type, parseSearch(c.req.query()));
+  // Etiquetas de color de cada registro (si el objeto tiene).
+  const tagMap = await tagsFor(c.env.DB, c.get('ctx'), type, found.results.map((r) => r.id));
+  const res = { ...found, results: found.results.map((r) => (tagMap.size ? { ...r, tags: tagMap.get(r.id) ?? [] } : r)) };
   // Columna "Empresa asociada" de las listas: la principal de cada registro, en una sola consulta.
   if (c.req.query('with') === 'company' && res.results.length) {
     const { results } = await c.env.DB.prepare(
@@ -175,7 +181,8 @@ api.get('/records/:type/:id', async (c) => {
     const merged = await c.env.DB.prepare('SELECT merged_into FROM records WHERE id = ?').bind(row.id).first<{ merged_into: number | null }>();
     if (merged?.merged_into) return c.json({ redirect: merged.merged_into, record: rowToRecord(row) });
   }
-  return c.json({ record: rowToRecord(row), associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx'))) });
+  const tags = (await tagsFor(c.env.DB, c.get('ctx'), type, [row.id])).get(row.id) ?? [];
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx'))) });
 });
 
 api.patch('/records/:type/:id', async (c) => {
@@ -295,6 +302,8 @@ api.get('/records/:type/:id/timeline', async (c) => {
     rollup: q.rollup !== '0',
     limit: num(q.limit),
     before: q.before,
+    q: q.q,
+    owner: num(q.owner),
   }));
 });
 
@@ -422,8 +431,8 @@ api.get('/board', async (c) => {
   const since = q.closed_all ? '0000' : new Date(Date.now() - (Number(q.closed_days) || 90) * 86_400_000).toISOString();
   const visible = `${whereSql} AND (s.is_closed = 0 OR r.stage_entered_at >= ?)`;
   const withInfo = async (rows: RecordRow[]) => {
-    const info = await cardInfo(db, rows.map((r) => r.id));
-    return rows.map((r) => ({ ...rowToRecord(r), card: info.get(r.id) }));
+    const [info, tags] = await Promise.all([cardInfo(db, rows.map((r) => r.id)), tagsFor(db, ctx, 'deal', rows.map((r) => r.id))]);
+    return rows.map((r) => ({ ...rowToRecord(r), card: info.get(r.id), tags: tags.get(r.id) ?? [] }));
   };
   // «Cargar más» de una columna: las siguientes tarjetas de esa etapa.
   if (q.stage) {
@@ -655,6 +664,48 @@ api.get('/export/:type', async (c) => {
 });
 
 // ---------- Administración ----------
+
+api.put('/key-props/:type', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const type = assertType(c.req.param('type'));
+  const { props } = await c.req.json<{ props: string[] }>();
+  const known = new Set((await new Meta(c.env.DB).properties(type)).map((p) => p.name));
+  const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'key_props'").first<{ value: string }>();
+  const all = { ...JSON.parse(row?.value ?? '{}'), [type]: (props ?? []).filter((p) => known.has(p)) };
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('key_props', ?)").bind(JSON.stringify(all)).run();
+  return c.json(all);
+});
+
+// Etiquetas de color con regla. Se valida la regla armando su consulta (propiedades y operadores que existen).
+async function tagBody(c: { req: { json: <T>() => Promise<T> }; env: Env; get: (k: 'ctx') => Ctx }) {
+  const b = await c.req.json<{ name: string; color?: string; object_type?: string; description?: string; rule?: { groups?: Filter[][]; pipelines?: string[] } }>();
+  if (!b.name?.trim()) throw new HttpError(400, 'Falta el nombre de la etiqueta.');
+  const color = /^#[0-9a-f]{6}$/i.test(b.color ?? '') ? b.color! : '#7c8597';
+  const type = assertType(b.object_type ?? 'deal');
+  const rule = { groups: (b.rule?.groups ?? []).map((g) => g.filter((f) => f.prop && f.prop !== '__tag')).filter((g) => g.length), pipelines: b.rule?.pipelines ?? [] };
+  if (!rule.groups.length) throw new HttpError(400, 'La etiqueta necesita al menos un filtro en su regla.');
+  await tagSql(new Meta(c.env.DB), c.get('ctx'), { id: 0, name: b.name, color, object_type: type, description: '', display_order: 0, rule }, []);
+  return { name: b.name.trim(), color, type, description: b.description ?? '', rule };
+}
+api.post('/tags', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const t = await tagBody(c);
+  const row = await c.env.DB.prepare('INSERT INTO tags (name, color, object_type, description, rule, display_order) VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(display_order), 0) + 1 FROM tags)) RETURNING id')
+    .bind(t.name, t.color, t.type, t.description, JSON.stringify(t.rule)).first<{ id: number }>();
+  return c.json(row, 201);
+});
+api.put('/tags/:id', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const t = await tagBody(c);
+  await c.env.DB.prepare('UPDATE tags SET name = ?, color = ?, object_type = ?, description = ?, rule = ? WHERE id = ?')
+    .bind(t.name, t.color, t.type, t.description, JSON.stringify(t.rule), Number(c.req.param('id'))).run();
+  return c.json({ ok: true });
+});
+api.delete('/tags/:id', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  await c.env.DB.prepare('DELETE FROM tags WHERE id = ?').bind(Number(c.req.param('id'))).run();
+  return c.json({ ok: true });
+});
 
 api.post('/properties/:type', async (c) => {
   requireRole(c.get('ctx'), 'admin');

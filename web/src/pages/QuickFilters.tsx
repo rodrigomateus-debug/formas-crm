@@ -56,8 +56,9 @@ export function presetFilter(prop: string, key: string): Filter | null {
   }
 }
 
-export function quickFilters(owners: string[] | undefined, dates: Record<string, string> | undefined): Filter[] {
+export function quickFilters(owners: string[] | undefined, dates: Record<string, string> | undefined, tags?: string[]): Filter[] {
   const out: Filter[] = [];
+  if (tags?.length) out.push({ prop: '__tag', op: 'in', values: tags });
   if (owners?.length) out.push(owners.length === 1 && owners[0] === 'none' ? { prop: 'owner_id', op: 'unknown' } : { prop: 'owner_id', op: 'in', values: owners });
   for (const [prop, key] of Object.entries(dates ?? {})) { const f = presetFilter(prop, key); if (f) out.push(f); }
   return out;
@@ -81,15 +82,17 @@ function Pop({ label, on, children }: { label: ReactNode; on: boolean; children:
   );
 }
 
-export function QuickFilterBar({ type, owners, dates, onOwners, onDates, onClear, extra }: {
-  type: ObjectType; owners: string[]; dates: Record<string, string>;
-  onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onClear: () => void; extra?: boolean;
+export function QuickFilterBar({ type, owners, dates, tags, onOwners, onDates, onTags, onClear, extra }: {
+  type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[];
+  onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onClear: () => void; extra?: boolean;
 }) {
   const { meta } = useMeta();
   const name = (v: string) => (v === 'me' ? 'Yo' : v === 'none' ? 'Sin asignar' : meta.users.find((u) => String(u.id) === v)?.name ?? v);
   const ownerLabel = owners.length ? `Propietario: ${owners.slice(0, 2).map(name).join(', ')}${owners.length > 2 ? ` +${owners.length - 2}` : ''}` : 'Propietario';
   const toggle = (v: string) => onOwners(owners.includes(v) ? owners.filter((x) => x !== v) : [...owners, v]);
-  const any = owners.length > 0 || Object.keys(dates).length > 0 || extra;
+  const any = owners.length > 0 || Object.keys(dates).length > 0 || tags.length > 0 || extra;
+  const typeTags = meta.tags?.filter((t) => t.object_type === type) ?? [];
+  const tagName = (v: string) => typeTags.find((t) => String(t.id) === v)?.name ?? v;
   return (
     <>
       <Pop label={ownerLabel} on={owners.length > 0}>
@@ -120,6 +123,18 @@ export function QuickFilterBar({ type, owners, dates, onOwners, onDates, onClear
           </Pop>
         );
       })}
+      {typeTags.length > 0 && (
+        <Pop label={tags.length ? `Etiqueta: ${tags.slice(0, 2).map(tagName).join(', ')}${tags.length > 2 ? ` +${tags.length - 2}` : ''}` : 'Etiqueta'} on={tags.length > 0}>
+          {() => (
+            <div className="stack" style={{ gap: 0 }}>
+              {typeTags.map((t) => (
+                <label key={t.id} className="opt"><input type="checkbox" checked={tags.includes(String(t.id))} onChange={() => onTags(tags.includes(String(t.id)) ? tags.filter((x) => x !== String(t.id)) : [...tags, String(t.id)])} />
+                  <span className="tag-dot" style={{ background: t.color }} />{t.name}</label>
+              ))}
+            </div>
+          )}
+        </Pop>
+      )}
       {any && <button className="btn ghost qf-clear" onClick={onClear}>Borrar todo</button>}
     </>
   );

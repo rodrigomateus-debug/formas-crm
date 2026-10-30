@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { http, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, type ObjectType, type Option, type Pipeline, type Property, type Stage, canSeePipeline, userTeams } from '../lib';
-import { Modal, MultiPick } from '../components';
+import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams } from '../lib';
+import { FilterRow, Modal, MultiPick, describeFilter, filterableProps, opsFor } from '../components';
 
-const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
+const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['tags', 'Etiquetas'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
 const TYPES: Array<[string, string]> = [['string', 'Texto corto'], ['text', 'Texto largo'], ['number', 'Número'], ['currency', 'Moneda'], ['date', 'Fecha'], ['datetime', 'Fecha y hora'], ['enum', 'Lista desplegable'], ['multienum', 'Selección múltiple'], ['bool', 'Sí / No'], ['email', 'Email'], ['phone', 'Teléfono'], ['url', 'Link'], ['owner', 'Usuario']];
 
 export default function Settings() {
@@ -14,6 +14,7 @@ export default function Settings() {
       {tab === 'users' && <Users />}
       {tab === 'properties' && <Properties />}
       {tab === 'pipelines' && <Pipelines />}
+      {tab === 'tags' && <Tags />}
       {tab === 'integrations' && <Integrations />}
       {tab === 'inbound' && <Inbound />}
     </div>
@@ -426,5 +427,112 @@ function OutboundHooks() {
         <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setDraft([...list, { event: 'deal.won', url: '', name: 'Darwin' }])}>+ Aviso</button>
       </div>
     </div>
+  );
+}
+
+// Etiquetas de color con regla, como las «Etiquetas de negocio» de HubSpot: se ponen solas a los registros que cumplen
+// la regla (en los pipelines elegidos). Se ven en las tarjetas, como columna y como filtro rápido.
+const TAG_COLORS = ['#2f7d32', '#1565c0', '#6a1b9a', '#c62828', '#ef6c00', '#5d4037', '#00838f', '#ad1457', '#455a64', '#9e9d24'];
+
+function Tags() {
+  const { meta, reload } = useMeta();
+  const toast = useToast();
+  const [edit, setEdit] = useState<Partial<Tag> | null>(null);
+  const admin = meta.me.role === 'admin';
+  return (
+    <div className="stack">
+      <div className="row">
+        <p className="muted small grow" style={{ margin: 0 }}>Cada etiqueta tiene una regla: los negocios (o contactos, empresas, pedidos) que la cumplen la muestran solos, sin cargarla a mano.</p>
+        {admin && <button className="btn primary" onClick={() => setEdit({ name: '', color: TAG_COLORS[0], object_type: 'deal', description: '', rule: { groups: [[]], pipelines: [] } })}>Crear etiqueta</button>}
+      </div>
+      <div className="panel">
+        {(meta.tags ?? []).map((t) => <TagRow key={t.id} t={t} onEdit={admin ? () => setEdit(t) : undefined} onDelete={admin ? async () => {
+          if (!confirm(`¿Borrar la etiqueta «${t.name}»? Deja de verse en todos lados.`)) return;
+          await http('DELETE', `/tags/${t.id}`); toast('Etiqueta borrada'); reload();
+        } : undefined} />)}
+        {!meta.tags?.length && <div className="panel-body muted">Todavía no hay etiquetas.</div>}
+      </div>
+      {edit && <TagEditor tag={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); reload(); }} />}
+    </div>
+  );
+}
+
+function TagRow({ t, onEdit, onDelete }: { t: Tag; onEdit?: () => void; onDelete?: () => void }) {
+  const { meta } = useMeta();
+  const count = useAsync(() => http<{ total: number }>('GET', `/records/${t.object_type}${qs({ limit: 1, groups: [[{ prop: '__tag', op: 'eq', value: String(t.id) }]] })}`), [t.id, JSON.stringify(t.rule)]);
+  const pipes = t.rule.pipelines?.length ? t.rule.pipelines.map((id) => meta.pipelines.find((p) => p.id === id)?.label ?? id).join(', ') : 'Todos los pipelines';
+  const rule = (t.rule.groups ?? []).map((g) => g.map((f) => describeFilter(meta, t.object_type, f)).join(' y ')).join(' — o — ');
+  return (
+    <div className="assoc-item" style={{ alignItems: 'center' }}>
+      <TagChips meta={meta} ids={[t.id]} />
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div className="small"><b>{OBJECTS[t.object_type].plural}</b>{t.object_type === 'deal' ? ` · ${pipes}` : ''}</div>
+        <div className="small muted">{rule || 'Sin regla'}{t.description ? ` · ${t.description}` : ''}</div>
+      </div>
+      <span className="small muted num" style={{ whiteSpace: 'nowrap' }}>{count.data ? `${count.data.total.toLocaleString('es-AR')} con la etiqueta` : ''}</span>
+      {onEdit && <button className="btn sm" onClick={onEdit}>Editar</button>}
+      {onDelete && <button className="btn sm ghost danger" onClick={onDelete}>Borrar</button>}
+    </div>
+  );
+}
+
+function TagEditor({ tag, onClose, onSaved }: { tag: Partial<Tag>; onClose: () => void; onSaved: () => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const [t, setT] = useState<Partial<Tag>>(tag);
+  const type = (t.object_type ?? 'deal') as ObjectType;
+  const groups: Filter[][] = t.rule?.groups?.length ? t.rule.groups : [[]];
+  const first = filterableProps(meta, type).find((p) => p.name !== '__tag')!;
+  const blank = (): Filter => ({ prop: first.name, op: opsFor(first)[0][0] });
+  const setGroups = (g: Filter[][]) => setT((x) => ({ ...x, rule: { ...x.rule, groups: g } }));
+  return (
+    <Modal title={tag.id ? `Etiqueta «${tag.name}»` : 'Nueva etiqueta'} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn primary" disabled={!t.name?.trim()} onClick={async () => {
+        try {
+          const body = { name: t.name, color: t.color, object_type: type, description: t.description, rule: { groups: groups.map((g) => g.filter((f) => f.prop)).filter((g) => g.length), pipelines: type === 'deal' ? t.rule?.pipelines ?? [] : [] } };
+          await http(tag.id ? 'PUT' : 'POST', tag.id ? `/tags/${tag.id}` : '/tags', body);
+          toast('Etiqueta guardada'); onSaved();
+        } catch (e) { toast((e as Error).message, true); }
+      }}>Guardar</button>
+    </>}>
+      <div className="row wrap">
+        <label className="field" style={{ flex: 2 }}>Nombre<input className="input" autoFocus value={t.name ?? ''} onChange={(e) => setT({ ...t, name: e.target.value })} /></label>
+        <label className="field" style={{ flex: 1 }}>De
+          <select className="input" value={type} onChange={(e) => setT({ ...t, object_type: e.target.value as ObjectType, rule: { groups: [[]], pipelines: [] } })}>
+            {(['deal', 'company', 'contact', 'order'] as ObjectType[]).map((o) => <option key={o} value={o}>{OBJECTS[o].plural}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="field">Color
+        <div className="row wrap" style={{ gap: 6 }}>
+          {TAG_COLORS.map((c) => <button key={c} type="button" aria-label={`Color ${c}`} className={`swatch${t.color === c ? ' on' : ''}`} style={{ background: c }} onClick={() => setT({ ...t, color: c })} />)}
+          <span className="tag-chip" style={{ background: `${t.color}1a`, color: t.color, borderColor: `${t.color}55` }}>{t.name || 'Vista previa'}</span>
+        </div>
+      </div>
+      {type === 'deal' && (
+        <div className="field">Pipelines (vacío = todos)
+          <MultiPick options={meta.pipelines.map((p) => ({ value: p.id, label: p.label }))} values={t.rule?.pipelines ?? []} onChange={(v) => setT({ ...t, rule: { ...t.rule, pipelines: v } })} />
+        </div>
+      )}
+      <div className="field">Regla: se pone a los que cumplen
+        {groups.map((g, gi) => (
+          <div key={gi} className="panel" style={{ marginTop: 6 }}>
+            <div className="panel-body stack">
+              {gi > 0 && <b className="small">o bien</b>}
+              {g.map((f, fi) => (
+                <FilterRow key={fi} type={type} f={f} onChange={(nf) => setGroups(groups.map((gg, i) => i === gi ? gg.map((x, j) => j === fi ? nf : x) : gg))}
+                  onRemove={() => setGroups(groups.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg))} />
+              ))}
+              <div className="row">
+                <button className="btn sm" onClick={() => setGroups(groups.map((gg, i) => i === gi ? [...gg, blank()] : gg))}>+ Agregar filtro (y)</button>
+                {gi === groups.length - 1 && <button className="btn sm ghost" onClick={() => setGroups([...groups, [blank()]])}>+ Otro grupo (o)</button>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <label className="field">Descripción<input className="input" value={t.description ?? ''} onChange={(e) => setT({ ...t, description: e.target.value })} placeholder="Para qué sirve o de dónde sale" /></label>
+    </Modal>
   );
 }

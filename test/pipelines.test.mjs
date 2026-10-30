@@ -243,3 +243,60 @@ test('vistas compartidas con un equipo: las ve ese equipo y nadie más', async (
   assert.equal((await api('PATCH', `/views/company/${v.id}`, { name: 'x' })).status, 403);
   asUser = null;
 });
+
+test('etiquetas por regla: las 7 de HubSpot, se ven en la lista, la ficha y el tablero, y filtran', async () => {
+  asUser = null;
+  const meta = (await api('GET', '/meta')).data;
+  assert.equal(meta.tags.length >= 7, true);
+  const imp = meta.tags.find((t) => t.name === 'Productos Importados');
+  const net = meta.tags.find((t) => t.name === 'NETWORKING');
+  const comp = (await api('POST', '/records/company', { props: { name: `Tag ${RUN}`, domain: `tag-${RUN}.com.ar` } })).data;
+  const a = (await api('POST', '/records/deal', { props: { dealname: `Etiq ${RUN} imp`, pipeline: '674405796', tipo_de_producto: 'Productos importados' }, associations: [comp.id] })).data;
+  const b = (await api('POST', '/records/deal', { props: { dealname: `Etiq ${RUN} shop`, pipeline: 'default', tipo_de_producto: 'Productos importados', origen: 'Networking' } })).data;
+  const list = (await api('GET', `/records/deal?q=${encodeURIComponent(`Etiq ${RUN}`)}`)).data.results;
+  assert.deepEqual(list.find((r) => r.id === a.id).tags, [imp.id], 'Corporate + Productos importados');
+  assert.deepEqual(list.find((r) => r.id === b.id).tags, [net.id], 'en Formas Shop no lleva la de producto, sí NETWORKING');
+  assert.deepEqual((await api('GET', `/records/deal/${b.id}`)).data.record.tags, [net.id]);
+  const board = (await api('GET', `/board?pipeline=674405796&q=${encodeURIComponent(`Etiq ${RUN}`)}`)).data;
+  assert.deepEqual(board.columns.flatMap((c) => c.deals).find((d) => d.id === a.id).tags, [imp.id]);
+  const byTag = (await api('GET', `/records/deal?q=${encodeURIComponent(`Etiq ${RUN}`)}&groups=${encodeURIComponent(JSON.stringify([[{ prop: '__tag', op: 'in', values: [String(imp.id)] }]]))}`)).data;
+  assert.deepEqual(byTag.results.map((r) => r.id), [a.id]);
+  // Etiqueta nueva desde Configuración, con regla inválida y válida
+  assert.equal((await api('POST', '/tags', { name: `Mala ${RUN}`, rule: { groups: [[{ prop: 'no_existe', op: 'eq', value: 1 }]] } })).status, 400);
+  const t = await api('POST', '/tags', { name: `Grande ${RUN}`, color: '#c62828', rule: { groups: [[{ prop: 'amount', op: 'gte', value: 1000000 }]] } });
+  assert.equal(t.status, 201);
+  await api('DELETE', `/tags/${t.data.id}`);
+});
+
+test('filtrar por un dato del asociado (negocios de empresas de cierto tipo)', async () => {
+  asUser = null;
+  const c1 = (await api('POST', '/records/company', { props: { name: `Asoc A ${RUN}`, domain: `asoc-a-${RUN}.com.ar`, city: `Ciudad ${RUN}` } })).data;
+  const c2 = (await api('POST', '/records/company', { props: { name: `Asoc B ${RUN}`, domain: `asoc-b-${RUN}.com.ar` } })).data;
+  await api('POST', '/records/deal', { props: { dealname: `Por asoc ${RUN} 1`, pipeline: 'default' }, associations: [c1.id] });
+  await api('POST', '/records/deal', { props: { dealname: `Por asoc ${RUN} 2`, pipeline: 'default' }, associations: [c2.id] });
+  const r = (await api('GET', `/records/deal?q=${encodeURIComponent(`Por asoc ${RUN}`)}&groups=${encodeURIComponent(JSON.stringify([[{ prop: 'company.city', op: 'eq', value: `Ciudad ${RUN}` }]]))}`)).data;
+  assert.deepEqual(r.results.map((x) => x.name), [`Por asoc ${RUN} 1`]);
+});
+
+test('actividad: buscar, filtrar por responsable y fijar arriba', async () => {
+  asUser = null;
+  const d = (await api('POST', '/records/deal', { props: { dealname: `Act ${RUN}`, pipeline: 'default' } })).data;
+  const n1 = (await api('POST', '/activities', { type: 'note', body: `Presupuesto de mochilas ${RUN}`, links: [d.id], occurred_at: new Date(Date.now() - 86_400_000).toISOString() })).data;
+  await api('POST', '/activities', { type: 'note', body: `Llamó por gorras ${RUN}`, links: [d.id] });
+  const q = (await api('GET', `/records/deal/${d.id}/timeline?q=mochilas`)).data.activities;
+  assert.deepEqual(q.map((a) => a.id), [n1.id]);
+  await api('PATCH', `/activities/${n1.id}`, { meta: { pinned: true } });
+  const all = (await api('GET', `/records/deal/${d.id}/timeline`)).data.activities;
+  assert.equal(all[0].id, n1.id, 'la fijada va primero aunque sea más vieja');
+  const users = (await api('GET', '/meta')).data.users;
+  const other = users.find((u) => u.active && u.id !== users.find((x) => x.email === 'rodrigo.mateus@formaspublicitarias.com')?.id);
+  if (other) assert.equal((await api('GET', `/records/deal/${d.id}/timeline?owner=${other.id}`)).data.activities.length, 0);
+});
+
+test('«Acerca de» elegido por objeto', async () => {
+  asUser = null;
+  const r = await api('PUT', '/key-props/company', { props: ['domain', 'city', 'no_existe'] });
+  assert.equal(r.status, 200);
+  assert.deepEqual((await api('GET', '/meta')).data.key_props.company, ['domain', 'city']);
+  await api('PUT', '/key-props/company', { props: [] });
+});

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, formatValue, propOf, safeUrl, ACTIVITY_LABEL,
+  http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
 import { Avatar, Modal, PropertyInput } from '../components';
@@ -210,6 +210,7 @@ function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd, 
       onDragStart={(e) => { onDragStart(); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={onDragEnd}>
       {onSelect && <input type="checkbox" className="card-check" checked={sel} aria-label={`Seleccionar ${d.name}`} onClick={(e) => e.stopPropagation()} onChange={() => onSelect(d.id)} />}
       <Link className="t" to={recordUrl('deal', d.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{d.name}</Link>
+      <TagChips meta={meta} ids={d.tags} small />
       {cardProps.map((k) => {
         if (k === 'link_a_darwin') return null;
         const v = k === 'amount' ? fmtMoney(d.props.amount, d.props.deal_currency_code) || 'Sin monto' : formatValue(meta, 'deal', k, d.props[k], d.props);

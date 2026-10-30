@@ -163,7 +163,7 @@ export async function updateActivity(db: D1Database, ctx: Ctx, id: number, input
 
 // Línea de tiempo de un registro. En empresas y negocios suma la actividad de los contactos asociados
 // (y en empresas, la de sus negocios), que es lo que el equipo espera ver en la ficha.
-export async function timeline(db: D1Database, recordId: number, opts: { types?: string[]; rollup?: boolean; limit?: number; before?: string; hiddenPipelines?: string[] } = {}) {
+export async function timeline(db: D1Database, recordId: number, opts: { types?: string[]; rollup?: boolean; limit?: number; before?: string; hiddenPipelines?: string[]; q?: string; owner?: number } = {}) {
   const rec = await db.prepare('SELECT object_type FROM records WHERE id = ?').bind(recordId).first<{ object_type: string }>();
   if (!rec) throw new HttpError(404, `No existe el registro ${recordId}.`);
   const rollup = opts.rollup !== false && rec.object_type !== 'contact';
@@ -178,9 +178,11 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
   const { results } = await db.prepare(
     `${SELECT_ACTIVITY} WHERE a.archived = 0 ${typeSql} AND COALESCE(a.due_at, a.occurred_at) < ?2
      AND a.id IN (SELECT l.activity_id FROM activity_links l WHERE ${scope})
-     ORDER BY CASE WHEN a.type = 'task' AND a.status != 'COMPLETED' THEN 0 ELSE 1 END, COALESCE(CASE WHEN a.type = 'task' THEN a.due_at END, a.occurred_at) DESC
+     AND (?4 IS NULL OR a.subject LIKE ?4 OR a.body LIKE ?4) AND (?5 IS NULL OR a.owner_id = ?5)
+     ORDER BY COALESCE(json_extract(a.meta, '$.pinned'), 0) DESC, CASE WHEN a.type = 'task' AND a.status != 'COMPLETED' THEN 0 ELSE 1 END,
+       COALESCE(CASE WHEN a.type = 'task' THEN a.due_at END, a.occurred_at) DESC
      LIMIT ${limit}`,
-  ).bind(recordId, before, JSON.stringify(opts.hiddenPipelines ?? [])).all<ActivityRow & { links: string | null }>();
+  ).bind(recordId, before, JSON.stringify(opts.hiddenPipelines ?? []), opts.q?.trim() ? `%${opts.q.trim()}%` : null, opts.owner ?? null).all<ActivityRow & { links: string | null }>();
   const changes = await db.prepare(
     `SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id
      WHERE c.record_id = ? AND c.prop IN ('dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'archived', 'merged', 'amount')

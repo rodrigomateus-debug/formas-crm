@@ -64,9 +64,22 @@ export async function ensureSeeded(db: D1Database) {
   seeded = true;
 }
 
+// Etiqueta de color con regla (como las «deal tags» de HubSpot): se pone sola a los registros que cumplen el filtro.
+export interface TagRule { groups?: Array<Array<{ prop: string; op: string; value?: unknown; values?: unknown[]; high?: unknown }>>; pipelines?: string[] }
+export interface Tag { id: number; name: string; color: string; object_type: string; description: string; display_order: number; rule: TagRule }
+
 export class Meta {
   private props?: Property[];
   private pipes?: Pipeline[];
+  private tagList?: Tag[];
+
+  async tags(type?: string) {
+    if (!this.tagList) {
+      const { results } = await this.db.prepare('SELECT * FROM tags ORDER BY display_order, name').all<Tag & { rule: string }>();
+      this.tagList = results.map((t) => ({ ...t, rule: (() => { try { return JSON.parse(String(t.rule ?? '{}')); } catch { return {}; } })() }));
+    }
+    return type ? this.tagList.filter((t) => t.object_type === type) : this.tagList;
+  }
   constructor(private db: D1Database) {}
 
   async properties(type?: ObjectType) {

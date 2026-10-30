@@ -18,8 +18,10 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 export interface User { id: number; email: string; name: string; role: string; team_id: number | null; extra_teams?: string; active: number }
-export interface Meta { me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }> }
-export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean }
+// Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
+export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
+export interface Meta { me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }>; tags: Tag[]; key_props?: Partial<Record<ObjectType, string[]>> }
+export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean; tags?: number[] }
 export interface Activity {
   id: number; type: 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp'; occurred_at: string; owner_id: number | null; subject: string; body: string;
   direction: string | null; status: string | null; outcome: string | null; due_at: string | null; completed_at: string | null; priority: string | null;
@@ -267,3 +269,14 @@ export function Icon({ name, size }: { name: keyof typeof paths | string; size?:
 export const ACTIVITY_LABEL: Record<Activity['type'], string> = {
   note: 'Nota', email: 'Email', call: 'Llamada', meeting: 'Reunión', task: 'Tarea', whatsapp: 'WhatsApp',
 };
+
+// Chips de las etiquetas de un registro, con su color.
+export function TagChips({ meta, ids, small }: { meta: Meta; ids?: number[]; small?: boolean }) {
+  const tags = (ids ?? []).map((id) => meta.tags?.find((t) => t.id === id)).filter(Boolean) as Tag[];
+  if (!tags.length) return null;
+  return (
+    <span className={`tag-chips${small ? ' small' : ''}`}>
+      {tags.map((t) => <span key={t.id} className="tag-chip" style={{ background: `${t.color}1a`, color: t.color, borderColor: `${t.color}55` }} title={t.description || t.name}>{t.name}</span>)}
+    </span>
+  );
+}

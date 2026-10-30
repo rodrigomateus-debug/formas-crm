@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline,
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline, TagChips,
   type Activity, type CrmRecord, type Filter, type ObjectType,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -24,7 +24,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
 
 // `owner` es de las vistas viejas (un solo propietario); ahora van `owners` (varios) y `dates` (filtros rápidos de fecha).
 interface ViewConfig {
-  q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>;
+  q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[];
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string;
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
@@ -85,6 +85,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const toggleSel = (id: number) => { const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s); setSelAll(false); };
   const [boardTotal, setBoardTotal] = useState<number>();
   const [createDefaults, setCreateDefaults] = useState<Record<string, unknown> | undefined>();
+  const [filterProp, setFilterProp] = useState<string>();
   const createIn = (d: Record<string, unknown>) => { setCreateDefaults(d); setShow('create'); };
   // Vista previa al costado (clic en una tarjeta del tablero o «Vista previa» en la tabla), como en HubSpot.
   const [preview, setPreviewState] = useState<{ id: number; compose?: Activity['type'] } | null>(null);
@@ -94,13 +95,13 @@ function IndexFor({ type }: { type: ObjectType }) {
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
 
   useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.sort, cfg.dir, pipelineSel, mode]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.sort, cfg.dir, pipelineSel, mode]);
 
   // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
   const viewGroups = useMemo(() => {
-    const quick = quickFilters(cfg.owners, cfg.dates);
+    const quick = quickFilters(cfg.owners, cfg.dates, cfg.tags);
     return (cfg.groups.length ? cfg.groups : [[]]).map((g) => [...g, ...quick]).filter((g) => g.length);
-  }, [cfg.groups, cfg.owners, cfg.dates]);
+  }, [cfg.groups, cfg.owners, cfg.dates, cfg.tags]);
   // La tabla además filtra por el pipeline elegido.
   const groups = useMemo(() => {
     const pipe: Filter[] = type === 'deal' && pipelineSel !== 'all' ? [{ prop: 'pipeline', op: 'eq', value: pipelineSel }] : [];
@@ -127,18 +128,18 @@ function IndexFor({ type }: { type: ObjectType }) {
       if (pipe) p.set('pipeline', pipe);
       return p;
     }, { replace: true });
-    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: [], dates: {} }));
-    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: ['me'], dates: {} }));
-    else if (v) { setCfg(withOwners({ ...loadLocal(type), owners: [], dates: {}, ...v.config })); setQ(v.config.q ?? ''); }
+    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: [], dates: {}, tags: [] }));
+    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: ['me'], dates: {}, tags: [] }));
+    else if (v) { setCfg(withOwners({ ...loadLocal(type), owners: [], dates: {}, tags: [], ...v.config })); setQ(v.config.q ?? ''); }
   };
   // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
   const current: ViewConfig = {
-    q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, mode,
+    q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], mode,
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
-    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, c.mode ?? base.mode,
+    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', type === 'deal' ? c.pipeline ?? base.pipeline : '',
   ]);
   const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(activeSaved.config), current);
@@ -157,7 +158,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     const prop = col === '__name' ? (type === 'contact' || type === 'company' ? 'name' : OBJECTS[type].nameProp) : col;
     setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
   };
-  const label = (col: string) => col === '__company' ? 'Empresa' : propOf(meta, type, col)?.label ?? col;
+  const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
   const [patched, setPatched] = useState<Record<number, CrmRecord>>({});
@@ -166,9 +167,9 @@ function IndexFor({ type }: { type: ObjectType }) {
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   const quickBar = (
-    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} extra={cfg.groups.length > 0}
-      onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))}
-      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, groups: [] }))} />
+    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} extra={cfg.groups.length > 0}
+      onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
+      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], groups: [] }))} />
   );
   const filterButton = <button className={`btn${mode === 'board' ? ' sm' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
   const filterChips = (
@@ -260,10 +261,16 @@ function IndexFor({ type }: { type: ObjectType }) {
             <thead>
               <tr>
                 <th className="check nosort"><input type="checkbox" aria-label="Seleccionar todo" checked={allSel} onChange={() => setSelected(allSel ? new Set() : new Set(rows.map((r) => r.id)))} /></th>
-                <th onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}</th>
-                {columns.map((col) => (
-                  <th key={col} className={col.startsWith('__') ? 'nosort' : ''} onClick={() => !col.startsWith('__') && sortBy(col)}>
+                <th className="namecol" onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}</th>
+                {columns.map((col, i) => (
+                  <th key={col} className={`${col.startsWith('__') ? 'nosort' : ''} has-menu`} onClick={() => !col.startsWith('__') && sortBy(col)}>
                     {label(col)}{cfg.sort === col && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}
+                    <ColMenu label={label(col)} sortable={!col.startsWith('__')} filterable={!col.startsWith('__')}
+                      first={i === 0} last={i === columns.length - 1}
+                      onSort={(dir) => setCfg((c) => ({ ...c, sort: col, dir }))}
+                      onFilter={() => { setFilterProp(col); setShow('filters'); }}
+                      onMove={(d) => setCfg((c) => { const n = [...c.columns]; const k = n.indexOf(col); if (k < 0) return c; n.splice(k, 1); n.splice(k + d, 0, col); return { ...c, columns: n }; })}
+                      onRemove={() => setCfg((c) => ({ ...c, columns: c.columns.filter((x) => x !== col) }))} />
                   </th>
                 ))}
               </tr>
@@ -278,6 +285,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     <button className="btn sm peek" onClick={() => setPreview(r.id)}>Vista previa</button></td>
                   {columns.map((col) => (col === '__company'
                     ? <td key={col}>{r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>}</td>
+                    : col === '__tags' ? <td key={col}><TagChips meta={meta} ids={r.tags} small />{!r.tags?.length && <span className="muted">—</span>}</td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
               ))}
@@ -299,7 +307,7 @@ function IndexFor({ type }: { type: ObjectType }) {
 
       {preview && <RecordPreview key={`${preview.id}-${preview.compose ?? ''}`} type={type} id={preview.id} compose={preview.compose} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
       {show === 'create' && <CreateRecord type={type} onClose={() => { setShow(''); setCreateDefaults(undefined); }} onCreated={() => { list.reload(); setBoardKey((k) => k + 1); }} defaults={createDefaults ?? (type === 'deal' ? { pipeline: boardPipeline } : undefined)} />}
-      {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} onClose={() => setShow('')} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); }} />}
+      {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} addProp={filterProp} onClose={() => { setShow(''); setFilterProp(undefined); }} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); setFilterProp(undefined); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
       {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
@@ -358,11 +366,44 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   );
 }
 
-function FiltersDrawer({ type, groups, onClose, onApply }: { type: ObjectType; groups: Filter[][]; onClose: () => void; onApply: (g: Filter[][]) => void }) {
+// Menú del encabezado de una columna (como el ⋮ de HubSpot): ordenar, filtrar por ella, moverla o quitarla.
+function ColMenu({ label, sortable, filterable, first, last, onSort, onFilter, onMove, onRemove }: {
+  label: string; sortable: boolean; filterable: boolean; first: boolean; last: boolean;
+  onSort: (dir: 'asc' | 'desc') => void; onFilter: () => void; onMove: (d: number) => void; onRemove: () => void;
+}) {
+  const [at, setAt] = useState<DOMRect | null>(null);
+  const pick = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); setAt(null); fn(); };
+  return (
+    <>
+      <button className="col-menu" aria-label={`Opciones de la columna ${label}`} title="Opciones de la columna"
+        onClick={(e) => { e.stopPropagation(); setAt((e.currentTarget as HTMLElement).getBoundingClientRect()); }}>⋮</button>
+      {at && createPortal(
+        <>
+          <div className="cell-veil" onClick={() => setAt(null)} />
+          <div className="popover cell-pop" style={{ top: at.bottom + 4, left: Math.min(at.left - 180, window.innerWidth - 240), minWidth: 220, padding: 6 }} onClick={(e) => e.stopPropagation()}>
+            {sortable && <div className="opt" onClick={pick(() => onSort('asc'))}>Ordenar de menor a mayor</div>}
+            {sortable && <div className="opt" onClick={pick(() => onSort('desc'))}>Ordenar de mayor a menor</div>}
+            {filterable && <div className="opt" onClick={pick(onFilter)}>Filtrar por esta columna</div>}
+            {!first && <div className="opt" onClick={pick(() => onMove(-1))}>Mover a la izquierda</div>}
+            {!last && <div className="opt" onClick={pick(() => onMove(1))}>Mover a la derecha</div>}
+            <div className="opt danger-text" onClick={pick(onRemove)}>Quitar columna</div>
+          </div>
+        </>, document.body)}
+    </>
+  );
+}
+
+function FiltersDrawer({ type, groups, addProp, onClose, onApply }: { type: ObjectType; groups: Filter[][]; addProp?: string; onClose: () => void; onApply: (g: Filter[][]) => void }) {
   const { meta } = useMeta();
-  const [draft, setDraft] = useState<Filter[][]>(groups.length ? groups : [[]]);
   const first = filterableProps(meta, type)[0];
   const blank = (): Filter => ({ prop: first.name, op: opsFor(first)[0][0] });
+  // «Filtrar por esta columna» abre el panel con un filtro nuevo de esa propiedad, sumado al primer grupo.
+  const [draft, setDraft] = useState<Filter[][]>(() => {
+    const base = groups.length ? groups : [[]];
+    if (!addProp) return base;
+    const p = filterableProps(meta, type).find((x) => x.name === addProp);
+    return base.map((g, i) => (i === 0 ? [...g, { prop: addProp, op: opsFor(p)[0][0] }] : g));
+  });
   return (
     <Drawer title="Filtros avanzados" onClose={onClose} footer={<>
       <button className="btn" onClick={() => onApply([])}>Limpiar</button>
@@ -392,7 +433,11 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
   const { meta } = useMeta();
   const [sel, setSel] = useState<string[]>(columns);
   const [f, setF] = useState('');
-  const options = [...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []), ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name))];
+  const options = [
+    ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
+    ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
+    ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
+  ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };
   return (
     <Modal title="Editar columnas" onClose={onClose} footer={<>

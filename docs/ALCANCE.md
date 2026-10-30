@@ -31,11 +31,12 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Listas de contactos, empresas, negocios, pedidos | ✅ | `/contacts`, `/companies`, `/deals`, `/orders` |
 | Pedidos con la etapa de su pipeline (los 11 ids de HubSpot) en la lista, la vista previa y un tablero por etapa | ✅ | `/orders` → «Tablero»; la migración trae `hs_pipeline_stage` |
 | Búsqueda por nombre, mail, dominio, teléfono, id | ✅ | Lupa de arriba (Ctrl+K) y cada lista |
-| Filtros avanzados (Y / O), por propietario, fechas relativas | ✅ | «Filtros» |
+| Filtros avanzados (Y / O), por propietario, fechas relativas, por etiqueta y por datos del asociado («Empresa · Ciudad», «Contacto · Origen») | ✅ | «Filtros» |
+| Etiquetas de color por regla (las 7 de HubSpot cargadas), en tarjetas, columna «Etiquetas», ficha, vista previa y filtro rápido | ✅ | Configuración → Etiquetas |
 | Vistas guardadas propias y compartidas, «Todos» / «Míos», en la tabla y en el tablero (con sus filtros) | ✅ | Pestañas de cada lista |
 | Guardar los cambios de una vista (filtros, propietario, columnas, orden, tabla o tablero, pipeline), guardarla como nueva o descartar | ✅ | «Cambios sin guardar» a la derecha de las pestañas; pisar una vista ajena solo puede un administrador |
 | Vistas: compartir con solo yo, todos o un equipo; renombrar, copiar link, abrir por defecto, borrar; ícono de tablero en la pestaña | ✅ | «⋯» de la vista abierta |
-| Elegir y ordenar columnas, ordenar por columna, paginado | ✅ | «Columnas» |
+| Elegir y ordenar columnas, ordenar por columna, paginado; menú ⋮ en cada encabezado (ordenar, filtrar por esa columna, mover, quitar); casilla y nombre fijos al desplazar | ✅ | «Columnas» y encabezados |
 | Editar un campo desde la lista (propietario, mail, desplegables, fechas…), sin entrar a la ficha | ✅ | Lápiz al pasar el mouse por la celda (o doble clic); solo lectura no edita |
 | Vista previa al costado: clic en una tarjeta del tablero o «Vista previa» en la tabla, con acciones rápidas, «Acerca de» editable, asociaciones (agregar existentes, crear nuevos ya asociados, quitar) y última actividad | ✅ | Botón «Ver registro» para la ficha completa |
 | Acciones masivas: Asignar, Editar (la etapa pide de una vez lo obligatorio), Crear tareas, Borrar; «Seleccionar los N» de todas las páginas; informa cuáles no se pudieron y por qué | ✅ | Barra de selección en tabla y tablero (Ctrl/Cmd + clic o la casilla de la tarjeta) |
@@ -50,9 +51,10 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función | Estado | Dónde |
 |---|---|---|
 | Propiedades por grupo, edición en línea, búsqueda de propiedad | ✅ | Columna izquierda |
+| «Acerca de» elegido por objeto (contactos, empresas, pedidos) y por pipeline en negocios | ✅ | «Elegir datos» en la ficha (administradores) y Configuración → Pipelines |
 | Historial de cada propiedad (quién, cuándo, desde dónde) | ✅ | «Historial» en cada propiedad |
 | Asociaciones con empresa principal, agregar existente o crear nueva | ✅ | Columna derecha |
-| Línea de tiempo con filtros por tipo; en empresa y negocio suma la de sus contactos | ✅ | Centro |
+| Línea de tiempo con filtros por tipo, búsqueda de texto, responsable y actividades fijadas arriba; en empresa y negocio suma la de sus contactos | ✅ | Centro |
 | Registrar nota, mail, llamada (con resultado), reunión, WhatsApp | ✅ | Botones de la ficha |
 | Crear tareas con vencimiento, tipo, prioridad y responsable | ✅ | Botón «Tarea» |
 | Última actividad, último contacto, próxima actividad | ✅ | Se recalculan solos |

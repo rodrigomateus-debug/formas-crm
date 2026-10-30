@@ -103,3 +103,22 @@ test('borrar una etapa con negocios obliga a moverlos', async () => {
   const del = await api('DELETE', `/pipelines/${s.pid}`);
   assert.equal(del.status, 409, 'con negocios no se borra');
 });
+
+test('tablero de empresas por etapa del ciclo de vida (y por propietario)', async () => {
+  const comp = await api('POST', '/records/company', { props: { name: `Tablero ${RUN}`, domain: `tablero-${RUN}.com.ar`, lifecyclestage: 'opportunity' } });
+  const board = await api('GET', `/board-prop/company?prop=lifecyclestage&q=${encodeURIComponent(`Tablero ${RUN}`)}`);
+  assert.equal(board.status, 200, JSON.stringify(board.data));
+  const labels = board.data.columns.map((c) => c.label);
+  assert.deepEqual(labels.slice(0, 2), ['Listado de Empresas S/A', 'Prospect'], 'en el orden de las etapas');
+  const col = board.data.columns.find((c) => c.value === 'opportunity');
+  assert.equal(col.total, 1);
+  assert.equal(col.records[0].id, comp.data.id);
+  // Arrastrar a otra columna = cambiar la propiedad.
+  await api('PATCH', `/records/company/${comp.data.id}`, { props: { lifecyclestage: 'customer' } });
+  const after = await api('GET', `/board-prop/company?prop=lifecyclestage&q=${encodeURIComponent(`Tablero ${RUN}`)}`);
+  assert.equal(after.data.columns.find((c) => c.value === 'customer').total, 1);
+  const byOwner = await api('GET', `/board-prop/company?prop=owner_id&q=${encodeURIComponent(`Tablero ${RUN}`)}`);
+  assert.equal(byOwner.status, 200);
+  const bad = await api('GET', '/board-prop/company?prop=name');
+  assert.equal(bad.status, 400);
+});

@@ -241,3 +241,12 @@ table.grid td.name a { font-weight: 500; }
   .grid-2 { grid-template-columns: 1fr; }
   .filter-row { grid-template-columns: 1fr 1fr; }
 }
+
+/* Selector de pipeline en Negocios */
+.pipe-head { display: flex; align-items: center; gap: 12px; margin-right: auto; flex-wrap: wrap; min-width: 0; }
+.pipe-switch { display: inline-flex; align-items: center; gap: 10px; max-width: 400px; height: 42px; padding: 0 14px; font-size: 18px; font-weight: 600; color: var(--navy); background: #e8e8f8; border: 1px solid #c9c9ee; border-radius: var(--r-control); cursor: pointer; }
+.pipe-switch:hover { background: #dcdcf5; border-color: var(--navy); }
+.pipe-switch .team { font-size: 12px; font-weight: 500; color: var(--ink-2); background: var(--surface); border-radius: var(--r-pill); padding: 2px 10px; white-space: nowrap; }
+.pipe-switch .caret { font-size: 13px; }
+.pipe-menu { min-width: 320px; }
+.pipe-menu .grp { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-3); padding: 8px 10px 2px; }

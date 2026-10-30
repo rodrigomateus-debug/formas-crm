@@ -58,6 +58,8 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 |---|---|---|
 | 8 pipelines con las mismas etapas, ids y probabilidades | ✅ | `src/worker/seed.ts` |
 | Tablero con arrastrar y soltar, totales por etapa, filtro por propietario | ✅ | Negocios → «Tablero» |
+| Selector de pipeline grande arriba de Negocios (tabla y tablero), «Todos los pipelines» en la tabla, recordado y en el link | ✅ | Negocios |
+| Tablero de empresas y contactos por etapa del ciclo de vida (o por cualquier desplegable o propietario), arrastrando para cambiar | ✅ | Empresas / Contactos → «Tablero» |
 | Motivo de cierre perdido obligatorio al perder | ✅ | Tablero y barra de etapas |
 | Fecha de cierre automática al cerrar | ✅ | |
 | Fecha de entrada a cada etapa (`hs_v2_date_entered_*`) | ✅ | Historial y API compatible |

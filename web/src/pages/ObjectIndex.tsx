@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon,
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline,
   type CrmRecord, type Filter, type ObjectType,
 } from '../lib';
 import { CreateRecord, Drawer, FilterRow, Modal, PropertyInput, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
+import PropBoard from './PropBoard';
 import ImportModal from './Import';
+
+const PIPE_KEY = 'crm.deals.pipeline';
 
 const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', 'lifecyclestage', 'notes_last_updated', 'createdate'],
@@ -15,7 +18,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   order: ['pdv_finnegans', 'hs_total_price', 'owner_id', 'hs_order_status', 'createdate'],
 };
 
-interface ViewConfig { q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string }
+interface ViewConfig { q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; pipeline?: string }
 interface SavedView { id: number; name: string; shared: number; user_id: number; config: ViewConfig }
 
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
@@ -37,7 +40,26 @@ function IndexFor({ type }: { type: ObjectType }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const mode = type === 'deal' && params.get('view') === 'board' ? 'board' : 'table';
+  // Tablero: negocios por etapa del pipeline; empresas y contactos por etapa del ciclo de vida (u otra propiedad).
+  const mode = type !== 'order' && params.get('view') === 'board' ? 'board' : 'table';
+  // Negocios: en qué pipeline estás. Sale del link (?pipeline=), si no de la última elección, si no del equipo.
+  const [pipelineSel, setPipelineSelRaw] = useState<string>(() => {
+    const valid = (v: string | null) => !!v && (v === 'all' || meta.pipelines.some((p) => p.id === v));
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(PIPE_KEY); } catch { /* sin preferencia guardada */ }
+    const fromUrl = params.get('pipeline');
+    return valid(fromUrl) ? fromUrl! : valid(saved) ? saved! : defaultPipeline(meta).id;
+  });
+  const boardPipeline = pipelineSel === 'all' ? defaultPipeline(meta).id : pipelineSel;
+  const setPipelineSel = (v: string) => {
+    setPipelineSelRaw(v);
+    try { localStorage.setItem(PIPE_KEY, v); } catch { /* ignorar */ }
+    setParams((p) => { p.set('pipeline', v); return p; }, { replace: true });
+  };
+  useEffect(() => {
+    if (type === 'deal' && params.get('pipeline') !== pipelineSel) setParams((p) => { p.set('pipeline', pipelineSel); return p; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [cfg, setCfg] = useState<ViewConfig>(() => loadLocal(type));
   const [activeView, setActiveView] = useState<string>(params.get('v') ?? 'all');
   const [q, setQ] = useState(cfg.q ?? '');
@@ -49,13 +71,16 @@ function IndexFor({ type }: { type: ObjectType }) {
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
 
   useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owner, cfg.sort, cfg.dir]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owner, cfg.sort, cfg.dir, pipelineSel]);
 
   const groups = useMemo(() => {
     const base = cfg.groups.length ? cfg.groups : [[]];
     const own: Filter[] = cfg.owner ? [{ prop: 'owner_id', op: cfg.owner === 'none' ? 'unknown' : 'eq', value: cfg.owner }] : [];
-    return base.map((g) => [...g, ...own]).filter((g) => g.length);
-  }, [cfg.groups, cfg.owner]);
+    const pipe: Filter[] = type === 'deal' && pipelineSel !== 'all' ? [{ prop: 'pipeline', op: 'eq', value: pipelineSel }] : [];
+    return base.map((g) => [...g, ...own, ...pipe]).filter((g) => g.length);
+  }, [cfg.groups, cfg.owner, pipelineSel, type]);
+  // Con «Todos los pipelines» la tabla muestra de qué pipeline es cada negocio.
+  const columns = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
 
   const list = useAsync(() => http<{ results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number }>('GET', `/records/${type}${qs({
     q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, limit: pageSize, offset: page * pageSize,
@@ -69,7 +94,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: 'me' }));
     else {
       const v = views.data?.find((x) => String(x.id) === key);
-      if (v) { setCfg({ ...loadLocal(type), ...v.config }); setQ(v.config.q ?? ''); }
+      if (v) { setCfg({ ...loadLocal(type), ...v.config }); setQ(v.config.q ?? ''); if (type === 'deal' && v.config.pipeline) setPipelineSel(v.config.pipeline); }
     }
   };
   useEffect(() => { if (views.data && activeView !== 'all' && activeView !== 'mine') applyView(activeView); /* eslint-disable-next-line */ }, [views.data]);
@@ -91,8 +116,16 @@ function IndexFor({ type }: { type: ObjectType }) {
   return (
     <div className="content">
       <div className="page-head">
-        <h1>{OBJECTS[type].plural} <span className="muted small num">{list.data ? list.data.total.toLocaleString('es-AR') : ''}</span></h1>
-        {type === 'deal' && (
+        {type === 'deal' ? (
+          <div className="pipe-head">
+            <h1>Negocios</h1>
+            <PipelineSwitcher value={mode === 'board' ? boardPipeline : pipelineSel} allowAll={mode === 'table'} onChange={setPipelineSel} />
+            {mode === 'table' && <span className="muted small num">{list.data ? `${list.data.total.toLocaleString('es-AR')} negocios` : ''}</span>}
+          </div>
+        ) : (
+          <h1>{OBJECTS[type].plural} <span className="muted small num">{list.data ? list.data.total.toLocaleString('es-AR') : ''}</span></h1>
+        )}
+        {type !== 'order' && (
           <div className="row" role="group" aria-label="Vista">
             <button className={`btn sm ${mode === 'table' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.delete('view'); return p; })}><Icon name="table" size={14} />Tabla</button>
             <button className={`btn sm ${mode === 'board' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.set('view', 'board'); return p; })}><Icon name="board" size={14} />Tablero</button>
@@ -103,7 +136,8 @@ function IndexFor({ type }: { type: ObjectType }) {
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
-      {mode === 'board' ? <Board q={dq} owner={cfg.owner} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} /> : <>
+      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} q={dq} owner={cfg.owner} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} />
+        : mode === 'board' ? <PropBoard type={type} q={dq} owner={cfg.owner} onSearch={setQ} search={q} onOwner={(o) => setCfg((c) => ({ ...c, owner: o }))} /> : <>
         <div className="tabs">
           <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
           <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
@@ -153,7 +187,7 @@ function IndexFor({ type }: { type: ObjectType }) {
               <tr>
                 <th className="check nosort"><input type="checkbox" aria-label="Seleccionar todo" checked={allSel} onChange={() => setSelected(allSel ? new Set() : new Set(rows.map((r) => r.id)))} /></th>
                 <th onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}</th>
-                {cfg.columns.map((col) => (
+                {columns.map((col) => (
                   <th key={col} className={col.startsWith('__') ? 'nosort' : ''} onClick={() => !col.startsWith('__') && sortBy(col)}>
                     {label(col)}{cfg.sort === col && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}
                   </th>
@@ -167,7 +201,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     const s = new Set(selected); s.has(r.id) ? s.delete(r.id) : s.add(r.id); setSelected(s);
                   }} /></td>
                   <td className="name"><Link to={recordUrl(type, r.id)}>{r.name}</Link></td>
-                  {cfg.columns.map((col) => (
+                  {columns.map((col) => (
                     <td key={col}>{col === '__company'
                       ? (r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>)
                       : formatValue(meta, type, col, r.props[col], r.props) || <span className="muted">—</span>}</td>
@@ -190,12 +224,12 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
       </>}
 
-      {show === 'create' && <CreateRecord type={type} onClose={() => setShow('')} onCreated={() => list.reload()} />}
+      {show === 'create' && <CreateRecord type={type} onClose={() => setShow('')} onCreated={() => list.reload()} defaults={type === 'deal' ? { pipeline: boardPipeline } : undefined} />}
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} onClose={() => setShow('')} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'bulk' && <BulkEdit type={type} ids={[...selected]} onClose={() => setShow('')} onDone={() => { setShow(''); setSelected(new Set()); list.reload(); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
-      {show === 'save' && <SaveView type={type} config={{ ...cfg, q }} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
+      {show === 'save' && <SaveView type={type} config={{ ...cfg, q, ...(type === 'deal' ? { pipeline: pipelineSel } : {}) }} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
     </div>
   );
 }
@@ -309,5 +343,46 @@ function SaveView({ type, config, onClose, onSaved }: { type: ObjectType; config
       <label className="row small"><input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />Compartir con todo el equipo</label>
       <p className="muted small" style={{ margin: 0 }}>Guarda filtros, columnas, orden y búsqueda actuales.</p>
     </Modal>
+  );
+}
+
+// Selector de pipeline de la página de negocios: grande y arriba, como en HubSpot, para que siempre se sepa dónde estás.
+function PipelineSwitcher({ value, onChange, allowAll }: { value: string; onChange: (v: string) => void; allowAll: boolean }) {
+  const { meta } = useMeta();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const team = (id: number | null) => meta.teams.find((t) => t.id === id)?.name;
+  const cur = meta.pipelines.find((p) => p.id === value);
+  const groups = [...new Set(meta.pipelines.map((p) => p.team_id))];
+  const pick = (v: string) => { onChange(v); setOpen(false); };
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button className="pipe-switch" onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} title="Cambiar de pipeline">
+        <span className="ellipsis">{cur ? cur.label : 'Todos los pipelines'}</span>
+        {cur?.team_id && !cur.label.toLowerCase().startsWith(String(team(cur.team_id)).toLowerCase().split(' ')[0]) && <span className="team">{team(cur.team_id)}</span>}
+        <span aria-hidden="true" className="caret">▾</span>
+      </button>
+      {open && (
+        <div className="popover pipe-menu" role="listbox" style={{ top: 48, left: 0 }}>
+          {allowAll && <div className={`opt${value === 'all' ? ' on' : ''}`} role="option" aria-selected={value === 'all'} onClick={() => pick('all')}><b>Todos los pipelines</b></div>}
+          {groups.map((g) => (
+            <div key={String(g)}>
+              <div className="grp">{team(g) ?? 'Sin equipo'}</div>
+              {meta.pipelines.filter((p) => p.team_id === g).map((p) => (
+                <div key={p.id} className={`opt${p.id === value ? ' on' : ''}`} role="option" aria-selected={p.id === value} onClick={() => pick(p.id)}>
+                  <span className="grow">{p.label}</span><span className="small muted">{p.stages.length} etapas</span>
+                </div>
+              ))}
+            </div>
+          ))}
+          {!allowAll && <div className="small muted" style={{ padding: '6px 10px' }}>El tablero muestra un pipeline a la vez.</div>}
+        </div>
+      )}
+    </div>
   );
 }

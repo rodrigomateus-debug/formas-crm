@@ -1,26 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, type CrmRecord, type Stage, type Pipeline, defaultPipeline, missingFor, formatValue, propOf, type Property } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, type CrmRecord, type Stage, type Pipeline, missingFor, formatValue, propOf, type Property } from '../lib';
 import { Avatar, Modal, PropertyInput } from '../components';
 
 interface Column { stage: Stage; total: number; amount: number; deals: CrmRecord[] }
 
-const PIPE_KEY = 'crm.board.pipeline';
 
 // Tablero de negocios por pipeline: arrastrar una tarjeta a otra columna cambia la etapa.
-export default function Board({ q, owner, onOwner, search, onSearch }: { q: string; owner?: string; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void }) {
+export default function Board({ pipelineId, q, owner, onOwner, search, onSearch }: { pipelineId: string; q: string; owner?: string; onOwner: (o?: string) => void; search: string; onSearch: (s: string) => void }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const [pipelineId, setPipelineId] = useState(() => {
-    let saved: string | null = null;
-    try { saved = localStorage.getItem(PIPE_KEY); } catch { /* sin preferencia guardada */ }
-    return saved && meta.pipelines.some((p) => p.id === saved) ? saved : defaultPipeline(meta).id;
-  });
   const [closedDays, setClosedDays] = useState(90);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [ask, setAsk] = useState<{ deal: CrmRecord; stage: Stage; missing: string[] } | null>(null);
-  useEffect(() => { try { localStorage.setItem(PIPE_KEY, pipelineId); } catch { /* ignorar */ } }, [pipelineId]);
   const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', `/board${qs({ pipeline: pipelineId, owner, q, closed_days: closedDays })}`), [pipelineId, owner, q, closedDays]);
   const [cols, setCols] = useState<Column[]>([]);
   const pipe = meta.pipelines.find((p) => p.id === pipelineId);
@@ -50,9 +43,6 @@ export default function Board({ q, owner, onOwner, search, onSearch }: { q: stri
   return (
     <>
       <div className="toolbar">
-        <select className="input" style={{ width: 260 }} value={pipelineId} onChange={(e) => setPipelineId(e.target.value)} aria-label="Pipeline">
-          {meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-        </select>
         <div className="search" style={{ width: 240 }}><Icon name="search" /><input className="input" placeholder="Buscar negocios…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
         <select className="input" style={{ width: 190 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
           <option value="">Todos los propietarios</option>

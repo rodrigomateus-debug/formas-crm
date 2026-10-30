@@ -4,7 +4,7 @@ import { assertType, HttpError, now, OBJECT_TYPES } from './env';
 import { requireRole, canWrite, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
-  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, updateRecord,
+  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, updateRecord,
   type Filter, type RecordRow, type SearchParams,
 } from './records';
 import { associate, associationsOf, dissociate } from './associations';
@@ -287,6 +287,42 @@ api.get('/board', async (c) => {
     deals: rows.filter((r) => r.stage_id === st.id).map(rowToRecord),
   }));
   return c.json({ pipeline, columns });
+});
+
+// Tablero por propiedad (empresas y contactos, como el tablero por etapa del ciclo de vida de HubSpot):
+// una columna por opción de la propiedad (desplegable, sí/no o propietario) y las primeras N tarjetas de cada una.
+api.get('/board-prop/:type', async (c) => {
+  const type = assertType(c.req.param('type'));
+  const q = c.req.query();
+  const db = c.env.DB;
+  const ctx = c.get('ctx');
+  const meta = new Meta(db);
+  const propName = q.prop || 'lifecyclestage';
+  const prop = await meta.property(type, propName);
+  if (!prop || !['enum', 'bool', 'owner'].includes(prop.type)) throw new HttpError(400, `No se puede armar un tablero por «${propName}»: tiene que ser un desplegable, sí/no o propietario.`);
+  const extra = parseSearch(q);
+  const filters: Filter[] = [...(extra.filters ?? [])];
+  if (q.owner) filters.push({ prop: 'owner_id', op: q.owner === 'none' ? 'unknown' : 'eq', value: q.owner });
+  const { whereSql, binds } = await buildWhere(meta, ctx, type, { q: extra.q, filters });
+  const { expr } = await sqlFor(meta, type, propName);
+  const perColumn = Math.min(Number(q.per_column) || 40, 200);
+  const [cards, totals] = await db.batch([
+    db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY r.updated_at DESC) AS rn
+      FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`).bind(...binds),
+    db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
+  ]);
+  const options = prop.type === 'owner'
+    ? (await db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name').all<{ id: number; name: string }>()).results.map((u) => ({ value: String(u.id), label: u.name }))
+    : prop.type === 'bool' && !prop.options.length ? [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }] : prop.options;
+  const counts = new Map((totals.results as Array<{ v: string | null; n: number }>).map((t) => [t.v ?? '', t.n]));
+  // Valores que no están entre las opciones (viejos o de otro sistema) también tienen su columna.
+  const known = new Set(options.map((o) => o.value));
+  const others = [...counts.keys()].filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v }));
+  const rows = cards.results as unknown as Array<RecordRow & { board_value: string | null }>;
+  const columns = [...options, ...others, { value: '', label: 'Sin dato' }]
+    .map((o) => ({ value: o.value, label: o.label, total: counts.get(o.value) ?? 0, records: rows.filter((r) => (r.board_value ?? '') === o.value).map(rowToRecord) }))
+    .filter((col) => col.value !== '' || col.total > 0 || prop.type !== 'owner');
+  return c.json({ prop: { name: prop.name, label: prop.label, type: prop.type }, columns });
 });
 
 // ---------- Inicio / reportes ----------

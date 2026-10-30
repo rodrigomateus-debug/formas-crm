@@ -1,0 +1,193 @@
+// Pruebas de punta a punta contra un `wrangler dev` corriendo (npm run dev) con la base local.
+// CRM_URL cambia el destino. Cada corrida usa datos con sufijo único, así se puede repetir.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
+const RUN = Date.now().toString(36);
+
+async function call(method, path, body, headers = {}) {
+  const res = await fetch(BASE + path, {
+    method,
+    headers: { 'content-type': 'application/json', ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+  return { status: res.status, data };
+}
+const api = (m, p, b) => call(m, `/api${p}`, b);
+
+const state = {};
+
+test('crea empresa, contacto con dominio corporativo y se asocian solos', async () => {
+  const comp = await api('POST', '/records/company', { props: { name: `Acme ${RUN}`, domain: `acme-${RUN}.com.ar`, industry: 'RETAIL' } });
+  assert.equal(comp.status, 201, JSON.stringify(comp.data));
+  state.company = comp.data.id;
+  const dup = await api('POST', '/records/company', { props: { name: 'Otra', domain: `https://www.acme-${RUN}.com.ar/` } });
+  assert.equal(dup.status, 409);
+  const ct = await call('POST', '/hooks/bundle', undefined); // sin token
+  assert.equal(ct.status, 401);
+  const contact = await api('POST', '/records/contact', { props: { firstname: 'Ana', lastname: `Pérez ${RUN}`, email: `ana@acme-${RUN}.com.ar`, phone: '+54 9 11 5555-0001' }, associations: [state.company] });
+  assert.equal(contact.status, 201, JSON.stringify(contact.data));
+  state.contact = contact.data.id;
+  assert.equal(contact.data.name, `Ana Pérez ${RUN}`);
+  const again = await api('POST', '/records/contact', { props: { email: `ANA@acme-${RUN}.com.ar` } });
+  assert.equal(again.status, 409, 'dedupe por email sin importar mayúsculas');
+  const rec = await api('GET', `/records/contact/${state.contact}`);
+  assert.equal(rec.data.associations.company.length, 1);
+  assert.equal(rec.data.associations.company[0].primary, true);
+});
+
+test('valida opciones de enums y tipos', async () => {
+  const bad = await api('PATCH', `/records/company/${state.company}`, { props: { tipo_de_empresa_cotizacion: 'Z' } });
+  assert.equal(bad.status, 400);
+  assert.match(bad.data.error, /Opciones/);
+  const byLabel = await api('PATCH', `/records/company/${state.company}`, { props: { tipo_de_empresa_cotizacion: 'A · Cotización mensual', objetivo_economico_anual: '1.500.000' } });
+  assert.equal(byLabel.status, 200, JSON.stringify(byLabel.data));
+  assert.equal(byLabel.data.props.tipo_de_empresa_cotizacion, 'a_cotizacion_mensual');
+  assert.equal(byLabel.data.props.objetivo_economico_anual, 1500000);
+});
+
+test('negocio: etapa por defecto, mover de etapa, historial y cierre', async () => {
+  const deal = await api('POST', '/records/deal', { props: { dealname: `Remeras ${RUN}`, pipeline: '674405796', amount: 250000 }, associations: [state.contact, state.company] });
+  assert.equal(deal.status, 201, JSON.stringify(deal.data));
+  state.deal = deal.data.id;
+  assert.equal(deal.data.props.dealstage, '989921330');
+  const wrong = await api('PATCH', `/records/deal/${state.deal}`, { props: { dealstage: 'closedwon' } });
+  assert.equal(wrong.status, 400, 'closedwon no es de Corporate');
+  const won = await api('PATCH', `/records/deal/${state.deal}`, { props: { dealstage: 'Cierre Ganado' } });
+  assert.equal(won.data.props.dealstage, '989921336');
+  assert.ok(won.data.props.closedate, 'completa la fecha de cierre');
+  const hist = await api('GET', `/records/deal/${state.deal}/history?prop=dealstage`);
+  assert.equal(hist.data.length, 2);
+  const comp = await api('GET', `/records/company/${state.company}`);
+  assert.equal(comp.data.associations.deal.length, 1);
+});
+
+test('actividades: nota en el contacto aparece en la empresa y el negocio; tareas', async () => {
+  const note = await api('POST', '/activities', { type: 'note', body: 'Pidió muestras', links: [state.contact] });
+  assert.equal(note.status, 201);
+  assert.ok(note.data.links.some((l) => l.id === state.company), 'se asocia a la empresa principal');
+  const call1 = await api('POST', '/activities', { type: 'call', outcome: 'Conectada', body: 'Charla', links: [state.deal] });
+  assert.equal(call1.status, 201);
+  const due = new Date(Date.now() + 3600_000).toISOString();
+  const task = await api('POST', '/activities', { type: 'task', subject: `Llamar ${RUN}`, due_at: due, links: [state.deal] });
+  assert.equal(task.data.status, 'NOT_STARTED');
+  state.task = task.data.id;
+  const tl = await api('GET', `/records/company/${state.company}/timeline`);
+  const types = tl.data.activities.map((a) => a.type);
+  assert.ok(types.includes('note') && types.includes('call') && types.includes('task'), types.join());
+  const dealRec = await api('GET', `/records/deal/${state.deal}`);
+  assert.ok(dealRec.data.record.props.notes_next_activity_date, 'próxima actividad');
+  assert.ok(dealRec.data.record.props.notes_last_contacted, 'último contacto por la llamada');
+  const tasks = await api('GET', `/tasks?q=${RUN}`);
+  assert.equal(tasks.data.total, 1);
+  const done = await api('PATCH', `/activities/${state.task}`, { status: 'COMPLETED' });
+  assert.ok(done.data.completed_at);
+});
+
+test('búsqueda con filtros, texto y orden', async () => {
+  const byText = await api('GET', `/records/contact?q=${encodeURIComponent(`acme-${RUN}`)}`);
+  assert.equal(byText.data.total, 1);
+  const byPhone = await api('GET', '/records/contact?q=1155550001');
+  assert.ok(byPhone.data.total >= 1);
+  const filters = JSON.stringify([{ prop: 'amount', op: 'gte', value: 200000 }, { prop: 'pipeline', op: 'eq', value: '674405796' }, { prop: 'owner_id', op: 'eq', value: 'me' }]);
+  const deals = await api('GET', `/records/deal?filters=${encodeURIComponent(filters)}&sort=amount&dir=desc`);
+  assert.ok(deals.data.results.some((d) => d.id === state.deal));
+  const assoc = await api('GET', `/records/deal?associated_with=${state.company}`);
+  assert.equal(assoc.data.total, 1);
+  const board = await api('GET', '/board?pipeline=674405796');
+  assert.equal(board.data.columns.length, 7);
+});
+
+test('MCP: initialize, tools/list y alta con upsert_bundle', async () => {
+  const tok = await api('POST', '/tokens', { name: `Claude ${RUN}`, source: 'mcp' });
+  assert.equal(tok.status, 201);
+  state.token = tok.data.token;
+  const rpc = (method, params, id = 1) => call('POST', `/mcp/${state.token}`, { jsonrpc: '2.0', id, method, params });
+  const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+  assert.equal(init.data.result.serverInfo.name, 'formas-crm');
+  const notif = await call('POST', `/mcp/${state.token}`, { jsonrpc: '2.0', method: 'notifications/initialized' });
+  assert.equal(notif.status, 202);
+  const list = await rpc('tools/list', {});
+  assert.ok(list.data.result.tools.length >= 15);
+  const up = await rpc('tools/call', { name: 'upsert_bundle', arguments: {
+    contact: { email: `ana@acme-${RUN}.com.ar`, jobtitle: 'Compras' },
+    deal: { dealname: `Gorras ${RUN}`, pipeline: 'Formas Shop (Inbound)', dealstage: 'Nueva oportunidad' },
+    task: { subject: `Prospectar Acme ${RUN}`, due_at: new Date(Date.now() + 86400000).toISOString() },
+  } });
+  const out = JSON.parse(up.data.result.content[0].text);
+  assert.equal(out.contact.id, state.contact, 'reutiliza el contacto existente');
+  assert.equal(out.contact.created, false);
+  assert.ok(out.deal.created);
+  const got = await rpc('tools/call', { name: 'get_record', arguments: { id: out.deal.id } });
+  const rec = JSON.parse(got.data.result.content[0].text);
+  assert.equal(rec.associations.company[0].id, state.company, 'el negocio hereda la empresa del contacto');
+  const hist = await rpc('tools/call', { name: 'property_history', arguments: { id: out.deal.id } });
+  assert.ok(JSON.parse(hist.data.result.content[0].text).some((h) => h.source === 'mcp'));
+  const rep = await rpc('tools/call', { name: 'report', arguments: { object_type: 'deal', group_by: ['pipeline'], filters: [{ prop: 'dealname', op: 'contains', value: RUN }] } });
+  assert.equal(JSON.parse(rep.data.result.content[0].text).total, 2);
+  const err = await rpc('tools/call', { name: 'update_record', arguments: { id: state.deal, properties: { inexistente: 1 } } });
+  assert.equal(err.data.result.isError, true);
+});
+
+test('webhook de Darwin crea contacto + negocio y no duplica', async () => {
+  const phone = `549341${String(Date.now()).slice(-7)}`;
+  const payload = { name: `Juana ${RUN}`, phone, producto: 'Kit Verano', cantidad: 50, conversation_id: `15552-${phone}`, utm_source: 'META_ADS', utm_campaign: '1202' };
+  const h = { authorization: `Bearer ${state.token}` };
+  const first = await call('POST', '/hooks/darwin', payload, h);
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.equal(first.data.deal.created, true);
+  const second = await call('POST', '/hooks/darwin', { ...payload, summary: 'Quiere 50 kits' }, h);
+  assert.equal(second.data.deal.id, first.data.deal.id, 'mismo negocio abierto');
+  const deal = await api('GET', `/records/deal/${first.data.deal.id}`);
+  assert.equal(deal.data.record.props.dealname, `Juana ${RUN} - Kit Verano - 50 - Darwin`);
+  assert.equal(deal.data.record.props.dealstage, 'appointmentscheduled');
+  assert.match(deal.data.record.props.link_a_darwin, /getdarwin/);
+});
+
+test('API compatible con HubSpot (lo que usan los tableros)', async () => {
+  const h = { authorization: `Bearer ${state.token}` };
+  const search = await call('POST', '/hubspot/crm/v3/objects/deals/search', {
+    filterGroups: [{ filters: [{ propertyName: 'dealname', operator: 'CONTAINS_TOKEN', value: RUN }, { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' }] }],
+    properties: ['dealname', 'amount_in_home_currency', 'hubspot_owner_id', 'hs_is_closed_won', 'hs_v2_date_entered_989921336'],
+    limit: 10,
+  }, h);
+  assert.equal(search.status, 200, JSON.stringify(search.data));
+  assert.equal(search.data.total, 1);
+  const p = search.data.results[0].properties;
+  assert.equal(p.amount_in_home_currency, '250000');
+  assert.ok(p.hs_v2_date_entered_989921336);
+  const assoc = await call('POST', '/hubspot/crm/v4/associations/deals/companies/batch/read', { inputs: [{ id: String(state.deal) }] }, h);
+  assert.equal(assoc.data.results[0].to[0].toObjectId, state.company);
+  const pipes = await call('GET', '/hubspot/crm/v3/pipelines/deals', undefined, h);
+  assert.equal(pipes.data.results.length, 8);
+  const tasks = await call('POST', '/hubspot/crm/v3/objects/tasks/search', {
+    filterGroups: [{ filters: [{ propertyName: 'hs_task_subject', operator: 'CONTAINS_TOKEN', value: `Prospectar Acme ${RUN}` }] }],
+    properties: ['hs_task_subject', 'hs_timestamp', 'hs_task_status', 'hubspot_owner_id'],
+  }, h);
+  assert.equal(tasks.data.total, 1);
+  const created = await call('POST', '/hubspot/crm/v3/objects/contacts', { properties: { firstname: 'Refe', lastname: RUN, mobilephone: '1134567890', hubspot_owner_id: '1', tipo_de_origen: 'Referido' } }, h);
+  assert.equal(created.status, 201, JSON.stringify(created.data));
+  const owners = await call('GET', '/hubspot/crm/v3/owners', undefined, h);
+  assert.ok(owners.data.results.length >= 1);
+});
+
+test('combinar duplicados pasa asociaciones y actividades', async () => {
+  const dupe = await api('POST', '/records/company', { props: { name: `Acme dup ${RUN}`, city: 'Rosario' } });
+  await api('POST', '/activities', { type: 'note', body: 'nota del duplicado', links: [dupe.data.id] });
+  const merged = await api('POST', `/records/company/${state.company}/merge`, { other_id: dupe.data.id });
+  assert.equal(merged.status, 200, JSON.stringify(merged.data));
+  assert.equal(merged.data.props.city, 'Rosario', 'completa lo vacío');
+  const tl = await api('GET', `/records/company/${state.company}/timeline?types=note`);
+  assert.ok(tl.data.activities.some((a) => a.body === 'nota del duplicado'));
+  const old = await api('GET', `/records/company/${dupe.data.id}`);
+  assert.equal(old.data.redirect, state.company);
+});
+
+test('formulario web público con configuración', async () => {
+  const missing = await call('POST', '/hooks/form/no-existe', { email: 'x@y.com' });
+  assert.equal(missing.status, 404);
+});

@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "formas-crm",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/hubspot/*", "/hooks/*", "/mcp", "/mcp/*", "/health", "/contacts/*/record/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "formas-crm",
+      // Se completa con el id que devuelve `npx wrangler d1 create formas-crm` (ver README).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "cold-mud-48f2.cloudflareaccess.com",
+    "ADMIN_EMAIL": "rodrigo.mateus@formaspublicitarias.com"
+  },
+  "observability": { "enabled": true }
+}

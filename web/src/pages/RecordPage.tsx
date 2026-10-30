@@ -219,7 +219,7 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
     <>
       <div className="row" style={{ marginBottom: 6 }}>
         <span className="small muted">Pipeline</span>
-        <select className="input" style={{ width: 240, height: 30 }} value={pipe.id} onChange={async (e) => {
+        <select className="input sm" style={{ width: 240 }} value={pipe.id} onChange={async (e) => {
           try { await http('PATCH', `/records/deal/${record.id}`, { props: { pipeline: e.target.value } }); onChange(); } catch (er) { toast((er as Error).message, true); }
         }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
         <span className="grow" />

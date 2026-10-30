@@ -11,10 +11,16 @@ import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
-import { companiesFor, requireCompany } from './pipelines';
+import { assertDealVisible, canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
+
+async function hiddenPipelines(db: D1Database, ctx: Ctx) {
+  const meta = new Meta(db);
+  const visible = await visiblePipelineIds(meta, ctx.user);
+  return visible ? (await meta.pipelines()).map((p) => p.id).filter((id) => !visible.includes(id)) : [];
+}
 
 const num = (v: string | undefined) => (v == null || v === '' ? undefined : Number(v));
 
@@ -44,14 +50,14 @@ api.get('/meta', async (c) => {
   const db = c.env.DB;
   const meta = new Meta(db);
   const [users, teams, tags] = await db.batch([
-    db.prepare('SELECT id, email, name, role, team_id, active FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, team_id, extra_teams, active FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color FROM tags ORDER BY name'),
   ]);
   return c.json({
     me: c.get('ctx').user,
     properties: await meta.properties(),
-    pipelines: await meta.pipelines(),
+    pipelines: (await meta.pipelines()).filter((p) => canSee(c.get('ctx').user, p)),
     users: users.results,
     teams: teams.results,
     tags: tags.results,
@@ -107,11 +113,12 @@ api.post('/records/:type', async (c) => {
 api.get('/records/:type/:id', async (c) => {
   const type = assertType(c.req.param('type'));
   const row = await getRow(c.env.DB, Number(c.req.param('id')), type);
+  if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), c.get('ctx').user, row.pipeline_id);
   if (row.archived) {
     const merged = await c.env.DB.prepare('SELECT merged_into FROM records WHERE id = ?').bind(row.id).first<{ merged_into: number | null }>();
     if (merged?.merged_into) return c.json({ redirect: merged.merged_into, record: rowToRecord(row) });
   }
-  return c.json({ record: rowToRecord(row), associations: await associationsOf(c.env.DB, row.id) });
+  return c.json({ record: rowToRecord(row), associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx'))) });
 });
 
 api.patch('/records/:type/:id', async (c) => {
@@ -119,6 +126,7 @@ api.patch('/records/:type/:id', async (c) => {
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown> }>();
+  if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, Number(c.req.param('id')), type)).pipeline_id);
   const row = await updateRecord(c.env.DB, ctx, type, Number(c.req.param('id')), body.props ?? {});
   return c.json(rowToRecord(row));
 });
@@ -176,6 +184,7 @@ api.get('/records/:type/:id/history', async (c) => {
 api.get('/records/:type/:id/timeline', async (c) => {
   const q = c.req.query();
   return c.json(await timeline(c.env.DB, Number(c.req.param('id')), {
+    hiddenPipelines: await hiddenPipelines(c.env.DB, c.get('ctx')),
     types: q.types ? q.types.split(',') : undefined,
     rollup: q.rollup !== '0',
     limit: num(q.limit),
@@ -261,7 +270,10 @@ api.get('/board', async (c) => {
   const ctx = c.get('ctx');
   const meta = new Meta(db);
   const pipelines = await meta.pipelines();
-  const pipeline = pipelines.find((p) => p.id === q.pipeline) ?? pipelines[0];
+  const allowed = pipelines.filter((p) => canSee(ctx.user, p));
+  if (!allowed.length) throw new HttpError(403, 'No tenés acceso a ningún pipeline.');
+  const pipeline = pipelines.find((p) => p.id === q.pipeline) ?? allowed[0];
+  await assertDealVisible(meta, ctx.user, pipeline.id);
   const extra = parseSearch(q);
   const filters: Filter[] = [{ prop: 'pipeline', op: 'eq', value: pipeline.id }, ...(extra.filters ?? [])];
   if (q.owner) filters.push({ prop: 'owner_id', op: 'eq', value: q.owner });
@@ -334,8 +346,9 @@ api.get('/dashboard', async (c) => {
   const ownerId = owner === 'all' ? null : owner ? Number(owner === 'me' ? ctx.user.id : owner) : null;
   const month = new Date(); month.setUTCDate(1); month.setUTCHours(3, 0, 0, 0);
   const m = month.toISOString();
-  const ow = ownerId ? 'AND r.owner_id = ?' : '';
-  const ob = ownerId ? [ownerId] : [];
+  const hidden = await hiddenPipelines(db, ctx);
+  const ow = `${ownerId ? 'AND r.owner_id = ?' : ''} AND (r.pipeline_id IS NULL OR r.pipeline_id NOT IN (SELECT value FROM json_each(?)))`;
+  const ob = [...(ownerId ? [ownerId] : []), JSON.stringify(hidden)];
   const [open, won, created, lost, tasks] = await db.batch([
     db.prepare(`SELECT r.pipeline_id, r.stage_id, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r JOIN stages s ON s.id = r.stage_id
       WHERE r.object_type = 'deal' AND r.archived = 0 AND s.is_closed = 0 ${ow} GROUP BY r.pipeline_id, r.stage_id`).bind(...ob),
@@ -572,11 +585,12 @@ api.post('/users', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; team_id?: number | null; active?: boolean }>();
+  const b = await c.req.json<{ name?: string; role?: string; team_id?: number | null; extra_teams?: number[]; active?: boolean }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
-  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, team_id = ?, active = ? WHERE id = ?')
-    .bind(b.name ?? cur.name, b.role ?? cur.role, b.team_id === undefined ? cur.team_id : b.team_id, b.active === undefined ? cur.active : b.active ? 1 : 0, cur.id).run();
+  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, team_id = ?, extra_teams = ?, active = ? WHERE id = ?')
+    .bind(b.name ?? cur.name, b.role ?? cur.role, b.team_id === undefined ? cur.team_id : b.team_id,
+      b.extra_teams === undefined ? cur.extra_teams : JSON.stringify(b.extra_teams.map(Number)), b.active === undefined ? cur.active : b.active ? 1 : 0, cur.id).run();
   return c.json({ ok: true });
 });
 

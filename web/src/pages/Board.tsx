@@ -44,12 +44,12 @@ export default function Board({ pipelineId, q, owner, onOwner, search, onSearch 
     <>
       <div className="toolbar">
         <div className="search" style={{ width: 240 }}><Icon name="search" /><input className="input" placeholder="Buscar negocios…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
-        <select className="input" style={{ width: 190 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
+        <select className="input" style={{ width: 215 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
           <option value="">Todos los propietarios</option>
           <option value="me">Mis negocios</option>
           {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <select className="input" style={{ width: 200 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados">
+        <select className="input" style={{ width: 230 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados">
           <option value={30}>Cerrados: últimos 30 días</option>
           <option value={90}>Cerrados: últimos 90 días</option>
           <option value={365}>Cerrados: último año</option>

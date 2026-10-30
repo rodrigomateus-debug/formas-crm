@@ -96,7 +96,8 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 |---|---|---|
 | Ingreso con el mail de Formas (Cloudflare Access) | 🔧 | Falta crear la aplicación de Access |
 | Usuarios, equipos, roles (admin, gerente, miembro, solo lectura) | ✅ | Configuración → Usuarios |
-| Que cada vendedora vea solo lo suyo | ⏳ | Hoy todos ven todo (como en HubSpot con permiso «Todo»); se puede restringir por equipo |
+| Qué pipelines ve cada uno: por pipeline, «Todos» o «Solo estos equipos»; equipos extra por usuario; los administradores ven todo | ✅ | Configuración → Pipelines (Quién lo ve) y Usuarios (Otros equipos, Pipelines que ve). En HubSpot esto es del plan Enterprise |
+| Que cada vendedora vea solo sus registros (contactos, empresas, negocios propios) | ⏳ | Hoy ven todo lo de los pipelines que tienen habilitados |
 
 ### Lo que falta para pasar el 90 %
 | Función | Estado | Por qué importa |

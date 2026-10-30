@@ -71,10 +71,23 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .input, select.input, textarea.input { height: var(--control-h); border: 1px solid var(--line-strong); border-radius: var(--r-control); padding: 0 10px; background: var(--surface); width: 100%; min-width: 0; }
 textarea.input { height: auto; min-height: 90px; padding: 8px 10px; resize: vertical; }
 .input:focus { outline: none; border-color: var(--navy); box-shadow: var(--focus); }
+/* Desplegables: «SelectField» del Design System de Formas (select nativo con el aspecto del campo de texto y chevron navy). */
+.input { font-size: 13px; }
+select.input, .input.select-like {
+  -webkit-appearance: none; appearance: none; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 32px 0 10px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23000085' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center / 16px 16px;
+}
+select.input:hover, .input.select-like:hover { border-color: var(--navy); }
+select.input:disabled { background-color: var(--sunken); cursor: default; color: var(--ink-3); }
+.input.select-like.placeholder { color: var(--ink-3); }
+.input.sm { height: 32px; }
+select.input option, select.input optgroup { font: 13px var(--font); color: var(--ink); }
 .search { position: relative; }
 .search input { padding-left: 32px; }
 .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--ink-3); }
-label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-2); font-weight: 500; }
+label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.field > .btn { align-self: flex-start; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-pill); background: var(--sunken); color: var(--ink-2); font-size: 12px; border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
 .chip.on { background: #e8e8f8; color: var(--navy); border-color: #c9c9ee; font-weight: 600; }
 .chip button { border: 0; background: none; cursor: pointer; padding: 0; color: inherit; }

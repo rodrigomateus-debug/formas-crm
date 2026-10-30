@@ -228,7 +228,7 @@ test('API compatible con HubSpot (lo que usan los tableros)', async () => {
   const assoc = await call('POST', '/hubspot/crm/v4/associations/deals/companies/batch/read', { inputs: [{ id: String(state.deal) }] }, h);
   assert.equal(assoc.data.results[0].to[0].toObjectId, state.company);
   const pipes = await call('GET', '/hubspot/crm/v3/pipelines/deals', undefined, h);
-  assert.equal(pipes.data.results.length, (await api('GET', '/meta')).data.pipelines.length);
+  assert.ok(['674405796', 'default', '740095901', '687889576'].every((id) => pipes.data.results.some((p) => p.id === id)), 'los pipelines de HubSpot con sus ids');
   const tasks = await call('POST', '/hubspot/crm/v3/objects/tasks/search', {
     filterGroups: [{ filters: [{ propertyName: 'hs_task_subject', operator: 'CONTAINS_TOKEN', value: `Prospectar Acme ${RUN}` }] }],
     properties: ['hs_task_subject', 'hs_timestamp', 'hs_task_status', 'hubspot_owner_id'],

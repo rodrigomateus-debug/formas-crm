@@ -30,6 +30,7 @@ export interface PipelineConfig {
     require_company?: boolean;  // el negocio tiene que tener una empresa asociada
     create_stages?: string[];   // etapas en las que se puede crear un negocio (vacío = todas)
   };
+  visible_teams?: number[];     // quién lo ve: vacío = todos; si no, solo estos equipos (y los administradores)
   card_props?: string[];        // datos de las tarjetas del tablero
   key_props?: string[];         // «Acerca de este negocio» en la ficha
 }

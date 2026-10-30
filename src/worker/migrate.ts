@@ -46,11 +46,13 @@ migrate.post('/', async (c) => {
   switch (body.kind) {
     case 'users': {
       for (const u of items) {
-        stmts.push(db.prepare(`INSERT INTO users (id, email, name, role, team_id, active, hs_owner_id)
-          VALUES (?, ?, ?, 'member', (SELECT id FROM teams WHERE hs_id = ?), ?, ?)
+        const extra = JSON.stringify((u.team_hs_ids ?? []).filter((t: unknown) => String(t) !== String(u.team_hs_id ?? '')).map(Number));
+        stmts.push(db.prepare(`INSERT INTO users (id, email, name, role, team_id, extra_teams, active, hs_owner_id)
+          VALUES (?, ?, ?, 'member', (SELECT id FROM teams WHERE hs_id = ?), (SELECT json_group_array(id) FROM teams WHERE id IN (SELECT value FROM json_each(?))), ?, ?)
           ON CONFLICT (email) DO UPDATE SET hs_owner_id = excluded.hs_owner_id, team_id = COALESCE(users.team_id, excluded.team_id),
+            extra_teams = CASE WHEN users.extra_teams = '[]' THEN excluded.extra_teams ELSE users.extra_teams END,
             active = CASE WHEN users.role = 'admin' THEN users.active ELSE excluded.active END`)
-          .bind(Number(u.hs_owner_id), String(u.email).toLowerCase(), u.name || u.email, u.team_hs_id ?? null, u.active ? 1 : 0, String(u.hs_owner_id)));
+          .bind(Number(u.hs_owner_id), String(u.email).toLowerCase(), u.name || u.email, u.team_hs_id ?? null, extra, u.active ? 1 : 0, String(u.hs_owner_id)));
       }
       break;
     }

@@ -5,7 +5,7 @@ import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor,
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
-import { companiesFor, requireCompany } from './pipelines';
+import { assertDealVisible, canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -78,11 +78,15 @@ const TOOLS: Tool[] = [
       properties: { id: { type: 'integer' }, activity_limit: { type: 'integer', description: 'Cuántas actividades traer (default 15, 0 = ninguna).' } },
       required: ['id'],
     },
-    run: async (a, _ctx, env, base) => {
+    run: async (a, ctx, env, base) => {
       const row = await getRow(env.DB, Number(a.id));
-      const assoc = await associationsOf(env.DB, row.id);
+      const meta = new Meta(env.DB);
+      if (row.object_type === 'deal') await assertDealVisible(meta, ctx.user, row.pipeline_id);
+      const visible = await visiblePipelineIds(meta, ctx.user);
+      const hidden = visible ? (await meta.pipelines()).map((p) => p.id).filter((id) => !visible.includes(id)) : [];
+      const assoc = await associationsOf(env.DB, row.id, hidden);
       const lim = a.activity_limit ?? 15;
-      const tl = lim ? await timeline(env.DB, row.id, { limit: lim }) : null;
+      const tl = lim ? await timeline(env.DB, row.id, { limit: lim, hiddenPipelines: hidden }) : null;
       return {
         ...slim(base, rowToRecord(row)),
         archived: !!row.archived,
@@ -134,6 +138,7 @@ const TOOLS: Tool[] = [
     },
     run: async (a, ctx, env, base) => {
       const cur = await getRow(env.DB, Number(a.id));
+      if (cur.object_type === 'deal') await assertDealVisible(new Meta(env.DB), ctx.user, cur.pipeline_id);
       return slim(base, rowToRecord(await updateRecord(env.DB, ctx, cur.object_type, cur.id, a.properties ?? {})));
     },
   },
@@ -277,7 +282,7 @@ const TOOLS: Tool[] = [
     description: 'Pipelines de negocios con sus etapas (id, nombre, probabilidad, si es cerrada/ganada, propiedades obligatorias para entrar) y sus reglas (no saltear etapas, no volver atrás, empresa obligatoria, etapas de alta). Leelo antes de crear o mover negocios.',
     readOnly: true,
     inputSchema: { type: 'object', properties: {} },
-    run: async (_a, _ctx, env) => (await new Meta(env.DB).pipelines()).map((p) => ({
+    run: async (_a, ctx, env) => (await new Meta(env.DB).pipelines()).filter((p) => canSee(ctx.user, p)).map((p) => ({
       id: p.id, label: p.label, team_id: p.team_id, rules: p.config.rules ?? {},
       stages: p.stages.map((s) => ({ id: s.id, label: s.label, probability: s.probability, closed: !!s.is_closed, won: !!s.is_won, required_props: s.config.required_props ?? [], auto_task: s.config.task?.subject ?? null })),
     })),

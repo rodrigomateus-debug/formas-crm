@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { http, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, type ObjectType, type Option, type Pipeline, type Property, type Stage } from '../lib';
+import { http, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, type ObjectType, type Option, type Pipeline, type Property, type Stage, canSeePipeline, userTeams } from '../lib';
 import { Modal, MultiPick } from '../components';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
@@ -25,6 +25,15 @@ function Users() {
   const toast = useToast();
   const users = useAsync(() => http<Array<{ id: number; email: string; name: string; role: string; team_id: number | null; active: number; hs_owner_id: string | null }>>('GET', '/users'), []);
   const [add, setAdd] = useState(false);
+  // Resumen corto: «Todos», «Todos menos: …» o la lista de los que ve.
+  const pipelinesSummary = (u: Parameters<typeof canSeePipeline>[0]) => {
+    if (u.role === 'admin') return 'Todos (administrador)';
+    const sees = meta.pipelines.filter((p) => canSeePipeline(u, p));
+    const hidden = meta.pipelines.filter((p) => !canSeePipeline(u, p));
+    if (!hidden.length) return 'Todos';
+    if (!sees.length) return 'Ninguno';
+    return hidden.length <= sees.length ? `Todos menos: ${hidden.map((p) => p.label).join(', ')}` : sees.map((p) => p.label).join(', ');
+  };
   const [f, setF] = useState({ email: '', name: '', role: 'member', team_id: '' });
   const patch = async (id: number, body: Record<string, unknown>) => {
     try { await http('PATCH', `/users/${id}`, body); users.reload(); reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
@@ -33,16 +42,18 @@ function Users() {
     <>
       <div className="toolbar"><span className="muted small grow">Entran con su mail de Formas por Cloudflare Access. Quien entra por primera vez queda como «Miembro».</span>
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
-      <div className="table-wrap"><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Rol</th><th className="nosort">Equipo</th><th className="nosort">Id</th><th className="nosort">Activo</th></tr></thead>
+      <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
+        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Rol</th><th className="nosort">Equipo</th><th className="nosort">Otros equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
-            <td>{u.name}</td><td>{u.email}</td>
-            <td><select className="input" style={{ height: 30 }} value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}>
+            <td>{u.name}</td><td style={{ maxWidth: 210 }} title={u.email}>{u.email}</td>
+            <td><select className="input sm" style={{ minWidth: 140 }} value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}>
               <option value="admin">Administrador</option><option value="manager">Gerente</option><option value="member">Miembro</option><option value="viewer">Solo lectura</option></select></td>
-            <td><select className="input" style={{ height: 30 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
+            <td><select className="input sm" style={{ minWidth: 180, maxWidth: 200 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
               <option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></td>
-            <td className="muted small">{u.id}</td>
+            <td style={{ minWidth: 170, maxWidth: 190, overflow: 'visible' }}><MultiPick small options={meta.teams.filter((t) => t.id !== u.team_id).map((t) => ({ value: String(t.id), label: t.name }))}
+              values={[...userTeams(u)].filter((t) => t !== u.team_id).map(String)} onChange={(v) => patch(u.id, { extra_teams: v.map(Number) })} /></td>
+            <td className="small" style={{ maxWidth: 220, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
           </tr>
         ))}</tbody>
@@ -193,6 +204,16 @@ function Pipelines() {
           <label className="field">Nombre<input className="input" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} /></label>
           <label className="field">Equipo (arranca en este pipeline)<select className="input" value={draft.team_id ?? ''} onChange={(e) => setDraft({ ...draft, team_id: e.target.value ? Number(e.target.value) : null })}>
             <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <div className="field">Quién lo ve
+            <div className="row wrap">
+              <label className="row small" style={{ fontWeight: 400 }}><input type="radio" name="vis" checked={!draft.config.visible_teams?.length} onChange={() => setDraft({ ...draft, config: { ...draft.config, visible_teams: [] } })} />Todos</label>
+              <label className="row small" style={{ fontWeight: 400 }}><input type="radio" name="vis" checked={!!draft.config.visible_teams?.length} onChange={() => setDraft({ ...draft, config: { ...draft.config, visible_teams: draft.team_id ? [draft.team_id] : meta.teams.slice(0, 1).map((t) => t.id) } })} />Solo estos equipos</label>
+            </div>
+            {!!draft.config.visible_teams?.length && <MultiPick options={meta.teams.map((t) => ({ value: String(t.id), label: t.name }))} values={draft.config.visible_teams.map(String)} onChange={(v) => setDraft({ ...draft, config: { ...draft.config, visible_teams: v.map(Number) } })} />}
+            <span className="small muted" style={{ fontWeight: 400 }}>Lo ven: {draft.config.visible_teams?.length
+              ? meta.users.filter((u) => u.active && canSeePipeline(u, draft as unknown as Pipeline)).map((u) => u.name).join(', ')
+              : 'todos los usuarios'}. Los administradores ven siempre todos los pipelines.</span>
+          </div>
           <label className="field">Datos de las tarjetas del tablero<MultiPick options={propOpts} values={draft.config.card_props ?? ['amount', 'closedate']} onChange={(v) => setDraft({ ...draft, config: { ...draft.config, card_props: v } })} /></label>
           <label className="field">«Acerca de este negocio» en la ficha<MultiPick options={propOpts} values={draft.config.key_props ?? []} onChange={(v) => setDraft({ ...draft, config: { ...draft.config, key_props: v } })} /></label>
           <span className="small muted">Si no elegís nada, se usan los datos de siempre.</span>
@@ -231,7 +252,7 @@ function Pipelines() {
           <b className="small">Etapas que se borran al guardar</b>
           {removed.map((r, i) => (
             <div key={r.id} className="row small">«{r.label}»: si tiene negocios, pasan a
-              <select className="input" style={{ width: 240, height: 30 }} value={r.move_to} onChange={(e) => setRemoved(removed.map((x, j) => (j === i ? { ...x, move_to: e.target.value } : x)))}>
+              <select className="input sm" style={{ width: 240 }} value={r.move_to} onChange={(e) => setRemoved(removed.map((x, j) => (j === i ? { ...x, move_to: e.target.value } : x)))}>
                 {draft.stages.filter((s) => !s._new).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
               </select>
               <button className="btn ghost sm" onClick={() => { const st = meta.pipelines.find((p) => p.id === draft.id)!.stages.find((x) => x.id === r.id)!; setRemoved(removed.filter((_, j) => j !== i)); setDraft({ ...draft, stages: [...draft.stages, st] }); }}>No borrar</button>

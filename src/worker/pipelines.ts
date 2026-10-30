@@ -1,4 +1,4 @@
-import type { Ctx } from './env';
+import type { Ctx, User } from './env';
 import { HttpError } from './env';
 import type { Meta, Pipeline, Stage } from './meta';
 import { createActivity } from './activities';
@@ -26,6 +26,7 @@ export async function checkRequired(meta: Meta, stage: Stage, props: Props) {
 
 export async function checkCreate(meta: Meta, ctx: Ctx, pipeline: Pipeline, stage: Stage, props: Props) {
   if (exempt(ctx)) return;
+  if (!canSee(ctx.user, pipeline)) throw new HttpError(403, `No tenés acceso al pipeline «${pipeline.label}».`);
   const allowed = pipeline.config.rules?.create_stages ?? [];
   if (allowed.length && !allowed.includes(stage.id)) {
     const names = pipeline.stages.filter((s) => allowed.includes(s.id)).map((s) => s.label).join(', ');
@@ -36,6 +37,7 @@ export async function checkCreate(meta: Meta, ctx: Ctx, pipeline: Pipeline, stag
 
 export async function checkMove(meta: Meta, ctx: Ctx, pipeline: Pipeline, from: Stage | undefined, to: Stage, props: Props) {
   if (exempt(ctx)) return;
+  if (!canSee(ctx.user, pipeline)) throw new HttpError(403, `No tenés acceso al pipeline «${pipeline.label}».`);
   const rules = pipeline.config.rules ?? {};
   // Como en HubSpot, los administradores pueden saltear las reglas de movimiento (no las propiedades obligatorias).
   if (from && from.pipeline_id === to.pipeline_id && ctx.user.role !== 'admin') {
@@ -80,4 +82,31 @@ export async function stageAutomation(db: D1Database, ctx: Ctx, dealId: number, 
     type: 'task', subject: t.subject.replace('{negocio}', dealName), body: `Tarea automática al entrar a «${stage.label}».`,
     due_at: due.toISOString(), owner_id: ownerId ?? undefined, task_type: t.task_type ?? 'todo', links: [dealId], link_primary_company: false,
   });
+}
+
+// ---------- Quién ve cada pipeline ----------
+// Un pipeline sin equipos elegidos lo ven todos. Con equipos, lo ven sus integrantes (equipo principal o extra)
+// y los administradores. Devuelve null cuando el usuario ve todos.
+export function teamsOf(user: User) {
+  let extra: number[] = [];
+  try { extra = JSON.parse(user.extra_teams ?? '[]'); } catch { /* sin equipos extra */ }
+  return new Set([user.team_id, ...extra].filter((t): t is number => t != null).map(Number));
+}
+
+export function canSee(user: User, pipeline: Pipeline) {
+  const teams = pipeline.config.visible_teams ?? [];
+  if (user.role === 'admin' || !teams.length) return true;
+  const mine = teamsOf(user);
+  return teams.some((t) => mine.has(Number(t)));
+}
+
+export async function visiblePipelineIds(meta: Meta, user: User): Promise<string[] | null> {
+  const all = await meta.pipelines();
+  const ids = all.filter((p) => canSee(user, p)).map((p) => p.id);
+  return ids.length === all.length ? null : ids;
+}
+
+export async function assertDealVisible(meta: Meta, user: User, pipelineId: string | null | undefined) {
+  const p = (await meta.pipelines()).find((x) => x.id === pipelineId);
+  if (p && !canSee(user, p)) throw new HttpError(403, `No tenés acceso al pipeline «${p.label}».`);
 }

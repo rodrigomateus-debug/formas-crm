@@ -57,7 +57,7 @@ export default function PropBoard({ type, q, owner, onOwner, search, onSearch }:
         </label>
         <div className="search" style={{ width: 240 }}><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
         {prop !== 'owner_id' && (
-          <select className="input" style={{ width: 200 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
+          <select className="input" style={{ width: 215 }} value={owner ?? ''} onChange={(e) => onOwner(e.target.value || undefined)} aria-label="Propietario">
             <option value="">Todos los propietarios</option>
             <option value="me">Míos</option>
             <option value="none">Sin asignar</option>

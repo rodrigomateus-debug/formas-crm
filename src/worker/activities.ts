@@ -163,13 +163,14 @@ export async function updateActivity(db: D1Database, ctx: Ctx, id: number, input
 
 // Línea de tiempo de un registro. En empresas y negocios suma la actividad de los contactos asociados
 // (y en empresas, la de sus negocios), que es lo que el equipo espera ver en la ficha.
-export async function timeline(db: D1Database, recordId: number, opts: { types?: string[]; rollup?: boolean; limit?: number; before?: string } = {}) {
+export async function timeline(db: D1Database, recordId: number, opts: { types?: string[]; rollup?: boolean; limit?: number; before?: string; hiddenPipelines?: string[] } = {}) {
   const rec = await db.prepare('SELECT object_type FROM records WHERE id = ?').bind(recordId).first<{ object_type: string }>();
   if (!rec) throw new HttpError(404, `No existe el registro ${recordId}.`);
   const rollup = opts.rollup !== false && rec.object_type !== 'contact';
   const scope = rollup
-    ? `l.record_id = ?1 OR l.record_id IN (SELECT to_id FROM associations WHERE from_id = ?1 AND to_type IN (${rec.object_type === 'company' ? "'contact', 'deal'" : "'contact'"}))`
-    : 'l.record_id = ?1';
+    ? `l.record_id = ?1 OR l.record_id IN (SELECT a.to_id FROM associations a JOIN records x ON x.id = a.to_id WHERE a.from_id = ?1
+        AND a.to_type IN (${rec.object_type === 'company' ? "'contact', 'deal'" : "'contact'"}) AND (x.pipeline_id IS NULL OR x.pipeline_id NOT IN (SELECT value FROM json_each(?3))))`
+    : '(l.record_id = ?1 AND ?3 IS NOT NULL)';
   const types = (opts.types ?? []).filter((t) => ACTIVITY_TYPES.includes(t as ActivityType));
   const typeSql = types.length ? `AND a.type IN (${types.map((t) => `'${t}'`).join(', ')})` : '';
   const before = opts.before ?? '9999';
@@ -179,7 +180,7 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
      AND a.id IN (SELECT l.activity_id FROM activity_links l WHERE ${scope})
      ORDER BY CASE WHEN a.type = 'task' AND a.status != 'COMPLETED' THEN 0 ELSE 1 END, COALESCE(CASE WHEN a.type = 'task' THEN a.due_at END, a.occurred_at) DESC
      LIMIT ${limit}`,
-  ).bind(recordId, before).all<ActivityRow & { links: string | null }>();
+  ).bind(recordId, before, JSON.stringify(opts.hiddenPipelines ?? [])).all<ActivityRow & { links: string | null }>();
   const changes = await db.prepare(
     `SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id
      WHERE c.record_id = ? AND c.prop IN ('dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'archived', 'merged', 'amount')
@@ -187,7 +188,7 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
   ).bind(recordId).all();
   const counts = await db.prepare(
     `SELECT a.type, COUNT(*) AS n FROM activities a WHERE a.archived = 0 AND a.id IN (SELECT l.activity_id FROM activity_links l WHERE ${scope}) GROUP BY a.type`,
-  ).bind(recordId).all<{ type: string; n: number }>();
+  ).bind(recordId, '', JSON.stringify(opts.hiddenPipelines ?? [])).all<{ type: string; n: number }>();
   return {
     activities: results.map(shape),
     changes: changes.results,

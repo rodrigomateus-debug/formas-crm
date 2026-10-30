@@ -43,11 +43,12 @@ export async function dissociate(db: D1Database, ctx: Ctx, aId: number, bId: num
   ]);
 }
 
-export async function associationsOf(db: D1Database, id: number) {
+export async function associationsOf(db: D1Database, id: number, hiddenPipelines: string[] = []) {
   const { results } = await db.prepare(
     `SELECT r.*, a.label AS assoc_label, a.is_primary AS assoc_primary FROM associations a JOIN records r ON r.id = a.to_id
-     WHERE a.from_id = ? AND r.archived = 0 ORDER BY a.is_primary DESC, r.updated_at DESC LIMIT 500`,
-  ).bind(id).all<RecordRow & { assoc_label: string | null; assoc_primary: number }>();
+     WHERE a.from_id = ? AND r.archived = 0 AND (r.pipeline_id IS NULL OR r.pipeline_id NOT IN (SELECT value FROM json_each(?)))
+     ORDER BY a.is_primary DESC, r.updated_at DESC LIMIT 500`,
+  ).bind(id, JSON.stringify(hiddenPipelines)).all<RecordRow & { assoc_label: string | null; assoc_primary: number }>();
   const out: Record<ObjectType, Array<ReturnType<typeof rowToRecord> & { label: string | null; primary: boolean }>> = {
     contact: [], company: [], deal: [], order: [],
   };

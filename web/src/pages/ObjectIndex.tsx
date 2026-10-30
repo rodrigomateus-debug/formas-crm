@@ -151,7 +151,7 @@ function IndexFor({ type }: { type: ObjectType }) {
 
         <div className="toolbar">
           <div className="search" style={{ width: 280 }}><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-          <select className="input" style={{ width: 190 }} value={cfg.owner ?? ''} onChange={(e) => setCfg((c) => ({ ...c, owner: e.target.value || undefined }))} aria-label="Propietario">
+          <select className="input" style={{ width: 215 }} value={cfg.owner ?? ''} onChange={(e) => setCfg((c) => ({ ...c, owner: e.target.value || undefined }))} aria-label="Propietario">
             <option value="">Todos los propietarios</option>
             <option value="me">Yo</option>
             <option value="none">Sin asignar</option>
@@ -215,7 +215,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
         <div className="pager">
           <span>Por página</span>
-          <select className="input" style={{ width: 80, height: 30 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
+          <select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
             {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
           </select>
           <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>

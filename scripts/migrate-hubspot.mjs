@@ -119,7 +119,7 @@ if (want('users')) {
       const page = await hs('GET', `/crm/v3/owners?limit=100&archived=${archived}${after ? `&after=${after}` : ''}`);
       for (const o of page.results) {
         if (!o.email) continue;
-        users.push({ hs_owner_id: o.id, email: o.email, name: [o.firstName, o.lastName].filter(Boolean).join(' ') || o.email, active: archived === 'false', team_hs_id: o.teams?.find((t) => t.primary)?.id ?? o.teams?.[0]?.id ?? null });
+        users.push({ hs_owner_id: o.id, email: o.email, name: [o.firstName, o.lastName].filter(Boolean).join(' ') || o.email, active: archived === 'false', team_hs_id: o.teams?.find((t) => t.primary)?.id ?? o.teams?.[0]?.id ?? null, team_hs_ids: (o.teams ?? []).map((t) => t.id) });
       }
       after = page.paging?.next?.after;
     } while (after);

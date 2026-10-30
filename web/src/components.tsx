@@ -296,7 +296,7 @@ export function FilterRow({ type, f, onChange, onRemove }: { type: ObjectType; f
   );
 }
 
-export function MultiPick({ options, values, onChange }: { options: { value: string; label: string }[]; values: string[]; onChange: (v: string[]) => void }) {
+export function MultiPick({ options, values, onChange, small }: { options: { value: string; label: string }[]; values: string[]; onChange: (v: string[]) => void; small?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -307,7 +307,7 @@ export function MultiPick({ options, values, onChange }: { options: { value: str
   const label = values.length ? values.map((v) => options.find((o) => o.value === v)?.label ?? v).join(', ') : 'Elegir…';
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button className="input ellipsis" style={{ textAlign: 'left' }} onClick={() => setOpen(!open)}>{label}</button>
+      <button type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}>{label}</button>
       {open && (
         <div className="popover" style={{ top: 38, left: 0 }}>
           {options.map((o) => (

@@ -11,12 +11,13 @@ export interface Property {
 export interface StageConfig { required_props?: string[]; task?: { subject: string; due_days?: number; task_type?: string } | null }
 export interface PipelineConfig {
   rules?: { no_skip?: boolean; no_backward?: boolean; require_company?: boolean; create_stages?: string[] };
+  visible_teams?: number[];
   card_props?: string[];
   key_props?: string[];
 }
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
-export interface User { id: number; email: string; name: string; role: string; team_id: number | null; active: number }
+export interface User { id: number; email: string; name: string; role: string; team_id: number | null; extra_teams?: string; active: number }
 export interface Meta { me: User; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }> }
 export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean }
 export interface Activity {
@@ -102,6 +103,18 @@ export function stageOf(meta: Meta, id?: string) {
 // Cada equipo arranca en su pipeline (Corporate en Corporate, Formas Shop en Formas Shop).
 export function defaultPipeline(meta: Meta) {
   return meta.pipelines.find((p) => p.team_id != null && p.team_id === meta.me.team_id) ?? meta.pipelines[0];
+}
+// Quién ve un pipeline (misma regla que el servidor): sin equipos, todos; si no, sus equipos y los administradores.
+export function userTeams(u: User) {
+  let extra: number[] = [];
+  try { extra = JSON.parse(u.extra_teams ?? '[]'); } catch { /* sin equipos extra */ }
+  return new Set([u.team_id, ...extra].filter((t): t is number => t != null).map(Number));
+}
+export function canSeePipeline(u: User, p: Pipeline) {
+  const teams = p.config.visible_teams ?? [];
+  if (u.role === 'admin' || !teams.length) return true;
+  const mine = userTeams(u);
+  return teams.some((t) => mine.has(Number(t)));
 }
 // Lo que falta completar para pasar un negocio a una etapa.
 export function missingFor(stage: Stage, props: Record<string, unknown>) {

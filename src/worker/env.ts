@@ -21,6 +21,7 @@ export interface User {
   name: string;
   role: 'admin' | 'manager' | 'member' | 'viewer';
   team_id: number | null;
+  extra_teams?: string;
   active: number;
 }
 

@@ -2,7 +2,7 @@ import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property } from './meta';
 import { emitDealEvent } from './events';
-import { checkCreate, checkMove, requireCompany, stageAutomation } from './pipelines';
+import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 
 // Los registros nuevos arrancan en este id para no chocar con los ids de HubSpot que trae la migración
 // (los migrados conservan su id de HubSpot, así los links y los tableros siguen andando).
@@ -505,6 +505,10 @@ async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, bind
 export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params: SearchParams) {
   const binds: unknown[] = [type];
   const where = ['r.object_type = ?'];
+  if (type === 'deal') {
+    const visible = await visiblePipelineIds(meta, ctx.user);
+    if (visible) { where.push('r.pipeline_id IN (SELECT value FROM json_each(?))'); binds.push(JSON.stringify(visible)); }
+  }
   if (!params.includeArchived) where.push('r.archived = 0');
   if (params.q?.trim()) {
     const q = params.q.trim();

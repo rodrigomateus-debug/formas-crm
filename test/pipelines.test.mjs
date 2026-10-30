@@ -122,3 +122,35 @@ test('tablero de empresas por etapa del ciclo de vida (y por propietario)', asyn
   const bad = await api('GET', '/board-prop/company?prop=name');
   assert.equal(bad.status, 400);
 });
+
+test('quién ve cada pipeline: por equipo (principal o extra); los administradores ven todo', async () => {
+  asUser = null;
+  const p = await api('POST', '/pipelines', { label: `Solo Corporate ${RUN}`, team_id: 58079782 });
+  const def = (await api('GET', '/meta')).data.pipelines.find((x) => x.id === p.data.id);
+  await api('PUT', `/pipelines/${p.data.id}`, { label: def.label, team_id: 58079782, config: { visible_teams: [58079782] }, stages: def.stages });
+  const comp = await api('POST', '/records/company', { props: { name: `Visible ${RUN}`, domain: `visible-${RUN}.com.ar` } });
+  const deal = await api('POST', '/records/deal', { props: { dealname: `Oculto ${RUN}`, pipeline: p.data.id }, associations: [comp.data.id] });
+  assert.equal(deal.status, 201, JSON.stringify(deal.data));
+  await api('POST', '/activities', { type: 'note', body: `nota del negocio oculto ${RUN}`, links: [deal.data.id] });
+
+  const shop = await api('POST', '/users', { email: `shop.${RUN}@formas.ar`, name: `Shop ${RUN}`, role: 'member', team_id: 57132078 });
+  asUser = `shop.${RUN}@formas.ar`;
+  const meta = (await api('GET', '/meta')).data;
+  assert.ok(!meta.pipelines.some((x) => x.id === p.data.id), 'no aparece en su lista de pipelines');
+  assert.equal((await api('GET', `/records/deal?q=${encodeURIComponent(`Oculto ${RUN}`)}`)).data.total, 0, 'ni en la búsqueda');
+  assert.equal((await api('GET', `/records/deal/${deal.data.id}`)).status, 403, 'ni abriendo la ficha');
+  assert.equal((await api('GET', `/board?pipeline=${p.data.id}`)).status, 403);
+  assert.equal((await api('PATCH', `/records/deal/${deal.data.id}`, { props: { amount: 1 } })).status, 403);
+  assert.equal((await api('POST', '/records/deal', { props: { dealname: 'x', pipeline: p.data.id } })).status, 403);
+  const company = (await api('GET', `/records/company/${comp.data.id}`)).data;
+  assert.equal(company.associations.deal.length, 0, 'la empresa no muestra el negocio oculto');
+  const tl = (await api('GET', `/records/company/${comp.data.id}/timeline`)).data;
+  assert.ok(!tl.activities.some((a) => a.body.includes(`nota del negocio oculto ${RUN}`)), 'ni su actividad');
+
+  asUser = null;
+  await api('PATCH', `/users/${shop.data.id}`, { extra_teams: [58079782] });
+  asUser = `shop.${RUN}@formas.ar`;
+  assert.ok((await api('GET', '/meta')).data.pipelines.some((x) => x.id === p.data.id), 'con el equipo extra, lo ve');
+  assert.equal((await api('GET', `/records/deal/${deal.data.id}`)).status, 200);
+  asUser = null;
+});

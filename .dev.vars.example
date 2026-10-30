@@ -1,0 +1,4 @@
+# Copiar a .dev.vars para desarrollo local.
+DEV_USER_EMAIL=rodrigo.mateus@formaspublicitarias.com
+# Opcional, para probar Gmail (o generar uno de prueba con `node test/gmail-dev-vars.mjs`):
+# GOOGLE_SA_JSON='{"client_email":"…","private_key":"-----BEGIN PRIVATE KEY-----\n…"}'

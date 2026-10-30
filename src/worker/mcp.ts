@@ -4,7 +4,7 @@ import { Meta } from './meta';
 import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor, updateRecord, type Filter } from './records';
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
-import { applyBundle, type Bundle } from './upsert';
+import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -109,6 +109,9 @@ const TOOLS: Tool[] = [
     run: async (a, ctx, env, base) => {
       const row = await createRecord(env.DB, ctx, assertType(a.object_type), a.properties ?? {});
       for (const id of a.associate_with ?? []) await associate(env.DB, ctx, row.id, Number(id));
+      if (row.object_type === 'contact' && !(await env.DB.prepare("SELECT 1 FROM associations WHERE from_id = ? AND to_type = 'company'").bind(row.id).first())) {
+        await autoAssociateCompany(env.DB, ctx, row);
+      }
       return slim(base, rowToRecord(await getRow(env.DB, row.id)));
     },
   },

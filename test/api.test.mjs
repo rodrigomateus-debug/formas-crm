@@ -173,6 +173,11 @@ test('API compatible con HubSpot (lo que usan los tableros)', async () => {
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const owners = await call('GET', '/hubspot/crm/v3/owners', undefined, h);
   assert.ok(owners.data.results.length >= 1);
+  // Misma ruta que api.hubapi.com: los tableros solo cambian el host.
+  const root = await call('GET', '/crm/v3/pipelines/deals', undefined, h);
+  assert.equal(root.data.results.length, pipes.data.results.length);
+  const scopes = await call('POST', '/oauth/v2/private-apps/get/access-token-info', { tokenKey: 'x' }, h);
+  assert.ok(scopes.data.scopes.includes('crm.objects.deals.write'));
 });
 
 test('combinar duplicados pasa asociaciones y actividades', async () => {

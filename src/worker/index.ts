@@ -7,6 +7,8 @@ import { api } from './api';
 import { compat } from './compat';
 import { hooks } from './hooks';
 import { handleMcp } from './mcp';
+import { migrate } from './migrate';
+import { syncAll } from './gmail';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 const app = new Hono<App>();
@@ -28,11 +30,16 @@ const authed = async (c: { env: Env; req: { raw: Request }; set: (k: 'ctx', v: C
 };
 
 app.use('/api/*', authed);
+app.route('/api/migrate', migrate);
 app.route('/api', api);
 
-// API compatible con HubSpot para los tableros: https://<crm>/hubspot/crm/v3/...
+// API compatible con HubSpot para los tableros: misma ruta que api.hubapi.com (https://<crm>/crm/v3/...),
+// así alcanza con cambiar el host y el token. También en /hubspot/… por claridad.
 app.use('/hubspot/*', authed);
 app.route('/hubspot', compat);
+app.use('/crm/*', authed);
+app.use('/oauth/*', authed);
+app.route('/', compat);
 
 app.route('/hooks', hooks);
 
@@ -53,4 +60,8 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
+  // Cada 10 minutos: registra los mails nuevos del equipo (si Gmail está activado en Configuración).
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil((async () => { await ensureSeeded(env.DB); await syncAll(env); })());
+  },
 } satisfies ExportedHandler<Env>;

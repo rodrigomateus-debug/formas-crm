@@ -36,6 +36,19 @@ const ASSOC_TYPE_ID: Record<string, number> = {
 
 const ALIAS: Record<string, string> = { hubspot_owner_id: 'owner_id', amount_in_home_currency: 'amount', hs_lastactivitydate: 'notes_last_updated' };
 
+// Los tableros conocen a cada vendedora por su owner id de HubSpot (PERSONAS). Si el usuario ya existía en el CRM
+// con otro id, se traduce en las dos direcciones con users.hs_owner_id.
+interface OwnerMap { toHs: (id: unknown) => string | null; fromHs: (v: unknown) => unknown }
+async function ownerMap(db: D1Database): Promise<OwnerMap> {
+  const { results } = await db.prepare('SELECT id, hs_owner_id FROM users WHERE hs_owner_id IS NOT NULL').all<{ id: number; hs_owner_id: string }>();
+  const toHs = new Map(results.map((u) => [String(u.id), u.hs_owner_id]));
+  const fromHs = new Map(results.map((u) => [u.hs_owner_id, u.id]));
+  return {
+    toHs: (id) => (id == null || id === '' ? null : toHs.get(String(id)) ?? String(id)),
+    fromHs: (v) => (v == null || v === '' ? v : fromHs.get(String(v)) ?? Number(v)),
+  };
+}
+
 async function stageSets(db: D1Database) {
   const pipes = await new Meta(db).pipelines();
   const all = pipes.flatMap((p) => p.stages);
@@ -59,6 +72,7 @@ async function stageHistory(db: D1Database, ids: number[]) {
 
 async function recordOut(db: D1Database, rows: RecordRow[], wanted: string[] | null) {
   const sets = await stageSets(db);
+  const om = await ownerMap(db);
   const hist = rows[0]?.object_type === 'deal' ? await stageHistory(db, rows.map((r) => r.id)) : new Map();
   const extra = new Map<number, Record<string, unknown>>();
   if (rows.length && rows[0].object_type !== 'deal') {
@@ -85,7 +99,7 @@ async function recordOut(db: D1Database, rows: RecordRow[], wanted: string[] | n
   return rows.map((row) => {
     const r = rowToRecord(row);
     const p: Record<string, unknown> = { ...r.props, ...(extra.get(row.id) ?? {}), ...(hist.get(row.id) ?? {}) };
-    p.hubspot_owner_id = p.owner_id ?? null;
+    p.hubspot_owner_id = om.toHs(p.owner_id);
     p.hubspot_owner_assigneddate = ownerAt.get(row.id) ?? null;
     p.hs_lastactivitydate = row.last_activity_at;
     if (row.object_type === 'contact') p.hs_whatsapp_phone_number = p.hs_whatsapp_phone_number ?? p.mobilephone ?? null;
@@ -114,6 +128,7 @@ function toVal(prop: string, v: unknown) {
 
 async function translateFilters(db: D1Database, groups: Array<{ filters?: Array<Record<string, any>> }>): Promise<Filter[][]> {
   const sets = await stageSets(db);
+  const om = await ownerMap(db);
   return groups.map((g) => (g.filters ?? []).map((f) => {
     const prop = ALIAS[f.propertyName] ?? f.propertyName;
     const op = String(f.operator).toUpperCase();
@@ -122,7 +137,8 @@ async function translateFilters(db: D1Database, groups: Array<{ filters?: Array<
       const yes = String(f.value) === 'true' ? op === 'EQ' : op === 'NEQ';
       return { prop: 'dealstage', op: yes ? 'in' : 'not_in', values: ids } as Filter;
     }
-    const value = toVal(prop, f.value);
+    const conv = (v: unknown) => (prop === 'owner_id' ? om.fromHs(v) : toVal(prop, v));
+    const value = conv(f.value);
     switch (op) {
       case 'EQ': return { prop, op: 'eq', value };
       case 'NEQ': return { prop, op: 'neq', value };
@@ -131,8 +147,8 @@ async function translateFilters(db: D1Database, groups: Array<{ filters?: Array<
       case 'GT': return { prop, op: 'gt', value };
       case 'GTE': return { prop, op: 'gte', value };
       case 'BETWEEN': return { prop, op: 'between', value, high: toVal(prop, f.highValue) };
-      case 'IN': return { prop, op: 'in', values: (f.values ?? []).map((v: unknown) => toVal(prop, v)) };
-      case 'NOT_IN': return { prop, op: 'not_in', values: (f.values ?? []).map((v: unknown) => toVal(prop, v)) };
+      case 'IN': return { prop, op: 'in', values: (f.values ?? []).map(conv) };
+      case 'NOT_IN': return { prop, op: 'not_in', values: (f.values ?? []).map(conv) };
       case 'HAS_PROPERTY': return { prop, op: 'known' };
       case 'NOT_HAS_PROPERTY': return { prop, op: 'unknown' };
       case 'CONTAINS_TOKEN': return { prop, op: 'contains', value: String(f.value).replace(/\*/g, '') };
@@ -152,11 +168,11 @@ const ACT_COL: Record<string, string> = {
   hs_email_direction: "CASE a.direction WHEN 'in' THEN 'INCOMING_EMAIL' ELSE 'EMAIL' END",
 };
 
-function activityOut(a: ActivityRow, wanted: string[] | null) {
+function activityOut(a: ActivityRow, wanted: string[] | null, om: OwnerMap) {
   const meta = JSON.parse(a.meta || '{}') as Record<string, unknown>;
   const ts = a.type === 'task' ? a.due_at : a.occurred_at;
   const p: Record<string, unknown> = {
-    hs_object_id: a.id, hs_timestamp: ts, hubspot_owner_id: a.owner_id, hs_createdate: a.created_at, hs_lastmodifieddate: a.updated_at,
+    hs_object_id: a.id, hs_timestamp: ts, hubspot_owner_id: om.toHs(a.owner_id), hs_createdate: a.created_at, hs_lastmodifieddate: a.updated_at,
   };
   if (a.type === 'task') Object.assign(p, { hs_task_subject: a.subject, hs_task_body: a.body, hs_task_status: a.status, hs_task_priority: (a.priority ?? 'none').toUpperCase(), hs_task_type: (a.task_type ?? 'todo').toUpperCase() });
   if (a.type === 'note') Object.assign(p, { hs_note_body: a.body });
@@ -173,6 +189,7 @@ function activityOut(a: ActivityRow, wanted: string[] | null) {
 }
 
 async function searchActivities(db: D1Database, type: ActivityRow['type'], body: Record<string, any>) {
+  const om = await ownerMap(db);
   const groups = (body.filterGroups ?? []) as Array<{ filters?: Array<Record<string, any>> }>;
   const binds: unknown[] = [type];
   const ors: string[] = [];
@@ -184,10 +201,10 @@ async function searchActivities(db: D1Database, type: ActivityRow['type'], body:
       const v = toVal(f.propertyName === 'hs_timestamp' ? 'hs_timestamp' : f.propertyName, f.value);
       const op = String(f.operator).toUpperCase();
       const simple: Record<string, string> = { EQ: '=', NEQ: '!=', LT: '<', LTE: '<=', GT: '>', GTE: '>=' };
-      if (simple[op]) { ands.push(`${col} ${simple[op]} ?`); binds.push(f.propertyName === 'hubspot_owner_id' ? Number(v) : v); }
+      if (simple[op]) { ands.push(`${col} ${simple[op]} ?`); binds.push(f.propertyName === 'hubspot_owner_id' ? om.fromHs(v) : v); }
       else if (op === 'BETWEEN') { ands.push(`${col} BETWEEN ? AND ?`); binds.push(v, toVal('hs_timestamp', f.highValue)); }
       else if (op === 'IN' || op === 'NOT_IN') {
-        const vs = (f.values ?? []).map((x: unknown) => (f.propertyName === 'hubspot_owner_id' ? Number(x) : x));
+        const vs = (f.values ?? []).map((x: unknown) => (f.propertyName === 'hubspot_owner_id' ? om.fromHs(x) : x));
         ands.push(`${col} ${op === 'IN' ? '' : 'NOT '}IN (${vs.map(() => '?').join(', ') || 'NULL'})`); binds.push(...vs);
       } else if (op === 'CONTAINS_TOKEN') { ands.push(`${col} LIKE ?`); binds.push(`%${String(f.value).replace(/\*/g, '')}%`); }
       else if (op === 'HAS_PROPERTY') ands.push(`${col} IS NOT NULL AND ${col} != ''`);
@@ -208,7 +225,7 @@ async function searchActivities(db: D1Database, type: ActivityRow['type'], body:
   const total = (count.results[0] as { n: number }).n;
   return {
     total,
-    results: (list.results as unknown as ActivityRow[]).map((a) => activityOut(a, body.properties ?? null)),
+    results: (list.results as unknown as ActivityRow[]).map((a) => activityOut(a, body.properties ?? null, om)),
     ...(offset + limit < total ? { paging: { next: { after: String(offset + limit) } } } : {}),
   };
 }
@@ -224,12 +241,12 @@ compat.post('/oauth/v2/private-apps/get/access-token-info', (c) => c.json({
 compat.get('/crm/v3/owners', async (c) => {
   const archived = c.req.query('archived') === 'true';
   const { results } = await c.env.DB.prepare('SELECT u.*, t.name AS team_name FROM users u LEFT JOIN teams t ON t.id = u.team_id WHERE u.active = ? ORDER BY u.id')
-    .bind(archived ? 0 : 1).all<{ id: number; email: string; name: string; team_id: number | null; team_name: string | null; created_at: string }>();
+    .bind(archived ? 0 : 1).all<{ id: number; email: string; name: string; team_id: number | null; team_name: string | null; created_at: string; hs_owner_id: string | null }>();
   return c.json({
     results: results.map((u) => {
       const [firstName, ...rest] = u.name.split(' ');
       return {
-        id: String(u.id), email: u.email, firstName, lastName: rest.join(' '), userId: u.id, createdAt: u.created_at, updatedAt: u.created_at, archived,
+        id: u.hs_owner_id ?? String(u.id), email: u.email, firstName, lastName: rest.join(' '), userId: u.id, createdAt: u.created_at, updatedAt: u.created_at, archived,
         teams: u.team_id ? [{ id: String(u.team_id), name: u.team_name, primary: true }] : [],
       };
     }),
@@ -291,7 +308,8 @@ compat.post('/crm/v3/objects/:objectType/batch/read', async (c) => {
   const ids = body.inputs.map((i) => Number(i.id)).filter(Boolean);
   if (ACTIVITY_TYPES[t]) {
     const { results } = await c.env.DB.prepare('SELECT * FROM activities WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<ActivityRow>();
-    return c.json({ status: 'COMPLETE', results: results.map((a) => activityOut(a, body.properties ?? null)) });
+    const om = await ownerMap(c.env.DB);
+    return c.json({ status: 'COMPLETE', results: results.map((a) => activityOut(a, body.properties ?? null, om)) });
   }
   const { results } = await c.env.DB.prepare('SELECT * FROM records WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<RecordRow>();
   const out = await recordOut(c.env.DB, results, body.properties?.length ? body.properties : null);
@@ -343,16 +361,17 @@ compat.post('/crm/v3/objects/:objectType', async (c) => {
       body: (p.hs_task_body ?? p.hs_note_body ?? p.hs_email_text ?? p.hs_call_body ?? p.hs_meeting_body ?? '') as string,
       occurred_at: (type === 'task' ? undefined : p.hs_timestamp) as string | undefined,
       due_at: (type === 'task' ? p.hs_timestamp : undefined) as string | undefined,
-      owner_id: p.hubspot_owner_id ? Number(p.hubspot_owner_id) : undefined,
+      owner_id: p.hubspot_owner_id ? Number((await ownerMap(c.env.DB)).fromHs(p.hubspot_owner_id)) : undefined,
       status: p.hs_task_status as string | undefined,
       direction: p.hs_email_direction === 'INCOMING_EMAIL' ? 'in' : type === 'email' ? 'out' : undefined,
       links: (body.associations ?? []).map((a) => Number(a.to.id)),
     });
-    return c.json(activityOut((await c.env.DB.prepare('SELECT * FROM activities WHERE id = ?').bind(act.id).first<ActivityRow>())!, null), 201);
+    return c.json(activityOut((await c.env.DB.prepare('SELECT * FROM activities WHERE id = ?').bind(act.id).first<ActivityRow>())!, null, await ownerMap(c.env.DB)), 201);
   }
   const type = RECORD_TYPES[t];
   if (!type) throw new HttpError(404, `Tipo no soportado: ${t}`);
-  const props = Object.fromEntries(Object.entries(body.properties ?? {}).map(([k, v]) => [ALIAS[k] ?? k, v]));
+  const om = await ownerMap(c.env.DB);
+  const props = Object.fromEntries(Object.entries(body.properties ?? {}).map(([k, v]) => [ALIAS[k] ?? k, k === 'hubspot_owner_id' ? om.fromHs(v) : v]));
   const row = await createRecord(c.env.DB, ctx, type, props, { strict: false });
   for (const a of body.associations ?? []) await associate(c.env.DB, ctx, row.id, Number(a.to.id));
   const [out] = await recordOut(c.env.DB, [await getRow(c.env.DB, row.id)], null);
@@ -363,7 +382,8 @@ compat.patch('/crm/v3/objects/:objectType/:id', async (c) => {
   const type = RECORD_TYPES[c.req.param('objectType')];
   if (!type) throw new HttpError(404, 'Tipo no soportado.');
   const body = await c.req.json<{ properties: Record<string, unknown> }>();
-  const props = Object.fromEntries(Object.entries(body.properties ?? {}).map(([k, v]) => [ALIAS[k] ?? k, v]));
+  const om = await ownerMap(c.env.DB);
+  const props = Object.fromEntries(Object.entries(body.properties ?? {}).map(([k, v]) => [ALIAS[k] ?? k, k === 'hubspot_owner_id' ? om.fromHs(v) : v]));
   const row = await updateRecord(c.env.DB, c.get('ctx'), type, Number(c.req.param('id')), props, { strict: false });
   const [out] = await recordOut(c.env.DB, [row], null);
   return c.json(out);

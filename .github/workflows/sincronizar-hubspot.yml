@@ -1,0 +1,31 @@
+# Mientras convivan HubSpot y el CRM: trae a la noche lo que cambió en HubSpot en los últimos 2 días.
+# Se apaga el día del corte (borrar este archivo o desactivar el workflow).
+name: Sincronizar desde HubSpot
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Desde (AAAA-MM-DD). Vacío = últimos 2 días. "todo" = migración completa.'
+        required: false
+  schedule:
+    - cron: '17 6 * * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Migrar
+        env:
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+        run: |
+          SINCE="${{ github.event.inputs.since }}"
+          if [ "$SINCE" = "todo" ]; then node scripts/migrate-hubspot.mjs
+          else node scripts/migrate-hubspot.mjs --since="${SINCE:-$(date -u -d '2 days ago' +%F)}"; fi

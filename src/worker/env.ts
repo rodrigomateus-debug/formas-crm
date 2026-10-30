@@ -8,6 +8,11 @@ export interface Env {
   DEV_USER_EMAIL?: string;
   // Email del primer administrador (se crea solo la primera vez que entra).
   ADMIN_EMAIL?: string;
+  // Cuenta de servicio de Google Workspace con delegación de dominio (gmail.readonly) para registrar mails.
+  GOOGLE_SA_JSON?: string;
+  // Solo para pruebas: otras URLs de Google.
+  GOOGLE_TOKEN_URL?: string;
+  GMAIL_API_URL?: string;
 }
 
 export interface User {

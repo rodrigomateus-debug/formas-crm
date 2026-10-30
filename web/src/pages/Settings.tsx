@@ -185,6 +185,7 @@ function Integrations() {
   const origin = window.location.origin;
   return (
     <div className="stack" style={{ gap: 16 }}>
+      <Gmail />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">
         <p style={{ margin: 0 }}>Para que Claude y Cowork lean y actualicen el CRM: creá un token de tipo «Claude (MCP)» y cargá esta URL como conector personalizado en claude.ai (Configuración → Conectores → Agregar conector personalizado):</p>
         <code className="panel panel-body small">{origin}/mcp/&lt;token&gt;</code>
@@ -238,5 +239,45 @@ function Inbound() {
         </tr>
       ))}</tbody>
     </table>{log.data && !log.data.length && <div className="empty">Todavía no entró nada por integraciones.</div>}</div>
+  );
+}
+
+interface GmailStatus {
+  config: { enabled: boolean; internal_domains: string[]; ignore_domains: string[]; create_contacts_on_sent: boolean; users: string[] | 'all' };
+  has_credentials: boolean;
+  state: Record<string, { at?: string; logged?: number; seen?: number; pending?: number; out?: Array<{ mailbox?: string; error?: string; logged?: number }> }>;
+}
+
+function Gmail() {
+  const toast = useToast();
+  const st = useAsync(() => http<GmailStatus>('GET', '/gmail'), []);
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const cfg = st.data.config;
+  const save = async (patch: Partial<GmailStatus['config']>) => {
+    try { await http('PUT', '/gmail', patch); st.reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
+  };
+  const last = st.data.state.gmail_last_run as { at?: string; out?: Array<{ mailbox?: string; error?: string; logged?: number; skipped?: string }> } | undefined;
+  return (
+    <div className="panel"><div className="panel-head"><h2>Mails (Gmail)</h2>
+      {st.data.has_credentials ? <span className={`tag ${cfg.enabled ? 'ok' : ''}`}>{cfg.enabled ? 'Activo' : 'Apagado'}</span> : <span className="tag warn">Falta la cuenta de servicio</span>}</div>
+      <div className="panel-body stack">
+        <p style={{ margin: 0 }}>Cada 10 minutos registra en el CRM los mails del equipo con contactos (como la conexión de bandeja de HubSpot). Los recibidos se guardan si el remitente ya es contacto; los enviados pueden crear el contacto.</p>
+        {!st.data.has_credentials && <p className="small muted" style={{ margin: 0 }}>Hace falta cargar el secreto GOOGLE_SA_JSON (cuenta de servicio con delegación de dominio y permiso gmail.readonly). Ver README, «Gmail».</p>}
+        <label className="row"><input type="checkbox" checked={cfg.enabled} disabled={!st.data.has_credentials} onChange={(e) => save({ enabled: e.target.checked })} />Registrar mails automáticamente</label>
+        <label className="row"><input type="checkbox" checked={cfg.create_contacts_on_sent} onChange={(e) => save({ create_contacts_on_sent: e.target.checked })} />Crear el contacto cuando le escribimos a alguien nuevo</label>
+        <label className="field">Dominios propios (no se registran)<input className="input" defaultValue={cfg.internal_domains.join(', ')} onBlur={(e) => save({ internal_domains: e.target.value.split(/[,\s]+/).filter(Boolean) })} /></label>
+        <label className="field">Dominios que nunca se registran (proveedores, avisos)<input className="input" defaultValue={cfg.ignore_domains.join(', ')} onBlur={(e) => save({ ignore_domains: e.target.value.split(/[,\s]+/).filter(Boolean) })} /></label>
+        <div className="row">
+          <button className="btn" disabled={busy || !st.data.has_credentials || !cfg.enabled} onClick={async () => {
+            setBusy(true);
+            try { const r = await http<Array<{ mailbox?: string; logged?: number; error?: string }>>('POST', '/gmail/sync'); toast(`Listo: ${r.reduce((n, x) => n + (x.logged ?? 0), 0)} mails registrados`); st.reload(); }
+            catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+          }}>Sincronizar ahora</button>
+          {last?.at && <span className="small muted">Última pasada: {fmtDate(last.at, true)}</span>}
+        </div>
+        {last?.out?.some((o) => o.error) && <div className="small" style={{ color: 'var(--bad)' }}>{last.out.filter((o) => o.error).map((o) => `${o.mailbox}: ${o.error}`).join(' · ')}</div>}
+      </div>
+    </div>
   );
 }

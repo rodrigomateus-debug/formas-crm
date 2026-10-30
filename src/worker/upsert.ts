@@ -51,19 +51,23 @@ export async function upsertContact(db: D1Database, ctx: Ctx, p: Props, opts: { 
   const found = await findContact(db, p);
   if (found) return { row: await fillEmpty(db, ctx, found, p, opts.overwrite), created: false };
   const row = await createRecord(db, ctx, 'contact', p, { strict: false, skipDedupe: true });
-  // Como el ajuste de HubSpot "crear y asociar empresas con contactos": por dominio del mail corporativo.
-  if (opts.autoCompany !== false) {
-    const dom = emailDomain(p.email);
-    if (dom) {
-      let company = await findCompany(db, { domain: dom });
-      if (!company) {
-        const guess = dom.split('.')[0];
-        company = await createRecord(db, ctx, 'company', { name: guess.charAt(0).toUpperCase() + guess.slice(1), domain: dom, owner_id: p.owner_id ?? null }, { strict: false, skipDedupe: true });
-      }
-      await associate(db, ctx, row.id, company.id);
-    }
-  }
+  if (opts.autoCompany !== false) await autoAssociateCompany(db, ctx, row);
   return { row, created: true };
+}
+
+// Como el ajuste de HubSpot "crear y asociar empresas con contactos": por el dominio del mail corporativo
+// se asocia la empresa (y se crea si no existe). No hace nada con mails personales (gmail, hotmail…).
+export async function autoAssociateCompany(db: D1Database, ctx: Ctx, contact: RecordRow) {
+  const props = JSON.parse(contact.props) as Props;
+  const dom = emailDomain(props.email);
+  if (!dom) return null;
+  let company = await findCompany(db, { domain: dom });
+  if (!company) {
+    const guess = dom.split('.')[0];
+    company = await createRecord(db, ctx, 'company', { name: guess.charAt(0).toUpperCase() + guess.slice(1), domain: dom, owner_id: props.owner_id ?? null }, { strict: false, skipDedupe: true });
+  }
+  await associate(db, ctx, contact.id, company.id);
+  return company.id;
 }
 
 export async function upsertCompany(db: D1Database, ctx: Ctx, p: Props, opts: { overwrite?: boolean } = {}) {

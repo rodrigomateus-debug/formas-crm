@@ -9,7 +9,8 @@ import {
 } from './records';
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
-import { upsertCompany, upsertContact } from './upsert';
+import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
+import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -86,6 +87,10 @@ api.post('/records/:type', async (c) => {
   const body = await c.req.json<{ props: Record<string, unknown>; associations?: number[] }>();
   const row = await createRecord(c.env.DB, ctx, type, body.props ?? {});
   for (const id of body.associations ?? []) await associate(c.env.DB, ctx, row.id, id);
+  if (type === 'contact') {
+    const hasCompany = await c.env.DB.prepare("SELECT 1 FROM associations WHERE from_id = ? AND to_type = 'company'").bind(row.id).first();
+    if (!hasCompany) await autoAssociateCompany(c.env.DB, ctx, row);
+  }
   return c.json(rowToRecord(await getRow(c.env.DB, row.id)), 201);
 });
 
@@ -503,4 +508,30 @@ api.get('/inbound', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   const { results } = await c.env.DB.prepare('SELECT * FROM inbound_log ORDER BY id DESC LIMIT 200').all();
   return c.json(results);
+});
+
+// ---------- Gmail ----------
+
+api.get('/gmail', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const db = c.env.DB;
+  const { results } = await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'gmail_state:%' OR key = 'gmail_last_run'").all<{ key: string; value: string }>();
+  return c.json({
+    config: await gmailConfig(db),
+    defaults: DEFAULT_GMAIL,
+    has_credentials: !!c.env.GOOGLE_SA_JSON,
+    state: Object.fromEntries(results.map((r) => [r.key.replace('gmail_state:', ''), JSON.parse(r.value)])),
+  });
+});
+
+api.put('/gmail', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const cfg = { ...(await gmailConfig(c.env.DB)), ...(await c.req.json()) };
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gmail', ?)").bind(JSON.stringify(cfg)).run();
+  return c.json(cfg);
+});
+
+api.post('/gmail/sync', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await syncAll(c.env));
 });

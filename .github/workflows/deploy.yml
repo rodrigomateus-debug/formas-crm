@@ -1,0 +1,44 @@
+name: Probar y publicar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: cp .dev.vars.example .dev.vars && npm run db:local
+      - name: Pruebas de punta a punta contra wrangler dev
+        run: |
+          npx wrangler dev --port 8787 > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8787/health && break; sleep 1; done
+          npm test
+      - if: failure()
+        run: tail -100 wrangler.log
+
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run deploy

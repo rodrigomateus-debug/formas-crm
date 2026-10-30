@@ -535,3 +535,22 @@ api.post('/gmail/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   return c.json(await syncAll(c.env));
 });
+
+// ---------- Avisos a otros sistemas ----------
+
+api.get('/webhooks', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const row = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'webhooks'").first<{ value: string }>();
+  return c.json(row ? JSON.parse(row.value) : []);
+});
+
+api.put('/webhooks', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const hooks = await c.req.json<Array<{ event: string; url: string; secret?: string; name?: string }>>();
+  for (const h of hooks) {
+    if (!['deal.won', 'deal.stage_changed'].includes(h.event)) throw new HttpError(400, `Evento desconocido: ${h.event}`);
+    if (!/^https?:\/\//.test(h.url)) throw new HttpError(400, `URL inválida: ${h.url}`);
+  }
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('webhooks', ?)").bind(JSON.stringify(hooks)).run();
+  return c.json(hooks);
+});

@@ -1,6 +1,7 @@
 import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property } from './meta';
+import { emitDealEvent } from './events';
 
 // Los registros nuevos arrancan en este id para no chocar con los ids de HubSpot que trae la migración
 // (los migrados conservan su id de HubSpot, así los links y los tableros siguen andando).
@@ -364,6 +365,10 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     }
   }
   await db.batch(stmts);
+  if (type === 'deal' && stageMoved) {
+    const st = await meta.stage(next.dealstage as string);
+    await emitDealEvent(db, st?.is_won ? ['deal.stage_changed', 'deal.won'] : ['deal.stage_changed'], id);
+  }
   return getRow(db, id);
 }
 

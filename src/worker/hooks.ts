@@ -56,37 +56,62 @@ async function run(env: Env, req: Request, source: string, build: (body: Record<
 // Genérico: { contact, company, deal, note, task, owner_id | owner_email }.
 hooks.post('/bundle', (c) => run(c.env, c.req.raw, 'api', async (b) => ({ ...b, owner_id: await ownerFrom(c.env, b) } as Bundle)));
 
-// Darwin (WhatsApp con IA). Arma el negocio igual que hoy la integración de Pipedream:
-// "Nombre - Producto - Cantidad - Darwin", pipeline Formas Shop (Inbound), etapa Lead calificado.
-hooks.post('/darwin', (c) => run(c.env, c.req.raw, 'darwin', async (b) => {
-  const owner = await ownerFrom(c.env, b);
-  const phone = b.phone ?? b.telefono ?? String(b.conversation_id ?? '').split('-').pop();
-  const name = String(b.name ?? b.nombre ?? '').trim();
-  const [firstname, ...rest] = name.split(/\s+/);
-  const producto = b.producto ?? b.product ?? '';
-  const cantidad = b.cantidad ?? b.quantity ?? '';
-  const url = b.conversation_url ?? (b.conversation_id ? `https://app.getdarwin.ai/agent/1986/conversations/all/${b.conversation_id}` : undefined);
+// Darwin (WhatsApp con IA). Reemplaza al workflow «Formas Publicitarias - Hubspot» de Darwin: ese workflow pasa a
+// tener un solo paso `http-request` que manda el evento `session.forwarded` entero ({ data: {{data}} }) acá.
+// Se arma igual que hoy: negocio "Nombre - Producto - Cantidad - Darwin" en Formas Shop (Inbound) / Lead calificado,
+// pero sin el mail inventado (el contacto se busca por teléfono), con propietario por mail y sin negocios repetidos
+// cuando la misma conversación se califica y después se escala. También acepta campos planos (name, phone, …).
+const DARWIN_INTERNAL = ['maru', 'eli', 'elizabeth', 'jorgelina', 'lucia', 'lucía', 'ciro', 'rodrigo', 'facundo', 'tomas', 'tomás'];
+const MEDIUM: Record<string, string> = { instagram: 'Instagram DM', webchat: 'WebChat', messenger: 'Facebook Messenger', facebook: 'Facebook Messenger' };
+
+async function ownerByName(env: Env, name?: string) {
+  if (!name) return undefined;
+  const { results } = await env.DB.prepare('SELECT id, name FROM users WHERE active = 1').all<{ id: number; name: string }>();
+  const norm = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  return results.find((u) => norm(name).startsWith(norm(u.name)))?.id;
+}
+
+hooks.post('/darwin', (c) => run(c.env, c.req.raw, 'darwin', async (raw) => {
+  const d: Record<string, any> = raw.data ?? raw;
+  const sf: Record<string, any> = d.smartFields ?? d.smart_fields ?? {};
+  const src: Record<string, any> = d.source ?? {};
+  const conversationId = d.conversationId ?? raw.conversation_id;
+  const phone = d.phoneNumber ?? raw.phone ?? raw.telefono ?? (conversationId ? String(conversationId).split('-').pop() : undefined);
+  const assignee = d.forwardedToName ?? raw.owner_name;
+  const owner = (await ownerFrom(c.env, { owner_id: raw.owner_id, owner_email: d.forwardedToEmail ?? raw.owner_email })) ?? (await ownerByName(c.env, assignee));
+  // Nombre: el que juntó la IA, salvo que sea el de alguien de Formas; si no, el título de la conversación.
+  const internal = (n: string) => !n || DARWIN_INTERNAL.includes(n.toLowerCase().split(/\s+/)[0]) || (assignee && n.toLowerCase() === String(assignee).toLowerCase());
+  const candidates = [sf.name, raw.name, raw.nombre, d.conversationTitle].map((x) => String(x ?? '').trim());
+  const name = candidates.find((n) => n && !internal(n) && !/^\+?\d[\d\s-]+$/.test(n)) ?? '';
+  const parts = sf.last_name ? splitName(name, sf.last_name) : splitName(undefined, undefined, name);
+  const producto = sf.producto ?? raw.producto ?? raw.product ?? '';
+  const cantidad = sf.cantidad ?? raw.cantidad ?? raw.quantity ?? '';
+  const prellenado = sf.anuncio_prellenado;
+  const utmSource = src.utmSource ?? raw.utm_source ?? raw.origen ?? (prellenado ? 'META_ADS' : 'Orgánico');
+  const utmCampaign = src.utmCampaign ?? raw.utm_campaign ?? raw.campaign ?? (prellenado ? `Anuncio sin referral - ${prellenado}` : 'Directo');
+  const canal = MEDIUM[String(src.utmMedium ?? '').toLowerCase()] ?? 'Contacto por Whatsapp';
+  const url = raw.conversation_url ?? (conversationId ? `https://app.getdarwin.ai/agent/1986/conversations/all/${conversationId}` : undefined);
+  const summary = d.summary ?? raw.summary;
   return {
     owner_id: owner,
     contact: {
-      firstname: firstname || undefined, lastname: rest.join(' ') || undefined, mobilephone: phone, email: b.email,
-      company: b.company ?? b.empresa, origen_del_contacto: 'Contacto por Whatsapp', origen_de_la_conversacion: 'Darwin',
-      prospect_source: b.utm_source, campaign_name: b.utm_campaign,
+      ...parts, mobilephone: phone, email: raw.email ?? sf.email, company: raw.company ?? raw.empresa ?? sf.empresa,
+      origen_del_contacto: canal, origen_de_la_conversacion: 'Darwin', prospect_source: utmSource, campaign_name: utmCampaign,
     },
-    company: b.company_domain ? { name: b.company ?? b.empresa, domain: b.company_domain } : undefined,
+    company: raw.company_domain ? { name: raw.company ?? raw.empresa, domain: raw.company_domain } : undefined,
     deal: {
-      dealname: b.dealname ?? [name || phone, producto, cantidad === '' ? '0' : cantidad, 'Darwin'].join(' - '),
-      pipeline: b.pipeline ?? 'default',
-      dealstage: b.dealstage ?? 'appointmentscheduled',
+      dealname: raw.dealname ?? [name || phone, producto, cantidad === '' ? '0' : cantidad, 'Darwin'].join(' - '),
+      pipeline: raw.pipeline ?? 'default',
+      dealstage: raw.dealstage ?? 'appointmentscheduled',
       estado_del_negocio: 'Nuevo',
       producto, cantidad: cantidad === '' ? undefined : String(cantidad),
-      origen_del_negocio: 'Contacto por Whatsapp',
-      origen_del_prospecto: b.utm_source ?? b.origen,
-      origen_de_la_campana: b.utm_campaign ?? b.campaign,
+      origen_del_negocio: canal,
+      origen_del_prospecto: utmSource,
+      origen_de_la_campana: utmCampaign,
       link_a_darwin: url,
-      dedupe_open: b.dedupe_open !== false,
+      dedupe_open: raw.dedupe_open !== false,
     },
-    note: b.summary ? `Resumen de Darwin:\n${b.summary}` : undefined,
+    note: summary ? `Resumen de Darwin${d.forwardType ? ` (${d.forwardType})` : ''}:\n${summary}` : undefined,
   };
 }));
 

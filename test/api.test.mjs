@@ -2,6 +2,7 @@
 // CRM_URL cambia el destino. Cada corrida usa datos con sufijo único, así se puede repetir.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 
 const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
@@ -148,6 +149,54 @@ test('webhook de Darwin crea contacto + negocio y no duplica', async () => {
   assert.match(deal.data.record.props.link_a_darwin, /getdarwin/);
 });
 
+test('Darwin manda su evento nativo (session.forwarded) sin Pipedream', async () => {
+  const h = { authorization: `Bearer ${state.token}` };
+  const phone = `549351${String(Date.now()).slice(-7)}`;
+  const event = { data: {
+    phoneNumber: phone, conversationId: `15552-${phone}`, conversationThreadId: phone, conversationTitle: `Cliente ${RUN}`,
+    channelName: 'Formas Publicitarias', forwardedToName: 'Rodrigo Mateus Formas', forwardedToEmail: 'rodrigo.mateus@formaspublicitarias.com',
+    forwardType: 'qualified', summary: 'Quiere 300 botellas con logo',
+    smartFields: { name: 'Maru', producto: 'Botellas', cantidad: 300, anuncio_prellenado: 'Hola, quiero botellas' },
+    source: { utmSource: null, utmCampaign: null, utmMedium: 'whatsapp' },
+  } };
+  const first = await call('POST', '/hooks/darwin', event, h);
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  const deal = await api('GET', `/records/deal/${first.data.deal.id}`);
+  const p = deal.data.record.props;
+  assert.equal(p.dealname, `Cliente ${RUN} - Botellas - 300 - Darwin`, 'no usa el nombre de la IA (Maru) sino el título');
+  assert.equal(p.origen_del_prospecto, 'META_ADS', 'anuncio prellenado sin utm → META_ADS');
+  assert.equal(p.origen_de_la_campana, 'Anuncio sin referral - Hola, quiero botellas');
+  assert.equal(p.origen_del_negocio, 'Contacto por Whatsapp');
+  assert.ok(p.owner_id, 'propietario por mail');
+  const contact = deal.data.associations.contact[0];
+  assert.ok(!contact.props.email, 'sin mail inventado');
+  const escalated = await call('POST', '/hooks/darwin', { data: { ...event.data, forwardType: 'escalated' } }, h);
+  assert.equal(escalated.data.deal.id, first.data.deal.id, 'calificado y después escalado: un solo negocio');
+  state.darwinDeal = first.data.deal.id;
+});
+
+test('avisa por webhook cuando se gana un negocio (para Darwin)', async () => {
+  const received = [];
+  const server = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { received.push({ body: JSON.parse(b), sig: req.headers['x-formas-crm-signature'] }); res.end('ok'); }); });
+  await new Promise((r) => server.listen(8797, r));
+  try {
+    const put = await api('PUT', '/webhooks', [{ event: 'deal.won', url: 'http://localhost:8797/darwin', secret: 's3cr3t', name: 'Darwin' }]);
+    assert.equal(put.status, 200, JSON.stringify(put.data));
+    await api('PATCH', `/records/deal/${state.darwinDeal}`, { props: { dealstage: 'presentationscheduled' } });
+    assert.equal(received.length, 0, 'cambio de etapa común: no avisa (solo está suscripto a deal.won)');
+    await api('PATCH', `/records/deal/${state.darwinDeal}`, { props: { dealstage: 'closedwon', amount: 900000 } });
+    assert.equal(received.length, 1);
+    const b = received[0].body;
+    assert.equal(b.event, 'deal.won');
+    assert.equal(b.deal.amount, 900000);
+    assert.match(b.deal.whatsapp_thread, /^549351/);
+    assert.ok(received[0].sig, 'firmado');
+  } finally {
+    await api('PUT', '/webhooks', []);
+    server.close();
+  }
+});
+
 test('LinkedIn directo (sin Zapier): deduplica por perfil y arregla el nombre', async () => {
   const h = { authorization: `Bearer ${state.token}` };
   const url = `https://www.linkedin.com/in/maría-valentina-${RUN}/`;
@@ -167,7 +216,7 @@ test('LinkedIn directo (sin Zapier): deduplica por perfil y arregla el nombre', 
 test('API compatible con HubSpot (lo que usan los tableros)', async () => {
   const h = { authorization: `Bearer ${state.token}` };
   const search = await call('POST', '/hubspot/crm/v3/objects/deals/search', {
-    filterGroups: [{ filters: [{ propertyName: 'dealname', operator: 'CONTAINS_TOKEN', value: RUN }, { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' }] }],
+    filterGroups: [{ filters: [{ propertyName: 'dealname', operator: 'CONTAINS_TOKEN', value: `Remeras ${RUN}` }, { propertyName: 'hs_is_closed_won', operator: 'EQ', value: 'true' }] }],
     properties: ['dealname', 'amount_in_home_currency', 'hubspot_owner_id', 'hs_is_closed_won', 'hs_v2_date_entered_989921336'],
     limit: 10,
   }, h);

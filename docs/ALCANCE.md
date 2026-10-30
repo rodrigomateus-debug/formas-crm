@@ -74,7 +74,8 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función | Estado | Dónde |
 |---|---|---|
 | Claude / Cowork leen y actualizan el CRM | 🔧 | MCP en `/mcp/<token>`; falta cargar el conector en claude.ai y repuntar la prospección diaria |
-| Darwin crea contacto + negocio desde WhatsApp | 🔧 | `/hooks/darwin` (mismo formato de negocio que hoy); falta cambiar el paso de Pipedream |
+| Darwin crea contacto + negocio desde WhatsApp | 🔧 | `/hooks/darwin` recibe el evento nativo de Darwin: sin Pipedream, sin mail inventado, sin negocios repetidos. Falta reemplazar los 3 pasos de HubSpot del workflow por un `http-request` ([DARWIN.md](DARWIN.md)) |
+| Venta ganada → Darwin (estado de la venta e ingreso para marketing) | 🔧 | Aviso «Negocio ganado» del CRM; falta el workflow de Darwin con disparador webhook. Hoy esos workflows leen HubSpot y fallan en ~60 % de las corridas |
 | Leads de prospección por LinkedIn (hoy por Zapier: 4.712 en total, ~300 por mes) | 🔧 | `/hooks/linkedin` directo, sin Zapier; deduplica por perfil y separa bien nombre y apellido. Falta apuntar la herramienta de LinkedIn y dar de baja el Zap |
 | Formularios web (ruleta de eventos, descarga de catálogos) | 🔧 | `/hooks/form/<nombre>`; falta cambiar el formulario de la web |
 | Registro automático de mails de la bandeja | 🔧 | Gmail cada 10 min; falta la delegación de la cuenta de servicio |
@@ -94,7 +95,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 |---|---|---|
 | Links de agenda de reuniones (meetings link) | ⏳ | 337 reuniones; se puede reemplazar con las «páginas de reserva» de Google Calendar y registrar el evento por Gmail/Calendar |
 | Seguimiento de aperturas de mails | ⏳ | Lo da la extensión de HubSpot; hoy no lo usan los tableros (solo cuentan aperturas en formas-tablero) |
-| Workflows de HubSpot | ⏳ | No se pueden leer por el conector: hay que listar cuáles están activos (Automatización → Workflows) y rehacer los que sirvan |
+| Workflows de HubSpot | ⏳ | No se pueden leer por el conector: hay que listar cuáles están activos (Automatización → Workflows). Hay al menos uno: completa el origen de los negocios de Darwin (eso ya lo hace el CRM) |
 | Avisos por mail (tareas, asignaciones) | ⏳ | Ver «Tareas» |
 
 ### Fuera de alcance (sin uso real)

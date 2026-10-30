@@ -186,6 +186,7 @@ function Integrations() {
   return (
     <div className="stack" style={{ gap: 16 }}>
       <Gmail />
+      <OutboundHooks />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">
         <p style={{ margin: 0 }}>Para que Claude y Cowork lean y actualicen el CRM: creá un token de tipo «Claude (MCP)» y cargá esta URL como conector personalizado en claude.ai (Configuración → Conectores → Agregar conector personalizado):</p>
         <code className="panel panel-body small">{origin}/mcp/&lt;token&gt;</code>
@@ -278,6 +279,38 @@ function Gmail() {
           {last?.at && <span className="small muted">Última pasada: {fmtDate(last.at, true)}</span>}
         </div>
         {last?.out?.some((o) => o.error) && <div className="small" style={{ color: 'var(--bad)' }}>{last.out.filter((o) => o.error).map((o) => `${o.mailbox}: ${o.error}`).join(' · ')}</div>}
+      </div>
+    </div>
+  );
+}
+
+interface Hook { event: 'deal.won' | 'deal.stage_changed'; url: string; name?: string; secret?: string }
+
+function OutboundHooks() {
+  const toast = useToast();
+  const hooks = useAsync(() => http<Hook[]>('GET', '/webhooks'), []);
+  const [draft, setDraft] = useState<Hook[] | null>(null);
+  const list = draft ?? hooks.data ?? [];
+  const set = (i: number, patch: Partial<Hook>) => setDraft(list.map((h, j) => (j === i ? { ...h, ...patch } : h)));
+  return (
+    <div className="panel"><div className="panel-head"><h2>Avisos a otros sistemas</h2>
+      {draft && <button className="btn sm primary" onClick={async () => {
+        try { await http('PUT', '/webhooks', draft); setDraft(null); hooks.reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
+      }}>Guardar</button>}</div>
+      <div className="panel-body stack">
+        <p className="small muted" style={{ margin: 0 }}>Cuando un negocio se gana (o cambia de etapa) el CRM le avisa a esta URL con el negocio, el monto, los contactos y el hilo de WhatsApp. Sirve para que Darwin marque la venta y registre el ingreso. Lo enviado queda en «Registro de entradas».</p>
+        {list.map((h, i) => (
+          <div key={i} className="row wrap">
+            <input className="input" style={{ width: 140 }} placeholder="Nombre" value={h.name ?? ''} onChange={(e) => set(i, { name: e.target.value })} />
+            <select className="input" style={{ width: 200 }} value={h.event} onChange={(e) => set(i, { event: e.target.value as Hook['event'] })}>
+              <option value="deal.won">Negocio ganado</option><option value="deal.stage_changed">Cambio de etapa</option>
+            </select>
+            <input className="input grow" style={{ minWidth: 240 }} placeholder="https://…" value={h.url} onChange={(e) => set(i, { url: e.target.value })} />
+            <input className="input" style={{ width: 160 }} placeholder="Clave para firmar (opcional)" value={h.secret ?? ''} onChange={(e) => set(i, { secret: e.target.value || undefined })} />
+            <button className="btn ghost sm" onClick={() => setDraft(list.filter((_, j) => j !== i))}>Quitar</button>
+          </div>
+        ))}
+        <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setDraft([...list, { event: 'deal.won', url: '', name: 'Darwin' }])}>+ Aviso</button>
       </div>
     </div>
   );

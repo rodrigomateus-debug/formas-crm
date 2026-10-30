@@ -5,6 +5,7 @@ import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor,
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
+import { companiesFor, requireCompany } from './pipelines';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -107,8 +108,16 @@ const TOOLS: Tool[] = [
       required: ['object_type', 'properties'],
     },
     run: async (a, ctx, env, base) => {
-      const row = await createRecord(env.DB, ctx, assertType(a.object_type), a.properties ?? {});
-      for (const id of a.associate_with ?? []) await associate(env.DB, ctx, row.id, Number(id));
+      const type = assertType(a.object_type);
+      const assoc: number[] = [...new Set<number>((a.associate_with ?? []).map(Number))];
+      if (type === 'deal') {
+        const companies = await companiesFor(env.DB, assoc);
+        const pipeline = (await new Meta(env.DB).pipelines()).find((p) => p.id === (a.properties?.pipeline ?? 'default') || p.label === a.properties?.pipeline);
+        requireCompany(ctx, pipeline, companies.length);
+        for (const co of companies) if (!assoc.includes(co)) assoc.push(co);
+      }
+      const row = await createRecord(env.DB, ctx, type, a.properties ?? {});
+      for (const id of assoc) await associate(env.DB, ctx, row.id, id);
       if (row.object_type === 'contact' && !(await env.DB.prepare("SELECT 1 FROM associations WHERE from_id = ? AND to_type = 'company'").bind(row.id).first())) {
         await autoAssociateCompany(env.DB, ctx, row);
       }
@@ -265,11 +274,12 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_pipelines',
-    description: 'Pipelines de negocios con sus etapas (id, nombre, probabilidad, si es cerrada/ganada).',
+    description: 'Pipelines de negocios con sus etapas (id, nombre, probabilidad, si es cerrada/ganada, propiedades obligatorias para entrar) y sus reglas (no saltear etapas, no volver atrás, empresa obligatoria, etapas de alta). Leelo antes de crear o mover negocios.',
     readOnly: true,
     inputSchema: { type: 'object', properties: {} },
     run: async (_a, _ctx, env) => (await new Meta(env.DB).pipelines()).map((p) => ({
-      id: p.id, label: p.label, stages: p.stages.map((s) => ({ id: s.id, label: s.label, probability: s.probability, closed: !!s.is_closed, won: !!s.is_won })),
+      id: p.id, label: p.label, team_id: p.team_id, rules: p.config.rules ?? {},
+      stages: p.stages.map((s) => ({ id: s.id, label: s.label, probability: s.probability, closed: !!s.is_closed, won: !!s.is_won, required_props: s.config.required_props ?? [], auto_task: s.config.task?.subject ?? null })),
     })),
   },
   {

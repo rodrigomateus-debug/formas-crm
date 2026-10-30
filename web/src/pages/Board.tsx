@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, type CrmRecord, type Stage, type Pipeline } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, type CrmRecord, type Stage, type Pipeline, defaultPipeline, missingFor, formatValue, propOf, type Property } from '../lib';
 import { Avatar, Modal, PropertyInput } from '../components';
 
 interface Column { stage: Stage; total: number; amount: number; deals: CrmRecord[] }
@@ -12,23 +12,28 @@ export default function Board({ q, owner, onOwner, search, onSearch }: { q: stri
   const { meta } = useMeta();
   const toast = useToast();
   const [pipelineId, setPipelineId] = useState(() => {
-    try { return localStorage.getItem(PIPE_KEY) || meta.pipelines[0].id; } catch { return meta.pipelines[0].id; }
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(PIPE_KEY); } catch { /* sin preferencia guardada */ }
+    return saved && meta.pipelines.some((p) => p.id === saved) ? saved : defaultPipeline(meta).id;
   });
   const [closedDays, setClosedDays] = useState(90);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const [lost, setLost] = useState<{ deal: CrmRecord; stage: Stage } | null>(null);
+  const [ask, setAsk] = useState<{ deal: CrmRecord; stage: Stage; missing: string[] } | null>(null);
   useEffect(() => { try { localStorage.setItem(PIPE_KEY, pipelineId); } catch { /* ignorar */ } }, [pipelineId]);
   const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', `/board${qs({ pipeline: pipelineId, owner, q, closed_days: closedDays })}`), [pipelineId, owner, q, closedDays]);
   const [cols, setCols] = useState<Column[]>([]);
+  const pipe = meta.pipelines.find((p) => p.id === pipelineId);
+  const cardProps = pipe?.config.card_props?.length ? pipe.config.card_props : ['amount', 'closedate'];
   useEffect(() => { if (board.data) setCols(board.data.columns); }, [board.data]);
 
   const move = async (dealId: number, stage: Stage, extra: Record<string, unknown> = {}) => {
     const from = cols.find((c) => c.deals.some((d) => d.id === dealId));
     const deal = from?.deals.find((d) => d.id === dealId);
     if (!from || !deal || from.stage.id === stage.id) return;
-    // Pérdida: se pide el motivo, igual que en HubSpot.
-    if (stage.is_closed && !stage.is_won && !extra.motivo_de_cierre_perdido && pipelineId !== '765787061') { setLost({ deal, stage }); return; }
+    // Lo que la etapa pide para entrar (por ejemplo, el motivo al perder), como las propiedades condicionales de HubSpot.
+    const missing = missingFor(stage, { ...deal.props, ...extra });
+    if (missing.length) { setAsk({ deal, stage, missing }); return; }
     setCols((cs) => cs.map((c) => c.stage.id === from.stage.id
       ? { ...c, deals: c.deals.filter((d) => d.id !== dealId), total: c.total - 1, amount: c.amount - Number(deal.props.amount || 0) }
       : c.stage.id === stage.id ? { ...c, deals: [{ ...deal, props: { ...deal.props, dealstage: stage.id } }, ...c.deals], total: c.total + 1, amount: c.amount + Number(deal.props.amount || 0) } : c));
@@ -36,7 +41,8 @@ export default function Board({ q, owner, onOwner, search, onSearch }: { q: stri
       await http('PATCH', `/records/deal/${dealId}`, { props: { dealstage: stage.id, ...extra } });
       toast(`«${deal.name}» pasó a ${stage.label}`);
     } catch (e) {
-      toast((e as Error).message, true);
+      const missing = (e as Error & { data?: { missing?: string[] } }).data?.missing;
+      if (missing?.length) setAsk({ deal, stage, missing }); else toast((e as Error).message, true);
       board.reload();
     }
   };
@@ -78,8 +84,11 @@ export default function Board({ q, owner, onOwner, search, onSearch }: { q: stri
                   <div key={d.id} className={`card${dragId === d.id ? ' dragging' : ''}`} draggable
                     onDragStart={(e) => { setDragId(d.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>
                     <Link className="t" to={recordUrl('deal', d.id)} draggable={false}>{d.name}</Link>
-                    <div className="meta"><span className="amount num">{fmtMoney(d.props.amount, d.props.deal_currency_code) || 'Sin monto'}</span>
-                      {d.props.closedate && <span>· cierre {fmtDate(d.props.closedate)}</span>}</div>
+                    {cardProps.map((k) => {
+                      const v = k === 'amount' ? fmtMoney(d.props.amount, d.props.deal_currency_code) || 'Sin monto' : formatValue(meta, 'deal', k, d.props[k], d.props);
+                      if (!v) return null;
+                      return <div key={k} className="meta"><span className={k === 'amount' ? 'amount num' : 'ellipsis'} title={propOf(meta, 'deal', k)?.label}>{k === 'closedate' ? `Cierre ${v}` : v}</span></div>;
+                    })}
                     <div className="meta">
                       <Avatar name={userName(meta, d.props.owner_id)} />
                       <span className={`grow ellipsis${stale ? ' stale' : ''}`} title="Última actividad">
@@ -94,24 +103,31 @@ export default function Board({ q, owner, onOwner, search, onSearch }: { q: stri
           </div>
         ))}
       </div>
-      {lost && <LostReason deal={lost.deal} onClose={() => setLost(null)} onSave={(extra) => { const l = lost; setLost(null); move(l.deal.id, l.stage, extra); }} />}
+      {ask && <StageProps deal={ask.deal} stage={ask.stage} missing={ask.missing} onClose={() => setAsk(null)} onSave={(extra) => { const a = ask; setAsk(null); move(a.deal.id, a.stage, extra); }} />}
     </>
   );
 }
 
-export function LostReason({ deal, onClose, onSave }: { deal: CrmRecord; onClose: () => void; onSave: (extra: Record<string, unknown>) => void }) {
+// Antes de mover un negocio a una etapa que pide datos (motivo de pérdida, monto…), se piden en un cuadro.
+export function StageProps({ deal, stage, missing, onClose, onSave }: { deal: CrmRecord; stage: Stage; missing: string[]; onClose: () => void; onSave: (extra: Record<string, unknown>) => void }) {
   const { meta } = useMeta();
-  const prop = meta.properties.find((p) => p.object_type === 'deal' && p.name === 'motivo_de_cierre_perdido')!;
-  const detail = meta.properties.find((p) => p.object_type === 'deal' && p.name === 'closed_lost_reason')!;
-  const [motivo, setMotivo] = useState<string | null>(null);
-  const [texto, setTexto] = useState('');
+  const props = missing.map((m) => propOf(meta, 'deal', m)).filter(Boolean) as Property[];
+  const lost = stage.is_closed && !stage.is_won;
+  const detail = propOf(meta, 'deal', 'closed_lost_reason');
+  const [vals, setVals] = useState<Record<string, unknown>>({});
+  const ready = props.every((p) => vals[p.name] != null && vals[p.name] !== '');
   return (
-    <Modal title={`Cierre perdido: ${deal.name}`} onClose={onClose} footer={<>
+    <Modal title={`${stage.label}: ${deal.name}`} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Cancelar</button>
-      <button className="btn primary" disabled={!motivo} onClick={() => onSave({ motivo_de_cierre_perdido: motivo, ...(texto ? { closed_lost_reason: texto } : {}) })}>Guardar</button>
+      <button className="btn primary" disabled={!ready} onClick={() => onSave(vals)}>Guardar</button>
     </>}>
-      <label className="field">{prop.label} *<PropertyInput prop={prop} type="deal" value={motivo} onChange={setMotivo} autoFocus /></label>
-      <label className="field">{detail.label}<PropertyInput prop={detail} type="deal" value={texto} onChange={setTexto} /></label>
+      <p className="muted small" style={{ margin: 0 }}>Para pasar a «{stage.label}» hay que completar:</p>
+      {props.map((p, i) => (
+        <label key={p.name} className="field">{p.label} *<PropertyInput prop={p} type="deal" value={vals[p.name]} onChange={(v) => setVals((x) => ({ ...x, [p.name]: v }))} autoFocus={i === 0} /></label>
+      ))}
+      {lost && detail && !missing.includes('closed_lost_reason') && (
+        <label className="field">{detail.label}<PropertyInput prop={detail} type="deal" value={vals.closed_lost_reason} onChange={(v) => setVals((x) => ({ ...x, closed_lost_reason: v }))} /></label>
+      )}
     </Modal>
   );
 }

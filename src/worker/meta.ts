@@ -16,6 +16,24 @@ export interface Property {
   required: number;
 }
 
+export interface StageConfig {
+  // Propiedades que hay que completar para pasar a esta etapa (HubSpot: «propiedades condicionales de etapa»).
+  required_props?: string[];
+  // Tarea que se crea sola al entrar a la etapa, para el propietario del negocio.
+  task?: { subject: string; due_days?: number; task_type?: string } | null;
+}
+
+export interface PipelineConfig {
+  rules?: {
+    no_skip?: boolean;          // no saltear etapas abiertas hacia adelante
+    no_backward?: boolean;      // no volver a una etapa anterior (ni reabrir un cerrado)
+    require_company?: boolean;  // el negocio tiene que tener una empresa asociada
+    create_stages?: string[];   // etapas en las que se puede crear un negocio (vacío = todas)
+  };
+  card_props?: string[];        // datos de las tarjetas del tablero
+  key_props?: string[];         // «Acerca de este negocio» en la ficha
+}
+
 export interface Stage {
   id: string;
   pipeline_id: string;
@@ -24,6 +42,7 @@ export interface Stage {
   probability: number;
   is_closed: number;
   is_won: number;
+  config: StageConfig;
 }
 
 export interface Pipeline {
@@ -31,6 +50,7 @@ export interface Pipeline {
   label: string;
   display_order: number;
   team_id: number | null;
+  config: PipelineConfig;
   stages: Stage[];
 }
 
@@ -63,13 +83,18 @@ export class Meta {
   async pipelines() {
     if (!this.pipes) {
       const [p, s] = await this.db.batch([
-        this.db.prepare('SELECT id, label, display_order, team_id FROM pipelines WHERE archived = 0 ORDER BY display_order'),
+        this.db.prepare('SELECT id, label, display_order, team_id, config FROM pipelines WHERE archived = 0 ORDER BY display_order'),
         this.db.prepare('SELECT * FROM stages WHERE archived = 0 ORDER BY display_order'),
       ]);
-      const stages = s.results as unknown as Stage[];
-      this.pipes = (p.results as unknown as Pipeline[]).map((pl) => ({ ...pl, stages: stages.filter((st) => st.pipeline_id === pl.id) }));
+      const parse = (v: unknown) => { try { return JSON.parse(String(v ?? '{}')); } catch { return {}; } };
+      const stages = (s.results as Array<Stage & { config: string }>).map((st) => ({ ...st, config: parse(st.config) }));
+      this.pipes = (p.results as Array<Pipeline & { config: string }>).map((pl) => ({ ...pl, config: parse(pl.config), stages: stages.filter((st) => st.pipeline_id === pl.id) }));
     }
     return this.pipes;
+  }
+
+  async pipelineOf(stageId: string) {
+    return (await this.pipelines()).find((p) => p.stages.some((s) => s.id === stageId));
   }
 
   async stage(id: string) {

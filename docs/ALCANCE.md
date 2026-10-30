@@ -61,7 +61,13 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Motivo de cierre perdido obligatorio al perder | ✅ | Tablero y barra de etapas |
 | Fecha de cierre automática al cerrar | ✅ | |
 | Fecha de entrada a cada etapa (`hs_v2_date_entered_*`) | ✅ | Historial y API compatible |
-| Editar pipelines y etapas | ✅ | Configuración → Pipelines |
+| Crear pipelines (en blanco o copiando otro con sus etapas y reglas), borrar pipelines sin negocios | ✅ | Configuración → Pipelines |
+| Etapas: agregar, ordenar, renombrar, probabilidad, tipo (abierta, ganada, perdida); borrar moviendo sus negocios | ✅ | Configuración → Pipelines |
+| Propiedades obligatorias por etapa (como las «propiedades condicionales» de HubSpot): se piden al mover en el tablero o la ficha | ✅ | Por defecto: el motivo al perder en los pipelines de venta |
+| Tarea automática al entrar a una etapa, para el propietario del negocio | ✅ | Configuración → Pipelines → Etapas |
+| Reglas por pipeline: no saltear etapas, no volver atrás, empresa obligatoria, etapas donde se crean negocios | ✅ | Corporate pide empresa (pendiente del runbook de márgenes) |
+| Cada equipo arranca en su pipeline (tablero y alta) | ✅ | Equipo del pipeline |
+| Datos de las tarjetas del tablero y de «Acerca de este negocio» por pipeline | ✅ | Configuración → Pipelines → General |
 
 ### Tareas
 | Función | Estado | Dónde |

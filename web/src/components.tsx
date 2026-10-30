@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon,
-  type CrmRecord, type Filter, type ObjectType, type Property, type Meta,
+  http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor,
 } from './lib';
 
 export function Avatar({ name, type, size }: { name: string; type?: ObjectType; size?: 'lg' }) {
@@ -109,9 +108,10 @@ export function toLocalInput(v: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function StageSelect({ value, onChange, pipelineId }: { value: string; onChange: (v: string) => void; pipelineId?: string }) {
+export function StageSelect({ value, onChange, pipelineId, only }: { value: string; onChange: (v: string) => void; pipelineId?: string; only?: string[] }) {
   const { meta } = useMeta();
-  const pipes = pipelineId ? meta.pipelines.filter((p) => p.id === pipelineId) : meta.pipelines;
+  const pipes = (pipelineId ? meta.pipelines.filter((p) => p.id === pipelineId) : meta.pipelines)
+    .map((p) => (only?.length ? { ...p, stages: p.stages.filter((s) => only.includes(s.id)) } : p));
   return (
     <select className="input" value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       {pipes.map((p) => (
@@ -160,24 +160,40 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
-  const fields = useMemo(() => propsOf(meta, type).filter((p) => p.in_create_form || p.required), [meta, type]);
+  const firstStage = (pid: string) => {
+    const p = meta.pipelines.find((x) => x.id === pid);
+    const allowed = p?.config.rules?.create_stages ?? [];
+    return (allowed.length ? p?.stages.find((s) => allowed.includes(s.id)) : p?.stages[0])?.id;
+  };
   const [form, setForm] = useState<Record<string, any>>(() => {
     const init: Record<string, any> = { owner_id: meta.me.id, ...defaults };
     if (type === 'deal') {
-      init.pipeline = defaults?.pipeline ?? meta.pipelines[0]?.id;
-      init.dealstage = defaults?.dealstage ?? meta.pipelines.find((p) => p.id === init.pipeline)?.stages[0]?.id;
+      init.pipeline = defaults?.pipeline ?? defaultPipeline(meta)?.id;
+      init.dealstage = defaults?.dealstage ?? firstStage(init.pipeline);
     }
     return init;
   });
+  const pipeline = type === 'deal' ? meta.pipelines.find((p) => p.id === form.pipeline) : undefined;
+  const stage = pipeline?.stages.find((s) => s.id === form.dealstage);
+  const needsCompany = !!pipeline?.config.rules?.require_company && !associateWith;
+  // Campos del alta + los que pide la etapa elegida (propiedades condicionales).
+  const fields = useMemo(() => {
+    const base = propsOf(meta, type).filter((p) => p.in_create_form || p.required);
+    const extra = (stage?.config.required_props ?? []).map((n) => propOf(meta, type, n)).filter((p): p is Property => !!p && !base.includes(p));
+    return [...base, ...extra];
+  }, [meta, type, stage]);
   const [busy, setBusy] = useState(false);
   const [company, setCompany] = useState<CrmRecord | null>(null);
   const [pickCompany, setPickCompany] = useState(false);
   const set = (k: string, v: any) => setForm((f) => {
     const next = { ...f, [k]: v };
-    if (k === 'pipeline') next.dealstage = meta.pipelines.find((p) => p.id === v)?.stages[0]?.id;
+    if (k === 'pipeline') next.dealstage = firstStage(v);
     return next;
   });
   const save = async (openAfter: boolean) => {
+    if (needsCompany && !company) { toast(`En «${pipeline!.label}» el negocio tiene que tener una empresa asociada.`, true); return; }
+    const missing = stage ? missingFor(stage, form) : [];
+    if (missing.length) { toast(`Para crear en «${stage!.label}» falta: ${missing.map((m) => propOf(meta, type, m)?.label ?? m).join(', ')}.`, true); return; }
     setBusy(true);
     try {
       const assoc = [associateWith, company?.id].filter(Boolean) as number[];
@@ -199,15 +215,15 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
       <button className="btn primary" disabled={busy} onClick={() => save(true)}>Crear y abrir</button>
     </>}>
       {fields.map((p) => (
-        <label key={p.name} className="field">{p.label}{p.required ? ' *' : ''}
+        <label key={p.name} className="field">{p.label}{p.required || stage?.config.required_props?.includes(p.name) ? ' *' : ''}
           {p.name === 'dealstage'
-            ? <StageSelect value={form.dealstage} onChange={(v) => set('dealstage', v)} pipelineId={form.pipeline} />
+            ? <StageSelect value={form.dealstage} onChange={(v) => set('dealstage', v)} pipelineId={form.pipeline} only={pipeline?.config.rules?.create_stages} />
             : <PropertyInput prop={p} type={type} value={form[p.name]} onChange={(v) => set(p.name, v)} />}
         </label>
       ))}
       {type !== 'company' && !associateWith && (
         <div className="field">
-          <span className="small muted">Empresa asociada</span>
+          <span className="small muted">Empresa asociada{needsCompany ? ' * (obligatoria en este pipeline)' : ''}</span>
           {company
             ? <div className="row"><Avatar name={company.name} type="company" /><span className="grow">{company.name}</span><button className="btn sm ghost" onClick={() => setCompany(null)}>Quitar</button></div>
             : pickCompany ? <RecordPicker type="company" onPick={(r) => { setCompany(r); setPickCompany(false); }} />

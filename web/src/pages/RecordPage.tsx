@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf,
-  fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, type Activity, type CrmRecord, type ObjectType, type Property,
+  http, qs, useMeta, useToast, useAsync, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
 import { Avatar, CreateRecord, Modal, PropertyInput, RecordPicker, toLocalInput } from '../components';
-import { LostReason } from './Board';
+import { StageProps } from './Board';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number }
@@ -90,7 +89,8 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
     } catch (e) { toast((e as Error).message, true); throw e; }
   };
   const quick = (t: Activity['type']) => window.dispatchEvent(new CustomEvent('crm:compose', { detail: t }));
-  const keyProps = KEY_PROPS[type].map((n) => propOf(meta, type, n)).filter(Boolean) as Property[];
+  const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record.props.pipeline)?.config.key_props : undefined;
+  const keyProps = (pipeKeys?.length ? pipeKeys : KEY_PROPS[type]).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[];
   return (
     <>
       <div className="rec-head">
@@ -202,13 +202,18 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
   const { meta } = useMeta();
   const toast = useToast();
   const pipe = meta.pipelines.find((p) => p.id === record.props.pipeline);
-  const [lost, setLost] = useState<string | null>(null);
+  const [ask, setAsk] = useState<{ stage: Stage; missing: string[] } | null>(null);
   if (!pipe) return null;
   const curIdx = pipe.stages.findIndex((s) => s.id === record.props.dealstage);
   const cur = pipe.stages[curIdx];
-  const go = async (stageId: string, extra: Record<string, unknown> = {}) => {
-    try { await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stageId, ...extra } }); toast('Etapa actualizada'); onChange(); }
-    catch (e) { toast((e as Error).message, true); }
+  const go = async (stage: Stage, extra: Record<string, unknown> = {}) => {
+    const missing = missingFor(stage, { ...record.props, ...extra });
+    if (missing.length) { setAsk({ stage, missing }); return; }
+    try { await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stage.id, ...extra } }); toast('Etapa actualizada'); onChange(); }
+    catch (e) {
+      const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
+      if (m?.length) setAsk({ stage, missing: m }); else toast((e as Error).message, true);
+    }
   };
   return (
     <>
@@ -224,10 +229,10 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
         {pipe.stages.map((s, i) => {
           const cls = s.id === cur?.id ? (s.is_closed ? (s.is_won ? 'won' : 'lost') : 'cur') : !s.is_closed && i < curIdx && !cur?.is_closed ? 'done' : '';
           return <button key={s.id} className={cls} title={`${s.label} · ${Math.round(s.probability * 100)}%`}
-            onClick={() => s.id !== cur?.id && (s.is_closed && !s.is_won && pipe.id !== '765787061' ? setLost(s.id) : go(s.id))}>{s.label}</button>;
+            onClick={() => s.id !== cur?.id && go(s)}>{s.label}</button>;
         })}
       </div>
-      {lost && <LostReason deal={record} onClose={() => setLost(null)} onSave={(extra) => { const s = lost; setLost(null); go(s, extra); }} />}
+      {ask && <StageProps deal={record} stage={ask.stage} missing={ask.missing} onClose={() => setAsk(null)} onSave={(extra) => { const a = ask; setAsk(null); go(a.stage, extra); }} />}
     </>
   );
 }

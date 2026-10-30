@@ -8,8 +8,14 @@ export interface Property {
   object_type: ObjectType; name: string; label: string; type: string; options: Option[]; group_name: string; description: string;
   display_order: number; system: number; read_only: number; in_create_form: number; required: number;
 }
-export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number }
-export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; stages: Stage[] }
+export interface StageConfig { required_props?: string[]; task?: { subject: string; due_days?: number; task_type?: string } | null }
+export interface PipelineConfig {
+  rules?: { no_skip?: boolean; no_backward?: boolean; require_company?: boolean; create_stages?: string[] };
+  card_props?: string[];
+  key_props?: string[];
+}
+export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
+export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 export interface User { id: number; email: string; name: string; role: string; team_id: number | null; active: number }
 export interface Meta { me: User; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }> }
 export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean }
@@ -40,7 +46,11 @@ export async function http<T = any>(method: string, path: string, body?: unknown
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data?.error ?? `Error ${res.status}`) as Error & { data?: any };
+    err.data = data;
+    throw err;
+  }
   return data as T;
 }
 
@@ -88,6 +98,14 @@ export function stageOf(meta: Meta, id?: string) {
     if (s) return { stage: s, pipeline: p };
   }
   return null;
+}
+// Cada equipo arranca en su pipeline (Corporate en Corporate, Formas Shop en Formas Shop).
+export function defaultPipeline(meta: Meta) {
+  return meta.pipelines.find((p) => p.team_id != null && p.team_id === meta.me.team_id) ?? meta.pipelines[0];
+}
+// Lo que falta completar para pasar un negocio a una etapa.
+export function missingFor(stage: Stage, props: Record<string, unknown>) {
+  return (stage.config?.required_props ?? []).filter((k) => props[k] == null || props[k] === '');
 }
 export const userName = (meta: Meta, id: unknown) => meta.users.find((u) => u.id === Number(id))?.name ?? (id ? `Usuario ${id}` : 'Sin asignar');
 

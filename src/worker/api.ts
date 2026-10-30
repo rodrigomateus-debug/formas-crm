@@ -11,6 +11,7 @@ import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
+import { companiesFor, requireCompany } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -85,8 +86,17 @@ api.post('/records/:type', async (c) => {
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown>; associations?: number[] }>();
+  const assoc = [...new Set((body.associations ?? []).map(Number))];
+  if (type === 'deal') {
+    // Como HubSpot: el negocio se asocia también a la empresa principal de sus contactos.
+    const companies = await companiesFor(c.env.DB, assoc);
+    const meta = new Meta(c.env.DB);
+    const pipeline = (await meta.pipelines()).find((p) => p.id === (body.props?.pipeline ?? 'default') || p.label === body.props?.pipeline);
+    requireCompany(ctx, pipeline, companies.length);
+    for (const co of companies) if (!assoc.includes(co)) assoc.push(co);
+  }
   const row = await createRecord(c.env.DB, ctx, type, body.props ?? {});
-  for (const id of body.associations ?? []) await associate(c.env.DB, ctx, row.id, id);
+  for (const id of assoc) await associate(c.env.DB, ctx, row.id, id);
   if (type === 'contact') {
     const hasCompany = await c.env.DB.prepare("SELECT 1 FROM associations WHERE from_id = ? AND to_type = 'company'").bind(row.id).first();
     if (!hasCompany) await autoAssociateCompany(c.env.DB, ctx, row);
@@ -434,33 +444,80 @@ api.patch('/properties/:type/:name', async (c) => {
   return c.json({ ok: true });
 });
 
+interface StageInput { id?: string; label: string; probability: number; is_closed?: boolean | number; is_won?: boolean | number; config?: Record<string, unknown> }
+
 api.post('/pipelines', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ label: string; team_id?: number; stages: Array<{ label: string; probability: number; is_closed?: boolean; is_won?: boolean }> }>();
+  const b = await c.req.json<{ label: string; team_id?: number | null; copy_from?: string; stages?: StageInput[] }>();
+  if (!b.label?.trim()) throw new HttpError(400, 'Falta el nombre del pipeline.');
+  const meta = new Meta(c.env.DB);
+  const source = b.copy_from ? (await meta.pipelines()).find((p) => p.id === b.copy_from) : undefined;
+  const stages: StageInput[] = source ? source.stages.map((s) => ({ label: s.label, probability: s.probability, is_closed: s.is_closed, is_won: s.is_won, config: s.config as Record<string, unknown> }))
+    : b.stages?.length ? b.stages
+      : [{ label: 'Nueva oportunidad', probability: 0.2 }, { label: 'Envío de cotización', probability: 0.4 }, { label: 'Negociación', probability: 0.7 },
+        { label: 'Cierre ganado', probability: 1, is_closed: true, is_won: true }, { label: 'Cierre perdido', probability: 0, is_closed: true, config: { required_props: ['motivo_de_cierre_perdido'] } }];
   const id = `p${Date.now()}`;
-  const stmts = [c.env.DB.prepare("INSERT INTO pipelines (id, object_type, label, display_order, team_id) VALUES (?, 'deal', ?, (SELECT COALESCE(MAX(display_order), 0) + 1 FROM pipelines), ?)")
-    .bind(id, b.label, b.team_id ?? null)];
-  b.stages.forEach((s, i) => stmts.push(c.env.DB.prepare('INSERT INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .bind(`${id}_${i}`, id, s.label, i, s.probability, s.is_closed ? 1 : 0, s.is_won ? 1 : 0)));
+  const stmts = [c.env.DB.prepare("INSERT INTO pipelines (id, object_type, label, display_order, team_id, config) VALUES (?, 'deal', ?, (SELECT COALESCE(MAX(display_order), 0) + 1 FROM pipelines), ?, ?)")
+    .bind(id, b.label.trim(), b.team_id ?? null, JSON.stringify(source?.config ?? {}))];
+  stages.forEach((s, i) => stmts.push(c.env.DB.prepare('INSERT INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(`${id}_${i}`, id, s.label, i, Number(s.probability), s.is_closed ? 1 : 0, s.is_won ? 1 : 0, JSON.stringify(s.config ?? {}))));
   await c.env.DB.batch(stmts);
   return c.json({ id }, 201);
 });
 
+// Guarda nombre, equipo, reglas y etapas (orden, nombre, probabilidad, tipo, propiedades obligatorias, tarea automática).
+// Las etapas que no vienen se borran; si tienen negocios, hay que decir a qué etapa pasan (`remove: [{ id, move_to }]`).
 api.put('/pipelines/:id', async (c) => {
-  requireRole(c.get('ctx'), 'admin');
+  const ctx = c.get('ctx');
+  requireRole(ctx, 'admin');
   const id = c.req.param('id');
-  const b = await c.req.json<{ label: string; team_id?: number | null; stages: Array<{ id?: string; label: string; probability: number; is_closed?: boolean; is_won?: boolean; archived?: boolean }> }>();
-  const stmts = [c.env.DB.prepare('UPDATE pipelines SET label = ?, team_id = ? WHERE id = ?').bind(b.label, b.team_id ?? null, id)];
+  const db = c.env.DB;
+  const b = await c.req.json<{ label: string; team_id?: number | null; config?: Record<string, unknown>; stages: StageInput[]; remove?: Array<{ id: string; move_to?: string }> }>();
+  const current = (await new Meta(db).pipelines()).find((p) => p.id === id);
+  if (!current) throw new HttpError(404, 'No existe el pipeline.');
+  if (!b.stages?.length) throw new HttpError(400, 'El pipeline necesita al menos una etapa.');
+  if (!b.stages.some((s) => !s.is_closed)) throw new HttpError(400, 'El pipeline necesita al menos una etapa abierta.');
+  const keep = new Set(b.stages.map((s) => s.id).filter(Boolean));
+  const head = db.prepare('UPDATE pipelines SET label = ?, team_id = ?, config = ? WHERE id = ?').bind(b.label, b.team_id ?? null, JSON.stringify(b.config ?? current.config ?? {}), id);
+  const removals: D1PreparedStatement[] = [];
+  const upserts: D1PreparedStatement[] = [];
+  for (const st of current.stages.filter((s) => !keep.has(s.id))) {
+    const n = (await db.prepare("SELECT COUNT(*) AS n FROM records WHERE object_type = 'deal' AND stage_id = ? AND archived = 0").bind(st.id).first<{ n: number }>())!.n;
+    const move = b.remove?.find((r) => r.id === st.id)?.move_to;
+    if (n && !move) throw new HttpError(409, `La etapa «${st.label}» tiene ${n} negocios: elegí a qué etapa pasan antes de borrarla.`);
+    if (n && move) {
+      const target = b.stages.find((s) => s.id === move);
+      if (!target) throw new HttpError(400, 'La etapa de destino tiene que quedar en el pipeline.');
+      removals.push(db.prepare("UPDATE records SET stage_id = ?, props = json_set(props, '$.dealstage', ?), updated_at = ? WHERE object_type = 'deal' AND stage_id = ?").bind(move, move, now(), st.id));
+      removals.push(db.prepare(`INSERT INTO changes (record_id, prop, old_value, new_value, user_id, source)
+        SELECT id, 'dealstage', ?, ?, ?, 'crm' FROM records WHERE object_type = 'deal' AND stage_id = ?`).bind(st.id, move, ctx.user.id, st.id));
+    }
+    removals.push(db.prepare('UPDATE stages SET archived = 1 WHERE id = ?').bind(st.id));
+  }
   b.stages.forEach((s, i) => {
-    if (s.id) {
-      stmts.push(c.env.DB.prepare('UPDATE stages SET label = ?, display_order = ?, probability = ?, is_closed = ?, is_won = ?, archived = ? WHERE id = ? AND pipeline_id = ?')
-        .bind(s.label, i, s.probability, s.is_closed ? 1 : 0, s.is_won ? 1 : 0, s.archived ? 1 : 0, s.id, id));
+    const cfg = JSON.stringify(s.config ?? {});
+    if (s.id && current.stages.some((x) => x.id === s.id)) {
+      upserts.push(db.prepare('UPDATE stages SET label = ?, display_order = ?, probability = ?, is_closed = ?, is_won = ?, config = ? WHERE id = ? AND pipeline_id = ?')
+        .bind(s.label, i, Number(s.probability), s.is_closed ? 1 : 0, s.is_won ? 1 : 0, cfg, s.id, id));
     } else {
-      stmts.push(c.env.DB.prepare('INSERT INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .bind(`${id}_${Date.now()}_${i}`, id, s.label, i, s.probability, s.is_closed ? 1 : 0, s.is_won ? 1 : 0));
+      upserts.push(db.prepare('INSERT INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(`${id}_${Date.now()}_${i}`, id, s.label, i, Number(s.probability), s.is_closed ? 1 : 0, s.is_won ? 1 : 0, cfg));
     }
   });
-  await c.env.DB.batch(stmts);
+  // Todo junto (D1 lo aplica en una transacción): etapas, después los negocios que se mueven y las etapas que se borran.
+  await db.batch([head, ...upserts, ...removals]);
+  return c.json({ ok: true });
+});
+
+api.delete('/pipelines/:id', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const id = c.req.param('id');
+  const n = (await c.env.DB.prepare("SELECT COUNT(*) AS n FROM records WHERE object_type = 'deal' AND pipeline_id = ? AND archived = 0").bind(id).first<{ n: number }>())!.n;
+  if (n) throw new HttpError(409, `El pipeline tiene ${n} negocios: pasalos a otro pipeline antes de borrarlo.`);
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE pipelines SET archived = 1 WHERE id = ?').bind(id),
+    c.env.DB.prepare('UPDATE stages SET archived = 1 WHERE pipeline_id = ?').bind(id),
+  ]);
   return c.json({ ok: true });
 });
 

@@ -372,12 +372,16 @@ export async function seedConfig(db: D1Database) {
     }
   }
   PIPELINES.forEach((p, i) => {
-    stmts.push(db.prepare('INSERT OR IGNORE INTO pipelines (id, object_type, label, display_order, team_id) VALUES (?, ?, ?, ?, ?)')
-      .bind(p.id, 'deal', p.label, i, p.team ?? null));
+    const sales = !['765787061', '833718584'].includes(p.id);
+    const config = p.id === '674405796' ? { rules: { require_company: true } } : {};
+    stmts.push(db.prepare('INSERT OR IGNORE INTO pipelines (id, object_type, label, display_order, team_id, config) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(p.id, 'deal', p.label, i, p.team ?? null, JSON.stringify(config)));
     p.stages.forEach(([id, label, probability], j) => {
       const f = stageFlags(label, probability);
-      stmts.push(db.prepare('INSERT OR IGNORE INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won) VALUES (?, ?, ?, ?, ?, ?, ?)')
-        .bind(id, p.id, label, j, probability, f.is_closed, f.is_won));
+      // Perder un negocio de venta pide el motivo.
+      const stageConfig = sales && f.is_closed && !f.is_won ? { required_props: ['motivo_de_cierre_perdido'] } : {};
+      stmts.push(db.prepare('INSERT OR IGNORE INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .bind(id, p.id, label, j, probability, f.is_closed, f.is_won, JSON.stringify(stageConfig)));
     });
   });
   stmts.push(db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('seeded', ?)").bind(new Date().toISOString()));

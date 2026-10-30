@@ -9,11 +9,13 @@ import { hooks } from './hooks';
 import { handleMcp } from './mcp';
 import { migrate } from './migrate';
 import { syncAll } from './gmail';
+import { StageError } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 const app = new Hono<App>();
 
 app.onError((err, c) => {
+  if (err instanceof StageError) return c.json({ error: err.message, missing: err.missing }, 400);
   if (err instanceof HttpError) return c.json({ error: err.message }, err.status as 400);
   console.error(err);
   return c.json({ error: 'Error interno del CRM.', detail: err.message }, 500);

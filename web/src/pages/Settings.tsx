@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { http, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, type ObjectType, type Option, type Pipeline, type Property } from '../lib';
-import { Modal } from '../components';
+import { useEffect, useState } from 'react';
+import { http, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, type ObjectType, type Option, type Pipeline, type Property, type Stage } from '../lib';
+import { Modal, MultiPick } from '../components';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
 const TYPES: Array<[string, string]> = [['string', 'Texto corto'], ['text', 'Texto largo'], ['number', 'Número'], ['currency', 'Moneda'], ['date', 'Fecha'], ['datetime', 'Fecha y hora'], ['enum', 'Lista desplegable'], ['multienum', 'Selección múltiple'], ['bool', 'Sí / No'], ['email', 'Email'], ['phone', 'Teléfono'], ['url', 'Link'], ['owner', 'Usuario']];
@@ -128,52 +128,144 @@ function PropertyEditor({ type, prop, onClose, onSaved }: { type: ObjectType; pr
   );
 }
 
+type StageDraft = Stage & { _new?: boolean };
+
+// Pipelines como en HubSpot: etapas (orden, probabilidad, tipo), lo que pide cada etapa, tarea automática,
+// reglas del pipeline, datos de las tarjetas del tablero y de «Acerca de este negocio».
 function Pipelines() {
   const { meta, reload } = useMeta();
   const toast = useToast();
-  const [sel, setSel] = useState<Pipeline | null>(null);
-  const [draft, setDraft] = useState<Pipeline | null>(null);
-  const open = (p: Pipeline) => { setSel(p); setDraft(JSON.parse(JSON.stringify(p))); };
+  const [selId, setSelId] = useState<string | null>(meta.pipelines[0]?.id ?? null);
+  const [draft, setDraft] = useState<(Omit<Pipeline, 'stages'> & { stages: StageDraft[] }) | null>(null);
+  const [removed, setRemoved] = useState<Array<{ id: string; label: string; move_to: string }>>([]);
+  const [creating, setCreating] = useState(false);
+  const dealProps = propsOf(meta, 'deal').filter((p) => !p.read_only);
+  const propOpts = dealProps.map((p) => ({ value: p.name, label: p.label }));
+  useEffect(() => {
+    const p = meta.pipelines.find((x) => x.id === selId);
+    setDraft(p ? JSON.parse(JSON.stringify(p)) : null);
+    setRemoved([]);
+  }, [selId, meta]);
+  if (!draft) return null;
+  const rules = draft.config.rules ?? {};
+  const setRules = (patch: Partial<NonNullable<typeof rules>>) => setDraft({ ...draft, config: { ...draft.config, rules: { ...rules, ...patch } } });
+  const setStage = (i: number, patch: Partial<StageDraft>) => setDraft({ ...draft, stages: draft.stages.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
+  const moveStage = (i: number, d: number) => {
+    const st = [...draft.stages];
+    [st[i], st[i + d]] = [st[i + d], st[i]];
+    setDraft({ ...draft, stages: st });
+  };
+  const removeStage = (i: number) => {
+    const st = draft.stages[i];
+    const rest = draft.stages.filter((_, j) => j !== i);
+    if (!st._new) setRemoved([...removed, { id: st.id, label: st.label, move_to: (rest[Math.max(0, i - 1)] ?? rest[0]).id }]);
+    setDraft({ ...draft, stages: rest });
+  };
+  const save = async () => {
+    try {
+      await http('PUT', `/pipelines/${draft.id}`, {
+        label: draft.label, team_id: draft.team_id, config: draft.config,
+        stages: draft.stages.map((s) => ({ id: s._new ? undefined : s.id, label: s.label, probability: s.probability, is_closed: !!s.is_closed, is_won: !!s.is_won, config: s.config ?? {} })),
+        remove: removed.map((r) => ({ id: r.id, move_to: r.move_to })),
+      });
+      toast('Pipeline guardado');
+      await reload();
+    } catch (e) { toast((e as Error).message, true); }
+  };
   return (
-    <div className="grid-2">
-      <div className="panel">
-        <div className="panel-head"><h2>Pipelines de negocios</h2>
-          <button className="btn sm" onClick={async () => {
-            const label = prompt('Nombre del pipeline nuevo');
-            if (!label) return;
-            await http('POST', '/pipelines', { label, stages: [{ label: 'Nueva oportunidad', probability: 0.1 }, { label: 'Cierre ganado', probability: 1, is_closed: true, is_won: true }, { label: 'Cierre perdido', probability: 0, is_closed: true }] });
-            reload(); toast('Pipeline creado');
-          }}>+ Pipeline</button></div>
-        {meta.pipelines.map((p) => (
-          <div key={p.id} className="assoc-item" style={{ cursor: 'pointer', background: sel?.id === p.id ? 'var(--sunken)' : undefined }} onClick={() => open(p)}>
-            <div className="grow"><b>{p.label}</b><div className="small muted">{p.stages.length} etapas · {meta.teams.find((t) => t.id === p.team_id)?.name ?? 'sin equipo'}</div></div>
-          </div>
-        ))}
+    <div className="stack" style={{ gap: 16 }}>
+      <div className="row wrap">
+        <select className="input" style={{ width: 300 }} value={selId ?? ''} onChange={(e) => setSelId(e.target.value)} aria-label="Pipeline">
+          {meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}{p.team_id ? ` · ${meta.teams.find((t) => t.id === p.team_id)?.name ?? ''}` : ''}</option>)}
+        </select>
+        <button className="btn" onClick={() => setCreating(true)}>+ Crear pipeline</button>
+        <span className="grow" />
+        <button className="btn danger" onClick={async () => {
+          if (!confirm(`¿Borrar el pipeline «${draft.label}»? Solo se puede si no tiene negocios.`)) return;
+          try { await http('DELETE', `/pipelines/${draft.id}`); toast('Pipeline borrado'); await reload(); setSelId(meta.pipelines.find((p) => p.id !== draft.id)?.id ?? null); }
+          catch (e) { toast((e as Error).message, true); }
+        }}>Borrar pipeline</button>
+        <button className="btn primary" onClick={save}>Guardar cambios</button>
       </div>
-      {draft && (
-        <div className="panel">
-          <div className="panel-head"><h2>Etapas</h2><button className="btn sm primary" onClick={async () => {
-            try { await http('PUT', `/pipelines/${draft.id}`, { label: draft.label, team_id: draft.team_id, stages: draft.stages }); reload(); toast('Pipeline guardado'); } catch (e) { toast((e as Error).message, true); }
-          }}>Guardar</button></div>
-          <div className="panel-body stack">
-            <label className="field">Nombre<input className="input" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} /></label>
-            <label className="field">Equipo<select className="input" value={draft.team_id ?? ''} onChange={(e) => setDraft({ ...draft, team_id: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-            {draft.stages.map((s, i) => (
-              <div key={s.id ?? i} className="row">
-                <input className="input" value={s.label} onChange={(e) => setDraft({ ...draft, stages: draft.stages.map((x, j) => j === i ? { ...x, label: e.target.value } : x) })} />
-                <input className="input num" style={{ width: 70 }} type="number" min={0} max={100} value={Math.round(s.probability * 100)} title="Probabilidad %" onChange={(e) => setDraft({ ...draft, stages: draft.stages.map((x, j) => j === i ? { ...x, probability: Number(e.target.value) / 100 } : x) })} />
-                <select className="input" style={{ width: 120 }} value={s.is_closed ? (s.is_won ? 'won' : 'lost') : 'open'} onChange={(e) => setDraft({ ...draft, stages: draft.stages.map((x, j) => j === i ? { ...x, is_closed: e.target.value === 'open' ? 0 : 1, is_won: e.target.value === 'won' ? 1 : 0 } : x) })}>
-                  <option value="open">Abierta</option><option value="won">Ganada</option><option value="lost">Perdida</option></select>
-                <button className="btn ghost sm" disabled={i === 0} onClick={() => { const st = [...draft.stages]; [st[i - 1], st[i]] = [st[i], st[i - 1]]; setDraft({ ...draft, stages: st }); }}>↑</button>
-              </div>
-            ))}
-            <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setDraft({ ...draft, stages: [...draft.stages, { id: '', pipeline_id: draft.id, label: 'Nueva etapa', display_order: draft.stages.length, probability: 0.5, is_closed: 0, is_won: 0 }] })}>+ Etapa</button>
-            <p className="muted small" style={{ margin: 0 }}>Los ids de etapa no cambian al renombrar, así los tableros y la historia siguen funcionando.</p>
-          </div>
-        </div>
-      )}
+
+      <div className="grid-2">
+        <div className="panel"><div className="panel-head"><h2>General</h2></div><div className="panel-body stack">
+          <label className="field">Nombre<input className="input" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} /></label>
+          <label className="field">Equipo (arranca en este pipeline)<select className="input" value={draft.team_id ?? ''} onChange={(e) => setDraft({ ...draft, team_id: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label className="field">Datos de las tarjetas del tablero<MultiPick options={propOpts} values={draft.config.card_props ?? ['amount', 'closedate']} onChange={(v) => setDraft({ ...draft, config: { ...draft.config, card_props: v } })} /></label>
+          <label className="field">«Acerca de este negocio» en la ficha<MultiPick options={propOpts} values={draft.config.key_props ?? []} onChange={(v) => setDraft({ ...draft, config: { ...draft.config, key_props: v } })} /></label>
+          <span className="small muted">Si no elegís nada, se usan los datos de siempre.</span>
+        </div></div>
+        <div className="panel"><div className="panel-head"><h2>Reglas</h2></div><div className="panel-body stack">
+          <label className="row"><input type="checkbox" checked={!!rules.no_skip} onChange={(e) => setRules({ no_skip: e.target.checked })} />No saltear etapas (hay que pasar por cada etapa abierta)</label>
+          <label className="row"><input type="checkbox" checked={!!rules.no_backward} onChange={(e) => setRules({ no_backward: e.target.checked })} />No volver a una etapa anterior ni reabrir negocios cerrados</label>
+          <label className="row"><input type="checkbox" checked={!!rules.require_company} onChange={(e) => setRules({ require_company: e.target.checked })} />El negocio tiene que tener una empresa asociada</label>
+          <label className="field">Los negocios se crean solo en<MultiPick options={draft.stages.filter((s) => !s._new).map((s) => ({ value: s.id, label: s.label }))} values={rules.create_stages ?? []} onChange={(v) => setRules({ create_stages: v })} /></label>
+          <span className="small muted">Vacío = en cualquier etapa. Los administradores pueden saltear las reglas de movimiento (como en HubSpot); los datos obligatorios de cada etapa valen para todos.</span>
+        </div></div>
+      </div>
+
+      <div className="panel"><div className="panel-head"><h2>Etapas</h2>
+        <button className="btn sm" onClick={() => setDraft({ ...draft, stages: [...draft.stages.filter((s) => !s.is_closed), { id: `nueva-${Date.now()}`, _new: true, pipeline_id: draft.id, label: 'Nueva etapa', display_order: 0, probability: 0.5, is_closed: 0, is_won: 0, config: {} }, ...draft.stages.filter((s) => s.is_closed)] })}>+ Etapa</button></div>
+        <div className="table-wrap" style={{ border: 0, overflow: 'visible' }}><table className="grid">
+          <thead><tr><th className="nosort" /><th className="nosort">Etapa</th><th className="nosort">Probabilidad</th><th className="nosort">Tipo</th><th className="nosort">Para entrar pide</th><th className="nosort">Tarea automática al entrar</th><th className="nosort" /></tr></thead>
+          <tbody>{draft.stages.map((s, i) => (
+            <tr key={s.id}>
+              <td style={{ whiteSpace: 'nowrap' }}><button className="btn ghost sm" disabled={i === 0} onClick={() => moveStage(i, -1)} aria-label="Subir">↑</button><button className="btn ghost sm" disabled={i === draft.stages.length - 1} onClick={() => moveStage(i, 1)} aria-label="Bajar">↓</button></td>
+              <td><input className="input" style={{ minWidth: 200 }} value={s.label} onChange={(e) => setStage(i, { label: e.target.value })} /></td>
+              <td><input className="input num" style={{ width: 80 }} type="number" min={0} max={100} value={Math.round(s.probability * 100)} onChange={(e) => setStage(i, { probability: Number(e.target.value) / 100 })} /></td>
+              <td><select className="input" style={{ width: 120 }} value={s.is_closed ? (s.is_won ? 'won' : 'lost') : 'open'} onChange={(e) => setStage(i, { is_closed: e.target.value === 'open' ? 0 : 1, is_won: e.target.value === 'won' ? 1 : 0, probability: e.target.value === 'won' ? 1 : e.target.value === 'lost' ? 0 : s.probability })}>
+                <option value="open">Abierta</option><option value="won">Ganada</option><option value="lost">Perdida</option></select></td>
+              <td style={{ minWidth: 220, overflow: 'visible' }}><MultiPick options={propOpts} values={s.config?.required_props ?? []} onChange={(v) => setStage(i, { config: { ...s.config, required_props: v } })} /></td>
+              <td style={{ minWidth: 300 }}><div className="row">
+                <input className="input" placeholder="Ej.: Seguimiento de {negocio}" value={s.config?.task?.subject ?? ''} onChange={(e) => setStage(i, { config: { ...s.config, task: e.target.value ? { ...(s.config?.task ?? {}), subject: e.target.value } : null } })} />
+                <input className="input num" style={{ width: 70 }} type="number" min={0} title="Vence en días" value={s.config?.task?.due_days ?? 1} disabled={!s.config?.task?.subject} onChange={(e) => setStage(i, { config: { ...s.config, task: { ...(s.config?.task ?? { subject: '' }), due_days: Number(e.target.value) } } })} />
+                <span className="small muted">días</span>
+              </div></td>
+              <td><button className="btn ghost sm danger" disabled={draft.stages.filter((x) => !x.is_closed).length <= 1 && !s.is_closed} onClick={() => removeStage(i)}>Borrar</button></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+        {removed.length > 0 && <div className="panel-body stack">
+          <b className="small">Etapas que se borran al guardar</b>
+          {removed.map((r, i) => (
+            <div key={r.id} className="row small">«{r.label}»: si tiene negocios, pasan a
+              <select className="input" style={{ width: 240, height: 30 }} value={r.move_to} onChange={(e) => setRemoved(removed.map((x, j) => (j === i ? { ...x, move_to: e.target.value } : x)))}>
+                {draft.stages.filter((s) => !s._new).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+              <button className="btn ghost sm" onClick={() => { const st = meta.pipelines.find((p) => p.id === draft.id)!.stages.find((x) => x.id === r.id)!; setRemoved(removed.filter((_, j) => j !== i)); setDraft({ ...draft, stages: [...draft.stages, st] }); }}>No borrar</button>
+            </div>
+          ))}
+        </div>}
+        <div className="panel-body small muted">En la tarea automática, {'{negocio}'} se reemplaza por el nombre del negocio. Se le asigna al propietario del negocio.</div>
+      </div>
+      {creating && <NewPipeline onClose={() => setCreating(false)} onCreated={async (id) => { setCreating(false); await reload(); setSelId(id); }} />}
     </div>
+  );
+}
+
+function NewPipeline({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const [f, setF] = useState({ label: '', team_id: '', copy_from: '' });
+  return (
+    <Modal title="Crear pipeline" onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn primary" disabled={!f.label.trim()} onClick={async () => {
+        try {
+          const r = await http<{ id: string }>('POST', '/pipelines', { label: f.label, team_id: f.team_id ? Number(f.team_id) : null, copy_from: f.copy_from || undefined });
+          toast('Pipeline creado'); onCreated(r.id);
+        } catch (e) { toast((e as Error).message, true); }
+      }}>Crear</button>
+    </>}>
+      <label className="field">Nombre<input className="input" autoFocus value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="Ej.: Licitaciones" /></label>
+      <label className="field">Equipo<select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}>
+        <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+      <label className="field">Etapas<select className="input" value={f.copy_from} onChange={(e) => setF({ ...f, copy_from: e.target.value })}>
+        <option value="">Etapas básicas (oportunidad, cotización, negociación, ganado, perdido)</option>
+        {meta.pipelines.map((p) => <option key={p.id} value={p.id}>Copiar de «{p.label}» (etapas y reglas)</option>)}</select></label>
+    </Modal>
   );
 }
 

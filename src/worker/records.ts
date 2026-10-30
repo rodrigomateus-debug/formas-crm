@@ -2,6 +2,7 @@ import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property } from './meta';
 import { emitDealEvent } from './events';
+import { checkCreate, checkMove, requireCompany, stageAutomation } from './pipelines';
 
 // Los registros nuevos arrancan en este id para no chocar con los ids de HubSpot que trae la migración
 // (los migrados conservan su id de HubSpot, así los links y los tableros siguen andando).
@@ -301,7 +302,11 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
       throw new HttpError(400, `Falta "${p.label}".`);
     }
   }
-  if (type === 'deal') await checkDealStage(meta, props);
+  if (type === 'deal') {
+    await checkDealStage(meta, props);
+    const stage = (await meta.stage(props.dealstage as string))!;
+    await checkCreate(meta, ctx, (await meta.pipelineOf(stage.id))!, stage, props);
+  }
   if (type === 'company' && !props.domain && props.website) props.domain = normDomain(props.website);
   if (props.owner_id == null && ctx.source === 'crm' && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
   if (type === 'contact' && props.email && !opts.skipDedupe) {
@@ -325,6 +330,7 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, NULL, ?, ?, ?, ?)')
       .bind(row!.id, k, String(props[k]), ts, ctx.user.id, ctx.source));
   if (changes.length) await db.batch(changes);
+  if (type === 'deal') await stageAutomation(db, ctx, row!.id, (await meta.stage(c.stage_id!))!, c.owner_id, c.name);
   return row!;
 }
 
@@ -339,6 +345,15 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     await checkDealStage(meta, stagePart, current);
     next.pipeline = stagePart.pipeline;
     next.dealstage = stagePart.dealstage;
+    if (next.dealstage !== current.dealstage) {
+      const to = (await meta.stage(next.dealstage as string))!;
+      const pipeline = (await meta.pipelineOf(to.id))!;
+      await checkMove(meta, ctx, pipeline, await meta.stage(current.dealstage as string), to, next);
+      if (next.pipeline !== current.pipeline) {
+        const { results } = await db.prepare("SELECT to_id FROM associations WHERE from_id = ? AND to_type = 'company'").bind(id).all();
+        requireCompany(ctx, pipeline, results.length);
+      }
+    }
   }
   for (const k of Object.keys(next)) if (next[k] === null) delete next[k];
   const changed = Object.keys({ ...current, ...next }).filter((k) => String(current[k] ?? '') !== String(next[k] ?? ''));
@@ -366,8 +381,9 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   await db.batch(stmts);
   if (type === 'deal' && stageMoved) {
-    const st = await meta.stage(next.dealstage as string);
-    await emitDealEvent(db, st?.is_won ? ['deal.stage_changed', 'deal.won'] : ['deal.stage_changed'], id);
+    const st = (await meta.stage(next.dealstage as string))!;
+    await stageAutomation(db, ctx, id, st, c.owner_id, c.name);
+    await emitDealEvent(db, st.is_won ? ['deal.stage_changed', 'deal.won'] : ['deal.stage_changed'], id);
   }
   return getRow(db, id);
 }

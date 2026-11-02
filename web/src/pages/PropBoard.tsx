@@ -8,10 +8,33 @@ interface Column { value: string; label: string; total: number; records: CrmReco
 
 // Fecha de entrega de un pedido contada desde hoy, como «7 días a partir de ahora» en HubSpot.
 const daysTo = (v: string) => { const d = new Date(`${String(v).slice(0, 10)}T00:00:00`); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d.getTime() - t.getTime()) / 86_400_000); };
-const deliveryLate = (v: string) => daysTo(v) < 0;
-function deliveryText(v: string) {
-  const n = daysTo(v);
-  return n === 0 ? 'Entrega hoy' : n === 1 ? 'Entrega mañana' : n > 1 ? `Entrega en ${n} días` : `Entrega vencida hace ${-n} ${n === -1 ? 'día' : 'días'}`;
+const ENTREGADO = '1237498998';
+const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
+const shortDate = (v: string) => new Date(`${String(v).slice(0, 10)}T12:00:00`).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }).replace('.', '');
+
+// La línea del pedido en la tarjeta: «Evento» (los normales no llevan marca) y la entrega. Uno ya entregado dice cuándo se
+// entregó; uno anulado, nada; el resto, cuánto falta para la fecha prometida (en rojo si ya pasó, en ámbar si es hoy o mañana).
+function OrderLine({ r }: { r: CrmRecord }) {
+  const p = r.props;
+  const evento = p.tipo_de_pedido === 'EVENTO';
+  let when: { text: string; cls: string; title: string } | null = null;
+  if (p.hs_pipeline_stage === ENTREGADO) {
+    if (p.entregado_el) when = { text: `Entregado el ${shortDate(p.entregado_el)}`, cls: '', title: 'Fecha real de entrega' };
+  } else if (p.hs_pipeline_stage !== ANULADO && p.fecha_de_entrega) {
+    const n = daysTo(p.fecha_de_entrega);
+    when = {
+      text: n === 0 ? 'Entrega hoy' : n === 1 ? 'Entrega mañana' : n > 1 ? `Entrega en ${n} días` : `Vencida hace ${-n} ${n === -1 ? 'día' : 'días'}`,
+      cls: n < 0 ? ' late' : n <= 1 ? ' soon' : '',
+      title: `Entrega prometida: ${shortDate(p.fecha_de_entrega)}`,
+    };
+  }
+  if (!evento && !when) return null;
+  return (
+    <div className="meta order-line">
+      {evento && <span className="chip-evento">Evento</span>}
+      {when && <span className={`when${when.cls}`} title={when.title}><Icon name="meeting" size={13} /><span className="ellipsis">{when.text}</span></span>}
+    </div>
+  );
 }
 
 // Por qué propiedad se agrupa cada tablero si la vista no dice otra cosa: los pedidos por su etapa, el resto por ciclo de vida.
@@ -75,7 +98,10 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   });
 
   const subtitle = (r: CrmRecord) => (type === 'company' ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
-    : type === 'order' ? [fmtMoney(r.props.hs_total_price, r.props.hs_currency_code), r.props.pdv_finnegans && `PDV ${r.props.pdv_finnegans}`].filter(Boolean).join(' · ')
+    // El PDV solo si el nombre no lo dice ya; mientras se produce, cómo vienen los artículos («2 en el impresor · 1 listo…»).
+    : type === 'order' ? [r.props.hs_total_price != null && r.props.hs_total_price !== '' && fmtMoney(r.props.hs_total_price, r.props.hs_currency_code),
+      r.props.pdv_finnegans && !r.name.includes(String(r.props.pdv_finnegans)) && `PDV ${r.props.pdv_finnegans}`,
+      ![ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage) && r.props.detalle_produccion].filter(Boolean).join(' · ')
       : [r.props.jobtitle, r.props.company || r.props.email].filter(Boolean).join(' · '));
 
   return (
@@ -127,12 +153,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
                     {cardProps?.length
                       ? cardProps.map((k) => { const v = formatValue(meta, type, k, r.props[k], r.props); return v ? <div key={k} className="meta" title={propOf(meta, type, k)?.label}><span className="ellipsis">{v}</span></div> : null; })
                       : subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
-                    {type === 'order' && !cardProps?.length && (r.props.tipo_de_pedido || r.props.fecha_de_entrega) && (
-                      <div className="meta">
-                        {r.props.tipo_de_pedido && <span className={`tag ${r.props.tipo_de_pedido === 'EVENTO' ? 'warn' : 'info'}`}>{r.props.tipo_de_pedido}</span>}
-                        {r.props.fecha_de_entrega && <span className={`ellipsis${deliveryLate(r.props.fecha_de_entrega) ? ' stale' : ''}`} title="Fecha de entrega">{deliveryText(r.props.fecha_de_entrega)}</span>}
-                      </div>
-                    )}
+                    {type === 'order' && !cardProps?.length && <OrderLine r={r} />}
                     <div className="meta">
                       <Avatar name={userName(meta, r.props.owner_id) || '—'} />
                       <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>

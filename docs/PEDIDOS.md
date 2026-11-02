@@ -15,6 +15,7 @@ para producción»; lo demás lo mueve ClickUp.
 | La empresa del pedido | Finnegans: `pedidoVenta/<pedido>` → `cliente/<código>` → CUIT, y se busca la empresa por CUIT; si no, por razón social | Al crear el pedido | `clickup.ts` (`companyFor`) |
 | La factura | Finnegans: `reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals` (facturas del pedido, también las que pasan por un remito, como en Corporate) y `facturaVenta/<id>` (número y CAE) | A las :00 y a las :30 | `src/worker/finnegans.ts` |
 | El PDF de la factura | Finnegans GO (`/BSA/Sr2`, el mismo PDF que «Previsualizar»), con sesión iniciada | Cada hora, de 8 a 19, de lunes a viernes (GitHub) | `scripts/facturas-pdf.mjs`, workflow «Facturas de pedidos (PDF)» |
+| Los productos | Finnegans: los renglones de `pedidoVenta/<pedido>` (cantidad, precio, descuentos) y `producto/<código>` (nombre, descripción y foto) | Al abrir el pedido; se guardan y se vuelven a leer cada 6 horas (la ficha del producto, cada 30 días) | `src/worker/productos.ts`, tabla `line_items` y `products` |
 | El remito | ClickUp: la foto del remito firmado que suben a la tarea del PDV al entregar («PDV 31167.jpeg») | Con el estado | `clickup.ts`; se abre por `GET /api/files/<id>` |
 
 ## Estados del pedido

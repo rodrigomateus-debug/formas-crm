@@ -38,6 +38,7 @@ export default function RecordPage() {
           <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
         </section>
         <aside className="right">
+          {type === 'order' && <ProductsCard recordId={record.id} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
@@ -518,6 +519,47 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 // ---------- Columna derecha: asociaciones ----------
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
+interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null }
+interface OrderProducts { pedido: string | null; configured: boolean; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean }
+// Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio.
+function ProductsCard({ recordId }: { recordId: number }) {
+  const res = useAsync(() => http<OrderProducts>('GET', `/records/order/${recordId}/products`), [recordId]);
+  const d = res.data;
+  const items = d?.items ?? [];
+  const qty = (n: number | null) => (n == null ? '' : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }));
+  const empty = res.loading ? 'Buscando los productos en Finnegans…'
+    : res.error ? res.error
+    : !d?.pedido ? 'Este pedido no tiene pedido de Finnegans asociado.'
+    : !d.configured ? 'Falta conectar Finnegans (Configuración → Integraciones).'
+    : d.error ? `No se pudieron leer de Finnegans: ${d.error}`
+    : `El pedido ${d.pedido} no tiene productos en Finnegans.`;
+  return (
+    <div className="panel assoc-card">
+      <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3></div>
+      {items.map((it, i) => (
+        <div key={i} className="assoc-item product-item">
+          {it.image_url
+            ? <a href={it.image_url} target="_blank" rel="noreferrer" className="product-img" title="Ver la foto"><img src={it.image_url} alt="" loading="lazy" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).classList.add('broken'); }} /></a>
+            : <span className="product-img none" aria-hidden><Icon name="order" size={18} /></span>}
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="product-name">{it.name}</div>
+            <div className="small muted">{qty(it.quantity)} × {fmtMoney(it.unit_price, it.currency)}{it.discount ? ` · ${qty(it.discount)} % de descuento` : ''}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
+            {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
+          </div>
+          <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>
+        </div>
+      ))}
+      {items.length > 0 && (
+        <div className="assoc-item product-total">
+          <span className="grow">Total{d!.tax_included ? '' : ' sin IVA'}</span>
+          <b className="num">{fmtMoney(d!.total, d!.currency)}</b>
+        </div>
+      )}
+      {!items.length && <div className="panel-body muted small">{empty}</div>}
+    </div>
+  );
+}
+
 interface FileRow { id: number; kind: string; name: string; source: string; created_at: string; ready: boolean; meta: Record<string, any> }
 function FilesCard({ recordId }: { recordId: number }) {
   const files = useAsync(() => http<FileRow[]>('GET', `/records/order/${recordId}/files`), [recordId]);
@@ -710,6 +752,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
+        {type === 'order' && <ProductsCard recordId={id} />}
         {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
         {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}

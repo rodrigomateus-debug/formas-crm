@@ -43,15 +43,31 @@ export function pedidoIds(p: string) {
   return m[1] === 'PEDVTANE' ? [plain, padded] : [padded, plain];
 }
 
-// Cliente del pedido (para asociar la empresa por CUIT).
-export async function finnegansPedido(env: Env, token: string, pedido: string, b?: Budget) {
+export interface PedidoVenta {
+  Cliente?: string; MonedaCodigo?: string;
+  Items?: Array<{ ProductoCodigo?: string; Cantidad?: number; Precio?: number; Descuento1?: number; Descuento2?: number; Descripcion?: string; IncluyeImpuesto?: boolean }>;
+}
+
+// El pedido de venta, con sus renglones.
+export async function finnegansPedidoVenta(env: Env, token: string, pedido: string, b?: Budget) {
   for (const id of pedidoIds(pedido)) {
-    const p = await fin<{ Cliente?: string }>(env, token, `pedidoVenta/${encodeURIComponent(id)}`, {}, b);
-    if (!p?.Cliente) continue;
-    const c = await fin<{ IdentificacionTributariaNumero?: string; RazonSocial?: string }>(env, token, `cliente/${encodeURIComponent(p.Cliente)}`, {}, b);
-    return { cliente: p.Cliente, cuit: c?.IdentificacionTributariaNumero ?? null, razon: c?.RazonSocial ?? null };
+    const p = await fin<PedidoVenta>(env, token, `pedidoVenta/${encodeURIComponent(id)}`, {}, b);
+    if (p?.Cliente) return p;
   }
   return null;
+}
+
+// La ficha de un producto: nombre, descripción y foto.
+export async function finnegansProducto(env: Env, token: string, code: string, b?: Budget) {
+  return fin<{ Nombre?: string; Descripcion?: string; ProductoImagen?: string }>(env, token, `producto/${encodeURIComponent(code)}`, {}, b);
+}
+
+// Cliente del pedido (para asociar la empresa por CUIT).
+export async function finnegansPedido(env: Env, token: string, pedido: string, b?: Budget) {
+  const p = await finnegansPedidoVenta(env, token, pedido, b);
+  if (!p?.Cliente) return null;
+  const c = await fin<{ IdentificacionTributariaNumero?: string; RazonSocial?: string }>(env, token, `cliente/${encodeURIComponent(p.Cliente)}`, {}, b);
+  return { cliente: p.Cliente, cuit: c?.IdentificacionTributariaNumero ?? null, razon: c?.RazonSocial ?? null };
 }
 
 interface Destino {

@@ -13,6 +13,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupStatus, syncClickup } from './clickup';
+import { orderProducts } from './productos';
 import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -672,6 +673,13 @@ api.get('/records/:type/:id/files', async (c) => {
   const { results } = await c.env.DB.prepare(`SELECT id, kind, name, mime, size, source, meta, created_at, data IS NOT NULL AS has_data
     FROM files WHERE record_id = ? ORDER BY kind, created_at`).bind(id).all<{ meta: string; has_data: number; source: string }>();
   return c.json(results.map((f) => ({ ...f, meta: JSON.parse(f.meta || '{}'), ready: !!f.has_data || f.source === 'clickup' })));
+});
+
+// Productos del pedido (de Finnegans): cantidad, precio y la ficha de cada producto con su foto.
+api.get('/records/order/:id/products', async (c) => {
+  const rec = await getRow(c.env.DB, Number(c.req.param('id')));
+  if (rec.object_type !== 'order') throw new HttpError(404, 'No es un pedido.');
+  return c.json(await orderProducts(c.env, rec.id, JSON.parse(rec.props), { refresh: c.req.query('refresh') === '1' }));
 });
 
 // Abrir un archivo: el PDF guardado, o el remito traído de ClickUp en el momento (los links de ClickUp vencen).

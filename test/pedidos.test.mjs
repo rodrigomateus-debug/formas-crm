@@ -55,7 +55,13 @@ before(async () => {
     if (p.startsWith('/clickup/task/cuN')) { const i = Number(p.slice(17)); return send(pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)); }
     if (p === '/archivos/remito.jpg') { res.setHeader('content-type', 'image/jpeg'); return res.end(JPG); }
     if (p === '/fin/oauth/token') return res.end('"token-de-prueba"');
-    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV.padStart(8, '0')}`) return send({ Cliente: 'C-PRUEBA' });
+    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV.padStart(8, '0')}`) {
+      return send({ Cliente: 'C-PRUEBA', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: 'IMP_P18.030.03', Cantidad: 300, Precio: 8339.6, Descuento1: 0, Descuento2: 0, Descripcion: '', IncluyeImpuesto: false },
+        { ProductoCodigo: 'OTRO-1', Cantidad: 10, Precio: 100, Descuento1: 10, Descuento2: 0, Descripcion: 'Con logo a 1 color', IncluyeImpuesto: false },
+      ] });
+    }
+    if (p === '/fin/producto/IMP_P18.030.03') return send({ Nombre: 'Bolsa Shopper Colors Azul Marino', Descripcion: 'Bolsa de lona con base de yute.', ProductoImagen: 'https://www.promoproductos.com/upload/bolsa.jpg' });
     if (p === '/fin/cliente/C-PRUEBA') return send({ IdentificacionTributariaNumero: CUIT, RazonSocial: `CLIENTE ${RUN} SRL` });
     if (p === '/fin/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals') {
       return send(url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen') === `PEDVTASTP - ${PDV.padStart(8, '0')}` ? facturas : []);
@@ -148,7 +154,18 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.equal(pdf.type, 'application/pdf');
   assert.equal(Buffer.from(pdf.data).toString(), PDF.toString());
 
-  // 6. En la línea de tiempo se ve cómo avanzó.
+  // 6. Productos: los renglones del pedido de Finnegans, con la ficha (nombre, descripción y foto) de cada producto.
+  const pr = (await api('GET', `/records/order/${o.id}/products`)).data;
+  assert.equal(pr.items.length, 2);
+  assert.deepEqual([pr.items[0].name, pr.items[0].quantity, pr.items[0].unit_price, pr.items[0].subtotal, pr.items[0].image_url, pr.items[0].description],
+    ['Bolsa Shopper Colors Azul Marino', 300, 8339.6, 2501880, 'https://www.promoproductos.com/upload/bolsa.jpg', 'Bolsa de lona con base de yute.']);
+  assert.deepEqual([pr.items[1].name, pr.items[1].discount, pr.items[1].subtotal, pr.items[1].description], ['OTRO-1', 10, 900, 'Con logo a 1 color'], 'sin ficha: el código; con su descuento');
+  assert.equal(pr.total, 2502780);
+  hits = 0;
+  await api('GET', `/records/order/${o.id}/products`);
+  assert.equal(hits, 0, 'la segunda vez sale de lo guardado');
+
+  // 7. En la línea de tiempo se ve cómo avanzó.
   const tl = (await api('GET', `/records/order/${o.id}/timeline`)).data;
   assert.ok(tl.changes.some((c) => c.prop === 'hs_pipeline_stage') && tl.changes.some((c) => c.prop === 'factura_numero'));
 });

@@ -444,6 +444,9 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     db.prepare('INSERT OR IGNORE INTO activity_links (activity_id, record_id, object_type) SELECT activity_id, ?, object_type FROM activity_links WHERE record_id = ?').bind(primaryId, loserId),
     db.prepare('DELETE FROM activity_links WHERE record_id = ?').bind(loserId),
     db.prepare('UPDATE OR IGNORE files SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
+    // Los productos (de Finnegans) se vuelven a leer en el registro que queda.
+    db.prepare('DELETE FROM line_items WHERE record_id = ?').bind(loserId),
+    db.prepare('DELETE FROM line_item_sync WHERE record_id IN (?, ?)').bind(loserId, primaryId),
     db.prepare('UPDATE records SET archived = 1, merged_into = ?, updated_at = ? WHERE id = ?').bind(primaryId, ts, loserId),
     db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, 'merged', ?, ?, ?, ?, ?)")
       .bind(primaryId, String(loserId), loser.name, ts, ctx.user.id, ctx.source),

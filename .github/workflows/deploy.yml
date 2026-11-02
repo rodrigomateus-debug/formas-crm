@@ -36,8 +36,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       GOOGLE_SA_JSON: ${{ secrets.GOOGLE_SA_JSON }}
       CLICKUP_TOKEN: ${{ secrets.CLICKUP_TOKEN }}
-      FINNEGANS_CLIENT_ID: ${{ secrets.FINNEGANS_CLIENT_ID }}
-      FINNEGANS_CLIENT_SECRET: ${{ secrets.FINNEGANS_CLIENT_SECRET }}
+      FINNEGANS_CLIENT_ID: ${{ secrets.FINNEGANS_CLIENT_ID || secrets.FIN_CLIENT_ID }}
+      FINNEGANS_CLIENT_SECRET: ${{ secrets.FINNEGANS_CLIENT_SECRET || secrets.FIN_SECRET }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -56,7 +56,7 @@ En GitHub, repositorio `formas-crm` → Settings → Secrets and variables → A
 | Secreto o variable | Para qué | De dónde |
 |---|---|---|
 | `CLICKUP_TOKEN` (secreto) | Leer la lista PEC | El mismo del tablero de Formas Shop |
-| `FINNEGANS_CLIENT_ID`, `FINNEGANS_CLIENT_SECRET` (secretos) | Leer facturas y clientes | Los mismos del tablero de Formas Shop |
+| `FINNEGANS_CLIENT_ID`, `FINNEGANS_CLIENT_SECRET` (secretos; también sirven con los nombres `FIN_CLIENT_ID` y `FIN_SECRET`) | Leer facturas y clientes | Los mismos del tablero de Formas Shop |
 | `CRM_TOKEN` (secreto) | Que la tarea de los PDF suba al CRM | Un token de un administrador (Configuración → Integraciones → Tokens, tipo «API») |
 | `FINNEGANS_GO_USUARIO`, `FINNEGANS_GO_PASSWORD`, `FINNEGANS_GO_ESPACIO_DE_TRABAJO` (secretos) | Bajar el PDF de Finnegans GO | El usuario de GO que ya usa la facturación |
 | `CRM_URL` (variable) | Dónde está el CRM | `https://formas-crm.rodrigo-mateus.workers.dev` |

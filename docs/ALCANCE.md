@@ -109,7 +109,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función | Estado | Dónde |
 |---|---|---|
 | Ingreso con el mail de Formas (Cloudflare Access); quién entra lo decide Configuración → Usuarios | 🔧 | La aplicación de Access ya está; falta la política «Mails de Formas (CRM)» (a mano o con el workflow «Login de Cloudflare», que necesita el permiso de Access en el token) |
-| Usuarios, equipos, roles (admin, gerente, miembro, solo lectura) | ✅ | Configuración → Usuarios |
+| Usuarios, equipos, perfiles (Admin, Comercial, Producción, Logística; por ahora todos ven todo) y permisos (edita, edita y borra, solo mira) | ✅ | Configuración → Usuarios |
 | Qué pipelines ve cada uno: por pipeline, «Todos» o «Solo estos equipos»; equipos extra por usuario; los administradores ven todo | ✅ | Configuración → Pipelines (Quién lo ve) y Usuarios (Otros equipos, Pipelines que ve). En HubSpot esto es del plan Enterprise |
 | Que cada vendedora vea solo sus registros (contactos, empresas, negocios propios) | ⏳ | Hoy ven todo lo de los pipelines que tienen habilitados |
 

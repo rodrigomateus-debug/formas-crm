@@ -78,8 +78,8 @@ async function userByEmail(env: Env, email: string): Promise<User> {
   const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
   const isAdmin = (count?.n ?? 0) === 0 || (env.ADMIN_EMAIL && env.ADMIN_EMAIL.toLowerCase() === email.toLowerCase());
   if (!isAdmin) throw new HttpError(403, `Tu mail (${email}) no tiene usuario en el CRM. Pedile a un administrador que te agregue en Configuración → Usuarios.`);
-  return (await env.DB.prepare('INSERT INTO users (email, name, role) VALUES (?, ?, ?) RETURNING *')
-    .bind(email, nameFromEmail(email), 'admin').first<User>())!;
+  return (await env.DB.prepare("INSERT INTO users (email, name, role, profile) VALUES (?, ?, 'admin', 'admin') RETURNING *")
+    .bind(email, nameFromEmail(email)).first<User>())!;
 }
 
 export async function authenticate(env: Env, req: Request, pathToken?: string): Promise<Ctx> {

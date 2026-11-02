@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType } from './env';
-import { assertType, HttpError, now, OBJECT_TYPES } from './env';
+import { assertType, HttpError, now, OBJECT_TYPES, PROFILES } from './env';
 import { requireRole, canWrite, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
@@ -874,21 +874,40 @@ api.get('/users', async (c) => {
   return c.json(results);
 });
 
+// Perfil y permisos van juntos en un punto: el perfil admin es el rol admin. Pasar a admin (por cualquiera de los dos) da
+// los dos; dejar de serlo vuelve a «edita» (member) y, si no se elige otro, al perfil comercial.
+const ROLES = ['admin', 'manager', 'member', 'viewer'];
+function profileAndRole(b: { profile?: string; role?: string }, cur: { profile: string; role: string }) {
+  if (b.profile !== undefined && !(PROFILES as readonly string[]).includes(b.profile)) throw new HttpError(400, `Perfil desconocido: ${b.profile}.`);
+  if (b.role !== undefined && !ROLES.includes(b.role)) throw new HttpError(400, `Permiso desconocido: ${b.role}.`);
+  if (b.profile === undefined && b.role === undefined) return cur;
+  if (b.profile === 'admin' || (b.role === 'admin' && b.profile === undefined)) return { profile: 'admin', role: 'admin' };
+  const profile = b.profile ?? (cur.profile === 'admin' ? 'comercial' : cur.profile);
+  const role = b.role && b.role !== 'admin' ? b.role : cur.role === 'admin' || b.role === 'admin' ? 'member' : cur.role;
+  return { profile, role };
+}
+
 api.post('/users', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ email: string; name: string; role?: string; team_id?: number | null }>();
-  const row = await c.env.DB.prepare('INSERT INTO users (email, name, role, team_id) VALUES (?, ?, ?, ?) RETURNING *')
-    .bind(b.email.trim().toLowerCase(), b.name, b.role ?? 'member', b.team_id ?? null).first();
+  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null }>();
+  const { profile, role } = profileAndRole(b, { profile: 'comercial', role: 'member' });
+  const row = await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id) VALUES (?, ?, ?, ?, ?) RETURNING *')
+    .bind(b.email.trim().toLowerCase(), b.name, role, profile, b.team_id ?? null).first();
   return c.json(row, 201);
 });
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; team_id?: number | null; extra_teams?: number[]; active?: boolean }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; active?: boolean }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
-  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, team_id = ?, extra_teams = ?, active = ? WHERE id = ?')
-    .bind(b.name ?? cur.name, b.role ?? cur.role, b.team_id === undefined ? cur.team_id : b.team_id,
+  const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
+  if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
+    const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
+    if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
+  }
+  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ? WHERE id = ?')
+    .bind(b.name ?? cur.name, role, profile, b.team_id === undefined ? cur.team_id : b.team_id,
       b.extra_teams === undefined ? cur.extra_teams : JSON.stringify(b.extra_teams.map(Number)), b.active === undefined ? cur.active : b.active ? 1 : 0, cur.id).run();
   return c.json({ ok: true });
 });

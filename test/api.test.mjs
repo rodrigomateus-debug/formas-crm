@@ -334,3 +334,28 @@ test('pedidos: estados generales y tablero por estado', async () => {
   const more = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(tag)}&value=1237498994&offset=0`)).data;
   assert.equal(more.records.length, 1);
 });
+
+test('perfiles: admin, comercial, producción y logística; el perfil admin es el permiso admin', async () => {
+  const u = await api('POST', '/users', { email: `prod.${RUN}@formas.ar`, name: `Prod ${RUN}`, profile: 'produccion' });
+  assert.equal(u.status, 201, JSON.stringify(u.data));
+  assert.deepEqual([u.data.profile, u.data.role], ['produccion', 'member']);
+  const me = (await api('POST', '/users', { email: `vende2.${RUN}@formas.ar`, name: `Vende2 ${RUN}`, role: 'member' })).data;
+  assert.equal(me.profile, 'comercial', 'sin perfil: comercial');
+  const get = async () => (await api('GET', '/users')).data.find((x) => x.id === u.data.id);
+  const pick = (x) => [x.profile, x.role];
+
+  await api('PATCH', `/users/${u.data.id}`, { profile: 'admin' });
+  assert.deepEqual(pick(await get()), ['admin', 'admin'], 'perfil admin da permiso admin');
+  await api('PATCH', `/users/${u.data.id}`, { team_id: 57132078 });
+  assert.deepEqual(pick(await get()), ['admin', 'admin'], 'cambiar el equipo no le saca el admin');
+  await api('PATCH', `/users/${u.data.id}`, { profile: 'logistica' });
+  assert.deepEqual(pick(await get()), ['logistica', 'member'], 'deja de ser admin: edita');
+  await api('PATCH', `/users/${u.data.id}`, { role: 'manager' });
+  assert.deepEqual(pick(await get()), ['logistica', 'manager']);
+  await api('PATCH', `/users/${u.data.id}`, { role: 'admin' });
+  assert.deepEqual(pick(await get()), ['admin', 'admin'], 'permiso admin da perfil admin');
+  await api('PATCH', `/users/${u.data.id}`, { role: 'viewer' });
+  assert.deepEqual(pick(await get()), ['comercial', 'viewer'], 'deja de ser admin sin elegir perfil: comercial');
+  assert.equal((await api('PATCH', `/users/${u.data.id}`, { profile: 'jefe' })).status, 400);
+  assert.equal((await api('POST', '/users', { email: `x.${RUN}@formas.ar`, name: 'X', role: 'dueño' })).status, 400);
+});

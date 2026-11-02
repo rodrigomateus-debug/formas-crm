@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams, PROFILE_LABEL, ROLE_LABEL } from '../lib';
 import { FilterRow, Modal, MultiPick, describeFilter, filterableProps, opsFor } from '../components';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['tags', 'Etiquetas'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
@@ -24,7 +24,7 @@ export default function Settings() {
 function Users() {
   const { meta, reload } = useMeta();
   const toast = useToast();
-  const users = useAsync(() => http<Array<{ id: number; email: string; name: string; role: string; team_id: number | null; active: number; hs_owner_id: string | null }>>('GET', '/users'), []);
+  const users = useAsync(() => http<Array<{ id: number; email: string; name: string; role: string; profile: string; team_id: number | null; active: number; hs_owner_id: string | null }>>('GET', '/users'), []);
   const [add, setAdd] = useState(false);
   // Resumen corto: «Todos», «Todos menos: …» o la lista de los que ve.
   const pipelinesSummary = (u: Parameters<typeof canSeePipeline>[0]) => {
@@ -35,7 +35,15 @@ function Users() {
     if (!sees.length) return 'Ninguno';
     return hidden.length <= sees.length ? `Todos menos: ${hidden.map((p) => p.label).join(', ')}` : sees.map((p) => p.label).join(', ');
   };
-  const [f, setF] = useState({ email: '', name: '', role: 'member', team_id: '' });
+  const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', team_id: '' });
+  const profileSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
+    <select className={cls} style={{ minWidth: 116 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
+      {Object.entries(PROFILE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+  );
+  const roleSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
+    <select className={cls} style={{ minWidth: 124 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Permisos">
+      {Object.entries(ROLE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+  );
   const patch = async (id: number, body: Record<string, unknown>) => {
     try { await http('PATCH', `/users/${id}`, body); users.reload(); reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
   };
@@ -44,28 +52,30 @@ function Users() {
       <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas (login de Cloudflare Access). Para dar acceso, agregalo; para sacarlo, desactivalo.</span>
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Rol</th><th className="nosort">Equipo</th><th className="nosort">Otros equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th></tr></thead>
+        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort">Equipo</th><th className="nosort">Otros equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
-            <td>{u.name}</td><td style={{ maxWidth: 210 }} title={u.email}>{u.email}</td>
-            <td><select className="input sm" style={{ minWidth: 140 }} value={u.role} onChange={(e) => patch(u.id, { role: e.target.value })}>
-              <option value="admin">Administrador</option><option value="manager">Gerente</option><option value="member">Miembro</option><option value="viewer">Solo lectura</option></select></td>
-            <td><select className="input sm" style={{ minWidth: 180, maxWidth: 200 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
+            <td style={{ maxWidth: 160 }} title={u.name}>{u.name}</td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
+            <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }))}</td>
+            <td>{u.role === 'admin' ? <span className="small muted">Todo</span> : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
+            <td><select className="input sm" style={{ minWidth: 150, maxWidth: 170 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
               <option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></td>
-            <td style={{ minWidth: 170, maxWidth: 190, overflow: 'visible' }}><MultiPick small options={meta.teams.filter((t) => t.id !== u.team_id).map((t) => ({ value: String(t.id), label: t.name }))}
+            <td style={{ minWidth: 140, maxWidth: 160, overflow: 'visible' }}><MultiPick small options={meta.teams.filter((t) => t.id !== u.team_id).map((t) => ({ value: String(t.id), label: t.name }))}
               values={[...userTeams(u)].filter((t) => t !== u.team_id).map(String)} onChange={(v) => patch(u.id, { extra_teams: v.map(Number) })} /></td>
-            <td className="small" style={{ maxWidth: 220, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
+            <td className="small" style={{ maxWidth: 150, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
           </tr>
         ))}</tbody>
       </table></div>
-      <p className="muted small">Roles: Administrador ve y cambia todo, incluida esta configuración. Gerente puede además borrar y restaurar registros. Miembro crea y edita. Solo lectura no cambia nada.</p>
+      <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial, Producción y Logística por ahora también ven todo; más adelante cada perfil va a ver lo suyo.
+        Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.</p>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
         try { await http('POST', '/users', { ...f, team_id: f.team_id ? Number(f.team_id) : null }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
       }}>Agregar</button>}>
         <label className="field">Nombre<input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label className="field">Email<input className="input" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
-        <label className="field">Rol<select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="member">Miembro</option><option value="manager">Gerente</option><option value="admin">Administrador</option><option value="viewer">Solo lectura</option></select></label>
+        <label className="field">Perfil{profileSelect(f.profile, (v) => setF({ ...f, profile: v }), 'input')}</label>
+        {f.profile !== 'admin' && <label className="field">Permisos{roleSelect(f.role, (v) => setF({ ...f, role: v }), 'input')}</label>}
         <label className="field">Equipo<select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}><option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
       </Modal>}
     </>

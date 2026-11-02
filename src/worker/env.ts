@@ -24,11 +24,18 @@ export interface Env {
   FINNEGANS_API_URL?: string;
 }
 
+// Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; los demás, por ahora,
+// también ven todo: acá se va a colgar lo que ve cada uno cuando se restrinja. Qué puede hacer (editar, borrar, solo
+// mirar) lo dice role; un admin tiene perfil admin y viceversa.
+export const PROFILES = ['admin', 'comercial', 'produccion', 'logistica'] as const;
+export type Profile = (typeof PROFILES)[number];
+
 export interface User {
   id: number;
   email: string;
   name: string;
   role: 'admin' | 'manager' | 'member' | 'viewer';
+  profile: Profile;
   team_id: number | null;
   extra_teams?: string;
   active: number;

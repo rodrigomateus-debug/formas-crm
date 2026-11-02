@@ -289,11 +289,11 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_users',
-    description: 'Usuarios del CRM (propietarios posibles): id, nombre, mail, rol y equipo. También dice quién es el usuario de este token.',
+    description: 'Usuarios del CRM (propietarios posibles): id, nombre, mail, rol, perfil (admin, comercial, produccion, logistica) y equipo. También dice quién es el usuario de este token.',
     readOnly: true,
     inputSchema: { type: 'object', properties: {} },
     run: async (_a, ctx, env) => {
-      const { results } = await env.DB.prepare('SELECT u.id, u.name, u.email, u.role, u.active, t.name AS team FROM users u LEFT JOIN teams t ON t.id = u.team_id ORDER BY u.active DESC, u.name').all();
+      const { results } = await env.DB.prepare('SELECT u.id, u.name, u.email, u.role, u.profile, u.active, t.name AS team FROM users u LEFT JOIN teams t ON t.id = u.team_id ORDER BY u.active DESC, u.name').all();
       return { me: { id: ctx.user.id, name: ctx.user.name }, users: results };
     },
   },

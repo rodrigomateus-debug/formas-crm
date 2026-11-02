@@ -259,7 +259,9 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
     }
     // 2. Los PDV anotados.
     const ctx = await systemCtx(env);
-    let fin: string | null | undefined;
+    // El CUIT del pedido (dos consultas a Finnegans) solo sirve si hay empresas con CUIT en el CRM; si no, se busca por nombre.
+    const conCuit = await db.prepare("SELECT 1 FROM records WHERE object_type = 'company' AND archived = 0 AND COALESCE(json_extract(props, '$.cuit'), '') != '' LIMIT 1").first();
+    let fin: string | null | undefined = conCuit ? undefined : null;
     for (const [pid] of [...queue.entries()].sort((x, y) => y[1] - x[1])) {
       if (b.left() < POR_PDV) break;
       let t: CuTask;

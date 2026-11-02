@@ -9,6 +9,7 @@ const RUN = Date.now().toString(36);
 const PDV = String(70000 + Math.floor(Math.random() * 20000));
 const PDV_ML = String(Number(PDV) + 1);
 const PDV_B = String(Number(PDV) + 2);
+const PDV_C = String(Number(PDV) + 3);   // de una vendedora que todavía no tiene usuario en el CRM
 const CUIT = `30-7${String(Date.now()).slice(-7)}-8`;
 let asUser = null;
 async function api(method, path, body, headers = {}) {
@@ -23,15 +24,16 @@ async function api(method, path, body, headers = {}) {
 const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const PDF = Buffer.from('%PDF-1.4 factura de prueba');
 const field = (name, value, type = 'short_text') => ({ name, type, value });
-const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.now()) => ({
+const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.now(), vendedor = 'Rodrigo Mateus') => ({
   id, name: `PDV - ${npdv}`, parent: null, url: `https://app.clickup.com/t/${id}`, date_updated: String(updated), status: { status: 'pdv' },
-  text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: Rodrigo Mateus\nEs evento: Sí\nFecha entrega: 30-11-2026`,
-  custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', `Cliente ${RUN} S.R.L.`), field('🧑‍💻 VENDEDOR', 'Rodrigo Mateus'),
+  text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: ${vendedor}\nEs evento: Sí\nFecha entrega: 30-11-2026`,
+  custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', `Cliente ${RUN} S.R.L.`), field('🧑‍💻 VENDEDOR', vendedor),
     { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: unidad } }, field('ENTREGAS (FECHA REAL)', '1793343600000', 'date')],
   subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Artículo ${i}`, parent: id, date_updated: String(updated), status: { status: s } })),
   attachments,
 });
-const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0 };
+const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false };
+const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`);
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
 let hits = 0;   // consultas que recibe el ClickUp/Finnegans simulado
@@ -44,7 +46,7 @@ before(async () => {
     const send = (b, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
     const p = decodeURIComponent(url.pathname);
     if (p === '/clickup/list/901326159292/task') {
-      const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']),
+      const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']), pdvC(),
         ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER))].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
       const page = Number(url.searchParams.get('page') ?? 0);
       return send({ tasks: tasks.slice(page * 100, page * 100 + 100), last_page: (page + 1) * 100 >= tasks.length });
@@ -52,6 +54,7 @@ before(async () => {
     if (p === '/clickup/task/cuA') return send({ ...pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), attachments: cu.attachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) });
     if (p === '/clickup/task/cuML') return send(pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']));
     if (p === '/clickup/task/cuB') return send(pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']));
+    if (p === '/clickup/task/cuC') return cu.cGone ? send({ err: 'Task not found' }, 404) : send(pdvC());
     if (p.startsWith('/clickup/task/cuN')) { const i = Number(p.slice(17)); return send(pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)); }
     if (/^\/clickup\/task\/cuA-\d+$/.test(p)) return send({ id: p.slice(14), name: 'Artículo', parent: 'cuA', status: { status: 'entregados' }, attachments: p.endsWith('-0') ? cu.artAttachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) : [] });
     if (p === '/archivos/remito.jpg') { res.setHeader('content-type', 'image/jpeg'); return res.end(JPG); }
@@ -101,6 +104,16 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   const compB = (await api('POST', '/records/company', { props: { name: `Cliente ${RUN} SRL` } })).data;
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.equal((await api('GET', `/records/order/${b.id}`)).data.associations.company[0]?.id, compB.id, 'empresa asociada después');
+  // Un pedido de una vendedora sin usuario queda sin vendedora; cuando se le da el alta, «Revisar todo» (también con token
+  // por /hooks/pedidos/revisar) se la pone con lo que trae la lista, sin volver a pedir el PDV.
+  const c = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_C}`)}`)).data.results[0];
+  assert.ok(c && !c.props.owner_id, 'sin vendedora todavía');
+  const nueva = (await api('POST', '/users', { email: `nueva.${RUN}@formas.ar`, name: `Nueva ${RUN}`, role: 'member' })).data;
+  cu.cGone = true;
+  const tokR = (await api('POST', '/tokens', { name: `Revisar ${RUN}`, source: 'api' })).data.token;
+  assert.equal((await api('POST', '/hooks/pedidos/revisar')).status, 401, 'sin token no');
+  assert.equal((await api('POST', '/hooks/pedidos/revisar', undefined, { authorization: `Bearer ${tokR}` })).status, 200);
+  assert.equal((await api('GET', `/records/order/${c.id}`)).data.record.props.owner_id, nueva.id, 'con la vendedora nueva');
 
   // 2. La vendedora solo lo pasa a «Listo para producción»; el resto lo mueve ClickUp.
   await api('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vende ${RUN}`, role: 'member' });

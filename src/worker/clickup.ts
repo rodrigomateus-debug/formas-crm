@@ -134,6 +134,23 @@ async function ownerFor(db: D1Database, vendedor: string, mail: string) {
     ?? null;
 }
 
+// Pedidos que entraron sin vendedora (todavía no tenía usuario en el CRM): se completan con el VENDEDOR que ya trae la
+// lista de ClickUp, sin volver a pedir cada PDV. «Revisar todo» relee la lista entera y así los completa en un par de corridas.
+async function ownersFromList(db: D1Database, ctx: Ctx, tasks: CuTask[]) {
+  const pdvs = new Map(tasks.filter((t) => !t.parent && t.url && /PDV/i.test(t.name)).map((t) => [t.url!, t]));
+  if (!pdvs.size) return 0;
+  const { results } = await db.prepare(`SELECT id, json_extract(props, '$.url_clickup') AS url FROM records
+    WHERE object_type = 'order' AND archived = 0 AND owner_id IS NULL AND json_extract(props, '$.url_clickup') IN (SELECT value FROM json_each(?))`)
+    .bind(JSON.stringify([...pdvs.keys()])).all<{ id: number; url: string }>();
+  let n = 0;
+  for (const r of results) {
+    const pdv = readPdv(pdvs.get(r.url)!);
+    const o = await ownerFor(db, pdv.vendedor, pdv.mailVendedor);
+    if (o) { await updateRecord(db, ctx, 'order', r.id, { owner_id: o }, { system: true, strict: false }); n++; }
+  }
+  return n;
+}
+
 // Empresa del pedido: por CUIT (leyendo el pedido en Finnegans, si hay credenciales) o por razón social.
 async function companyFor(env: Env, pdv: ReturnType<typeof readPdv>, fin: string | null, b?: Budget) {
   const db = env.DB;
@@ -272,6 +289,7 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
   if (opts.full || (!state.last && !state.scan)) out.scan = { full: true, step: 0, page: 0, since: started - 45 * 86_400_000, started };
   else if (!state.scan) out.scan = { full: false, step: 0, page: 0, since: state.last! - 5 * 60_000, started };
   try {
+    const ctx = await systemCtx(env);
     // 1. La lista, de a páginas de 100 tareas (PDV y artículos).
     while (out.scan && b.left() > LISTADO) {
       const sc = out.scan;
@@ -281,12 +299,12 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
         const pid = t.parent || t.id;
         queue.set(pid, Math.max(queue.get(pid) ?? 0, Number(t.date_updated ?? 0)));
       }
+      out.actualizados! += await ownersFromList(db, ctx, d.tasks);
       if (d.last_page === false && d.tasks.length && sc.page < 200) sc.page++;
       else if (sc.full && sc.step === 0) { sc.step = 1; sc.page = 0; }
       else { out.last = sc.started; out.scan = null; }
     }
     // 2. Los PDV anotados.
-    const ctx = await systemCtx(env);
     // El CUIT del pedido (dos consultas a Finnegans) solo sirve si hay empresas con CUIT en el CRM; si no, se busca por nombre.
     const conCuit = await db.prepare("SELECT 1 FROM records WHERE object_type = 'company' AND archived = 0 AND COALESCE(json_extract(props, '$.cuit'), '') != '' LIMIT 1").first();
     let fin: string | null | undefined = conCuit ? undefined : null;

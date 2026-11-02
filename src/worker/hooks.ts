@@ -4,7 +4,7 @@ import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { normLinkedin, splitName } from './records';
-import { clickupStatus } from './clickup';
+import { clickupStatus, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
@@ -166,6 +166,12 @@ hooks.get('/pedidos/estado', async (c) => {
     clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
     finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
   });
+});
+// Lo mismo que «Revisar todo» de Configuración → Integraciones, para usarlo con token (por ejemplo, después de dar de
+// alta vendedoras, para que los pedidos que ya entraron queden con la suya).
+hooks.post('/pedidos/revisar', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await syncClickup(c.env, { full: true }));
 });
 hooks.put('/facturas/:id/pdf', async (c) => {
   await adminToken(c.env, c.req.raw);

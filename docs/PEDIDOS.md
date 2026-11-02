@@ -47,7 +47,8 @@ número de factura. Cada cambio de estado y la factura quedan en la línea de ti
 
 Si el pedido entra antes que su empresa o su vendedora (por ejemplo, antes de migrar HubSpot o de dar de alta a la
 vendedora), queda sin ellas y se completa la próxima vez que se revisa el PDV. Para completarlos todos de una vez:
-Configuración → Integraciones → «Revisar todo».
+Configuración → Integraciones → «Revisar todo» (o `POST /hooks/pedidos/revisar` con un token de administrador). La
+vendedora se completa ya al releer la lista, en las primeras corridas; la empresa, a medida que se revisa cada PDV.
 
 ## Migración desde HubSpot
 

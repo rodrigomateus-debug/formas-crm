@@ -13,6 +13,7 @@ const api = async (method, path, body) => (await fetch(`${CRM}/api${path}`, { me
 const me = 'rodrigo.mateus@formaspublicitarias.com';
 const client = `compras@cliente-${run}.com.ar`;
 const nuevo = `nuevo@prospecto-${run}.com`;
+const sinNombre = `marta@prospecto2-${run}.com`;
 const msg = (id, from, to, subject, text, mid) => ({
   id, threadId: `t${id}`, internalDate: String(Date.now() - 60000), labelIds: from.includes(me) ? ['SENT'] : ['INBOX'],
   payload: { mimeType: 'multipart/alternative', headers: [{ name: 'From', value: from }, { name: 'To', value: to }, { name: 'Subject', value: subject }, { name: 'Message-ID', value: mid }],
@@ -23,6 +24,9 @@ const MESSAGES = [
   msg(`m2${run}`, `Rodrigo Mateus <${me}>`, `"Nuevo Prospecto" <${nuevo}>, colega@formas.ar`, 'Presentación Formas', 'Te paso nuestro catálogo.', `<a2-${run}@mail>`),
   msg(`m3${run}`, `Desconocido <alguien@otro-${run}.com>`, me, 'Spam', 'Hola', `<a3-${run}@mail>`),
   msg(`m4${run}`, `notificaciones <noreply@cliente-${run}.com.ar>`, me, 'Aviso', 'automático', `<a4-${run}@mail>`),
+  // Enviado a una dirección sin nombre y, después, la respuesta con nombre: el contacto toma el nombre.
+  { ...msg(`m5${run}`, `Rodrigo Mateus <${me}>`, sinNombre, 'Catálogo de fin de año', 'Te paso el catálogo.', `<a5-${run}@mail>`), internalDate: String(Date.now() - 50000) },
+  { ...msg(`m6${run}`, `"Gómez, Marta" <${sinNombre}>`, me, 'Re: Catálogo de fin de año', 'Gracias, lo miro.', `<a6-${run}@mail>`), internalDate: String(Date.now() - 40000) },
 ];
 
 // Tanda grande (para el tope de consultas): mails de un contacto, todos dentro del margen de 10 minutos que se relee.
@@ -55,7 +59,7 @@ test('registra mails con contactos, crea el contacto al enviar y no duplica', as
   const out = await api('POST', '/gmail/sync');
   const mine = out.find((o) => o.mailbox === me);
   assert.ok(mine && !mine.error, JSON.stringify(out));
-  assert.equal(mine.logged, 2, 'el del cliente y el enviado al prospecto; ni el desconocido ni el noreply');
+  assert.equal(mine.logged, 4, 'el del cliente, los dos enviados y la respuesta; ni el desconocido ni el noreply');
 
   const tl = await api('GET', `/records/contact/${contact.id}/timeline`);
   const email = tl.activities.find((a) => a.type === 'email');
@@ -66,6 +70,8 @@ test('registra mails con contactos, crea el contacto al enviar y no duplica', as
   const created = await api('GET', `/records/contact?q=${encodeURIComponent(nuevo)}`);
   assert.equal(created.total, 1, 'contacto creado por el mail enviado');
   assert.equal(created.results[0].props.firstname, 'Nuevo');
+  const marta = (await api('GET', `/records/contact?q=${encodeURIComponent(sinNombre)}`)).results[0];
+  assert.deepEqual([marta.props.firstname, marta.props.lastname], ['Marta', 'Gómez'], 'el nombre llega con la respuesta');
 
   // Segunda pasada (mismos Message-ID): no duplica.
   await api('POST', '/gmail/sync');

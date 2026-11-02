@@ -2,7 +2,7 @@ import type { Ctx, Env, User } from './env';
 import { now } from './env';
 import { createActivity } from './activities';
 import { findContact, upsertContact } from './upsert';
-import type { RecordRow } from './records';
+import { updateRecord, type Props, type RecordRow } from './records';
 import { Budget, OutOfBudget } from './budget';
 
 // Registro automático de mails, como la conexión de bandeja de HubSpot: cada 10 minutos lee los Gmail del equipo
@@ -107,6 +107,16 @@ export function addresses(v?: string) {
   return out;
 }
 
+// Nombre y apellido a partir del nombre que trae el mail («Julia Malan», «"Malan, Julia"»). Vacío si no hay nombre.
+export function personName(raw: string): { firstname?: string; lastname?: string } {
+  let n = raw.replace(/['"]/g, '').replace(/\s+/g, ' ').trim();
+  if (!n || n.includes('@')) return {};
+  const comma = n.match(/^([^,]+),\s*(.+)$/);
+  if (comma) n = `${comma[2]} ${comma[1]}`;
+  const [firstname, ...rest] = n.split(' ');
+  return { firstname, lastname: rest.join(' ') || undefined };
+}
+
 const header = (m: GMessage, name: string) => m.payload.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 
 async function openDealOf(db: D1Database, contactId: number) {
@@ -145,7 +155,7 @@ export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, b: Bud
   const ctx: Ctx = { user, source: 'gmail' };
   const internal = (e: string) => cfg.internal_domains.some((d) => e.endsWith(`@${d}`));
   const ignored = (e: string) => cfg.ignore_addresses.includes(e) || cfg.ignore_domains.some((d) => e.endsWith(`@${d}`) || e.endsWith(`.${d}`))
-    || /^(no-?reply|noreply|notifications?|mailer-daemon|postmaster)@/.test(e);
+    || /^(no-?reply|notifications?|mailer-daemon|postmaster)([-+._][^@]*)?@/.test(e);
   let logged = 0;
   let read = 0;
   let lastSeen = since;
@@ -171,9 +181,13 @@ export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, b: Bud
     const contacts: RecordRow[] = [];
     for (const a of external.slice(0, 10)) {
       let c = await findContact(db, { email: a.email });
+      const name = personName(a.name);
       if (!c && outgoing && cfg.create_contacts_on_sent && a === external[0]) {
-        const [firstname, ...rest] = a.name.replace(/['"]/g, '').split(/\s+/).filter(Boolean);
-        c = (await upsertContact(db, { ...ctx, sourceDetail: 'mail enviado' }, { email: a.email, firstname, lastname: rest.join(' ') || undefined, owner_id: user.id, origen_del_contacto: 'Contacto por email' })).row;
+        c = (await upsertContact(db, { ...ctx, sourceDetail: 'mail enviado' }, { email: a.email, ...name, owner_id: user.id, origen_del_contacto: 'Contacto por email' })).row;
+      } else if (c && name.firstname) {
+        // Un contacto creado por un mail enviado sin nombre («a juan@…») toma el nombre cuando escribe él («Juan Pérez <juan@…>»).
+        const cur = JSON.parse(c.props) as Props;
+        if (!cur.firstname && !cur.lastname) c = await updateRecord(db, ctx, 'contact', c.id, name, { strict: false });
       }
       if (c) contacts.push(c);
     }

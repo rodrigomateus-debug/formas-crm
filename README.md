@@ -109,13 +109,18 @@ con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, ta
 ## Gmail
 
 El CRM lee los Gmail del equipo con una cuenta de servicio de Google Workspace con delegación de dominio (puede ser
-la misma de `GOOGLE_SA_JSON` de formas-tablero). En la consola de administración de Google (Seguridad → Controles de
-API → Delegación de todo el dominio) hay que darle a su Client ID el permiso
-`https://www.googleapis.com/auth/gmail.readonly`. Después:
-
-el JSON de la cuenta se carga como secreto `GOOGLE_SA_JSON` del repo en GitHub (la próxima publicación se lo pasa al
+la misma de `GOOGLE_SA_JSON` de formas-tablero: `google-sheets-pic@dashboard-formas.iam.gserviceaccount.com`, Client ID
+111736235755246678228, que ya tiene la Gmail API y el permiso `https://www.googleapis.com/auth/gmail.readonly` en
+Seguridad → Controles de API → Delegación de todo el dominio; probado el 2 de noviembre de 2026). El JSON de la cuenta se carga como secreto `GOOGLE_SA_JSON` del repo en GitHub (la próxima publicación se lo pasa al
 CRM), y en Configuración → Integraciones → «Mails (Gmail)» se prende. Cada 10 minutos guarda los mails con contactos
-(recibidos de contactos existentes; enviados, creando el contacto si no existe), deduplicados entre bandejas.
+(recibidos de contactos existentes; enviados, creando el contacto si no existe), deduplicados entre bandejas. Si
+el contacto se creó con un mail enviado a una dirección sin nombre, toma el nombre del primer mail que llega con
+nombre («Julia Malan <julia@…>»). Las casillas personales del equipo (por ejemplo un Gmail propio) van en
+`ignore_addresses` para que no se creen como contactos.
+
+Prueba con la casilla de Rodrigo, 2 de noviembre de 2026, últimos 2 días: 153 mails, 48 registrados (43 enviados y 5
+respuestas), 38 contactos y 21 empresas creados. Lo que no se registró: 44 automáticos o de servicios ignorados, 29
+internos y 31 de remitentes que no son contactos (proveedores, newsletters y avisos).
 
 Cada corrida lee hasta unos 40 mails en total (el tope de consultas del plan gratuito de Cloudflare), empezando por la
 bandeja que hace más que no se lee; lo que falta sigue en la próxima. Con token de administrador: `GET /hooks/gmail`

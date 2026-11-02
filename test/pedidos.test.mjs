@@ -31,7 +31,7 @@ const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.no
   subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Artículo ${i}`, parent: id, date_updated: String(updated), status: { status: s } })),
   attachments,
 });
-const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], bulk: 0 };
+const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0 };
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
 let hits = 0;   // consultas que recibe el ClickUp/Finnegans simulado
@@ -53,6 +53,7 @@ before(async () => {
     if (p === '/clickup/task/cuML') return send(pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']));
     if (p === '/clickup/task/cuB') return send(pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']));
     if (p.startsWith('/clickup/task/cuN')) { const i = Number(p.slice(17)); return send(pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)); }
+    if (/^\/clickup\/task\/cuA-\d+$/.test(p)) return send({ id: p.slice(14), name: 'Artículo', parent: 'cuA', status: { status: 'entregados' }, attachments: p.endsWith('-0') ? cu.artAttachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) : [] });
     if (p === '/archivos/remito.jpg') { res.setHeader('content-type', 'image/jpeg'); return res.end(JPG); }
     if (p === '/fin/oauth/token') return res.end('"token-de-prueba"');
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV.padStart(8, '0')}`) {
@@ -117,9 +118,9 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.equal((await order()).props.hs_pipeline_stage, '1237498994');
   assert.match((await order()).props.detalle_produccion, /1 en el impresor/);
 
-  // 4. Entregado: con el remito que suben a ClickUp.
+  // 4. Entregado: con el remito que suben a ClickUp (al artículo, como hacen en la realidad; se busca al abrir el pedido).
   cu.statuses = ['entregados', 'entregados'];
-  cu.attachments = [{ id: 'att1', title: `PDV ${PDV}.jpeg`, mimetype: 'image/jpeg', size: JPG.length, date: String(Date.now()) }];
+  cu.artAttachments = [{ id: 'att1', title: `PDV ${PDV}.jpeg`, mimetype: 'image/jpeg', size: JPG.length, date: String(Date.now()) }];
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.equal((await order()).props.hs_pipeline_stage, '1237498998');
   let files = (await api('GET', `/records/order/${o.id}/files`)).data;

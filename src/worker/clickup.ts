@@ -201,16 +201,44 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
       if (company) { await associate(db, ctx, id, company, { primary: true }).catch(() => undefined); result = 'actualizado'; }
     }
   }
-  // El remito: lo que suben a la tarea del PDV cuando lo entregan (una foto del remito firmado).
-  if (pdv.stage === STAGE.entregado || pdv.stage === STAGE.parcial) {
-    for (const a of t.attachments ?? []) {
-      const r = await db.prepare(`INSERT OR IGNORE INTO files (record_id, kind, name, mime, size, source, source_ref, meta)
-        VALUES (?, 'remito', ?, ?, ?, 'clickup', ?, ?)`).bind(id, a.title || `Remito PDV ${pdv.npdv}`, a.mimetype ?? null, a.size ?? null, `${t.id}:${a.id}`,
-        JSON.stringify({ task: t.id, attachment: a.id, date: a.date ? new Date(Number(a.date)).toISOString() : null })).run();
-      if (r.meta.changes && result === 'igual') result = 'actualizado';
-    }
-  }
+  // El remito: lo que suben a la tarea del PDV cuando lo entregan (una foto del remito firmado). Si lo suben al artículo
+  // (pasa seguido), se busca al abrir el pedido (clickupRemitos), para no gastar consultas en cada PDV entregado.
+  if ((pdv.stage === STAGE.entregado || pdv.stage === STAGE.parcial) && await saveRemitos(db, id, t, pdv.npdv) && result === 'igual') result = 'actualizado';
   return result;
+}
+
+async function saveRemitos(db: D1Database, recordId: number, t: CuTask, npdv: string) {
+  let added = 0;
+  for (const a of t.attachments ?? []) {
+    const r = await db.prepare(`INSERT OR IGNORE INTO files (record_id, kind, name, mime, size, source, source_ref, meta)
+      VALUES (?, 'remito', ?, ?, ?, 'clickup', ?, ?)`).bind(recordId, a.title || `Remito PDV ${npdv}`, a.mimetype ?? null, a.size ?? null, `${t.id}:${a.id}`,
+      JSON.stringify({ task: t.id, attachment: a.id, date: a.date ? new Date(Number(a.date)).toISOString() : null })).run();
+    added += r.meta.changes;
+  }
+  return added;
+}
+
+// Remitos subidos a los artículos del PDV (no a la tarea del PDV): se buscan al abrir un pedido entregado que todavía no
+// tiene remito, como mucho cada 30 minutos.
+export async function clickupRemitos(env: Env, recordId: number, props: Record<string, unknown>) {
+  const db = env.DB;
+  const stage = props.hs_pipeline_stage;
+  const taskId = String(props.url_clickup ?? '').match(/\/t\/([\w-]+)/)?.[1];
+  if (!env.CLICKUP_TOKEN || !taskId || (stage !== STAGE.entregado && stage !== STAGE.parcial)) return;
+  if (await db.prepare("SELECT 1 FROM files WHERE record_id = ? AND kind = 'remito' LIMIT 1").bind(recordId).first()) return;
+  const key = `remito_check:${recordId}`;
+  const last = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
+  if (last && Date.now() - Number(last.value) < 30 * 60_000) return;
+  await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, String(Date.now())).run();
+  const b = Budget.of(env);
+  const t = await cu<CuTask>(env, `/task/${taskId}`, { include_subtasks: 'true' }, b);
+  const npdv = readPdv(t).npdv;
+  await saveRemitos(db, recordId, t, npdv);
+  for (const s of t.subtasks ?? []) {
+    if (b.left() < 1) break;
+    const full = await cu<CuTask>(env, `/task/${s.id}`, {}, b).catch(() => null);
+    if (full) await saveRemitos(db, recordId, full, npdv);
+  }
 }
 
 export interface ClickupState {

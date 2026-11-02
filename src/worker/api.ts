@@ -12,7 +12,7 @@ import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updat
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
-import { clickupAttachment, clickupStatus, syncClickup } from './clickup';
+import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { orderProducts } from './productos';
 import { finnegansState, syncFacturas } from './finnegans';
 
@@ -670,6 +670,10 @@ api.get('/export/:type', async (c) => {
 
 api.get('/records/:type/:id/files', async (c) => {
   const id = Number(c.req.param('id'));
+  if (c.req.param('type') === 'order') {
+    const rec = await getRow(c.env.DB, id);
+    await clickupRemitos(c.env, id, JSON.parse(rec.props)).catch((e) => console.error((e as Error).message));
+  }
   const { results } = await c.env.DB.prepare(`SELECT id, kind, name, mime, size, source, meta, created_at, data IS NOT NULL AS has_data
     FROM files WHERE record_id = ? ORDER BY kind, created_at`).bind(id).all<{ meta: string; has_data: number; source: string }>();
   return c.json(results.map((f) => ({ ...f, meta: JSON.parse(f.meta || '{}'), ready: !!f.has_data || f.source === 'clickup' })));

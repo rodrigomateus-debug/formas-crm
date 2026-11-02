@@ -19,7 +19,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | `/mcp` | Servidor MCP para Claude y Cowork (`src/worker/mcp.ts`). |
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
-| `/api/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`). |
+| `/hooks/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`), con token de administrador. Va por `/hooks` porque `/api` pide el login de Access. |
 | Cron cada 10 min | Registro automático de mails de Gmail (`src/worker/gmail.ts`). |
 
 Quién entra: Cloudflare Access con el mail de Formas (igual que el tablero). Las integraciones y Claude entran con

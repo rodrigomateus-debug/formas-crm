@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Migración HubSpot → Formas CRM.
 //
-// Lee todo de HubSpot con un token de app privada y lo carga en el CRM por /api/migrate (token de administrador).
+// Lee todo de HubSpot con un token de app privada y lo carga en el CRM por /hooks/migrate (token de administrador).
 // Es repetible: se puede correr varias veces antes del corte (y con --since como sincronización diaria)
 // sin pisar lo que ya se editó en el CRM.
 //
@@ -52,10 +52,14 @@ async function hs(method, path, body) {
 async function crm(kind, items = [], extra = {}) {
   if (DRY) return { ok: true };
   for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch(`${CRM}/api/migrate`, {
-      method: 'POST', headers: { authorization: `Bearer ${CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ kind, items, ...extra }),
+    // Por /hooks/migrate y no por /api/migrate: /api pide el login de Cloudflare Access y devuelve su página.
+    const res = await fetch(`${CRM}/hooks/migrate`, {
+      method: 'POST', redirect: 'manual', headers: { authorization: `Bearer ${CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ kind, items, ...extra }),
     });
-    const data = await res.json().catch(() => ({}));
+    if (!(res.headers.get('content-type') ?? '').includes('application/json')) {
+      throw new Error(`CRM ${kind}: respondió ${res.status} sin datos (¿el login de Cloudflare Access está tapando /hooks?).`);
+    }
+    const data = await res.json();
     if (res.ok) return data;
     if (res.status < 500) throw new Error(`CRM ${kind}: ${res.status} ${data.error ?? ''}`);
     await sleep(2000 * (attempt + 1));

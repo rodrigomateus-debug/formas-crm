@@ -38,7 +38,7 @@ export default function RecordPage() {
           <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
         </section>
         <aside className="right">
-          {type === 'order' && <ProductsCard recordId={record.id} />}
+          {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
@@ -522,10 +522,14 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null }
 interface OrderProducts { pedido: string | null; configured: boolean; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean }
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio.
-function ProductsCard({ recordId }: { recordId: number }) {
+// En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
+// El total es siempre el de todos.
+function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   const res = useAsync(() => http<OrderProducts>('GET', `/records/order/${recordId}/products`), [recordId]);
+  const [all, setAll] = useState(false);
   const d = res.data;
   const items = d?.items ?? [];
+  const shown = all ? items : items.slice(0, max);
   const qty = (n: number | null) => (n == null ? '' : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }));
   const empty = res.loading ? 'Buscando los productos en Finnegans…'
     : res.error ? res.error
@@ -536,7 +540,7 @@ function ProductsCard({ recordId }: { recordId: number }) {
   return (
     <div className="panel assoc-card">
       <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3></div>
-      {items.map((it, i) => (
+      {shown.map((it, i) => (
         <div key={i} className="assoc-item product-item">
           {it.image_url
             ? <a href={it.image_url} target="_blank" rel="noreferrer" className="product-img" title="Ver la foto"><img src={it.image_url} alt="" loading="lazy" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).classList.add('broken'); }} /></a>
@@ -549,6 +553,9 @@ function ProductsCard({ recordId }: { recordId: number }) {
           <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>
         </div>
       ))}
+      {items.length > max && (
+        <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)} aria-expanded={all}>{all ? 'Ver menos' : `Ver más (${items.length - max})`}</button></div>
+      )}
       {items.length > 0 && (
         <div className="assoc-item product-total">
           <span className="grow">Total{d!.tax_included ? '' : ' sin IVA'}</span>
@@ -752,7 +759,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
-        {type === 'order' && <ProductsCard recordId={id} />}
+        {type === 'order' && <ProductsCard recordId={id} max={3} />}
         {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
         {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}

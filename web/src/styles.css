@@ -104,7 +104,14 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .view-menu { position: relative; }
 .view-menu .popover { min-width: 200px; }
 .danger-text { color: var(--bad); }
-.view-dirty { margin-left: auto; display: flex; gap: 6px; align-items: center; padding: 0 0 6px 12px; white-space: nowrap; }
+.save-bar { position: fixed; bottom: 20px; left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2); transform: translateX(-50%); z-index: 44;
+  display: flex; gap: 8px; align-items: center; min-width: min(520px, calc(100vw - var(--sidebar-w) - 32px)); max-width: calc(100vw - var(--sidebar-w) - 32px);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow-pop); padding: 10px 12px 10px 16px; font-size: 13px;
+  animation: save-bar-in .2s ease-out; }
+.save-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body:has(.save-bar) .toast { bottom: 88px; }
+@keyframes save-bar-in { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .save-bar { animation: none; } }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: #e8e8f8; color: var(--navy); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
 .avatar.lg { width: 48px; height: 48px; font-size: 17px; }
 .avatar.company { border-radius: 8px; background: #eaf5dc; color: #3c6b12; }
@@ -317,6 +324,9 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
   .record { grid-template-columns: 1fr; }
   .record .left { border-right: 0; }
   .content { padding: 14px 16px 40px; }
+  .save-bar { left: 50%; min-width: 0; max-width: calc(100vw - 32px); width: calc(100vw - 32px); flex-wrap: wrap; }
+  .save-bar > span { flex-basis: 100%; white-space: normal; }
+  body:has(.save-bar) .toast { bottom: 140px; }
   .grid-2 { grid-template-columns: 1fr; }
   .filter-row { grid-template-columns: 1fr 1fr; }
 }

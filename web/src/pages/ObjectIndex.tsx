@@ -53,7 +53,17 @@ function IndexFor({ type }: { type: ObjectType }) {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   // Tablero: negocios por etapa del pipeline; empresas y contactos por etapa del ciclo de vida (u otra propiedad).
-  const mode = params.get('view') === 'board' ? 'board' : 'table';
+  // Tabla o tablero: lo que diga el link (o la vista guardada); si no dice nada, lo último que eligió cada uno.
+  const [modePref, setModePref] = useState<'table' | 'board'>(() => {
+    try { return localStorage.getItem(`crm.mode.${type}`) === 'board' ? 'board' : 'table'; } catch { return 'table'; }
+  });
+  const viewParam = params.get('view');
+  const mode = viewParam === 'board' || viewParam === 'table' ? viewParam : modePref;
+  const setMode = (m: 'table' | 'board') => {
+    setModePref(m);
+    try { localStorage.setItem(`crm.mode.${type}`, m); } catch { /* ignorar */ }
+    setParams((p) => { p.set('view', m); return p; });
+  };
   // Negocios: en qué pipeline estás. Sale del link (?pipeline=), si no de la última elección, si no del equipo.
   const [pipelineSel, setPipelineSelRaw] = useState<string>(() => {
     const valid = (v: string | null) => !!v && (v === 'all' || meta.pipelines.some((p) => p.id === v));
@@ -124,7 +134,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     // Un solo cambio del link: la vista, su modo (tabla o tablero) y su pipeline.
     setParams((p) => {
       key === 'all' ? p.delete('v') : p.set('v', key);
-      if (v?.config.mode) v.config.mode === 'board' ? p.set('view', 'board') : p.delete('view');
+      if (v?.config.mode) p.set('view', v.config.mode);
       if (pipe) p.set('pipeline', pipe);
       return p;
     }, { replace: true });
@@ -138,16 +148,22 @@ function IndexFor({ type }: { type: ObjectType }) {
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
+  // Lo recién guardado vale enseguida (la barra se va al guardar, sin esperar a que se recarguen las vistas).
+  const [justSaved, setJustSaved] = useState<Record<string, ViewConfig>>({});
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '',
   ]);
-  const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(activeSaved.config), current);
+  const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
+  // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
+  const filtersChanged = (activeView === 'all' || activeView === 'mine') && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? []])
+    !== JSON.stringify([[], activeView === 'mine' ? ['me'] : [], {}, []]);
   const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
   const saveView = async () => {
     if (!activeSaved) return;
     try {
       await http('PATCH', `/views/${type}/${activeSaved.id}`, { config: current });
+      setJustSaved((m) => ({ ...m, [activeSaved.id]: current }));
       toast(`Vista «${activeSaved.name}» guardada`);
       views.reload();
     } catch (e) { toast((e as Error).message, true); }
@@ -201,8 +217,8 @@ function IndexFor({ type }: { type: ObjectType }) {
         )}
         {(
           <div className="row" role="group" aria-label="Vista">
-            <button className={`btn sm ${mode === 'table' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.delete('view'); return p; })}><Icon name="table" size={14} />Tabla</button>
-            <button className={`btn sm ${mode === 'board' ? 'primary' : ''}`} onClick={() => setParams((p) => { p.set('view', 'board'); return p; })}><Icon name="board" size={14} />Tablero</button>
+            <button className={`btn sm ${mode === 'table' ? 'primary' : ''}`} onClick={() => setMode('table')}><Icon name="table" size={14} />Tabla</button>
+            <button className={`btn sm ${mode === 'board' ? 'primary' : ''}`} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
           </div>
         )}
         <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>
@@ -224,18 +240,22 @@ function IndexFor({ type }: { type: ObjectType }) {
             {activeView === String(v.id) && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView('all'); }} />}
           </div>
         ))}
-        <button className="tab" onClick={() => setShow('save')}>+ Guardar vista</button>
-        {dirty && (
-          <div className="view-dirty">
-            <span className="small muted">Cambios sin guardar</span>
-            <button className="btn sm ghost" onClick={() => applyView(activeView)}>Descartar</button>
+        <button className="tab" onClick={() => setShow('save')}>+ Agregar vista</button>
+      </div>
+
+      {/* Con cambios sin guardar aparece la barra abajo (como en HubSpot); al guardar o descartar, se va. */}
+      {(dirty || filtersChanged) && !selected.size && (
+        <div className="save-bar" role="region" aria-label="Cambios sin guardar en la vista">
+          <span className="grow">{dirty ? <>Cambiaste la vista <b>{activeSaved!.name}</b></> : 'Cambiaste los filtros'}</span>
+          <button className="btn sm ghost" onClick={() => applyView(activeView)}>Descartar</button>
+          {dirty ? <>
             <button className="btn sm" onClick={() => setShow('save')}>Guardar como nueva</button>
             {canSaveView
               ? <button className="btn sm primary" onClick={saveView}>Guardar</button>
               : <button className="btn sm primary" disabled title="Solo quien creó la vista (o un administrador) la puede cambiar">Guardar</button>}
-          </div>
-        )}
-      </div>
+          </> : <button className="btn sm primary" onClick={() => setShow('save')}>Guardar como vista nueva</button>}
+        </div>
+      )}
 
       {selected.size > 0 && (
         <BulkBar type={type} sel={{ ids: selected, all: selAll }} total={mode === 'board' ? boardTotal : list.data?.total}

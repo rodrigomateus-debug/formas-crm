@@ -8,6 +8,7 @@ const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
 const PDV = String(70000 + Math.floor(Math.random() * 20000));
 const PDV_ML = String(Number(PDV) + 1);
+const PDV_B = String(Number(PDV) + 2);
 const CUIT = `30-7${String(Date.now()).slice(-7)}-8`;
 let asUser = null;
 async function api(method, path, body, headers = {}) {
@@ -39,11 +40,12 @@ before(async () => {
     const send = (b, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
     const p = decodeURIComponent(url.pathname);
     if (p === '/clickup/list/901326159292/task') {
-      const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv'])];
+      const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv'])];
       return send({ tasks: tasks.flatMap((t) => [t, ...t.subtasks]), last_page: true });
     }
     if (p === '/clickup/task/cuA') return send({ ...pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), attachments: cu.attachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) });
     if (p === '/clickup/task/cuML') return send(pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']));
+    if (p === '/clickup/task/cuB') return send(pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']));
     if (p === '/archivos/remito.jpg') { res.setHeader('content-type', 'image/jpeg'); return res.end(JPG); }
     if (p === '/fin/oauth/token') return res.end('"token-de-prueba"');
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV.padStart(8, '0')}`) return send({ Cliente: 'C-PRUEBA' });
@@ -79,6 +81,12 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.ok(o.props.owner_id, 'con la vendedora');
   assert.equal((await api('GET', `/records/order/${o.id}`)).data.associations.company[0].id, comp.id, 'empresa por CUIT');
   assert.equal((await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_ML}`)}`)).data.total, 0, 'Mercado Libre no crea pedidos');
+  // Un pedido que entró antes que su empresa: cuando la empresa aparece en el CRM, la sincronización lo asocia.
+  const b = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_B}`)}`)).data.results[0];
+  assert.equal((await api('GET', `/records/order/${b.id}`)).data.associations.company.length, 0, 'sin empresa todavía');
+  const compB = (await api('POST', '/records/company', { props: { name: `Cliente ${RUN} SRL` } })).data;
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  assert.equal((await api('GET', `/records/order/${b.id}`)).data.associations.company[0]?.id, compB.id, 'empresa asociada después');
 
   // 2. La vendedora solo lo pasa a «Listo para producción»; el resto lo mueve ClickUp.
   await api('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vende ${RUN}`, role: 'member' });

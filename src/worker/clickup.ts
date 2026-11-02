@@ -190,6 +190,12 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     if (!cur.tipo_de_pedido) change.tipo_de_pedido = pdv.evento ? 'EVENTO' : 'PEDIDO NORMAL';
     if (cur.owner_id == null) { const o = await ownerFor(db, pdv.vendedor, pdv.mailVendedor); if (o) change.owner_id = o; }
     if (Object.keys(change).length) { await updateRecord(db, ctx, 'order', id, change, { system: true, strict: false }); result = 'actualizado'; }
+    // Sin empresa (por ejemplo, entró antes de que la empresa estuviera en el CRM): se vuelve a buscar.
+    const hasCompany = await db.prepare(`SELECT 1 FROM associations WHERE (from_id = ? AND to_type = 'company') OR (to_id = ? AND from_type = 'company') LIMIT 1`).bind(id, id).first();
+    if (!hasCompany) {
+      const company = await companyFor(env, pdv, fin);
+      if (company) { await associate(db, ctx, id, company, { primary: true }).catch(() => undefined); result = 'actualizado'; }
+    }
   }
   // El remito: lo que suben a la tarea del PDV cuando lo entregan (una foto del remito firmado).
   if (pdv.stage === STAGE.entregado || pdv.stage === STAGE.parcial) {

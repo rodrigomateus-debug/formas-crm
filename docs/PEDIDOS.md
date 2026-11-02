@@ -40,9 +40,13 @@ El estado sale de los **artículos**, no del PDV (regla de Rodrigo: el del PDV n
 
 `pdv_finnegans` (el número, la llave con ClickUp y Finnegans), `pedido_finnegans` («PEDVTASTP - 31277»), unidad de negocio
 (Formas Shop, Corporate o NoEstres; Mercado Libre no tiene vendedora y no crea pedidos), cliente de ClickUp, vendedora
-(por el VENDEDOR de ClickUp, con los apodos de `CLICKUP_ALIAS` del tablero), tipo (evento o normal), fecha de entrega
+(por el VENDEDOR de ClickUp, con los apodos de `CLICKUP_ALIAS` del tablero; la vendedora tiene que ser usuaria del CRM con el mismo nombre), tipo (evento o normal), fecha de entrega
 prometida, fecha real de entrega, detalle de producción («3 en el impresor · 2 listo para entergar»), link al PDV y
 número de factura. Cada cambio de estado y la factura quedan en la línea de tiempo del pedido.
+
+Si el pedido entra antes que su empresa o su vendedora (por ejemplo, antes de migrar HubSpot o de dar de alta a la
+vendedora), queda sin ellas y se completa la próxima vez que se revisa el PDV. Para completarlos todos de una vez:
+Configuración → Integraciones → «Revisar todo».
 
 ## Migración desde HubSpot
 

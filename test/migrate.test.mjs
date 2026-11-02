@@ -13,6 +13,8 @@ const id = (n) => String(70_000_000_000 + seed * 100 + n);
 const OWNERS = [
   { id: '73383412', email: 'rodrigo.mateus@formaspublicitarias.com', firstName: 'Rodrigo', lastName: 'Mateus', teams: [{ id: '57132078', primary: true }] },
   { id: String(1_400_000_000 + seed), email: `vendedora${seed}@formas.ar`, firstName: 'Vende', lastName: `Dora ${seed}`, teams: [{ id: '58079782', primary: true }] },
+  // Ya dada de alta en el CRM con su mail de formas.ar; en HubSpot figura con el de formaspublicitarias.com.
+  { id: String(1_500_000_000 + seed), email: `otra${seed}@formaspublicitarias.com`, firstName: 'Otra', lastName: `Vendedora ${seed}`, teams: [{ id: '58079782', primary: true }] },
 ];
 const COMPANY = { id: id(1), properties: { name: `Migrada SA ${seed}`, domain: `migrada${seed}.com.ar`, hubspot_owner_id: OWNERS[1].id, tipo_de_empresa_cotizacion: 'a_cotizacion_mensual', createdate: '2025-03-01T10:00:00Z', hs_lastmodifieddate: '2026-01-01T10:00:00Z', campo_nuevo_hs: 'valor raro' } };
 const DARWIN_CONTACT = { id: id(7), properties: { firstname: 'Juan Pérez', lastname: 'Pérez', email: `incompleto549351${seed}@gmail.com`, mobilephone: `549351${seed}`, createdate: '2026-10-01T10:00:00Z', lastmodifieddate: '2026-10-01T10:00:00Z' } };
@@ -60,6 +62,10 @@ const api = async (path, opts = {}) => (await fetch(`${CRM}/api${path}`, opts)).
 
 test('migra usuarios, registros, asociaciones, historia de etapas y actividades', async () => {
   const tok = await api('/tokens', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'migración test', source: 'hubspot' }) });
+  const alta = await fetch(`${CRM}/hooks/migrate`, { method: 'POST', headers: { authorization: `Bearer ${tok.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ kind: 'users', items: [{ hs_owner_id: OWNERS[2].id, email: `otra${seed}@formas.ar`, name: `Otra Vendedora ${seed}`, active: true }] }) });
+  assert.equal(alta.status, 200, 'alta por /hooks/migrate con token');
+  assert.equal((await fetch(`${CRM}/hooks/migrate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"kind":"users","items":[]}' })).status, 401, 'sin token no entra');
   const env = { ...process.env, HUBSPOT_TOKEN: 'fake', CRM_URL: CRM, CRM_TOKEN: tok.token };
   const out = await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });
   assert.match(out.stdout, /Listo/);
@@ -69,6 +75,10 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   assert.equal(users.find((u) => u.email === 'rodrigo.mateus@formaspublicitarias.com').hs_owner_id, '73383412');
   const vend = users.find((u) => u.email === OWNERS[1].email);
   assert.equal(vend.id, Number(OWNERS[1].id));
+  const otra = users.filter((u) => u.hs_owner_id === OWNERS[2].id);
+  assert.equal(otra.length, 1, 'no se duplica quien ya estaba ligado a su propietario de HubSpot');
+  assert.equal(otra[0].email, `otra${seed}@formas.ar`, 'conserva el mail con el que entra');
+  assert.equal(otra[0].team_id, 58079782, 'toma el equipo de HubSpot');
 
   const company = await api(`/records/company/${id(1)}`);
   assert.equal(company.record.name, `Migrada SA ${seed}`);

@@ -4,6 +4,8 @@ import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { normLinkedin, splitName } from './records';
+import { clickupState } from './clickup';
+import { finnegansState } from './finnegans';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -155,6 +157,15 @@ hooks.get('/facturas/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   const { results } = await c.env.DB.prepare("SELECT id, name, meta FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL ORDER BY id LIMIT 50").all<{ id: number; name: string; meta: string }>();
   return c.json(results.map((f) => { const m = JSON.parse(f.meta || '{}'); return { id: f.id, name: f.name, transaccion_id: m.transaccion_id, empresa: m.empresa, numero: m.numero }; }));
+});
+// Estado de las conexiones de los pedidos (lo mismo que Configuración → Integraciones), para revisarlo con un token.
+hooks.get('/pedidos/estado', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
+  return c.json({
+    clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupState(c.env.DB)) },
+    finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
+  });
 });
 hooks.put('/facturas/:id/pdf', async (c) => {
   await adminToken(c.env, c.req.raw);

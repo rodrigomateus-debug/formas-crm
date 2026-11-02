@@ -6,6 +6,7 @@ import { applyBundle, findCompany, type Bundle } from './upsert';
 import { normLinkedin, splitName } from './records';
 import { clickupStatus, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
+import { gmailConfig, syncAll } from './gmail';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -172,6 +173,24 @@ hooks.get('/pedidos/estado', async (c) => {
 hooks.post('/pedidos/revisar', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await syncClickup(c.env, { full: true }));
+});
+// Gmail con token de administrador (lo mismo que Configuración → Integraciones → «Mails (Gmail)»): ver el estado,
+// cambiar la configuración (prender, qué bandejas) y leer ahora.
+hooks.get('/gmail', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const { results } = await c.env.DB.prepare("SELECT key, value FROM settings WHERE key LIKE 'gmail_state:%' OR key = 'gmail_last_run'").all<{ key: string; value: string }>();
+  return c.json({ config: await gmailConfig(c.env.DB), has_credentials: !!c.env.GOOGLE_SA_JSON,
+    state: Object.fromEntries(results.map((r) => [r.key.replace('gmail_state:', ''), JSON.parse(r.value)])) });
+});
+hooks.put('/gmail', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const cfg = { ...(await gmailConfig(c.env.DB)), ...(await c.req.json()) };
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gmail', ?)").bind(JSON.stringify(cfg)).run();
+  return c.json(cfg);
+});
+hooks.post('/gmail/sync', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await syncAll(c.env));
 });
 hooks.put('/facturas/:id/pdf', async (c) => {
   await adminToken(c.env, c.req.raw);

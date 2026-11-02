@@ -20,7 +20,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
 | `/hooks/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`), con token de administrador. Va por `/hooks` porque `/api` pide el login de Access. |
-| Cron cada 10 min | Registro automático de mails de Gmail (`src/worker/gmail.ts`). |
+| Cron a los :05, :15… | Registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
 
 Quién entra: Cloudflare Access con el mail de Formas (igual que el tablero). Las integraciones y Claude entran con
 tokens propios (`fcrm_…`) que se crean en Configuración → Integraciones. Los ids de todo lo migrado son los de
@@ -116,3 +116,8 @@ API → Delegación de todo el dominio) hay que darle a su Client ID el permiso
 el JSON de la cuenta se carga como secreto `GOOGLE_SA_JSON` del repo en GitHub (la próxima publicación se lo pasa al
 CRM), y en Configuración → Integraciones → «Mails (Gmail)» se prende. Cada 10 minutos guarda los mails con contactos
 (recibidos de contactos existentes; enviados, creando el contacto si no existe), deduplicados entre bandejas.
+
+Cada corrida lee hasta unos 40 mails en total (el tope de consultas del plan gratuito de Cloudflare), empezando por la
+bandeja que hace más que no se lee; lo que falta sigue en la próxima. Con token de administrador: `GET /hooks/gmail`
+(estado), `PUT /hooks/gmail` (configuración, por ejemplo `{"enabled": true, "users": ["alguien@formas.ar"]}`) y
+`POST /hooks/gmail/sync` (leer ahora).

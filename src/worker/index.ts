@@ -14,6 +14,7 @@ import { syncFacturas } from './finnegans';
 import { StageError } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
+const GMAIL_CRON = '5-59/10 * * * *';   // el mismo que en wrangler.jsonc
 const app = new Hono<App>();
 
 app.onError((err, c) => {
@@ -78,10 +79,12 @@ export default {
   async scheduled(event, env, ctx) {
     const safe = (fn: () => Promise<unknown>) => fn().catch((e) => console.error((e as Error).message));
     const turno = Math.floor(new Date(event.scheduledTime).getUTCMinutes() / 10);
+    // Cada corrida tiene su propio tope de consultas (budget.ts): Gmail va en la suya (a los :05, :15…) para no
+    // quitarle consultas a ClickUp y Finnegans (a los :00, :10…).
     ctx.waitUntil((async () => {
       await ensureSeeded(env.DB);
-      await safe(() => syncAll(env));
-      await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
+      if (event.cron === GMAIL_CRON) await safe(() => syncAll(env));
+      else await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
     })());
   },
 } satisfies ExportedHandler<Env>;

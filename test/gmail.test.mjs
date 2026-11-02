@@ -19,21 +19,28 @@ const msg = (id, from, to, subject, text, mid) => ({
     parts: [{ mimeType: 'text/plain', body: { data: b64(text) } }, { mimeType: 'text/html', body: { data: b64(`<p>${text}</p>`) } }] },
 });
 const MESSAGES = [
-  msg('m1', `"Compras Cliente" <${client}>`, me, 'Pedido de cotización', 'Hola, necesitamos 200 tazas.\n\nEl jue, 22 oct 2026 a la(s) 12:04 p.m., Rodrigo escribió:\n> cita vieja', `<a1-${run}@mail>`),
-  msg('m2', `Rodrigo Mateus <${me}>`, `"Nuevo Prospecto" <${nuevo}>, colega@formas.ar`, 'Presentación Formas', 'Te paso nuestro catálogo.', `<a2-${run}@mail>`),
-  msg('m3', `Desconocido <alguien@otro-${run}.com>`, me, 'Spam', 'Hola', `<a3-${run}@mail>`),
-  msg('m4', `notificaciones <noreply@cliente-${run}.com.ar>`, me, 'Aviso', 'automático', `<a4-${run}@mail>`),
+  msg(`m1${run}`, `"Compras Cliente" <${client}>`, me, 'Pedido de cotización', 'Hola, necesitamos 200 tazas.\n\nEl jue, 22 oct 2026 a la(s) 12:04 p.m., Rodrigo escribió:\n> cita vieja', `<a1-${run}@mail>`),
+  msg(`m2${run}`, `Rodrigo Mateus <${me}>`, `"Nuevo Prospecto" <${nuevo}>, colega@formas.ar`, 'Presentación Formas', 'Te paso nuestro catálogo.', `<a2-${run}@mail>`),
+  msg(`m3${run}`, `Desconocido <alguien@otro-${run}.com>`, me, 'Spam', 'Hola', `<a3-${run}@mail>`),
+  msg(`m4${run}`, `notificaciones <noreply@cliente-${run}.com.ar>`, me, 'Aviso', 'automático', `<a4-${run}@mail>`),
 ];
 
+// Tanda grande (para el tope de consultas): mails de un contacto, todos dentro del margen de 10 minutos que se relee.
+const bulk = [];
+let gets = 0;   // mails pedidos de a uno
 let server;
 before(async () => {
   server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     const send = (b) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
     if (url.pathname === '/token') return send({ access_token: 'fake', expires_in: 3600 });
-    if (url.pathname === '/gmail/v1/users/me/messages') return send({ messages: MESSAGES.map((m) => ({ id: m.id })) });
+    if (url.pathname === '/gmail/v1/users/me/messages') {
+      const after = Number((url.searchParams.get('q') ?? '').match(/after:(\d+)/)?.[1] ?? 0);
+      const all = [...MESSAGES, ...bulk].filter((x) => Number(x.internalDate) / 1000 > after).sort((x, y) => Number(y.internalDate) - Number(x.internalDate));
+      return send({ messages: all.map((x) => ({ id: x.id })) });
+    }
     const m = url.pathname.match(/messages\/(\w+)$/);
-    if (m) return send(MESSAGES.find((x) => x.id === m[1]));
+    if (m) { gets++; return send([...MESSAGES, ...bulk].find((x) => x.id === m[1])); }
     res.statusCode = 404; send({ error: { message: 'no simulado' } });
   });
   await new Promise((r) => server.listen(8799, r));
@@ -65,4 +72,28 @@ test('registra mails con contactos, crea el contacto al enviar y no duplica', as
   const tl2 = await api('GET', `/records/contact/${contact.id}/timeline?types=email`);
   assert.equal(tl2.activities.length, 1);
   await api('PUT', '/gmail', { enabled: false });
+});
+
+test('una tanda de 70 mails en pocos minutos se lee en varias corridas, sin pasarse del tope ni repetir', async (t) => {
+  const status = await api('GET', '/gmail');
+  if (!status.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba (ver encabezado)'); return; }
+  await api('PUT', '/gmail', { enabled: true, users: [me] });
+  for (let i = 0; i < 70; i++) {
+    const x = msg(`b${i}x${run}`, `"Compras Cliente" <${client}>`, me, `Tanda ${run} ${i}`, `Mail ${i}`, `<b${i}-${run}@mail>`);
+    x.internalDate = String(Date.now() - (70 - i) * 2000);
+    bulk.push(x);
+  }
+  let total = 0;
+  for (let corrida = 0; corrida < 4; corrida++) {
+    gets = 0;
+    const mine = (await api('POST', '/gmail/sync')).find((o) => o.mailbox === me);
+    assert.ok(mine && !mine.error, JSON.stringify(mine));
+    assert.ok(gets <= 43, `corrida ${corrida}: ${gets} mails pedidos`);
+    total += mine.logged;
+    if (!mine.pending) break;
+  }
+  assert.equal(total, 70, 'los 70, una vez cada uno');
+  gets = 0;
+  const again = (await api('POST', '/gmail/sync')).find((o) => o.mailbox === me);
+  assert.deepEqual([again.logged, gets], [0, 0], 'la corrida siguiente no vuelve a pedir los que ya leyó');
 });

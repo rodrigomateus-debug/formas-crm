@@ -66,6 +66,12 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
     body: JSON.stringify({ kind: 'users', items: [{ hs_owner_id: OWNERS[2].id, email: `otra${seed}@formas.ar`, name: `Otra Vendedora ${seed}`, active: true }] }) });
   assert.equal(alta.status, 200, 'alta por /hooks/migrate con token');
   assert.equal((await fetch(`${CRM}/hooks/migrate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"kind":"users","items":[]}' })).status, 401, 'sin token no entra');
+  // Antes de migrar, el CRM ya había creado solo el contacto (por ejemplo, desde Gmail) y su empresa por el dominio.
+  const json = { 'content-type': 'application/json' };
+  const nativo = await api('/records/contact', { method: 'POST', headers: json, body: JSON.stringify({ props: { firstname: 'Marta', email: CONTACT.properties.email.toUpperCase() } }) });
+  const nativoEmp = (await api(`/records/contact/${nativo.id}`)).associations.company[0];
+  assert.ok(nativoEmp, 'empresa creada sola por el dominio');
+  await api('/activities', { method: 'POST', headers: json, body: JSON.stringify({ type: 'note', body: `Nota de Gmail ${seed}`, links: [nativo.id] }) });
   const env = { ...process.env, HUBSPOT_TOKEN: 'fake', CRM_URL: CRM, CRM_TOKEN: tok.token };
   const out = await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });
   assert.match(out.stdout, /Listo/);
@@ -89,6 +95,9 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
 
   const contact = await api(`/records/contact/${id(2)}`);
   assert.equal(contact.associations.company[0].id, Number(id(1)));
+  assert.equal((await api(`/records/contact/${nativo.id}`)).redirect, Number(id(2)), 'el contacto creado antes se combinó en el de HubSpot');
+  assert.equal((await api(`/records/company/${nativoEmp.id}`)).redirect, Number(id(1)), 'la empresa creada antes, también');
+  assert.ok((await api(`/records/contact/${id(2)}/timeline`)).activities.some((a) => a.body === `Nota de Gmail ${seed}`), 'con su actividad');
   assert.equal(contact.associations.company[0].primary, true);
 
   const deal = await api(`/records/deal/${id(3)}`);
@@ -99,8 +108,8 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
 
   const tl = await api(`/records/company/${id(1)}/timeline`);
   const types = tl.activities.map((a) => a.type).sort();
-  assert.deepEqual(types, ['email', 'note', 'task']);
-  assert.equal(tl.activities.find((a) => a.type === 'note').body, 'Pidió muestras');
+  assert.deepEqual(types, ['email', 'note', 'note', 'task'], 'las de HubSpot y la del contacto creado antes de migrar');
+  assert.ok(tl.activities.some((a) => a.type === 'note' && a.body === 'Pidió muestras'));
   assert.equal(tl.activities.find((a) => a.type === 'task').priority, 'high');
   const c2 = await api(`/records/contact/${id(2)}`);
   assert.ok(c2.record.props.notes_last_contacted, 'último contacto recalculado por el mail');
@@ -121,5 +130,5 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   // Repetir la migración no duplica nada.
   await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });
   const again = await api(`/records/company/${id(1)}/timeline`);
-  assert.equal(again.activities.length, 3);
+  assert.equal(again.activities.length, 4);
 });

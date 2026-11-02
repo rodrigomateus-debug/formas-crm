@@ -3,6 +3,7 @@ import { now } from './env';
 import { createActivity } from './activities';
 import { findContact, upsertContact } from './upsert';
 import type { RecordRow } from './records';
+import { Budget, OutOfBudget } from './budget';
 
 // Registro automático de mails, como la conexión de bandeja de HubSpot: cada 10 minutos lee los Gmail del equipo
 // (cuenta de servicio con delegación de dominio, solo lectura) y guarda en el CRM los mails con contactos.
@@ -10,6 +11,8 @@ import type { RecordRow } from './records';
 // - Enviados: si el destinatario no existe y `create_contacts_on_sent` está activo, se crea el contacto (como el
 //   botón «Registrar» de la extensión de HubSpot).
 // - El mismo mail en dos bandejas del equipo se guarda una vez (se deduplica por Message-ID).
+// Corre en su propia corrida del cron (a los :05, :15…), con su tope de consultas (budget.ts): cada mail leído es una
+// consulta. Empieza por la bandeja que hace más que no se lee y, si llega al tope, la próxima sigue donde quedó.
 
 export interface GmailConfig {
   enabled: boolean;
@@ -114,18 +117,24 @@ async function openDealOf(db: D1Database, contactId: number) {
   return results.length === 1 ? results[0].id : null;
 }
 
-export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, maxMessages = 150) {
+export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, b: Budget = Budget.of(env)) {
   const db = env.DB;
   const api = env.GMAIL_API_URL ?? 'https://gmail.googleapis.com';
+  b.take();
   const token = await serviceToken(env, user.email);
   const stateKey = `gmail_state:${user.email}`;
   const state = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(stateKey).first<{ value: string }>();
-  const since = state ? (JSON.parse(state.value) as { after: number }).after : Math.floor(Date.now() / 1000) - cfg.lookback_days * 86400;
+  const prev = state ? (JSON.parse(state.value) as { after: number; seen_ids?: Array<[string, number]> }) : null;
+  const since = prev ? prev.after : Math.floor(Date.now() / 1000) - cfg.lookback_days * 86400;
+  // Se relee un margen de 10 minutos (por mails que Gmail indexa tarde); los que ya se leyeron en ese margen no se
+  // vuelven a pedir. Si no, una tanda de más de ~40 mails en 10 minutos se releería siempre y no avanzaría.
+  const already = new Map(prev?.seen_ids ?? []);
   const startedAt = Math.floor(Date.now() / 1000);
   const q = `after:${since - 600} -in:chats -in:spam -in:trash -category:promotions -category:social`;
   const ids: string[] = [];
   let pageToken: string | undefined;
   do {
+    b.take();
     const res = await fetch(`${api}/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=100${pageToken ? `&pageToken=${pageToken}` : ''}`, { headers: { authorization: `Bearer ${token}` } });
     const data = (await res.json()) as { messages?: Array<{ id: string }>; nextPageToken?: string; error?: { message: string } };
     if (data.error) throw new Error(data.error.message);
@@ -138,14 +147,19 @@ export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, maxMes
   const ignored = (e: string) => cfg.ignore_addresses.includes(e) || cfg.ignore_domains.some((d) => e.endsWith(`@${d}`) || e.endsWith(`.${d}`))
     || /^(no-?reply|noreply|notifications?|mailer-daemon|postmaster)@/.test(e);
   let logged = 0;
+  let read = 0;
   let lastSeen = since;
   // Gmail lista del más nuevo al más viejo: se procesa desde el más viejo para poder seguir donde quedó.
-  const batch = ids.reverse().slice(0, maxMessages);
+  const batch = ids.reverse().filter((id) => !already.has(id));
   for (const id of batch) {
+    if (b.left() < 1) break;
+    b.take();
+    read++;
     const res = await fetch(`${api}/gmail/v1/users/me/messages/${id}?format=full`, { headers: { authorization: `Bearer ${token}` } });
     const m = (await res.json()) as GMessage;
-    if (!m.payload) continue;
+    if (!m.payload) { already.set(id, startedAt); continue; }
     lastSeen = Math.max(lastSeen, Math.floor(Number(m.internalDate) / 1000));
+    already.set(id, Math.floor(Number(m.internalDate) / 1000));
     const messageId = header(m, 'Message-ID') || `${user.email}:${m.id}`;
     const from = addresses(header(m, 'From'))[0];
     if (!from) continue;
@@ -176,20 +190,31 @@ export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, maxMes
     });
     logged++;
   }
+  const pending = batch.length - read;
+  const after = pending ? lastSeen : startedAt;
+  const seen_ids = [...already.entries()].filter(([, t]) => t >= after - 700);
   await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-    .bind(stateKey, JSON.stringify({ after: ids.length > batch.length ? lastSeen : startedAt, at: now(), seen: batch.length, pending: ids.length - batch.length, logged })).run();
-  return { mailbox: user.email, seen: batch.length, pending: ids.length - batch.length, logged };
+    .bind(stateKey, JSON.stringify({ after, at: now(), seen: read, pending, logged, seen_ids })).run();
+  return { mailbox: user.email, seen: read, pending, logged };
 }
 
-export async function syncAll(env: Env) {
+export async function syncAll(env: Env, b: Budget = Budget.of(env)) {
   if (!env.GOOGLE_SA_JSON) return [{ error: 'Falta el secreto GOOGLE_SA_JSON.' }];
   const cfg = await gmailConfig(env.DB);
   if (!cfg.enabled) return [{ skipped: 'La sincronización de Gmail está apagada.' }];
   const { results } = await env.DB.prepare('SELECT * FROM users WHERE active = 1').all<User>();
-  const users = results.filter((u) => cfg.internal_domains.some((d) => u.email.endsWith(`@${d}`)) && (cfg.users === 'all' || cfg.users.includes(u.email)));
+  const wanted = cfg.users === 'all' ? null : cfg.users.map((e) => e.toLowerCase());
+  const users = results.filter((u) => cfg.internal_domains.some((d) => u.email.toLowerCase().endsWith(`@${d}`)) && (!wanted || wanted.includes(u.email.toLowerCase())));
+  // Primero la bandeja que hace más que no se lee.
+  const states = await env.DB.prepare("SELECT key, json_extract(value, '$.at') AS at FROM settings WHERE key LIKE 'gmail_state:%'").all<{ key: string; at: string | null }>();
+  const lastAt = new Map(states.results.map((r) => [r.key.slice('gmail_state:'.length), r.at ?? '']));
+  users.sort((x, y) => (lastAt.get(x.email) ?? '').localeCompare(lastAt.get(y.email) ?? ''));
   const out = [];
   for (const u of users) {
-    try { out.push(await syncMailbox(env, u, cfg)); } catch (e) { out.push({ mailbox: u.email, error: (e as Error).message }); }
+    if (b.left() < 3) { out.push({ mailbox: u.email, skipped: 'Sigue en la próxima corrida (tope de consultas).' }); continue; }
+    try { out.push(await syncMailbox(env, u, cfg, b)); } catch (e) {
+      out.push(e instanceof OutOfBudget ? { mailbox: u.email, skipped: 'Sigue en la próxima corrida (tope de consultas).' } : { mailbox: u.email, error: (e as Error).message });
+    }
   }
   await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('gmail_last_run', ?)").bind(JSON.stringify({ at: now(), out })).run();
   return out;

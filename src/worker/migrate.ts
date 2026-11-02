@@ -40,6 +40,8 @@ function convert(p: Property | undefined, v: unknown, owners: Map<string, number
 // Lo que manda ClickUp en un pedido (ver clickup.ts): en un pedido migrado vale más que lo que traía HubSpot.
 const CLICKUP_PROPS = ['hs_pipeline_stage', 'unidad_de_negocio', 'cliente_clickup', 'pedido_finnegans', 'url_clickup', 'detalle_produccion', 'entregado_el', 'factura_numero'];
 const clickupOrders: Array<{ id: number; pdv: string }> = [];
+// Contactos y empresas que el CRM ya creó solo (Gmail, Darwin, formularios) antes de migrar: se combinan en el de HubSpot.
+const sameKey: Array<{ id: number; type: 'contact' | 'company'; key: string }> = [];
 
 migrate.post('/', async (c) => {
   const db = c.env.DB;
@@ -108,6 +110,7 @@ migrate.post('/', async (c) => {
     case 'records': {
       const owners = await ownerIds(db);
       clickupOrders.length = 0;
+      sameKey.length = 0;
       for (const r of items) {
         const type = HS_TYPES[r.type] ?? r.type as ObjectType;
         const defs = await meta.properties(type);
@@ -125,6 +128,8 @@ migrate.post('/', async (c) => {
         // El workflow de Darwin inventaba mails (incompleto<teléfono>@gmail.com) para no duplicar: acá el contacto se busca por teléfono.
         if (type === 'contact' && /^incompleto[^@]*@gmail\.com$/i.test(String(props.email ?? ''))) delete props.email;
         const id = Number(r.hs_id);
+        if (!r.archived && type === 'contact' && props.email) sameKey.push({ id, type, key: String(props.email).trim().toLowerCase() });
+        if (!r.archived && type === 'company' && normDomain(props.domain || props.website)) sameKey.push({ id, type, key: normDomain(props.domain || props.website)! });
         const created = r.created_at ?? now();
         const updated = r.updated_at ?? created;
         const stageEntered = r.stage_entered_at ?? null;
@@ -213,8 +218,19 @@ migrate.post('/', async (c) => {
   // Pedidos que ClickUp ya había creado en el CRM antes de migrar: se queda el de HubSpot (por sus asociaciones) con lo
   // que sabe ClickUp (estado, detalle, factura, remito) y el creado por ClickUp se combina en él.
   let merged = 0;
+  const ctx = { user: (await db.prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").first<User>())!, source: 'hubspot' };
+  // Contactos (por mail) y empresas (por dominio) creados en el CRM antes de migrar: queda el de HubSpot, con sus
+  // asociaciones y actividades más las del creado acá.
+  if (body.kind === 'records') {
+    for (const k of sameKey) {
+      const dup = await db.prepare(`SELECT id FROM records WHERE object_type = ? AND archived = 0 AND id >= ? AND id != ? AND ${k.type === 'contact' ? 'lower(email)' : 'domain'} = ?`)
+        .bind(k.type, NATIVE_ID_START, k.id, k.key).first<{ id: number }>();
+      if (!dup) continue;
+      await mergeRecords(db, ctx, k.type, k.id, dup.id);
+      merged++;
+    }
+  }
   if (body.kind === 'records' && clickupOrders.length) {
-    const ctx = { user: (await db.prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").first<User>())!, source: 'hubspot' };
     for (const o of clickupOrders) {
       if (!o.pdv) continue;
       const dup = await db.prepare(`SELECT id, props FROM records WHERE object_type = 'order' AND archived = 0 AND id >= ? AND id != ?

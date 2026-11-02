@@ -25,7 +25,8 @@
     "ACCESS_AUD": "aebdd096c8e7d18c6983122bb647d7f371a3388cbfe9eaf74ac4442a46df1a24",
     "ADMIN_EMAIL": "rodrigo.mateus@formaspublicitarias.com"
   },
-  "triggers": { "crons": ["*/10 * * * *"] },
+  // :00, :10… ClickUp y Finnegans; :05, :15… Gmail (cada corrida tiene su propio tope de consultas). Ver index.ts.
+  "triggers": { "crons": ["*/10 * * * *", "5-59/10 * * * *"] },
   // La base D1 no tiene región en Sudamérica: con Smart Placement el Worker corre al lado de la base y cada pantalla
   // hace un solo viaje largo (navegador → Worker) en vez de uno por consulta.
   "placement": { "mode": "smart" },

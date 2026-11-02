@@ -4,7 +4,7 @@ import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { normLinkedin, splitName } from './records';
-import { clickupState } from './clickup';
+import { clickupStatus } from './clickup';
 import { finnegansState } from './finnegans';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
@@ -163,7 +163,7 @@ hooks.get('/pedidos/estado', async (c) => {
   await adminToken(c.env, c.req.raw);
   const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
   return c.json({
-    clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupState(c.env.DB)) },
+    clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
     finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
   });
 });

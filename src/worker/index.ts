@@ -64,15 +64,16 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
-  // Cada 10 minutos: los mails nuevos del equipo (si Gmail está activado) y los pedidos de ClickUp; una vez por hora, las
-  // facturas de Finnegans. Cada una corre aunque otra falle (el error queda en su estado, en Configuración → Integraciones).
+  // Cada 10 minutos: los mails nuevos del equipo (si Gmail está activado) y, por turnos, las facturas de Finnegans (a las
+  // :00 y a las :30) o los pedidos de ClickUp (el resto). Van por turnos porque cada corrida tiene un tope de consultas a
+  // otros servicios (budget.ts). Cada una corre aunque otra falle (el error queda en Configuración → Integraciones).
   async scheduled(event, env, ctx) {
     const safe = (fn: () => Promise<unknown>) => fn().catch((e) => console.error((e as Error).message));
+    const turno = Math.floor(new Date(event.scheduledTime).getUTCMinutes() / 10);
     ctx.waitUntil((async () => {
       await ensureSeeded(env.DB);
       await safe(() => syncAll(env));
-      await safe(() => syncClickup(env));
-      if (new Date(event.scheduledTime).getUTCMinutes() < 10) await safe(() => syncFacturas(env));
+      await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
     })());
   },
 } satisfies ExportedHandler<Env>;

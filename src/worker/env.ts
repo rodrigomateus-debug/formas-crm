@@ -20,6 +20,7 @@ export interface Env {
   FINNEGANS_CLIENT_SECRET?: string;
   // Solo para pruebas: ClickUp y Finnegans simulados.
   CLICKUP_API_URL?: string;
+  SUBREQUESTS?: string;   // consultas a otros servicios por corrida (default 45; ver budget.ts)
   FINNEGANS_API_URL?: string;
 }
 

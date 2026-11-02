@@ -23,29 +23,36 @@ async function api(method, path, body, headers = {}) {
 const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const PDF = Buffer.from('%PDF-1.4 factura de prueba');
 const field = (name, value, type = 'short_text') => ({ name, type, value });
-const pdvTask = (id, npdv, unidad, statuses, attachments = []) => ({
-  id, name: `PDV - ${npdv}`, parent: null, url: `https://app.clickup.com/t/${id}`, date_updated: String(Date.now()), status: { status: 'pdv' },
+const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.now()) => ({
+  id, name: `PDV - ${npdv}`, parent: null, url: `https://app.clickup.com/t/${id}`, date_updated: String(updated), status: { status: 'pdv' },
   text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: Rodrigo Mateus\nEs evento: Sí\nFecha entrega: 30-11-2026`,
   custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', `Cliente ${RUN} S.R.L.`), field('🧑‍💻 VENDEDOR', 'Rodrigo Mateus'),
     { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: unidad } }, field('ENTREGAS (FECHA REAL)', '1793343600000', 'date')],
-  subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Artículo ${i}`, parent: id, status: { status: s } })),
+  subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Artículo ${i}`, parent: id, date_updated: String(updated), status: { status: s } })),
   attachments,
 });
-const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [] };
+const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], bulk: 0 };
+const BULK = (i) => String(Number(PDV) + 100 + i);
+const AYER = Date.now() - 86_400_000;
+let hits = 0;   // consultas que recibe el ClickUp/Finnegans simulado
 let facturas = [];
 let server;
 before(async () => {
   server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    hits++;
     const send = (b, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
     const p = decodeURIComponent(url.pathname);
     if (p === '/clickup/list/901326159292/task') {
-      const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv'])];
-      return send({ tasks: tasks.flatMap((t) => [t, ...t.subtasks]), last_page: true });
+      const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']),
+        ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER))].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
+      const page = Number(url.searchParams.get('page') ?? 0);
+      return send({ tasks: tasks.slice(page * 100, page * 100 + 100), last_page: (page + 1) * 100 >= tasks.length });
     }
     if (p === '/clickup/task/cuA') return send({ ...pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), attachments: cu.attachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) });
     if (p === '/clickup/task/cuML') return send(pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']));
     if (p === '/clickup/task/cuB') return send(pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']));
+    if (p.startsWith('/clickup/task/cuN')) { const i = Number(p.slice(17)); return send(pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)); }
     if (p === '/archivos/remito.jpg') { res.setHeader('content-type', 'image/jpeg'); return res.end(JPG); }
     if (p === '/fin/oauth/token') return res.end('"token-de-prueba"');
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV.padStart(8, '0')}`) return send({ Cliente: 'C-PRUEBA' });
@@ -144,4 +151,23 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   // 6. En la línea de tiempo se ve cómo avanzó.
   const tl = (await api('GET', `/records/order/${o.id}/timeline`)).data;
   assert.ok(tl.changes.some((c) => c.prop === 'hs_pipeline_stage') && tl.changes.some((c) => c.prop === 'factura_numero'));
+});
+
+test('pedidos desde ClickUp: cada corrida respeta el tope de consultas y sigue en la próxima', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  cu.bulk = 60;   // 60 PDV nuevos, con su artículo: la lista ocupa varias páginas
+  let st = { leyendo_lista: true, pendientes: 1 };
+  for (let i = 0; i < 20 && (st.leyendo_lista || st.pendientes); i++) {
+    hits = 0;
+    st = (await api('POST', '/integrations/clickup/sync', { full: i === 0 })).data;
+    assert.ok(!st.error, st.error);
+    assert.ok(hits <= 45, `corrida ${i}: ${hits} consultas`);
+  }
+  assert.equal(st.pendientes, 0);
+  for (const i of [0, 30, 59]) {
+    const o = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${BULK(i)}`)}`)).data.results[0];
+    assert.equal(o?.props.hs_pipeline_stage, '1237498994', `PDV ${BULK(i)} en producción`);
+  }
+  cu.bulk = 0;
 });

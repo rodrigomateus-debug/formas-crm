@@ -292,7 +292,7 @@ function NewPipeline({ onClose, onCreated }: { onClose: () => void; onCreated: (
 }
 
 // Pedidos: ClickUp (estado, cada 10 minutos) y Finnegans (facturas, cada hora). Solo leen; acá se ve cómo vienen.
-interface SyncState { configured: boolean; at?: string; error?: string | null; creados?: number; actualizados?: number; pendientes?: number; revisados?: number; facturas?: number; pdf_pendientes?: number }
+interface SyncState { configured: boolean; at?: string; error?: string | null; creados?: number; actualizados?: number; pendientes?: number; leyendo_lista?: boolean; revisados?: number; facturas?: number; pdf_pendientes?: number }
 function Pedidos() {
   const toast = useToast();
   const st = useAsync(() => http<{ clickup: SyncState; finnegans: SyncState }>('GET', '/integrations/pedidos'), []);
@@ -310,7 +310,7 @@ function Pedidos() {
       <p style={{ margin: 0 }}>Los pedidos salen de la lista PEC de ClickUp: cada PDV nuevo crea su pedido y su estado se mueve solo según los artículos. La vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción». Cuando la factura de Finnegans tiene CAE se adjunta sola, y el remito cuando lo suben a ClickUp al entregar. ClickUp y Finnegans solo se leen.</p>
       <div className="row wrap">
         <b style={{ width: 90 }}>ClickUp</b>
-        {c?.configured ? <span className="grow">Última vez: {when(c)}{c.at ? ` · ${c.creados ?? 0} creados, ${c.actualizados ?? 0} actualizados${c.pendientes ? `, ${c.pendientes} para la próxima` : ''}` : ''}{c.error ? <span className="danger-text"> · {c.error}</span> : null}</span>
+        {c?.configured ? <span className="grow">Última vez: {when(c)}{c.at ? ` · ${c.creados ?? 0} creados, ${c.actualizados ?? 0} actualizados${c.pendientes ? `, ${c.pendientes} PDV para las próximas corridas` : ''}${c.leyendo_lista ? ' · todavía leyendo la lista' : ''}` : ''}{c.error ? <span className="danger-text"> · {c.error}</span> : null}</span>
           : <span className="grow muted">Falta el secreto CLICKUP_TOKEN en el repo (se carga en el próximo despliegue).</span>}
         <button className="btn sm" disabled={!c?.configured || !!busy} onClick={() => go('cu', '/integrations/clickup/sync')}>{busy === 'cu' ? 'Sincronizando…' : 'Sincronizar ahora'}</button>
         <button className="btn sm ghost" disabled={!c?.configured || !!busy} onClick={() => go('cufull', '/integrations/clickup/sync', { full: true })} title="Revisa todos los PDV abiertos y los entregados de los últimos 45 días">Revisar todo</button>

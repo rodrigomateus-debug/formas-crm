@@ -3,10 +3,12 @@ import { Meta } from './meta';
 import { createRecord, updateRecord, ORDER_CONFIRMED } from './records';
 import { associate } from './associations';
 import { finnegansPedido, finnegansToken } from './finnegans';
+import { Budget, OutOfBudget } from './budget';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
-// cambiaron y, por cada PDV, el CRM crea el pedido si no existe y le pone el estado general que corresponde.
+// cambiaron y, por cada PDV, el CRM crea el pedido si no existe y le pone el estado general que corresponde. Cada corrida
+// tiene un tope de consultas (budget.ts): la lista de PDV por revisar queda guardada y sigue en la próxima.
 //
 // - El estado sale de los ARTÍCULOS, no del PDV (regla de Rodrigo: el del PDV no es certero).
 // - La vendedora solo pasa el pedido de «Pedido confirmado» a «Listo para producción»; lo demás lo mueve esto.
@@ -15,7 +17,8 @@ import { finnegansPedido, finnegansToken } from './finnegans';
 
 const LIST = '901326159292';
 const API = (env: Env) => env.CLICKUP_API_URL ?? 'https://api.clickup.com/api/v2';
-const MAX_PDV = 40;   // PDV por corrida (cada uno es una consulta a ClickUp); lo que falta sigue en la próxima
+const POR_PDV = 5;    // consultas que puede llevar un PDV: la tarea y, si el pedido es nuevo, el token, el pedido y el cliente en Finnegans
+const LISTADO = 20;   // la lectura de la lista deja al menos esto para revisar PDV en la misma corrida
 
 export const STAGE = {
   confirmado: ORDER_CONFIRMED,
@@ -58,7 +61,8 @@ interface CuTask {
   attachments?: Array<{ id: string; title?: string; extension?: string; mimetype?: string; size?: number; date?: string }>;
 }
 
-async function cu<T>(env: Env, path: string, params: Record<string, string | number> = {}): Promise<T> {
+async function cu<T>(env: Env, path: string, params: Record<string, string | number> = {}, b?: Budget): Promise<T> {
+  b?.take();
   const url = new URL(API(env) + path);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const res = await fetch(url, { headers: { Authorization: env.CLICKUP_TOKEN! } });
@@ -131,10 +135,10 @@ async function ownerFor(db: D1Database, vendedor: string, mail: string) {
 }
 
 // Empresa del pedido: por CUIT (leyendo el pedido en Finnegans, si hay credenciales) o por razón social.
-async function companyFor(env: Env, pdv: ReturnType<typeof readPdv>, fin: string | null) {
+async function companyFor(env: Env, pdv: ReturnType<typeof readPdv>, fin: string | null, b?: Budget) {
   const db = env.DB;
   if (fin && pdv.pedido) {
-    const c = await finnegansPedido(env, fin, pdv.pedido).catch(() => null);
+    const c = await finnegansPedido(env, fin, pdv.pedido, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
     const cuit = c?.cuit?.replace(/\D/g, '');
     if (cuit) {
       const hit = await db.prepare(`SELECT id FROM records WHERE object_type = 'company' AND archived = 0
@@ -158,7 +162,7 @@ async function findOrder(db: D1Database, pdv: ReturnType<typeof readPdv>) {
 }
 
 // Un PDV de ClickUp → su pedido en el CRM. Devuelve qué hizo.
-export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | null): Promise<'creado' | 'actualizado' | 'igual' | 'omitido'> {
+export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | null, b?: Budget): Promise<'creado' | 'actualizado' | 'igual' | 'omitido'> {
   const db = env.DB;
   const pdv = readPdv(t);
   if (!pdv.npdv || !pdv.unidad) return 'omitido';
@@ -177,7 +181,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
       fecha_de_entrega: pdv.entrega, owner_id: await ownerFor(db, pdv.vendedor, pdv.mailVendedor),
     }, { system: true, strict: false });
     id = row.id;
-    const company = await companyFor(env, pdv, fin);
+    const company = await companyFor(env, pdv, fin, b);
     if (company) await associate(db, ctx, id, company, { primary: true }).catch(() => undefined);
     result = 'creado';
   } else {
@@ -193,7 +197,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     // Sin empresa (por ejemplo, entró antes de que la empresa estuviera en el CRM): se vuelve a buscar.
     const hasCompany = await db.prepare(`SELECT 1 FROM associations WHERE (from_id = ? AND to_type = 'company') OR (to_id = ? AND from_type = 'company') LIMIT 1`).bind(id, id).first();
     if (!hasCompany) {
-      const company = await companyFor(env, pdv, fin);
+      const company = await companyFor(env, pdv, fin, b);
       if (company) { await associate(db, ctx, id, company, { primary: true }).catch(() => undefined); result = 'actualizado'; }
     }
   }
@@ -209,59 +213,78 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   return result;
 }
 
-export interface ClickupState { last?: number; at?: string; creados?: number; actualizados?: number; error?: string | null; pendientes?: number }
+export interface ClickupState {
+  last?: number;                    // cuándo empezó la última lectura completa de la lista (la próxima pide lo cambiado desde ahí)
+  scan?: { full: boolean; step: number; page: number; since: number; started: number } | null;   // lectura en curso
+  queue?: Array<[string, number]>;  // PDV por revisar: [tarea, última modificación]
+  at?: string; creados?: number; actualizados?: number; error?: string | null; pendientes?: number;
+}
 
 export async function clickupState(db: D1Database): Promise<ClickupState> {
   const r = await db.prepare("SELECT value FROM settings WHERE key = 'clickup_state'").first<{ value: string }>();
   return r ? JSON.parse(r.value) : {};
 }
+// Lo que se muestra en Configuración → Integraciones (sin la lista de PDV por revisar).
+export async function clickupStatus(db: D1Database) {
+  const { queue: _q, scan, ...st } = await clickupState(db);
+  return { ...st, leyendo_lista: !!scan };
+}
 
-// Lee lo que cambió en la lista PEC desde la última corrida y actualiza los pedidos.
-// `full`: la primera vez (o a pedido), los PDV abiertos y los cerrados de los últimos 45 días.
+// Cada corrida: 1) sigue leyendo la lista (lo que cambió desde la última vez; en la carga completa, también los PDV
+// cerrados de los últimos 45 días y todos los abiertos) y anota los PDV por revisar; 2) revisa los PDV anotados, primero
+// los que cambiaron más recién. Si llega al tope de consultas, lo que falta queda anotado para la próxima.
 export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
   if (!env.CLICKUP_TOKEN) return { skipped: 'Falta CLICKUP_TOKEN.' };
   const db = env.DB;
   const state = await clickupState(db);
   const started = Date.now();
-  const since = opts.full || !state.last ? started - 45 * 86_400_000 : state.last - 5 * 60_000;
+  const b = Budget.of(env);
+  const queue = new Map(state.queue ?? []);
   const out: ClickupState = { ...state, at: new Date(started).toISOString(), creados: 0, actualizados: 0, error: null };
+  if (opts.full || (!state.last && !state.scan)) out.scan = { full: true, step: 0, page: 0, since: started - 45 * 86_400_000, started };
+  else if (!state.scan) out.scan = { full: false, step: 0, page: 0, since: state.last! - 5 * 60_000, started };
   try {
-    // 1. Tareas que cambiaron (PDV y artículos), abiertas y cerradas; y en la carga completa, todas las abiertas.
-    const changed: CuTask[] = [];
-    const pages = async (params: Record<string, string | number>) => {
-      for (let page = 0; page < 30; page++) {
-        const d = await cu<{ tasks: CuTask[]; last_page?: boolean }>(env, `/list/${LIST}/task`, { ...params, subtasks: 'true', page });
-        changed.push(...d.tasks);
-        if (d.last_page !== false || !d.tasks.length) break;
+    // 1. La lista, de a páginas de 100 tareas (PDV y artículos).
+    while (out.scan && b.left() > LISTADO) {
+      const sc = out.scan;
+      const params: Record<string, string | number> = sc.step === 0 ? { include_closed: 'true', date_updated_gt: sc.since, order_by: 'updated', reverse: 'true' } : {};
+      const d = await cu<{ tasks: CuTask[]; last_page?: boolean }>(env, `/list/${LIST}/task`, { ...params, subtasks: 'true', page: sc.page }, b);
+      for (const t of d.tasks) {
+        const pid = t.parent || t.id;
+        queue.set(pid, Math.max(queue.get(pid) ?? 0, Number(t.date_updated ?? 0)));
       }
-    };
-    await pages({ include_closed: 'true', date_updated_gt: since, order_by: 'updated', reverse: 'true' });
-    if (opts.full || !state.last) await pages({});
-    // 2. PDV a revisar (el padre de cada artículo), del cambio más viejo al más nuevo.
-    const byPdv = new Map<string, number>();
-    for (const t of changed) {
-      const pid = t.parent || t.id;
-      byPdv.set(pid, Math.max(byPdv.get(pid) ?? 0, Number(t.date_updated ?? 0)));
+      if (d.last_page === false && d.tasks.length && sc.page < 200) sc.page++;
+      else if (sc.full && sc.step === 0) { sc.step = 1; sc.page = 0; }
+      else { out.last = sc.started; out.scan = null; }
     }
-    const queue = [...byPdv.entries()].sort((a, b) => a[1] - b[1]);
+    // 2. Los PDV anotados.
     const ctx = await systemCtx(env);
-    const fin = await finnegansToken(env).catch(() => null);
-    let last = started;
-    for (const [i, [pid]] of queue.entries()) {
-      if (i >= MAX_PDV) { last = queue[i - 1][1]; break; }
-      const t = await cu<CuTask>(env, `/task/${pid}`, { include_subtasks: 'true' });
-      if (t.parent || !/PDV/i.test(t.name)) continue;
-      const r = await upsertPdv(env, ctx, t, fin);
-      if (r === 'creado') out.creados!++;
-      if (r === 'actualizado') out.actualizados!++;
+    let fin: string | null | undefined;
+    for (const [pid] of [...queue.entries()].sort((x, y) => y[1] - x[1])) {
+      if (b.left() < POR_PDV) break;
+      let t: CuTask;
+      try {
+        t = await cu<CuTask>(env, `/task/${pid}`, { include_subtasks: 'true' }, b);
+      } catch (e) {
+        if (e instanceof OutOfBudget) throw e;
+        queue.delete(pid);   // la tarea ya no está (la borraron o la movieron de lista)
+        continue;
+      }
+      if (!t.parent && /PDV/i.test(t.name)) {
+        if (fin === undefined) fin = await finnegansToken(env, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
+        const r = await upsertPdv(env, ctx, t, fin, b);
+        if (r === 'creado') out.creados!++;
+        if (r === 'actualizado') out.actualizados!++;
+      }
+      queue.delete(pid);
     }
-    out.pendientes = Math.max(0, queue.length - MAX_PDV);
-    out.last = last;
   } catch (e) {
-    out.error = (e as Error).message;
+    if (!(e instanceof OutOfBudget)) out.error = (e as Error).message;
   }
+  out.queue = [...queue.entries()];
+  out.pendientes = queue.size;
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('clickup_state', ?)").bind(JSON.stringify(out)).run();
-  return out;
+  return clickupStatus(db);
 }
 
 // Para abrir un remito: ClickUp da un link nuevo (y de un solo uso si los adjuntos son privados) cada vez que se pide.

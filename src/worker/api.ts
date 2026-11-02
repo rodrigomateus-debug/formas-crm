@@ -12,7 +12,7 @@ import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updat
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
-import { clickupAttachment, clickupState, syncClickup } from './clickup';
+import { clickupAttachment, clickupStatus, syncClickup } from './clickup';
 import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -696,7 +696,7 @@ api.get('/files/:id', async (c) => {
 api.get('/integrations/pedidos', async (c) => {
   const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
   return c.json({
-    clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupState(c.env.DB)) },
+    clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
     finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
   });
 });

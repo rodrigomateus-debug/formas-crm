@@ -11,9 +11,9 @@ para producción»; lo demás lo mueve ClickUp.
 
 | Qué | Fuente | Cada cuánto | Código |
 |---|---|---|---|
-| El pedido y su estado | ClickUp, lista **PEC** (`901326159292`): una tarea por PDV y una subtarea por artículo | Cada 10 minutos (cron del Worker) | `src/worker/clickup.ts` |
+| El pedido y su estado | ClickUp, lista **PEC** (`901326159292`): una tarea por PDV y una subtarea por artículo | Cada 10 minutos, salvo a las :00 y las :30 (cron del Worker) | `src/worker/clickup.ts` |
 | La empresa del pedido | Finnegans: `pedidoVenta/<pedido>` → `cliente/<código>` → CUIT, y se busca la empresa por CUIT; si no, por razón social | Al crear el pedido | `clickup.ts` (`companyFor`) |
-| La factura | Finnegans: `reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals` (facturas del pedido, también las que pasan por un remito, como en Corporate) y `facturaVenta/<id>` (número y CAE) | Cada hora | `src/worker/finnegans.ts` |
+| La factura | Finnegans: `reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals` (facturas del pedido, también las que pasan por un remito, como en Corporate) y `facturaVenta/<id>` (número y CAE) | A las :00 y a las :30 | `src/worker/finnegans.ts` |
 | El PDF de la factura | Finnegans GO (`/BSA/Sr2`, el mismo PDF que «Previsualizar»), con sesión iniciada | Cada hora, de 8 a 19, de lunes a viernes (GitHub) | `scripts/facturas-pdf.mjs`, workflow «Facturas de pedidos (PDF)» |
 | El remito | ClickUp: la foto del remito firmado que suben a la tarea del PDV al entregar («PDV 31167.jpeg») | Con el estado | `clickup.ts`; se abre por `GET /api/files/<id>` |
 
@@ -70,6 +70,13 @@ Los tres primeros los carga en el CRM el despliegue («Probar y publicar»): des
 Configuración → Integraciones → «Pedidos: ClickUp y Finnegans», con botones para correrlas en el momento.
 
 ## Límites conocidos
+
+- **Tope de consultas por corrida.** En el plan gratuito de Cloudflare, cada corrida puede hacer como mucho 50 consultas a
+  otros servicios; si se pasa, Cloudflare la corta («Too many subrequests»). Por eso ClickUp y Finnegans van en turnos
+  distintos y cada corrida frena a las 45 consultas (`src/worker/budget.ts`): los PDV que faltan quedan anotados y siguen
+  en la próxima. La primera carga (unos cientos de PDV) tarda algunas horas en completarse; después, cada corrida trae
+  solo lo que cambió. Con el plan pago de Workers el tope es mucho más alto: se puede subir con la variable `SUBREQUESTS`
+  en `wrangler.jsonc`. Si se activa la sincronización de Gmail, también consume de ese tope.
 
 - Las facturas de FP DEMO (algunos pedidos de NoEstres) no tienen CAE, así que no se adjuntan.
 - Los remitos se traen de ClickUp cada vez que se abren (son fotos de hasta 3 MB y ClickUp da links que vencen).

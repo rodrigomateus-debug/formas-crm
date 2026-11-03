@@ -1,3 +1,4 @@
+import { avisarAsignacion } from './avisos';
 import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
@@ -343,6 +344,7 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, NULL, ?, ?, ?, ?)')
       .bind(row!.id, k, String(props[k]), ts, ctx.user.id, ctx.source));
   if (changes.length) await db.batch(changes);
+  await avisarAsignacion(db, ctx, c.owner_id, { recordId: row!.id });
   if (type === 'deal') await stageAutomation(db, ctx, row!.id, (await meta.stage(c.stage_id!))!, c.owner_id, c.name);
   return row!;
 }
@@ -394,6 +396,7 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     }
   }
   await db.batch(stmts);
+  if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
   if (type === 'deal' && stageMoved) {
     const st = (await meta.stage(next.dealstage as string))!;
     await stageAutomation(db, ctx, id, st, c.owner_id, c.name);

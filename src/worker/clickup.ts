@@ -4,6 +4,7 @@ import { createRecord, updateRecord, ORDER_CONFIRMED } from './records';
 import { associate } from './associations';
 import { finnegansPedido, finnegansToken } from './finnegans';
 import { Budget, OutOfBudget } from './budget';
+import { tareaPostEntrega } from './postentrega';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
@@ -186,6 +187,8 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   const existing = await findOrder(db, pdv);
   let id: number;
   let result: 'creado' | 'actualizado' | 'igual' = 'igual';
+  let entregadoAhora = false;   // pasó a «Entregado» en esta lectura: va la tarea post-entrega
+  let owner: number | null = null;
   const synced: Record<string, unknown> = {
     unidad_de_negocio: pdv.unidad, cliente_clickup: pdv.cliente || null, pedido_finnegans: pdv.pedido || null, url_clickup: pdv.url,
     detalle_produccion: pdv.detalle, entregado_el: pdv.stage === STAGE.entregado || pdv.stage === STAGE.parcial ? pdv.entregado : null,
@@ -195,9 +198,10 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     const row = await createRecord(db, ctx, 'order', {
       ...synced, hs_order_name: `PDV ${pdv.npdv}${pdv.cliente ? ` · ${pdv.cliente}` : ''}`, pdv_finnegans: pdv.npdv,
       hs_pipeline_stage: pdv.stage ?? STAGE.confirmado, hs_pipeline: pipeline ?? null, tipo_de_pedido: pdv.evento ? 'EVENTO' : 'PEDIDO NORMAL',
-      fecha_de_entrega: pdv.entrega, owner_id: await ownerFor(db, pdv.vendedor, pdv.mailVendedor),
+      fecha_de_entrega: pdv.entrega, owner_id: (owner = (await ownerFor(db, pdv.vendedor, pdv.mailVendedor)) ?? null),
     }, { system: true, strict: false });
     id = row.id;
+    entregadoAhora = pdv.stage === STAGE.entregado;
     const company = await companyFor(env, pdv, fin, b);
     if (company) await associate(db, ctx, id, company, { primary: true }).catch(() => undefined);
     result = 'creado';
@@ -210,6 +214,8 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     if (!cur.fecha_de_entrega && pdv.entrega) change.fecha_de_entrega = pdv.entrega;
     if (!cur.tipo_de_pedido) change.tipo_de_pedido = pdv.evento ? 'EVENTO' : 'PEDIDO NORMAL';
     if (cur.owner_id == null) { const o = await ownerFor(db, pdv.vendedor, pdv.mailVendedor); if (o) change.owner_id = o; }
+    owner = (change.owner_id ?? cur.owner_id ?? null) as number | null;
+    entregadoAhora = change.hs_pipeline_stage === STAGE.entregado;
     if (Object.keys(change).length) { await updateRecord(db, ctx, 'order', id, change, { system: true, strict: false }); result = 'actualizado'; }
     // Sin empresa (por ejemplo, entró antes de que la empresa estuviera en el CRM): se vuelve a buscar.
     const hasCompany = await db.prepare(`SELECT 1 FROM associations WHERE (from_id = ? AND to_type = 'company') OR (to_id = ? AND from_type = 'company') LIMIT 1`).bind(id, id).first();
@@ -217,6 +223,10 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
       const company = await companyFor(env, pdv, fin, b);
       if (company) { await associate(db, ctx, id, company, { primary: true }).catch(() => undefined); result = 'actualizado'; }
     }
+  }
+  if (entregadoAhora) {
+    await tareaPostEntrega(db, ctx, id, { npdv: pdv.npdv, cliente: pdv.cliente, vendedor: pdv.vendedor, recibido: pdv.entregado, ownerId: owner })
+      .catch((e) => console.error('post-entrega', pdv.npdv, (e as Error).message));
   }
   // El remito: lo que suben a la tarea del PDV cuando lo entregan (una foto del remito firmado). Si lo suben al artículo
   // (pasa seguido), se busca al abrir el pedido (clickupRemitos), para no gastar consultas en cada PDV entregado.

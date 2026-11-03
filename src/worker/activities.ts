@@ -1,3 +1,4 @@
+import { avisarAsignacion } from './avisos';
 import type { Ctx } from './env';
 import { HttpError, now } from './env';
 import { refreshActivityDates } from './records';
@@ -108,6 +109,7 @@ export async function createActivity(db: D1Database, ctx: Ctx, input: ActivityIn
     input.task_type ?? null, JSON.stringify(input.meta ?? {}), input.thread_id ?? null, input.external_id ?? null, ts, ts, ctx.user.id,
     ctx.source).first<{ id: number }>();
   await linkActivity(db, row!.id, links);
+  if (input.type === 'task') await avisarAsignacion(db, ctx, input.owner_id ?? ctx.user.id, { activityId: row!.id });
   return getActivity(db, row!.id);
 }
 
@@ -157,7 +159,7 @@ export async function updateActivity(db: D1Database, ctx: Ctx, id: number, input
   await db.prepare(`UPDATE activities SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).bind(...keys.map((k) => fields[k]), id).run();
   if (input.links) await linkActivity(db, id, input.links);
   await refreshActivityDates(db, cur.links.map((l) => l.id));
-  void ctx;
+  if (cur.type === 'task' && fields.owner_id !== cur.owner_id) await avisarAsignacion(db, ctx, fields.owner_id as number | null, { activityId: id });
   return getActivity(db, id);
 }
 

@@ -7,6 +7,7 @@ import { normLinkedin, splitName } from './records';
 import { clickupStatus, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
 import { gmailConfig, syncAll } from './gmail';
+import { avisosConfig, correrAvisos } from './avisos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -192,6 +193,25 @@ hooks.post('/gmail/sync', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await syncAll(c.env));
 });
+// Avisos por mail: configuración, estado y envío a pedido (`?resumen=1` manda el resumen de tareas aunque no sea la hora).
+hooks.get('/avisos', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const db = c.env.DB;
+  const estado = await db.prepare("SELECT value FROM settings WHERE key = 'avisos_estado'").first<{ value: string }>();
+  const pend = await db.prepare('SELECT COUNT(*) AS n FROM avisos WHERE sent_at IS NULL').first<{ n: number }>();
+  return c.json({ config: await avisosConfig(c.env), estado: estado ? JSON.parse(estado.value) : null, pendientes: pend?.n ?? 0, has_credentials: !!c.env.GOOGLE_SA_JSON });
+});
+hooks.put('/avisos', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const cfg = { ...(await avisosConfig(c.env)), ...(await c.req.json()) };
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('avisos', ?)").bind(JSON.stringify(cfg)).run();
+  return c.json(cfg);
+});
+hooks.post('/avisos/enviar', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await correrAvisos(c.env, undefined, { forceResumen: c.req.query('resumen') === '1' }));
+});
+
 hooks.put('/facturas/:id/pdf', async (c) => {
   await adminToken(c.env, c.req.raw);
   const buf = await c.req.arrayBuffer();

@@ -11,6 +11,7 @@ const PDV_ML = String(Number(PDV) + 1);
 const PDV_B = String(Number(PDV) + 2);
 const PDV_C = String(Number(PDV) + 3);   // de una vendedora que todavía no tiene usuario en el CRM
 const CUIT = `30-7${String(Date.now()).slice(-7)}-8`;
+const RECIBIDO = Date.now() - 86_400_000;   // ENTREGAS (FECHA REAL): ayer
 let asUser = null;
 async function api(method, path, body, headers = {}) {
   const res = await fetch(`${BASE}${path.startsWith('/hooks') ? '' : '/api'}${path}`, {
@@ -28,7 +29,7 @@ const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.no
   id, name: `PDV - ${npdv}`, parent: null, url: `https://app.clickup.com/t/${id}`, date_updated: String(updated), status: { status: 'pdv' },
   text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: ${vendedor}\nEs evento: Sí\nFecha entrega: 30-11-2026`,
   custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', `Cliente ${RUN} S.R.L.`), field('🧑‍💻 VENDEDOR', vendedor),
-    { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: unidad } }, field('ENTREGAS (FECHA REAL)', '1793343600000', 'date')],
+    { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: unidad } }, field('ENTREGAS (FECHA REAL)', String(RECIBIDO), 'date')],
   subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Artículo ${i}`, parent: id, date_updated: String(updated), status: { status: s } })),
   attachments,
 });
@@ -142,6 +143,15 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   const img = await api('GET', `/files/${remito.id}`);
   assert.equal(img.type, 'image/jpeg');
   assert.equal(Buffer.from(img.data).length, JPG.length);
+
+  // La tarea post-entrega: para la vendedora, a los 3 días de recibido, asociada al pedido. Una sola aunque se relea.
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  const post = (await api("GET", `/records/order/${o.id}/timeline?types=task`)).data.activities.filter((a) => /^Post-entrega/.test(a.subject));
+  assert.equal(post.length, 1, 'una tarea post-entrega');
+  assert.match(post[0].subject, new RegExp(`PDV ${PDV}`));
+  assert.equal(post[0].owner_id, (await order()).props.owner_id);
+  const recibido = new Date(RECIBIDO - 3 * 3600_000).toISOString().slice(0, 10);
+  assert.equal(post[0].due_at.slice(0, 10), new Date(Date.parse(`${recibido}T12:00:00Z`) + 3 * 86_400_000).toISOString().slice(0, 10));
 
   // 5. Factura: aparece cuando tiene CAE; el PDF lo sube la tarea de GitHub.
   facturas = [{ DESTINONOMBRE: 'FCVTAELECT - 9999', DESTINOIDENTIFICACIONEXTERNA: `FC PEDVTASTP-${PDV.padStart(8, '0')} 1`, DESTINOTRANSACCIONID: 555, TIPODOCUMENTO: 'FCVTAELECT', CATEGORIATIPODOCUMENTO: -8, DESTINOIMPORTETOTAL: 121000, OBTUVOCAE: 'NO', DESTINOFECHA: '30-10-2026' }];

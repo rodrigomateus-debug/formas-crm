@@ -9,6 +9,8 @@ import { hooks } from './hooks';
 import { handleMcp } from './mcp';
 import { migrate } from './migrate';
 import { syncAll } from './gmail';
+import { correrAvisos } from './avisos';
+import { Budget } from './budget';
 import { syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
 import { StageError } from './pipelines';
@@ -73,7 +75,7 @@ app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 
 export default {
   fetch: app.fetch,
-  // Cada 10 minutos: los mails nuevos del equipo (si Gmail está activado) y, por turnos, las facturas de Finnegans (a las
+  // Cada 10 minutos: los avisos por mail y los mails nuevos del equipo (si Gmail está activado) y, por turnos, las facturas de Finnegans (a las
   // :00 y a las :30) o los pedidos de ClickUp (el resto). Van por turnos porque cada corrida tiene un tope de consultas a
   // otros servicios (budget.ts). Cada una corre aunque otra falle (el error queda en Configuración → Integraciones).
   async scheduled(event, env, ctx) {
@@ -83,7 +85,12 @@ export default {
     // quitarle consultas a ClickUp y Finnegans (a los :00, :10…).
     ctx.waitUntil((async () => {
       await ensureSeeded(env.DB);
-      if (event.cron === GMAIL_CRON) await safe(() => syncAll(env));
+      if (event.cron === GMAIL_CRON) {
+        // Primero los avisos por mail (pocos y con hora), después la lectura de Gmail con lo que quede del tope.
+        const b = Budget.of(env);
+        await safe(() => correrAvisos(env, b));
+        await safe(() => syncAll(env, b));
+      }
       else await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
     })());
   },

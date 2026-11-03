@@ -377,3 +377,16 @@ table.grid th .col-menu { position: absolute; right: 4px; top: 50%; transform: t
 table.grid th:hover .col-menu, table.grid th .col-menu:focus-visible { visibility: visible; }
 table.grid th .col-menu:hover { background: var(--line); color: var(--navy); }
 @media (hover: none) { table.grid th .col-menu { visibility: visible; } }
+
+/* Estado del cliente (compras de Finnegans) */
+.estado-cliente { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; background: var(--chip-bg, #eef1f5); color: var(--text, #1f2933); }
+.ec-nuevo { background: #e3f1ff; color: #0b5cad; }
+.ec-activo { background: #e5f6ec; color: #1d7a45; }
+.ec-recuperado { background: #efe8ff; color: #5b3cc4; }
+.ec-en-riesgo { background: #fff1d6; color: #9a5b00; }
+.ec-perdido { background: #fde4e4; color: #b42318; }
+.ec-dormido { background: #eceef1; color: #5b6472; }
+.compras { display: grid; gap: 6px; font-size: 13px; }
+.compras-row { display: flex; justify-content: space-between; gap: 12px; }
+.compras-row.bad { color: var(--bad, #b42318); font-weight: 600; }
+.panel-head .estado-cliente { margin-left: auto; }

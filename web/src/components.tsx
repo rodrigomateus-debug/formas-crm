@@ -351,3 +351,9 @@ export function describeFilter(meta: Meta, type: ObjectType, f: Filter) {
   const val = f.values ? f.values.map((v) => opts.find((o) => o.value === String(v))?.label ?? v).join(', ') : f.value ?? '';
   return `${p?.label ?? f.prop} ${op} ${val}`.trim();
 }
+
+// Estado del cliente (lo calcula el CRM con las compras de Finnegans) como etiqueta de color.
+export function EstadoCliente({ value }: { value: string }) {
+  const slug = value.toLowerCase().normalize('NFD').replace(/[^a-z]+/g, '-');
+  return <span className={`estado-cliente ec-${slug}`}>{value}</span>;
+}

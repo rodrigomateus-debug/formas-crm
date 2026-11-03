@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
-import { Avatar, CreateRecord, Drawer, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
+import { Avatar, CreateRecord, Drawer, EstadoCliente, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
 import { StageProps } from './Board';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
@@ -38,6 +38,7 @@ export default function RecordPage() {
           <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
         </section>
         <aside className="right">
+          {type === 'company' && <ComprasCard record={record} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
@@ -568,6 +569,33 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
 }
 
 interface FileRow { id: number; kind: string; name: string; source: string; created_at: string; ready: boolean; meta: Record<string, any> }
+// Compras de la empresa en Finnegans (las calcula el CRM cada noche): estado, última compra, cuánto compra y cuánto debe.
+function ComprasCard({ record }: { record: CrmRecord }) {
+  const p = record.props;
+  if (!p.estado_cliente && p.saldo_pendiente == null) return null;
+  const dias = p.fecha_ultima_compra ? Math.round((Date.now() - Date.parse(`${p.fecha_ultima_compra}T12:00:00Z`)) / 86_400_000) : null;
+  const fila = (label: string, value: React.ReactNode, hint?: string) => (value == null || value === '' ? null
+    : <div className="compras-row" title={hint}><span className="muted">{label}</span><span>{value}</span></div>);
+  const usd = (v: unknown) => (v == null || v === '' ? null : fmtMoney(v, 'USD'));
+  return (
+    <div className="panel">
+      <div className="panel-head"><h3>Compras</h3>{p.estado_cliente && <EstadoCliente value={String(p.estado_cliente)} />}</div>
+      <div className="panel-body compras">
+        {fila('Última compra', p.fecha_ultima_compra && `${fmtDate(p.fecha_ultima_compra)}${dias != null ? ` · hace ${dias} días` : ''}`)}
+        {fila('Compra cada', p.cada_cuanto_compra != null && `${p.cada_cuanto_compra} días`, 'Mediana de los días entre una compra y la siguiente')}
+        {fila('Últimos 12 meses', usd(p.compra_12m_usd), 'Neto sin IVA, al dólar MEP del día de cada compra')}
+        {fila('Compra histórica', usd(p.compra_historica_usd), p.fecha_primera_compra ? `Desde ${fmtDate(p.fecha_primera_compra)}` : undefined)}
+        {fila('Ticket promedio', usd(p.ticket_promedio_usd))}
+        {fila('Compras', p.cantidad_de_compras)}
+        {fila('Saldo pendiente', p.saldo_pendiente != null && fmtMoney(p.saldo_pendiente), 'Con IVA, en cuenta corriente de Finnegans')}
+        {Number(p.saldo_vencido) > 0 && <div className="compras-row bad"><span>Vencido</span><span>{fmtMoney(p.saldo_vencido)}</span></div>}
+        {fila('Vendedora', p.vendedora_finnegans)}
+        {fila('Unidad', p.unidad_finnegans)}
+      </div>
+    </div>
+  );
+}
+
 function FilesCard({ recordId }: { recordId: number }) {
   const files = useAsync(() => http<FileRow[]>('GET', `/records/order/${recordId}/files`), [recordId]);
   const list = files.data ?? [];
@@ -759,6 +787,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
+        {type === 'company' && <ComprasCard record={record} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} />}
         {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}

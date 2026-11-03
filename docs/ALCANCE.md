@@ -90,7 +90,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 |---|---|---|
 | Cola por vencidas, hoy, semana, próximas, completadas; de todo el equipo | ✅ | `/tasks` |
 | Completar, reabrir, posponer (+1 día / +1 semana), editar | ✅ | |
-| Aviso por mail de tareas que vencen y de registros asignados | ⏳ | Próximo paso (Gmail send, como los avisos de NC) |
+| Aviso por mail de tareas que vencen y de registros asignados | 🔧 | Resumen de la mañana y asignaciones (`src/worker/avisos.ts`); falta sumar el permiso gmail.send a la cuenta de servicio |
 
 ### Integraciones
 | Función | Estado | Dónde |
@@ -119,7 +119,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Links de agenda de reuniones (meetings link) | ⏳ | 337 reuniones; se puede reemplazar con las «páginas de reserva» de Google Calendar y registrar el evento por Gmail/Calendar |
 | Seguimiento de aperturas de mails | ⏳ | Lo da la extensión de HubSpot; hoy no lo usan los tableros (solo cuentan aperturas en formas-tablero) |
 | Workflows de HubSpot | ⏳ | No se pueden leer por el conector: hay que listar cuáles están activos (Automatización → Workflows). Hay al menos uno: completa el origen de los negocios de Darwin (eso ya lo hace el CRM) |
-| Avisos por mail (tareas, asignaciones) | ⏳ | Ver «Tareas» |
+| Avisos por mail (tareas, asignaciones) | 🔧 | Ver «Tareas» |
 
 ### Relevamiento de pantallas en el HubSpot de Formas (30/10/2026)
 Recorrido con el navegador (solo lectura) más documentación de HubSpot. Lo que define cómo replicar:

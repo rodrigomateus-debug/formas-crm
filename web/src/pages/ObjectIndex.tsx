@@ -10,6 +10,7 @@ import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
+import { EstadoCliente } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
 
@@ -17,7 +18,7 @@ const PIPE_KEY = 'crm.deals.pipeline';
 
 const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', 'lifecyclestage', 'notes_last_updated', 'createdate'],
-  company: ['domain', 'owner_id', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'notes_last_updated', 'createdate'],
+  company: ['domain', 'owner_id', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', 'notes_last_updated', 'createdate'],
   order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'createdate'],
 };
@@ -346,6 +347,7 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   const [val, setVal] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const shown = formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
+  if (col === 'estado_cliente' && record.props[col]) return <td><EstadoCliente value={String(record.props[col])} /></td>;
   if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td>{shown}</td>;
   const instant = ['owner', 'enum', 'bool'].includes(prop.type) || col === 'dealstage';
   const open = (e: React.MouseEvent) => { setVal(record.props[col]); setAt((e.currentTarget.closest('td') as HTMLElement).getBoundingClientRect()); };

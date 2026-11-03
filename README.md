@@ -20,7 +20,8 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
 | `/hooks/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`), con token de administrador. Va por `/hooks` porque `/api` pide el login de Access. |
-| Cron a los :05, :15… | Registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
+| Cron a los :05, :15… | Avisos por mail (`src/worker/avisos.ts`: resumen de tareas a la mañana y lo que te asignan) y registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
+| Tareas de GitHub | Compras de clientes cada mañana (`scripts/clientes.mjs`, [docs/CLIENTES.md](docs/CLIENTES.md)), PDF de facturas (`scripts/facturas-pdf.mjs`) y respaldo diario. |
 
 Quién entra: Cloudflare Access con el mail de Formas (igual que el tablero). Las integraciones y Claude entran con
 tokens propios (`fcrm_…`) que se crean en Configuración → Integraciones. Los ids de todo lo migrado son los de
@@ -105,6 +106,27 @@ con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, ta
 | Formularios web | Formularios de HubSpot | `POST https://<crm>/hooks/form/<nombre>`; cada formulario se configura con la clave `form:<nombre>` en `settings`. |
 | Mails | Conexión de bandeja de HubSpot | Gmail: ver abajo. |
 | Tableros | API de HubSpot | Ver [docs/CAMBIO-TABLEROS.md](docs/CAMBIO-TABLEROS.md). |
+
+## Avisos por mail
+
+Salen por Gmail con la misma cuenta de servicio, de la casilla de quien los recibe a sí misma (o de `desde`, si se
+configura). Necesitan sumar el permiso `https://www.googleapis.com/auth/gmail.send` al Client ID de la cuenta en la
+delegación de todo el dominio. Dos avisos:
+
+- **Resumen de la mañana** (días hábiles, desde las 8): las tareas para hoy y las vencidas más recientes.
+- **Asignaciones:** cuando alguien le asigna a otra persona un registro o una tarea desde la pantalla o desde Claude,
+  le llega un mail en los 10 minutos siguientes (lo que mueven las integraciones no avisa).
+
+Solo les llegan a las personas de `users` (al principio, el administrador; `"todos"` para todo el equipo). Con token de
+administrador: `GET /hooks/avisos` (configuración y estado), `PUT /hooks/avisos` (por ejemplo
+`{"users": ["alguien@formas.ar"], "hora": 8}`) y `POST /hooks/avisos/enviar` (`?resumen=1` manda el resumen ya).
+
+## Después de cada entrega
+
+Cuando un pedido pasa a «Entregado» (ClickUp), la vendedora tiene una tarea para los 3 días de recibido: preguntar cómo
+le fue, pedir un referido si le fue bien y, a los 10 días, la reseña de Google (`src/worker/postentrega.ts`, la misma regla
+que «PARA HACER URGENTE» del tablero). Varios pedidos del mismo cliente en la misma semana van en una sola tarea. No va para
+clientes internos ni para lo que carga la tienda con vendedor «STP».
 
 ## Gmail
 

@@ -1,0 +1,27 @@
+# Compras de clientes: estado del cliente, última compra, compra histórica en dólares MEP, ticket promedio y saldo, desde
+# Finnegans (solo lectura) a las empresas del CRM (scripts/clientes.mjs, ver docs/CLIENTES.md). Necesita la variable
+# CRM_URL y los secretos CRM_TOKEN (de un administrador) y FINNEGANS_CLIENT_ID / FINNEGANS_CLIENT_SECRET (o FIN_*).
+# El repo es público: el script solo imprime cantidades, nunca nombres ni montos.
+name: Compras de clientes
+
+on:
+  schedule:
+    - cron: '41 9 * * *'   # todos los días a las 6:41 de Buenos Aires
+  workflow_dispatch:
+
+jobs:
+  clientes:
+    runs-on: ubuntu-latest
+    if: vars.CRM_URL != ''
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/clientes.mjs
+        env:
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+          FINNEGANS_CLIENT_ID: ${{ secrets.FINNEGANS_CLIENT_ID || secrets.FIN_CLIENT_ID }}
+          FINNEGANS_CLIENT_SECRET: ${{ secrets.FINNEGANS_CLIENT_SECRET || secrets.FIN_SECRET }}

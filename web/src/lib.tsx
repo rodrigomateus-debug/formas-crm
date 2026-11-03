@@ -175,7 +175,7 @@ export function formatValue(meta: Meta, type: ObjectType, name: string, value: u
   if (!p) return String(value);
   switch (p.type) {
     case 'owner': return userName(meta, value);
-    case 'currency': return fmtMoney(value, props?.deal_currency_code ?? props?.hs_currency_code);
+    case 'currency': return fmtMoney(value, name.endsWith('_usd') ? 'USD' : props?.deal_currency_code ?? props?.hs_currency_code);
     case 'number': return fmtNumber(value);
     case 'date': return fmtDate(value);
     case 'datetime': return fmtDate(value, true);

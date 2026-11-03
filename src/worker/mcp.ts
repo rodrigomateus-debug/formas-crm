@@ -2,7 +2,7 @@ import type { Ctx, Env, ObjectType } from './env';
 import { assertType, HttpError, OBJECT_TYPES } from './env';
 import { Meta } from './meta';
 import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor, updateRecord, type Filter } from './records';
-import { associate, associationsOf, dissociate } from './associations';
+import { associate, associationsOf, dissociate, primaryCompanyId } from './associations';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { assertDealVisible, canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
@@ -308,6 +308,48 @@ const TOOLS: Tool[] = [
          WHERE c.record_id = ? ${a.property ? 'AND c.prop = ?' : ''} ORDER BY c.changed_at DESC LIMIT 200`,
       ).bind(...(a.property ? [Number(a.id), a.property] : [Number(a.id)])).all();
       return results;
+    },
+  },
+  {
+    name: 'preparar_reunion',
+    description: 'Junta todo lo que hace falta para preparar una reunión o una llamada con un cliente: compras en Finnegans (estado del cliente, última compra, cuánto compra en US$ MEP, ritmo), saldo y vencido, contactos, negocios abiertos y ganados, pedidos y su estado de producción, tareas abiertas y la actividad reciente (mails, notas, llamadas, WhatsApp). Se le pasa el id de una empresa, un contacto o un negocio (usa su empresa principal). Con eso armá un resumen corto de la relación, los temas abiertos, los riesgos (deuda vencida, cliente en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { id: { type: 'integer', description: 'Empresa, contacto o negocio.' } }, required: ['id'] },
+    run: async (a, ctx, env, base) => {
+      const db = env.DB;
+      const meta = new Meta(db);
+      const first = await getRow(db, Number(a.id));
+      const companyId = first.object_type === 'company' ? first.id : await primaryCompanyId(db, first.id);
+      const row = companyId ? await getRow(db, companyId) : first;
+      const visible = await visiblePipelineIds(meta, ctx.user);
+      const hidden = visible ? (await meta.pipelines()).map((p) => p.id).filter((id) => !visible.includes(id)) : [];
+      const assoc = await associationsOf(db, row.id, hidden);
+      const rec = rowToRecord(row);
+      const p = rec.props as Record<string, unknown>;
+      const orderStage = new Map(((await meta.property('order', 'hs_pipeline_stage'))?.options ?? []).map((o) => [o.value, o.label]));
+      const stageLabel = async (id: unknown) => (id ? (await meta.stage(String(id)))?.label ?? String(id) : null);
+      const deals = await Promise.all(assoc.deal.map(async (d) => {
+        const st = d.props.dealstage ? await meta.stage(String(d.props.dealstage)) : null;
+        return { id: d.id, name: d.name, url: link(base, 'deal', d.id), etapa: await stageLabel(d.props.dealstage), abierto: !st?.is_closed, ganado: !!st?.is_won,
+          monto: d.props.amount ?? null, cierre: d.props.closedate ?? null, ultimo_contacto: d.props.notes_last_contacted ?? null };
+      }));
+      const tl = await timeline(db, row.id, { limit: 25, hiddenPipelines: hidden });
+      const COMPRAS = ['estado_cliente', 'fecha_ultima_compra', 'fecha_primera_compra', 'cantidad_de_compras', 'compra_12m_usd', 'compra_historica_usd',
+        'ticket_promedio_usd', 'cada_cuanto_compra', 'saldo_pendiente', 'saldo_vencido', 'vendedora_finnegans', 'unidad_finnegans'];
+      return {
+        cliente: { ...slim(base, rec, ['domain', 'owner_id', 'industry', 'city', 'cuit', 'razon_social', 'tipo_de_empresa_cotizacion', 'hs_ideal_customer_profile', 'notes_last_contacted']), tipo: row.object_type },
+        compras: row.object_type === 'company' && p.estado_cliente ? Object.fromEntries(COMPRAS.map((k) => [k, p[k] ?? null]))
+          : 'Sin compras registradas en Finnegans para esta empresa (o la empresa todavía no cruza con un cliente de Finnegans).',
+        contactos: assoc.contact.slice(0, 15).map((c) => ({ id: c.id, name: c.name, cargo: c.props.jobtitle ?? null, email: c.props.email ?? null, telefono: c.props.mobilephone ?? c.props.phone ?? null, url: link(base, 'contact', c.id) })),
+        negocios_abiertos: deals.filter((d) => d.abierto),
+        negocios_ganados: deals.filter((d) => d.ganado).slice(0, 5),
+        pedidos: assoc.order.slice(0, 10).map((o) => ({ id: o.id, name: o.name, estado: orderStage.get(String(o.props.hs_pipeline_stage)) ?? o.props.hs_pipeline_stage ?? null,
+          entrega_prometida: o.props.fecha_de_entrega ?? null, entregado_el: o.props.entregado_el ?? null, detalle_produccion: o.props.detalle_produccion ?? null,
+          evento: o.props.tipo_de_pedido === 'EVENTO', factura: o.props.factura_numero ?? null, url: link(base, 'order', o.id) })),
+        tareas_abiertas: tl.activities.filter((x) => x.type === 'task' && x.status !== 'COMPLETED').map((x) => ({ id: x.id, subject: x.subject, vence: x.due_at, owner_id: x.owner_id })),
+        actividad_reciente: tl.activities.filter((x) => x.type !== 'task').map((x) => ({ id: x.id, type: x.type, when: x.occurred_at, direction: x.direction, subject: x.subject, body: x.body.slice(0, 700) })),
+        hoy: new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10),
+      };
     },
   },
   {

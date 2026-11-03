@@ -9,6 +9,7 @@ import { finnegansState } from './finnegans';
 import { gmailConfig, syncAll } from './gmail';
 import { avisosConfig, correrAvisos } from './avisos';
 import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from './clientes';
+import { refrescarFce } from './facturar';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -216,6 +217,13 @@ hooks.get('/clientes/estado', async (c) => {
   await adminToken(c.env, c.req.raw);
   const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'clientes_estado'").first<{ value: string }>();
   return c.json(r ? JSON.parse(r.value) : null);
+});
+
+// La lista de empresas grandes de ARCA (Factura de Crédito Electrónica): se baja sola una vez por día; esto la trae ya.
+hooks.post('/arca/fce', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  await c.env.DB.prepare("DELETE FROM settings WHERE key = 'arca_fce'").run();
+  return c.json(await refrescarFce(c.env));
 });
 
 // Avisos por mail: configuración, estado y envío a pedido (`?resumen=1` manda el resumen de tareas aunque no sea la hora).

@@ -8,3 +8,5 @@ CLICKUP_API_URL=http://localhost:8797/clickup
 FINNEGANS_CLIENT_ID=prueba
 FINNEGANS_CLIENT_SECRET=prueba
 FINNEGANS_API_URL=http://localhost:8797/fin
+# Prueba de datos para facturar (test/facturar.test.mjs): la lista de empresas grandes de ARCA, simulada.
+ARCA_FCE_URL=http://localhost:8796/fce

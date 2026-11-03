@@ -39,6 +39,7 @@ export default function RecordPage() {
         </section>
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
+          {type === 'deal' && <FacturarCard record={record} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
@@ -160,6 +161,11 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
           {type === 'deal' && safeUrl(record.props.link_a_darwin) && <a className="btn sm" href={safeUrl(record.props.link_a_darwin)} target="_blank" rel="noreferrer">Chat en Darwin</a>}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
+          {type !== 'order' && (
+            <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas CRM para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
+              href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} del CRM de Formas). Usá la herramienta preparar_reunion del conector Formas CRM y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
+              target="_blank" rel="noreferrer">Preparar reunión con Claude</a>
+          )}
           <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>
           {type === 'deal' && meta.me.role !== 'viewer' && (
             <button className="btn sm ghost" title="Crea una copia con los mismos datos y asociaciones, en la primera etapa" onClick={async () => {
@@ -596,6 +602,24 @@ function ComprasCard({ record }: { record: CrmRecord }) {
   );
 }
 
+// Datos para facturar: lo que administración necesita (CUIT válido, razón social) y lo que conviene saber antes.
+function FacturarCard({ record }: { record: CrmRecord }) {
+  const c = useAsync(() => http<{ empresa: { id: number; name: string } | null; faltan: string[]; avisos: string[]; listo: string[] }>('GET', `/records/deal/${record.id}/facturar`),
+    [record.id, record.updated_at]);
+  if (!c.data) return null;
+  const { faltan, avisos, listo } = c.data;
+  return (
+    <div className="panel">
+      <div className="panel-head"><h3>Datos para facturar</h3>{!faltan.length && <span className="tag ok">Completos</span>}</div>
+      <div className="panel-body facturar">
+        {faltan.map((f) => <div key={f} className="fact-row bad">✗ {f}</div>)}
+        {avisos.map((a) => <div key={a} className="fact-row warn">! {a}</div>)}
+        {listo.map((l) => <div key={l} className="fact-row ok">✓ {l}</div>)}
+      </div>
+    </div>
+  );
+}
+
 function FilesCard({ recordId }: { recordId: number }) {
   const files = useAsync(() => http<FileRow[]>('GET', `/records/order/${recordId}/files`), [recordId]);
   const list = files.data ?? [];
@@ -788,6 +812,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
         {type === 'company' && <ComprasCard record={record} />}
+        {type === 'deal' && <FacturarCard record={record} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} />}
         {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}

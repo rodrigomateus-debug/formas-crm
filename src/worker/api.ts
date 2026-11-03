@@ -1,3 +1,4 @@
+import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType } from './env';
 import { assertType, HttpError, now, OBJECT_TYPES, PROFILES } from './env';
@@ -667,6 +668,9 @@ api.get('/export/:type', async (c) => {
 });
 
 // ---------- Archivos (factura de Finnegans, remito de ClickUp) ----------
+
+// Datos para facturar de un negocio: lo que falta y lo que conviene saber antes de que llegue a administración.
+api.get('/records/deal/:id/facturar', async (c) => c.json(await datosParaFacturar(c.env.DB, Number(c.req.param('id')))));
 
 api.get('/records/:type/:id/files', async (c) => {
   const id = Number(c.req.param('id'));

@@ -390,3 +390,7 @@ table.grid th .col-menu:hover { background: var(--line); color: var(--navy); }
 .compras-row { display: flex; justify-content: space-between; gap: 12px; }
 .compras-row.bad { color: var(--bad, #b42318); font-weight: 600; }
 .panel-head .estado-cliente { margin-left: auto; }
+.facturar { display: grid; gap: 6px; font-size: 13px; }
+.fact-row.bad { color: var(--bad, #b42318); font-weight: 600; }
+.fact-row.warn { color: #9a5b00; }
+.fact-row.ok { color: var(--muted, #5b6472); }

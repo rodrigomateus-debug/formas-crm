@@ -13,6 +13,7 @@ import { correrAvisos } from './avisos';
 import { Budget } from './budget';
 import { syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
+import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -91,7 +92,10 @@ export default {
         await safe(() => correrAvisos(env, b));
         await safe(() => syncAll(env, b));
       }
-      else await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
+      else {
+        await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
+        if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día
+      }
     })());
   },
 } satisfies ExportedHandler<Env>;

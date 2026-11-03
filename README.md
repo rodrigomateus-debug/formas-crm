@@ -128,6 +128,22 @@ le fue, pedir un referido si le fue bien y, a los 10 días, la reseña de Google
 que «PARA HACER URGENTE» del tablero). Varios pedidos del mismo cliente en la misma semana van en una sola tarea. No va para
 clientes internos ni para lo que carga la tienda con vendedor «STP».
 
+## Datos para facturar
+
+Cuando un negocio pasa a ganado, el CRM revisa la empresa principal (`src/worker/facturar.ts`): que tenga CUIT y que sea
+válido (dígito verificador) y razón social. Si falta algo, la vendedora tiene una tarea «Completar datos para facturar»
+para hoy (una por negocio). Además avisa si es cliente nuevo en Finnegans (administración lo tiene que dar de alta), si
+tiene saldo vencido y si es empresa grande para ARCA (va con Factura de Crédito Electrónica). La lista de empresas grandes
+es la oficial de ARCA, sin captcha, y se baja una vez por día (`POST /hooks/arca/fce` la trae ya). En la ficha del negocio,
+la tarjeta «Datos para facturar» muestra lo mismo.
+
+## Preparar la reunión con Claude
+
+En la ficha de una empresa, contacto o negocio, «Preparar reunión con Claude» abre claude.ai con el pedido escrito. Claude usa
+la herramienta `preparar_reunion` del conector (compras y estado del cliente, saldo, contactos, negocios, pedidos, tareas y
+actividad reciente) y arma el resumen, los riesgos, los próximos pasos y un borrador de mail. Necesita el conector Formas CRM
+cargado en claude.ai.
+
 ## Gmail
 
 El CRM lee los Gmail del equipo con una cuenta de servicio de Google Workspace con delegación de dominio (puede ser

@@ -83,7 +83,7 @@ test('actividades: nota en el contacto aparece en la empresa y el negocio; tarea
   const dealRec = await api('GET', `/records/deal/${state.deal}`);
   assert.ok(dealRec.data.record.props.notes_next_activity_date, 'próxima actividad');
   assert.ok(dealRec.data.record.props.notes_last_contacted, 'último contacto por la llamada');
-  const tasks = await api('GET', `/tasks?q=${RUN}`);
+  const tasks = await api('GET', `/tasks?q=${encodeURIComponent(`Llamar ${RUN}`)}`);
   assert.equal(tasks.data.total, 1);
   const done = await api('PATCH', `/activities/${state.task}`, { status: 'COMPLETED' });
   assert.ok(done.data.completed_at);
@@ -126,6 +126,11 @@ test('MCP: initialize, tools/list y alta con upsert_bundle', async () => {
   const got = await rpc('tools/call', { name: 'get_record', arguments: { id: out.deal.id } });
   const rec = JSON.parse(got.data.result.content[0].text);
   assert.equal(rec.associations.company[0].id, state.company, 'el negocio hereda la empresa del contacto');
+  // Preparar la reunión desde el negocio: arma todo sobre su empresa.
+  const prep = JSON.parse((await rpc('tools/call', { name: 'preparar_reunion', arguments: { id: out.deal.id } })).data.result.content[0].text);
+  assert.equal(prep.cliente.id, state.company);
+  assert.ok(prep.negocios_abiertos.some((d) => d.id === out.deal.id));
+  assert.ok(Array.isArray(prep.actividad_reciente) && Array.isArray(prep.pedidos));
   const hist = await rpc('tools/call', { name: 'property_history', arguments: { id: out.deal.id } });
   assert.ok(JSON.parse(hist.data.result.content[0].text).some((h) => h.source === 'mcp'));
   const rep = await rpc('tools/call', { name: 'report', arguments: { object_type: 'deal', group_by: ['pipeline'], filters: [{ prop: 'dealname', op: 'contains', value: RUN }] } });

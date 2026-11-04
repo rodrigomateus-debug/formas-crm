@@ -241,8 +241,11 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .tab.on .count { background: var(--accent-soft); color: var(--accent-ink); }
 .tab-wrap { display: inline-flex; align-items: center; gap: 2px; }
 .tab-wrap .tab svg { margin-right: 2px; vertical-align: -2px; }
-.view-menu { position: relative; }
-.view-menu .popover { min-width: 200px; }
+.view-menu { position: relative; display: inline-flex; }
+/* Opciones de la vista guardada: la flechita al lado de la pestaña activa. */
+.view-menu-btn { width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); background: none;
+  color: var(--ui-ink-3); cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.view-menu-btn:hover, .view-menu-btn.on { background: var(--ui-surface-sunken); color: var(--accent-ink); }
 .save-bar { position: fixed; bottom: 20px; left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2); transform: translateX(-50%); z-index: 44;
   display: flex; gap: 8px; align-items: center; min-width: min(520px, calc(100vw - var(--sidebar-w) - 32px)); max-width: calc(100vw - var(--sidebar-w) - 32px);
   background: var(--ui-surface); border-radius: var(--r-panel); box-shadow: var(--shadow-pop); padding: 10px 12px 10px 16px; font-size: 13px;

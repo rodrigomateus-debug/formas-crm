@@ -13,7 +13,7 @@ import { RecordPreview } from './RecordPage';
 import { ColumnWidths, EstadoCliente, EtapaPedido, UnidadBadge, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
-import { Select } from '../Select';
+import { Select, useFloating } from '../Select';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -542,6 +542,10 @@ function ViewMenu({ type, view, onChanged, onDeleted }: { type: ObjectType; view
   const [share, setShare] = useState(shareOf(view));
   const [isDefault, setIsDefault] = useState(readDefault(type) === String(view.id));
   const ref = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  // El menú flota por encima de la fila de pestañas (si no, la fila lo recorta y parece que el botón no hace nada).
+  const { style: popStyle } = useFloating(btn, pop, open, () => setOpen(false), 300);
   const mine = view.user_id === meta.me.id || meta.me.role === 'admin';
   useEffect(() => {
     if (!open) return;
@@ -556,11 +560,12 @@ function ViewMenu({ type, view, onChanged, onDeleted }: { type: ObjectType; view
   };
   return (
     <div className="view-menu" ref={ref}>
-      <button className="btn ghost sm icon" aria-label={`Opciones de la vista ${view.name}`} title="Opciones de la vista" onClick={() => setOpen(!open)}>⋯</button>
+      <button ref={btn} className={`view-menu-btn${open ? ' on' : ''}`} aria-label={`Opciones de la vista ${view.name}`} aria-haspopup="menu" aria-expanded={open}
+        title="Opciones de la vista: renombrar, compartir, abrir por defecto, borrar" onClick={() => setOpen(!open)}><Icon name="down" size={14} /></button>
       {open && (
-        <div className="popover" style={{ top: 'calc(100% + 4px)', right: 0 }}>
+        <div ref={pop} className="popover" role="menu" style={{ ...popStyle, minWidth: 220, maxWidth: 320 }}>
           {mine && <div className="opt" onClick={() => { setEdit(true); setOpen(false); }}>Renombrar o compartir…</div>}
-          <div className="opt" onClick={() => { navigator.clipboard?.writeText(window.location.href); toast('Link copiado'); setOpen(false); }}>Copiar link</div>
+          <div className="opt" onClick={() => { setOpen(false); (navigator.clipboard?.writeText(window.location.href) ?? Promise.reject()).then(() => toast('Link copiado'), () => toast('El navegador no dejó copiar: copiá el link de la barra de direcciones.', true)); }}>Copiar link</div>
           <div className="opt" onClick={() => { toggleDefault(); setOpen(false); }}>{isDefault ? '✓ Se abre por defecto' : 'Abrir por defecto'}</div>
           {mine && <div className="opt danger-text" onClick={async () => {
             setOpen(false);

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, useDebounced, fmtDate, recordUrl, Icon, unidadesDe, type Activity } from '../lib';
-import { UnidadBadge } from '../components';
+import { ColumnWidths, UnidadBadge, useColumnResize } from '../components';
 import { UnidadFilter } from './QuickFilters';
 import { EditActivity } from './RecordPage';
 
@@ -16,6 +16,9 @@ export default function Tasks() {
   const [owner, setOwner] = useState<string>(String(meta.me.id));
   const [q, setQ] = useState('');
   const [unidades, setUnidades] = useState<string[]>([]);
+  // Ancho de las columnas: se arrastra el borde del encabezado y queda guardado en este navegador.
+  const [widths, setWidths] = useState<Record<string, number>>(() => { try { return JSON.parse(localStorage.getItem('crm.tasks.widths') ?? '{}'); } catch { return {}; } });
+  const resize = useColumnResize(widths, (w) => { setWidths(w); try { localStorage.setItem('crm.tasks.widths', JSON.stringify(w)); } catch { /* ignorar */ } });
   const dq = useDebounced(q, 300);
   const [edit, setEdit] = useState<Activity | null>(null);
   const list = useAsync(() => http<{ results: Activity[]; total: number }>('GET', `/tasks${qs({
@@ -34,6 +37,8 @@ export default function Tasks() {
     toast(`Pasada al ${fmtDate(d)}`);
     list.reload();
   };
+  const cols: Array<[string, string]> = [['tarea', 'Tarea'], ['asociada', 'Asociada a'], ['vence', 'Vence'], ['tipo', 'Tipo'], ['prioridad', 'Prioridad'],
+    ...(owner === 'all' ? [['responsable', 'Responsable'] as [string, string]] : []), ['unidad', 'Unidad']];
   return (
     <div className="content list-fixed">
       <div className="page-head"><h1>Tareas</h1>
@@ -50,16 +55,19 @@ export default function Tasks() {
         <span className="muted small">{list.data ? `${list.data.total} tareas` : ''}</span>
       </div>
       <div className="table-wrap">
-        <table className="grid">
-          <thead><tr><th className="check nosort" /><th className="nosort">Tarea</th><th className="nosort">Asociada a</th><th className="nosort">Vence</th><th className="nosort">Tipo</th><th className="nosort">Prioridad</th>{owner === 'all' && <th className="nosort">Responsable</th>}<th className="nosort">Unidad</th><th className="nosort" /></tr></thead>
+        <ColumnWidths scope="grid-tasks" order={['__check', ...cols.map(([k]) => k)]} widths={resize.widths} />
+        <table className="grid grid-tasks">
+          <thead><tr><th className="check nosort" />
+            {cols.map(([k, l]) => <th key={k} className="nosort">{l}{resize.handle(k)}</th>)}
+            <th className="nosort" /></tr></thead>
           <tbody>
             {list.data?.results.map((a) => {
               const overdue = a.status !== 'COMPLETED' && a.due_at && Date.parse(a.due_at) < Date.now();
               return (
                 <tr key={a.id}>
                   <td className="check"><button className={`check-round${a.status === 'COMPLETED' ? ' on' : ''}`} onClick={() => toggle(a)} aria-label="Completar">{a.status === 'COMPLETED' && <Icon name="check" />}</button></td>
-                  <td style={{ maxWidth: 420 }}><button className="btn ghost" style={{ height: 'auto', padding: 0, fontWeight: 500 }} onClick={() => setEdit(a)}>{a.subject}</button>
-                    {a.body && <div className="small muted ellipsis" style={{ maxWidth: 400 }}>{a.body.split('\n')[0]}</div>}</td>
+                  <td style={{ maxWidth: resize.widths.tarea ? undefined : 420 }}><button className="btn ghost" style={{ height: 'auto', padding: 0, fontWeight: 500 }} onClick={() => setEdit(a)}>{a.subject}</button>
+                    {a.body && <div className="small muted ellipsis" style={{ maxWidth: resize.widths.tarea ? '100%' : 400 }}>{a.body.split('\n')[0]}</div>}</td>
                   <td>{a.links.slice(0, 2).map((l) => <Link key={l.id} className="chip" style={{ marginRight: 4 }} to={recordUrl(l.type, l.id)}>{l.name}</Link>)}</td>
                   <td className={overdue ? 'overdue' : ''}>{fmtDate(a.due_at, true)}</td>
                   <td>{TASK_TYPE[a.task_type ?? 'todo'] ?? a.task_type}</td>

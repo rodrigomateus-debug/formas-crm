@@ -369,3 +369,44 @@ export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean })
     </span>
   );
 }
+
+// Ancho de las columnas, como en HubSpot: se arrastra el borde derecho del encabezado; doble clic vuelve al automático.
+// `onCommit` recibe los anchos nuevos al soltar (las listas los guardan en la vista).
+export function useColumnResize(widths: Record<string, number> | undefined, onCommit: (w: Record<string, number>) => void) {
+  const [live, setLive] = useState<{ col: string; w: number } | null>(null);
+  const eff = live ? { ...(widths ?? {}), [live.col]: live.w } : widths ?? {};
+  const start = (col: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest('th');
+    if (!th) return;
+    const x0 = e.clientX;
+    const w0 = th.getBoundingClientRect().width;
+    let last = w0;
+    const move = (ev: MouseEvent) => { last = Math.max(60, Math.min(900, Math.round(w0 + ev.clientX - x0))); setLive({ col, w: last }); };
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('col-resizing');
+      setLive(null);
+      if (Math.abs(last - w0) >= 2) onCommit({ ...(widths ?? {}), [col]: last });
+    };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    document.body.classList.add('col-resizing');
+  };
+  const reset = (col: string) => { const n = { ...(widths ?? {}) }; delete n[col]; onCommit(n); };
+  const handle = (col: string) => (
+    <span className="col-resize" role="separator" aria-orientation="vertical" aria-label="Cambiar el ancho de la columna"
+      title="Arrastrá para cambiar el ancho · doble clic: automático"
+      onMouseDown={(e) => start(col, e)} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => { e.stopPropagation(); reset(col); }} />
+  );
+  return { widths: eff, handle };
+}
+
+// Los anchos se aplican por posición de columna, sin tocar cada celda.
+export function ColumnWidths({ scope, order, widths }: { scope: string; order: string[]; widths: Record<string, number> }) {
+  const css = order.map((col, i) => (widths[col] ? `table.${scope} > thead > tr > th:nth-child(${i + 1}), table.${scope} > tbody > tr > td:nth-child(${i + 1}) {
+    width: ${widths[col]}px; min-width: ${widths[col]}px; max-width: ${widths[col]}px; box-sizing: border-box; }` : '')).join('\n');
+  return css ? <style>{css}</style> : null;
+}

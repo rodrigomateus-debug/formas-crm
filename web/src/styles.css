@@ -419,3 +419,16 @@ table.grid th .col-menu:hover { background: var(--line); color: var(--navy); }
 .qf-pop .opt .unidad { margin-left: 2px; }
 .qf-btn .unidad.compact { margin-left: 2px; }
 .pipe-menu .grp .unidad { text-transform: none; letter-spacing: normal; font-size: 12px; }
+
+/* Ancho de columnas: el borde derecho del encabezado se arrastra. */
+table.grid th .col-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; cursor: col-resize; z-index: 6; }
+table.grid th .col-resize::after { content: ''; position: absolute; left: 3px; top: 22%; height: 56%; width: 2px; border-radius: 2px; background: transparent; }
+table.grid th:hover .col-resize::after { background: var(--line); }
+table.grid th .col-resize:hover::after, body.col-resizing table.grid th .col-resize::after { background: var(--navy); }
+table.grid th { overflow: hidden; text-overflow: ellipsis; }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }
+/* Nombre en la lista: con la columna angosta termina en «…»; «Vista previa» aparece encima al pasar el mouse. */
+table.grid td.name { padding-right: 12px; }
+table.grid td.name .with-logo { max-width: 100%; min-width: 0; vertical-align: middle; }
+table.grid td.name .with-logo .avatar { flex: none; }
+table.grid td.name .peek { background: var(--surface); box-shadow: -10px 0 10px var(--surface); }

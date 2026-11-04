@@ -10,7 +10,7 @@ import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
-import { EstadoCliente, UnidadBadge } from '../components';
+import { ColumnWidths, EstadoCliente, UnidadBadge, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
 
@@ -27,6 +27,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
 interface ViewConfig {
   q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[]; unidades?: string[];
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string; cardProps?: string[];
+  widths?: Record<string, number>;   // ancho de cada columna (se arrastra el borde del encabezado)
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
 interface SavedView { id: number; name: string; shared: number; team_id: number | null; user_id: number; config: ViewConfig }
@@ -147,13 +148,14 @@ function IndexFor({ type }: { type: ObjectType }) {
   const current: ViewConfig = {
     q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], unidades: cfg.unidades ?? [], mode,
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
+    ...(cfg.widths && Object.keys(cfg.widths).length ? { widths: cfg.widths } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   // Lo recién guardado vale enseguida (la barra se va al guardar, sin esperar a que se recarguen las vistas).
   const [justSaved, setJustSaved] = useState<Record<string, ViewConfig>>({});
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), [...(c.unidades ?? [])].sort(), c.mode ?? base.mode,
-    c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '',
+    c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '', c.widths ?? {},
   ]);
   const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
@@ -183,6 +185,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const rows = (list.data?.results ?? []).map((r) => (patched[r.id] ? { ...r, ...patched[r.id] } : r));
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
+  const resize = useColumnResize(cfg.widths, (widths) => setCfg((c) => ({ ...c, widths })));
   const quickBar = (
     <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
@@ -281,11 +284,12 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
 
         <div className="table-wrap">
-          <table className="grid">
+          <ColumnWidths scope="grid-list" order={['__check', '__name', ...columns]} widths={resize.widths} />
+          <table className="grid grid-list">
             <thead>
               <tr>
                 <th className="check nosort"><input type="checkbox" aria-label="Seleccionar todo" checked={allSel} onChange={() => setSelected(allSel ? new Set() : new Set(rows.map((r) => r.id)))} /></th>
-                <th className="namecol" onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}</th>
+                <th className="namecol" onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}{resize.handle('__name')}</th>
                 {columns.map((col, i) => (
                   <th key={col} className={`${col.startsWith('__') ? 'nosort' : ''} has-menu`} onClick={() => !col.startsWith('__') && sortBy(col)}>
                     {label(col)}{cfg.sort === col && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}
@@ -295,6 +299,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                       onFilter={() => { setFilterProp(col); setShow('filters'); }}
                       onMove={(d) => setCfg((c) => { const n = [...c.columns]; const k = n.indexOf(col); if (k < 0) return c; n.splice(k, 1); n.splice(k + d, 0, col); return { ...c, columns: n }; })}
                       onRemove={() => setCfg((c) => ({ ...c, columns: c.columns.filter((x) => x !== col) }))} />
+                    {resize.handle(col)}
                   </th>
                 ))}
               </tr>
@@ -304,8 +309,8 @@ function IndexFor({ type }: { type: ObjectType }) {
                 <tr key={r.id} className={selected.has(r.id) ? 'sel' : ''}>
                   <td className="check"><input type="checkbox" aria-label={`Seleccionar ${r.name}`} checked={selected.has(r.id)} onChange={() => toggleSel(r.id)} /></td>
                   <td className="name">{type === 'company' || type === 'contact'
-                    ? <Link to={recordUrl(type, r.id)} className="with-logo"><Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} />{r.name}</Link>
-                    : <Link to={recordUrl(type, r.id)}>{r.name}</Link>}
+                    ? <Link to={recordUrl(type, r.id)} className="with-logo" title={r.name}><Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} /><span className="ellipsis">{r.name}</span></Link>
+                    : <Link to={recordUrl(type, r.id)} title={r.name}>{r.name}</Link>}
                     <button className="btn sm peek" onClick={() => setPreview(r.id)}>Vista previa</button></td>
                   {columns.map((col) => (col === '__company'
                     ? <td key={col}>{r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>}</td>

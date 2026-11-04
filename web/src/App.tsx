@@ -7,6 +7,7 @@ import ObjectIndex from './pages/ObjectIndex';
 import RecordPage from './pages/RecordPage';
 import Tasks from './pages/Tasks';
 import Settings from './pages/Settings';
+import { TEMAS, useTema } from './theme';
 
 export default function App() {
   const { meta } = useMeta();
@@ -33,7 +34,7 @@ export default function App() {
           <div className="nav-group">Cuenta</div>
           <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>
         </>}
-        <div className="me"><Avatar name={meta.me.name} /><div><b>{meta.me.name}</b>{meta.me.email}</div></div>
+        <UserMenu name={meta.me.name} email={meta.me.email} />
       </nav>
       <div className="main">
         <header className="topbar">
@@ -125,6 +126,40 @@ function CreateMenu() {
         </div>
       )}
       {type && <CreateRecord type={type} onClose={() => setType(null)} />}
+    </div>
+  );
+}
+
+// Usuario, abajo en el menú: desde acá cada uno elige el tema (Automático, Claro, Oscuro o Alto contraste).
+function UserMenu({ name, email }: { name: string; email: string }) {
+  const { tema, elegir } = useTema();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', h);
+    window.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', h); window.removeEventListener('keydown', k); };
+  }, [open]);
+  return (
+    <div className="me-wrap" ref={ref}>
+      {open && (
+        <div className="popover me-menu" role="menu" aria-label="Tema">
+          <div className="grp">Tema</div>
+          {TEMAS.map(([k, l]) => (
+            <div key={k} className={`opt${tema === k ? ' on' : ''}`} role="menuitemradio" aria-checked={tema === k} tabIndex={0}
+              onClick={() => { elegir(k); setOpen(false); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); elegir(k); setOpen(false); } }}>
+              {l}{k === 'auto' && <span className="small muted">como el sistema</span>}
+              {tema === k && <span className="check"><Icon name="check" size={16} /></span>}
+            </div>
+          ))}
+        </div>
+      )}
+      <button type="button" className="me" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title="Tema y usuario">
+        <Avatar name={name} /><div><b>{name}</b>{email}</div><Icon name="updown" size={16} />
+      </button>
     </div>
   );
 }

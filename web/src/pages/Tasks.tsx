@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, useAsync, useDebounced, fmtDate, recordUrl
 import { ColumnWidths, UnidadBadge, useColumnResize } from '../components';
 import { UnidadFilter } from './QuickFilters';
 import { EditActivity } from './RecordPage';
+import { Select } from '../Select';
 
 const TABS: Array<[string, string]> = [['overdue', 'Vencidas'], ['today', 'Para hoy'], ['week', 'Esta semana'], ['upcoming', 'Próximas'], ['all', 'Todas abiertas'], ['done', 'Completadas']];
 const PRIORITY: Record<string, [string, string]> = { high: ['Alta', 'bad'], medium: ['Media', 'warn'], low: ['Baja', 'info'] };
@@ -42,11 +43,11 @@ export default function Tasks() {
   return (
     <div className="content list-fixed">
       <div className="page-head"><h1>Tareas</h1>
-        <select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
+        <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
           <option value={String(meta.me.id)}>Mis tareas</option>
           <option value="all">Todo el equipo</option>
           {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        </Select>
       </div>
       <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div>
       <div className="toolbar">

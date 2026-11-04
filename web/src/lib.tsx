@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
 // ---------- Tipos compartidos con el Worker ----------
 
@@ -211,7 +211,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={show}>
       {children}
-      {t && <div className={`toast${t.err ? ' err' : ''}`} role="status">{t.msg}</div>}
+      {t && (
+        <div className={`toast${t.err ? ' err' : ''}`} role={t.err ? 'alert' : 'status'}>
+          <span className="toast-ic" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d={t.err ? 'M5 5l6 6M11 5l-6 6' : 'M4 8.5 6.8 11 12 5'} /></svg></span>
+          <span className="toast-msg">{t.msg}</span>
+        </div>
+      )}
     </ToastCtx.Provider>
   );
 }
@@ -272,6 +277,8 @@ const paths: Record<string, string> = {
   chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   edit: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z',
   chevron: 'M15 18l-6-6 6-6',
+  updown: 'M8 9l4-4 4 4M8 15l4 4 4-4',
+  theme: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 3v18M12 3a9 9 0 0 1 0 18',
   timer: 'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z',
 };
 export function Icon({ name, size }: { name: keyof typeof paths | string; size?: number }) {
@@ -293,7 +300,7 @@ export function TagChips({ meta, ids, small }: { meta: Meta; ids?: number[]; sma
   if (!tags.length) return null;
   return (
     <span className={`tag-chips${small ? ' small' : ''}`}>
-      {tags.map((t) => <span key={t.id} className="tag-chip" style={{ background: `${t.color}1a`, color: t.color, borderColor: `${t.color}55` }} title={t.description || t.name}>{t.name}</span>)}
+      {tags.map((t) => <span key={t.id} className="tag-chip" style={{ '--tag': t.color } as CSSProperties} title={t.description || t.name}>{t.name}</span>)}
     </span>
   );
 }
@@ -301,9 +308,10 @@ export function TagChips({ meta, ids, small }: { meta: Meta; ids?: number[]; sma
 // Unidades de negocio: el negocio, por el equipo de su pipeline; el pedido, por la unidad de ClickUp; contactos, empresas y
 // tareas, por el equipo de su propietario. Cada una con su ícono y su color (filtro rápido, columna y etiquetas).
 export const UNIDADES = [
-  { key: 'shop', label: 'Formas Shop', team: 57132078, icon: 'bag', color: '#17703d', bg: '#e3f5e9', border: '#a8dcb8' },
-  { key: 'corporate', label: 'Corporate', team: 58079782, icon: 'briefcase', color: '#1e40af', bg: '#e6edff', border: '#b3c5f5' },
-  { key: 'noestres', label: 'NoEstres', team: 57393663, icon: 'smile', color: '#b4410c', bg: '#fff0e4', border: '#f6c39d' },
+  // El color de cada una está en styles.css (.unidad.u-shop, .u-corporate, .u-noestres), con su versión oscura y de alto contraste.
+  { key: 'shop', label: 'Formas Shop', team: 57132078, icon: 'bag' },
+  { key: 'corporate', label: 'Corporate', team: 58079782, icon: 'briefcase' },
+  { key: 'noestres', label: 'NoEstres', team: 57393663, icon: 'smile' },
 ] as const;
 export type UnidadKey = (typeof UNIDADES)[number]['key'];
 const PEDIDO_UNIDAD: Record<string, UnidadKey> = { 'FORMAS SHOP': 'shop', CORPORATE: 'corporate', 'NO ESTRÉS': 'noestres', 'NO ESTRES': 'noestres', NOESTRES: 'noestres' };

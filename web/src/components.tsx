@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
 } from './lib';
+import { Select } from './Select';
 
 // Las empresas muestran el favicon de su dominio y los contactos la foto de su mail, como en HubSpot; si no hay, las iniciales.
 const sinImagen = new Set<string>();
@@ -78,27 +79,27 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type }: {
   const v = value ?? '';
   if (prop.name === 'pipeline' && type === 'deal') {
     return (
-      <select className="input" value={v} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus}>
+      <Select className="input" value={v} onChange={(e) => onChange(e.target.value)} autoFocus={autoFocus}>
         {meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-      </select>
+      </Select>
     );
   }
   switch (prop.type) {
     case 'owner':
       return (
-        <select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus}>
+        <Select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus}>
           <option value="">Sin asignar</option>
           {meta.users.filter((u) => u.active || u.id === Number(v)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        </Select>
       );
     case 'enum':
     case 'bool':
       return (
-        <select className="input" value={v} onChange={(e) => onChange(e.target.value || null)} autoFocus={autoFocus}>
+        <Select className="input" value={v} onChange={(e) => onChange(e.target.value || null)} autoFocus={autoFocus}>
           <option value="">—</option>
           {(prop.type === 'bool' && !prop.options.length ? [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }] : prop.options)
             .map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        </Select>
       );
     case 'multienum': {
       const sel = new Set(String(v).split(';').filter(Boolean));
@@ -141,13 +142,13 @@ export function StageSelect({ value, onChange, pipelineId, only }: { value: stri
   const pipes = (pipelineId ? meta.pipelines.filter((p) => p.id === pipelineId) : meta.pipelines)
     .map((p) => (only?.length ? { ...p, stages: p.stages.filter((s) => only.includes(s.id)) } : p));
   return (
-    <select className="input" value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
+    <Select className="input" value={value ?? ''} onChange={(e) => onChange(e.target.value)}>
       {pipes.map((p) => (
         <optgroup key={p.id} label={p.label}>
           {p.stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
         </optgroup>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -314,15 +315,15 @@ export function FilterRow({ type, f, onChange, onRemove }: { type: ObjectType; f
   const opts = p ? optionsFor(meta, type, p) : [];
   return (
     <div className="filter-row">
-      <select className="input" value={f.prop} onChange={(e) => {
+      <Select className="input" value={f.prop} onChange={(e) => {
         const np = props.find((x) => x.name === e.target.value);
         onChange({ prop: e.target.value, op: opsFor(np)[0][0] });
       }}>
         {props.map((x) => <option key={x.name} value={x.name}>{x.label}</option>)}
-      </select>
-      <select className="input" value={f.op} onChange={(e) => onChange({ ...f, op: e.target.value })}>
+      </Select>
+      <Select className="input" value={f.op} onChange={(e) => onChange({ ...f, op: e.target.value })}>
         {ops.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
+      </Select>
       {needsValue ? (
         (f.op === 'in' || f.op === 'not_in') ? (
           <MultiPick options={opts} values={(f.values ?? []).map(String)} onChange={(values) => onChange({ ...f, values })} />
@@ -382,7 +383,7 @@ export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean })
   const u = UNIDADES.find((x) => x.key === k);
   if (!u) return null;
   return (
-    <span className={`unidad${compact ? ' compact' : ''}`} style={{ color: u.color, background: u.bg, borderColor: u.border }} title={u.label}>
+    <span className={`unidad u-${u.key}${compact ? ' compact' : ''}`} title={u.label}>
       <Icon name={u.icon} size={compact ? 12 : 13} />{!compact && u.label}
     </span>
   );

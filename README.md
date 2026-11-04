@@ -15,7 +15,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | Pieza | Qué es |
 |---|---|
 | `src/worker/` | API (Hono) sobre D1 (SQLite). Modelo genérico como HubSpot: `records` con propiedades en JSON, `associations`, `activities`, `changes` (historial). |
-| `web/` | Interfaz en React. Se compila a `dist/` y el Worker la sirve. Usa el Design System de Formas (Poppins, navy, verde). |
+| `web/` | Interfaz en React. Se compila a `dist/` y el Worker la sirve. Usa el Design System de Formas Shop 2026 (dirección «ledger»: tokens `ui-*` y capa semántica en `web/src/styles.css`), con tema claro, oscuro y alto contraste que cada uno elige en su usuario, abajo en el menú (`web/src/theme.ts`). Los desplegables son el `SelectField` del DS (`web/src/Select.tsx`), no la lista del navegador. |
 | `/mcp` | Servidor MCP para Claude y Cowork (`src/worker/mcp.ts`). |
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |

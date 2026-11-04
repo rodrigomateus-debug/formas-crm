@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { http, qs, useMeta, useToast, propsOf, propOf, stageOf, missingFor, OBJECTS, Icon, type Filter, type ObjectType, type Property } from '../lib';
 import { Modal, PropertyInput, StageSelect } from '../components';
+import { Select } from '../Select';
 
 // Acciones masivas, como la barra de selección de HubSpot: Asignar, Editar, Crear tareas y Borrar, en la tabla y en el
 // tablero. Con «Seleccionar los N» se trabaja sobre todo lo filtrado (no solo la página). Se manda de a 200 y, al final,
@@ -85,10 +86,10 @@ function AssignModal({ count, onClose, onSave }: { count: number; onClose: () =>
       <button className="btn primary" onClick={() => onSave(owner ? Number(owner) : null)}>Asignar</button>
     </>}>
       <label className="field">Propietario
-        <select className="input" value={owner} onChange={(e) => setOwner(e.target.value)} autoFocus>
+        <Select className="input" value={owner} onChange={(e) => setOwner(e.target.value)} autoFocus>
           <option value="">Sin asignar</option>
           {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}{u.id === meta.me.id ? ' (yo)' : ''}</option>)}
-        </select>
+        </Select>
       </label>
     </Modal>
   );
@@ -111,9 +112,9 @@ function BulkEdit({ type, count, onClose, onSave }: { type: ObjectType; count: n
       <button className="btn primary" disabled={!ready} onClick={() => onSave({ [prop]: value, ...extra })}>Actualizar</button>
     </>}>
       <label className="field">Propiedad
-        <select className="input" value={prop} onChange={(e) => { setProp(e.target.value); setValue(null); setExtra({}); }}>
+        <Select className="input" value={prop} onChange={(e) => { setProp(e.target.value); setValue(null); setExtra({}); }}>
           {editable.map((x) => <option key={x.name} value={x.name}>{x.label}</option>)}
-        </select>
+        </Select>
       </label>
       <label className="field">Nuevo valor
         {prop === 'dealstage' ? <StageSelect value={value ?? ''} onChange={(v) => { setValue(v); setExtra({}); }} /> : <PropertyInput prop={p} type={type} value={value} onChange={setValue} />}
@@ -143,20 +144,20 @@ function TasksModal({ type, count, onClose, onSave }: { type: ObjectType; count:
       <div className="row wrap">
         <label className="field" style={{ flex: 1 }}>Vence<input className="input" type="date" value={f.due} onChange={(e) => set('due', e.target.value)} /></label>
         <label className="field" style={{ flex: 1 }}>Tipo
-          <select className="input" value={f.task_type} onChange={(e) => set('task_type', e.target.value)}>
+          <Select className="input" value={f.task_type} onChange={(e) => set('task_type', e.target.value)}>
             <option value="todo">Por hacer</option><option value="call">Llamada</option><option value="email">Mail</option>
-          </select>
+          </Select>
         </label>
         <label className="field" style={{ flex: 1 }}>Prioridad
-          <select className="input" value={f.priority} onChange={(e) => set('priority', e.target.value)}>
+          <Select className="input" value={f.priority} onChange={(e) => set('priority', e.target.value)}>
             <option value="none">Sin prioridad</option><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option>
-          </select>
+          </Select>
         </label>
       </div>
       <label className="field">Responsable
-        <select className="input" value={f.owner} onChange={(e) => set('owner', e.target.value)}>
+        <Select className="input" value={f.owner} onChange={(e) => set('owner', e.target.value)}>
           <option value="record">El propietario de cada registro</option><option value="me">Yo</option>
-        </select>
+        </Select>
       </label>
       <label className="field">Notas<textarea className="input" value={f.body} onChange={(e) => set('body', e.target.value)} /></label>
     </Modal>

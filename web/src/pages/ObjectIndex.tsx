@@ -13,6 +13,7 @@ import { RecordPreview } from './RecordPage';
 import { ColumnWidths, EstadoCliente, UnidadBadge, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
+import { Select } from '../Select';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -291,7 +292,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                 <th className="check nosort"><input type="checkbox" aria-label="Seleccionar todo" checked={allSel} onChange={() => setSelected(allSel ? new Set() : new Set(rows.map((r) => r.id)))} /></th>
                 <th className="namecol" onClick={() => sortBy('__name')}>Nombre{['name', OBJECTS[type].nameProp].includes(cfg.sort) && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}{resize.handle('__name')}</th>
                 {columns.map((col, i) => (
-                  <th key={col} className={`${col.startsWith('__') ? 'nosort' : ''} has-menu`} onClick={() => !col.startsWith('__') && sortBy(col)}>
+                  <th key={col} className={`${col.startsWith('__') ? 'nosort' : ''} has-menu${['number', 'currency'].includes(propOf(meta, type, col)?.type ?? '') ? ' numcol' : ''}`} onClick={() => !col.startsWith('__') && sortBy(col)}>
                     {label(col)}{cfg.sort === col && <span className="sort-ind">{cfg.dir === 'asc' ? '▲' : '▼'}</span>}
                     <ColMenu label={label(col)} sortable={!col.startsWith('__')} filterable={!col.startsWith('__')}
                       first={i === 0} last={i === columns.length - 1}
@@ -322,13 +323,13 @@ function IndexFor({ type }: { type: ObjectType }) {
             </tbody>
           </table>
           {!list.loading && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
-          {list.error && <div className="empty">{list.error}</div>}
+          {list.error && <div className="empty plain">{list.error}</div>}
         </div>
         <div className="pager">
           <span>Por página</span>
-          <select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
+          <Select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
             {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
-          </select>
+          </Select>
           <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>
           <button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button>
           <button className="btn sm" disabled={!list.data || (page + 1) * pageSize >= list.data.total} onClick={() => setPage(page + 1)}>Siguiente</button>
@@ -364,7 +365,9 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   const exact = prop?.type === 'currency' && record.props[col] != null && record.props[col] !== ''
     ? fmtMoneyExact(record.props[col], col.endsWith('_usd') ? 'USD' : record.props.deal_currency_code ?? record.props.hs_currency_code) : undefined;
   if (col === 'estado_cliente' && record.props[col]) return <td><EstadoCliente value={String(record.props[col])} /></td>;
-  if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td title={exact}>{shown}</td>;
+  // Números y montos alineados a la derecha, como en la tabla del Design System.
+  const numeric = !!prop && ['number', 'currency'].includes(prop.type);
+  if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td title={exact} className={numeric ? 'numcell' : undefined}>{shown}</td>;
   const instant = ['owner', 'enum', 'bool'].includes(prop.type) || col === 'dealstage';
   const open = (e: React.MouseEvent) => { setVal(record.props[col]); setAt((e.currentTarget.closest('td') as HTMLElement).getBoundingClientRect()); };
   const save = async (v: unknown) => {
@@ -380,7 +383,7 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
     } finally { setSaving(false); }
   };
   return (
-    <td className="editable" onDoubleClick={open} title={exact}>
+    <td className={`editable${numeric ? ' numcell' : ''}`} onDoubleClick={open} title={exact}>
       <span className="cell-v">{shown}</span>
       <button className="cell-edit" title={`Editar ${prop.label}`} aria-label={`Editar ${prop.label} de ${record.name}`} onClick={open}><Icon name="edit" size={14} /></button>
       {at && createPortal(
@@ -518,11 +521,11 @@ function ShareSelect({ value, onChange }: { value: string; onChange: (v: string)
   const { meta } = useMeta();
   return (
     <label className="field">Quién la ve
-      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+      <Select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="me">Solo yo</option>
         <option value="all">Todo el equipo</option>
         {meta.teams.map((t) => <option key={t.id} value={t.id}>Equipo {t.name}</option>)}
-      </select>
+      </Select>
     </label>
   );
 }

@@ -5,6 +5,7 @@ import {
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
 import { Avatar, Modal, PropertyInput } from '../components';
+import { Select } from '../Select';
 
 // Lo que el servidor agrega a cada tarjeta: contacto y empresa asociados y la próxima actividad.
 export interface CardInfo { contact?: { id: number; name: string }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } }
@@ -55,9 +56,9 @@ export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact'
   const all = opts.some(([k]) => k === cur) ? opts : [...opts, [cur, propOf(meta, type, cur)?.label ?? cur] as [string, string]];
   return (
     <div className="row" style={{ gap: 4 }}>
-      <select className="input sm" style={{ width: 220 }} value={cur} aria-label="Ordenar por" onChange={(e) => onSort(e.target.value, dir ?? 'desc')}>
+      <Select className="input sm" style={{ width: 220 }} value={cur} aria-label="Ordenar por" onChange={(e) => onSort(e.target.value, dir ?? 'desc')}>
         {all.map(([k, l]) => <option key={k} value={k}>Ordenar: {l}</option>)}
-      </select>
+      </Select>
       <button className="btn sm icon" style={{ width: 32 }} title={dir === 'asc' ? 'De menor a mayor' : 'De mayor a menor'} aria-label="Cambiar el sentido del orden"
         onClick={() => onSort(cur, dir === 'asc' ? 'desc' : 'asc')}>{dir === 'asc' ? '↑' : '↓'}</button>
     </div>
@@ -133,11 +134,11 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
     <>
       <div className="toolbar">
         <div className="search" style={{ width: 220 }}><Icon name="search" /><input className="input sm" placeholder="Buscar negocios…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
-        <select className="input sm" style={{ width: 170 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados" title="Negocios cerrados que se muestran">
+        <Select className="input sm" style={{ width: 170 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados" title="Negocios cerrados que se muestran">
           <option value={30}>Cerrados: 30 días</option>
           <option value={90}>Cerrados: 90 días</option>
           <option value={365}>Cerrados: 1 año</option>
-        </select>
+        </Select>
         <SortPick type="deal" sort={sort} dir={dir} onSort={onSort} />
         {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}

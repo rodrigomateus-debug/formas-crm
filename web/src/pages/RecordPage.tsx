@@ -5,6 +5,7 @@ import {
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, EstadoCliente, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
 import { StageProps } from './Board';
+import { Select } from '../Select';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number }
@@ -24,8 +25,8 @@ export default function RecordPage() {
   const [tlKey, setTlKey] = useState(0);
   const [peek, setPeek] = useState<{ type: ObjectType; id: number } | null>(null);
   useEffect(() => { if (data.data?.redirect) navigate(recordUrl(type, data.data.redirect), { replace: true }); }, [data.data, navigate, type]);
-  if (data.error) return <div className="content"><div className="empty">{data.error} <Link to={`/${objectPath}`}>Volver</Link></div></div>;
-  if (!data.data?.record) return <div className="content"><div className="empty">Cargando…</div></div>;
+  if (data.error) return <div className="content"><div className="empty plain">{data.error} <Link to={`/${objectPath}`}>Volver</Link></div></div>;
+  if (!data.data?.record) return <div className="content"><div className="empty plain">Cargando…</div></div>;
   const { record, associations } = data.data;
   const refresh = () => { data.reload(); setTlKey((k) => k + 1); };
   return (
@@ -288,9 +289,9 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
     <>
       <div className="row" style={{ marginBottom: 6 }}>
         <span className="small muted">Pipeline</span>
-        <select className="input sm" style={{ width: 240 }} value={pipe.id} onChange={async (e) => {
+        <Select className="input sm" style={{ width: 240 }} value={pipe.id} onChange={async (e) => {
           try { await http('PATCH', `/records/deal/${record.id}`, { props: { pipeline: e.target.value } }); onChange(); } catch (er) { toast((er as Error).message, true); }
-        }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</select>
+        }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</Select>
         <span className="grow" />
         {record.props.hs_v2_date_entered_current_stage && <span className="small muted">En esta etapa desde {fmtDate(record.props.hs_v2_date_entered_current_stage)}</span>}
       </div>
@@ -339,15 +340,15 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
     <>
       <div className="tabs">
         {FILTERS.map(([k, l]) => (
-          <button key={k} className={`tab ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}{k && tl.data?.counts[k] ? <span className="x">{tl.data.counts[k]}</span> : null}</button>
+          <button key={k} className={`tab ${filter === k ? 'on' : ''}`} onClick={() => setFilter(k)}>{l}{k && tl.data?.counts[k] ? <span className="count">{tl.data.counts[k]}</span> : null}</button>
         ))}
       </div>
       <div className="row wrap" style={{ marginBottom: 8 }}>
         <div className="search grow" style={{ minWidth: 180 }}><Icon name="search" /><input className="input sm" placeholder="Buscar en la actividad…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
-        <select className="input sm" style={{ width: 200 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
+        <Select className="input sm" style={{ width: 200 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
           <option value="">Todos los responsables</option>
           {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        </Select>
       </div>
       {type !== 'contact' && (
         <label className="row small muted" style={{ marginBottom: 10 }}>
@@ -435,10 +436,10 @@ export function EditActivity({ a, onClose, onSaved }: { a: Activity; onClose: ()
       {a.type === 'task'
         ? <label className="field">Vence<input className="input" type="datetime-local" value={f.due_at ? toLocalInput(f.due_at) : ''} onChange={(e) => setF({ ...f, due_at: new Date(e.target.value).toISOString() })} /></label>
         : <label className="field">Fecha<input className="input" type="datetime-local" value={toLocalInput(f.occurred_at)} onChange={(e) => setF({ ...f, occurred_at: new Date(e.target.value).toISOString() })} /></label>}
-      <label className="field">Responsable<select className="input" value={f.owner_id ?? ''} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })}>
-        {meta.users.filter((u) => u.active || u.id === f.owner_id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
-      {a.type === 'task' && <label className="field">Prioridad<select className="input" value={f.priority ?? 'none'} onChange={(e) => setF({ ...f, priority: e.target.value })}>
-        <option value="none">Sin prioridad</option><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></select></label>}
+      <label className="field">Responsable<Select className="input" value={f.owner_id ?? ''} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })}>
+        {meta.users.filter((u) => u.active || u.id === f.owner_id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></label>
+      {a.type === 'task' && <label className="field">Prioridad<Select className="input" value={f.priority ?? 'none'} onChange={(e) => setF({ ...f, priority: e.target.value })}>
+        <option value="none">Sin prioridad</option><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></Select></label>}
       <label className="field">Detalle<textarea className="input" rows={8} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></label>
     </Modal>
   );
@@ -484,25 +485,25 @@ function Composer({ type, record, associations, onClose, onSaved }: {
         )}
         <div className="row wrap">
           {(type === 'email' || type === 'whatsapp' || type === 'call') && (
-            <select className="input" style={{ width: 150 }} value={f.direction ?? 'out'} onChange={(e) => setF({ ...f, direction: e.target.value })}>
+            <Select className="input" style={{ width: 150 }} value={f.direction ?? 'out'} onChange={(e) => setF({ ...f, direction: e.target.value })}>
               <option value="out">{type === 'call' ? 'Saliente' : 'Enviado'}</option><option value="in">{type === 'call' ? 'Entrante' : 'Recibido'}</option>
-            </select>
+            </Select>
           )}
-          {type === 'call' && <select className="input" style={{ width: 170 }} value={f.outcome} onChange={(e) => setF({ ...f, outcome: e.target.value })}>{OUTCOMES.map((o) => <option key={o}>{o}</option>)}</select>}
+          {type === 'call' && <Select className="input" style={{ width: 170 }} value={f.outcome} onChange={(e) => setF({ ...f, outcome: e.target.value })}>{OUTCOMES.map((o) => <option key={o}>{o}</option>)}</Select>}
           {type === 'task' ? <>
             <label className="row small">Vence<input className="input" style={{ width: 210 }} type="datetime-local" value={toLocalInput(f.due_at)} onChange={(e) => setF({ ...f, due_at: new Date(e.target.value).toISOString() })} /></label>
-            <select className="input" style={{ width: 140 }} value={f.task_type} onChange={(e) => setF({ ...f, task_type: e.target.value })}>
+            <Select className="input" style={{ width: 140 }} value={f.task_type} onChange={(e) => setF({ ...f, task_type: e.target.value })}>
               <option value="todo">Por hacer</option><option value="call">Llamar</option><option value="email">Mail</option><option value="whatsapp">WhatsApp</option><option value="meeting">Reunión</option>
-            </select>
-            <select className="input" style={{ width: 150 }} value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}>
+            </Select>
+            <Select className="input" style={{ width: 150 }} value={f.priority} onChange={(e) => setF({ ...f, priority: e.target.value })}>
               <option value="none">Sin prioridad</option><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option>
-            </select>
+            </Select>
           </> : (
             <label className="row small">{type === 'meeting' ? 'Empieza' : 'Fecha'}<input className="input" style={{ width: 210 }} type="datetime-local" value={toLocalInput(f.occurred_at)} onChange={(e) => setF({ ...f, occurred_at: new Date(e.target.value).toISOString() })} /></label>
           )}
-          <select className="input" style={{ width: 190 }} value={f.owner_id} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })} aria-label="Responsable">
+          <Select className="input" style={{ width: 190 }} value={f.owner_id} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })} aria-label="Responsable">
             {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          </Select>
         </div>
         {type === 'meeting' && <input className="input" placeholder="Lugar o link" value={f.meta?.location ?? ''} onChange={(e) => setF({ ...f, meta: { ...f.meta, location: e.target.value } })} />}
         <textarea className="input" autoFocus={type === 'note' || type === 'call' || type === 'whatsapp'} rows={5} placeholder={type === 'task' ? 'Detalle (opcional)' : 'Qué pasó…'} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />

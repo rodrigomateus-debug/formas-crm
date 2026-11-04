@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Formas CRM</title>
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      // Tema antes de dibujar (web/src/theme.ts): el elegido en este navegador o, en «Automático», el del sistema.
+      (function () {
+        var t = 'auto';
+        try { t = localStorage.getItem('crm-tema') || 'auto'; } catch (e) {}
+        var m = function (q) { return window.matchMedia && window.matchMedia(q).matches; };
+        if (t === 'auto') t = m('(prefers-contrast: more)') ? 'contrast' : m('(prefers-color-scheme: dark)') ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', t);
+      })();
+    </script>
     <link rel="icon" href="/formas-favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

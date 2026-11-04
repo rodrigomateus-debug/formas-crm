@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
 import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, userName, stageOf, type Activity, type CrmRecord } from '../lib';
+import { Select } from '../Select';
 
 interface Dash {
   open: Array<{ pipeline_id: string; stage_id: string; n: number; amount: number }>;
@@ -38,11 +39,11 @@ export default function Home() {
       <div className="page-head">
         <h1>Hola, {meta.me.name.split(' ')[0]}</h1>
         <UnidadFilter value={unidades} onChange={setUnidades} />
-        <select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
+        <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
           <option value="me">Mis números</option>
           <option value="all">Todo el equipo</option>
           {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        </Select>
       </div>
       <div className="kpis">
         <div className="panel kpi"><div className="label">Tareas vencidas</div><div className={`value${d?.tasks.overdue ? ' overdue' : ''}`}>{d?.tasks.overdue ?? '–'}</div><Link className="small" to="/tasks">Ver tareas</Link></div>
@@ -84,7 +85,7 @@ export default function Home() {
                   return (
                     <Link key={s.id} to={`/deals?view=board`} className="row small" style={{ color: 'inherit', padding: '2px 0' }}>
                       <span style={{ width: 170 }} className="ellipsis">{s.label}</span>
-                      <span className="grow" style={{ background: 'var(--sunken)', borderRadius: 3, height: 8 }}><i style={{ display: 'block', height: 8, borderRadius: 3, background: 'var(--navy)', width: `${(r.n / max) * 100}%` }} /></span>
+                      <span className="grow" style={{ background: 'var(--sunken)', borderRadius: 3, height: 8 }}><i style={{ display: 'block', height: 8, borderRadius: 3, background: 'var(--viz-1)', width: `${(r.n / max) * 100}%` }} /></span>
                       <span className="num" style={{ width: 34, textAlign: 'right' }}>{r.n}</span>
                     </Link>
                   );

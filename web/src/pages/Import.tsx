@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { http, useMeta, useToast, propsOf, OBJECTS, type ObjectType } from '../lib';
 import { Modal } from '../components';
+import { Select } from '../Select';
 
 // CSV con comillas, separador , o ; (lo detecta), BOM de Excel incluido.
 export function parseCsv(text: string): string[][] {
@@ -100,10 +101,10 @@ export default function ImportModal({ type, onClose }: { type: ObjectType; onClo
           {rows[0].map((h, i) => (
             <div key={i} className="row">
               <span className="grow ellipsis" title={rows[1]?.[i]}>{h} <span className="muted small">· ej. {rows[1]?.[i] || '—'}</span></span>
-              <select className="input" style={{ width: 260 }} value={map[i] ?? ''} onChange={(e) => setMap(map.map((m, j) => (j === i ? e.target.value : m)))}>
+              <Select className="input" style={{ width: 260 }} value={map[i] ?? ''} onChange={(e) => setMap(map.map((m, j) => (j === i ? e.target.value : m)))}>
                 <option value="">No importar</option>
                 {targets.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
+              </Select>
             </div>
           ))}
         </div>

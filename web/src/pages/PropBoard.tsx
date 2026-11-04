@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
 import { Avatar, MultiPick, UnidadBadge } from '../components';
 import { SortPick, useCollapsed, useFillHeight } from './Board';
+import { Select } from '../Select';
 
 interface Column { value: string; label: string; total: number; records: CrmRecord[] }
 
@@ -111,9 +112,9 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
     <>
       <div className="toolbar">
         <label className="row small" style={{ fontWeight: 600 }}>Agrupar por
-          <select className="input" style={{ width: 240 }} value={prop} onChange={(e) => onProp(e.target.value)} aria-label="Agrupar por">
+          <Select className="input" style={{ width: 240 }} value={prop} onChange={(e) => onProp(e.target.value)} aria-label="Agrupar por">
             {groupable.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
-          </select>
+          </Select>
         </label>
         <div className="search" style={{ width: 220 }}><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
         <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />

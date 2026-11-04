@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams, PROFILE_LABEL, ROLE_LABEL } from '../lib';
 import { FilterRow, Modal, MultiPick, describeFilter, filterableProps, opsFor } from '../components';
+import { Select } from '../Select';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['tags', 'Etiquetas'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
 const TYPES: Array<[string, string]> = [['string', 'Texto corto'], ['text', 'Texto largo'], ['number', 'Número'], ['currency', 'Moneda'], ['date', 'Fecha'], ['datetime', 'Fecha y hora'], ['enum', 'Lista desplegable'], ['multienum', 'Selección múltiple'], ['bool', 'Sí / No'], ['email', 'Email'], ['phone', 'Teléfono'], ['url', 'Link'], ['owner', 'Usuario']];
@@ -37,12 +38,12 @@ function Users() {
   };
   const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', team_id: '' });
   const profileSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
-    <select className={cls} style={{ minWidth: 116 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
-      {Object.entries(PROFILE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+    <Select className={cls} style={{ minWidth: 116 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
+      {Object.entries(PROFILE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
   );
   const roleSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
-    <select className={cls} style={{ minWidth: 124 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Permisos">
-      {Object.entries(ROLE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+    <Select className={cls} style={{ minWidth: 124 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Permisos">
+      {Object.entries(ROLE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
   );
   const patch = async (id: number, body: Record<string, unknown>) => {
     try { await http('PATCH', `/users/${id}`, body); users.reload(); reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
@@ -58,8 +59,8 @@ function Users() {
             <td style={{ maxWidth: 160 }} title={u.name}>{u.name}</td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
             <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }))}</td>
             <td>{u.role === 'admin' ? <span className="small muted">Todo</span> : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
-            <td><select className="input sm" style={{ minWidth: 150, maxWidth: 170 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></td>
+            <td><Select className="input sm" style={{ minWidth: 150, maxWidth: 170 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
+              <option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></td>
             <td style={{ minWidth: 140, maxWidth: 160, overflow: 'visible' }}><MultiPick small options={meta.teams.filter((t) => t.id !== u.team_id).map((t) => ({ value: String(t.id), label: t.name }))}
               values={[...userTeams(u)].filter((t) => t !== u.team_id).map(String)} onChange={(v) => patch(u.id, { extra_teams: v.map(Number) })} /></td>
             <td className="small" style={{ maxWidth: 150, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
@@ -76,7 +77,7 @@ function Users() {
         <label className="field">Email<input className="input" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
         <label className="field">Perfil{profileSelect(f.profile, (v) => setF({ ...f, profile: v }), 'input')}</label>
         {f.profile !== 'admin' && <label className="field">Permisos{roleSelect(f.role, (v) => setF({ ...f, role: v }), 'input')}</label>}
-        <label className="field">Equipo<select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}><option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+        <label className="field">Equipo<Select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}><option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></label>
       </Modal>}
     </>
   );
@@ -91,7 +92,7 @@ function Properties() {
   return (
     <>
       <div className="toolbar">
-        <select className="input" style={{ width: 180 }} value={type} onChange={(e) => setType(e.target.value as ObjectType)}>{(Object.keys(OBJECTS) as ObjectType[]).map((t) => <option key={t} value={t}>{OBJECTS[t].plural}</option>)}</select>
+        <Select className="input" style={{ width: 180 }} value={type} onChange={(e) => setType(e.target.value as ObjectType)}>{(Object.keys(OBJECTS) as ObjectType[]).map((t) => <option key={t} value={t}>{OBJECTS[t].plural}</option>)}</Select>
         <input className="input" style={{ width: 260 }} placeholder="Buscar propiedad…" value={f} onChange={(e) => setF(e.target.value)} />
         <span className="grow" /><button className="btn primary" onClick={() => setEdit('new')}>Crear propiedad</button>
       </div>
@@ -128,7 +129,7 @@ function PropertyEditor({ type, prop, onClose, onSaved }: { type: ObjectType; pr
       <span className="grow" /><button className="btn" onClick={onClose}>Cancelar</button><button className="btn primary" onClick={() => save()}>Guardar</button>
     </>}>
       <label className="field">Etiqueta<input className="input" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></label>
-      <label className="field">Tipo<select className="input" disabled={!!prop} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></label>
+      <label className="field">Tipo<Select className="input" disabled={!!prop} value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select></label>
       <label className="field">Grupo<input className="input" value={f.group_name} onChange={(e) => setF({ ...f, group_name: e.target.value })} /></label>
       <label className="field">Descripción<input className="input" value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} /></label>
       <label className="row small"><input type="checkbox" checked={f.in_create_form} onChange={(e) => setF({ ...f, in_create_form: e.target.checked })} />Mostrar en el formulario de alta</label>
@@ -197,9 +198,9 @@ function Pipelines() {
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row wrap">
-        <select className="input" style={{ width: 300 }} value={selId ?? ''} onChange={(e) => setSelId(e.target.value)} aria-label="Pipeline">
+        <Select className="input" style={{ width: 300 }} value={selId ?? ''} onChange={(e) => setSelId(e.target.value)} aria-label="Pipeline">
           {meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}{p.team_id ? ` · ${meta.teams.find((t) => t.id === p.team_id)?.name ?? ''}` : ''}</option>)}
-        </select>
+        </Select>
         <button className="btn" onClick={() => setCreating(true)}>+ Crear pipeline</button>
         <span className="grow" />
         <button className="btn danger" onClick={async () => {
@@ -213,8 +214,8 @@ function Pipelines() {
       <div className="grid-2">
         <div className="panel"><div className="panel-head"><h2>General</h2></div><div className="panel-body stack">
           <label className="field">Nombre<input className="input" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} /></label>
-          <label className="field">Equipo (arranca en este pipeline)<select className="input" value={draft.team_id ?? ''} onChange={(e) => setDraft({ ...draft, team_id: e.target.value ? Number(e.target.value) : null })}>
-            <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label className="field">Equipo (arranca en este pipeline)<Select className="input" value={draft.team_id ?? ''} onChange={(e) => setDraft({ ...draft, team_id: e.target.value ? Number(e.target.value) : null })}>
+            <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></label>
           <div className="field">Quién lo ve
             <div className="row wrap">
               <label className="row small" style={{ fontWeight: 400 }}><input type="radio" name="vis" checked={!draft.config.visible_teams?.length} onChange={() => setDraft({ ...draft, config: { ...draft.config, visible_teams: [] } })} />Todos</label>
@@ -247,8 +248,8 @@ function Pipelines() {
               <td style={{ whiteSpace: 'nowrap' }}><button className="btn ghost sm" disabled={i === 0} onClick={() => moveStage(i, -1)} aria-label="Subir">↑</button><button className="btn ghost sm" disabled={i === draft.stages.length - 1} onClick={() => moveStage(i, 1)} aria-label="Bajar">↓</button></td>
               <td><input className="input" style={{ minWidth: 200 }} value={s.label} onChange={(e) => setStage(i, { label: e.target.value })} /></td>
               <td><input className="input num" style={{ width: 80 }} type="number" min={0} max={100} value={Math.round(s.probability * 100)} onChange={(e) => setStage(i, { probability: Number(e.target.value) / 100 })} /></td>
-              <td><select className="input" style={{ width: 120 }} value={s.is_closed ? (s.is_won ? 'won' : 'lost') : 'open'} onChange={(e) => setStage(i, { is_closed: e.target.value === 'open' ? 0 : 1, is_won: e.target.value === 'won' ? 1 : 0, probability: e.target.value === 'won' ? 1 : e.target.value === 'lost' ? 0 : s.probability })}>
-                <option value="open">Abierta</option><option value="won">Ganada</option><option value="lost">Perdida</option></select></td>
+              <td><Select className="input" style={{ width: 120 }} value={s.is_closed ? (s.is_won ? 'won' : 'lost') : 'open'} onChange={(e) => setStage(i, { is_closed: e.target.value === 'open' ? 0 : 1, is_won: e.target.value === 'won' ? 1 : 0, probability: e.target.value === 'won' ? 1 : e.target.value === 'lost' ? 0 : s.probability })}>
+                <option value="open">Abierta</option><option value="won">Ganada</option><option value="lost">Perdida</option></Select></td>
               <td style={{ minWidth: 220, overflow: 'visible' }}><MultiPick options={propOpts} values={s.config?.required_props ?? []} onChange={(v) => setStage(i, { config: { ...s.config, required_props: v } })} /></td>
               <td style={{ minWidth: 300 }}><div className="row">
                 <input className="input" placeholder="Ej.: Seguimiento de {negocio}" value={s.config?.task?.subject ?? ''} onChange={(e) => setStage(i, { config: { ...s.config, task: e.target.value ? { ...(s.config?.task ?? {}), subject: e.target.value } : null } })} />
@@ -263,9 +264,9 @@ function Pipelines() {
           <b className="small">Etapas que se borran al guardar</b>
           {removed.map((r, i) => (
             <div key={r.id} className="row small">«{r.label}»: si tiene negocios, pasan a
-              <select className="input sm" style={{ width: 240 }} value={r.move_to} onChange={(e) => setRemoved(removed.map((x, j) => (j === i ? { ...x, move_to: e.target.value } : x)))}>
+              <Select className="input sm" style={{ width: 240 }} value={r.move_to} onChange={(e) => setRemoved(removed.map((x, j) => (j === i ? { ...x, move_to: e.target.value } : x)))}>
                 {draft.stages.filter((s) => !s._new).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
+              </Select>
               <button className="btn ghost sm" onClick={() => { const st = meta.pipelines.find((p) => p.id === draft.id)!.stages.find((x) => x.id === r.id)!; setRemoved(removed.filter((_, j) => j !== i)); setDraft({ ...draft, stages: [...draft.stages, st] }); }}>No borrar</button>
             </div>
           ))}
@@ -292,11 +293,11 @@ function NewPipeline({ onClose, onCreated }: { onClose: () => void; onCreated: (
       }}>Crear</button>
     </>}>
       <label className="field">Nombre<input className="input" autoFocus value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} placeholder="Ej.: Licitaciones" /></label>
-      <label className="field">Equipo<select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}>
-        <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
-      <label className="field">Etapas<select className="input" value={f.copy_from} onChange={(e) => setF({ ...f, copy_from: e.target.value })}>
+      <label className="field">Equipo<Select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}>
+        <option value="">Ninguno</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></label>
+      <label className="field">Etapas<Select className="input" value={f.copy_from} onChange={(e) => setF({ ...f, copy_from: e.target.value })}>
         <option value="">Etapas básicas (oportunidad, cotización, negociación, ganado, perdido)</option>
-        {meta.pipelines.map((p) => <option key={p.id} value={p.id}>Copiar de «{p.label}» (etapas y reglas)</option>)}</select></label>
+        {meta.pipelines.map((p) => <option key={p.id} value={p.id}>Copiar de «{p.label}» (etapas y reglas)</option>)}</Select></label>
     </Modal>
   );
 }
@@ -361,9 +362,9 @@ function Integrations() {
       <div className="panel"><div className="panel-head"><h2>Tokens</h2></div><div className="panel-body stack">
         <div className="row wrap">
           <input className="input" style={{ width: 260 }} placeholder="Nombre (ej. Cowork Rodrigo)" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-          <select className="input" style={{ width: 200 }} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
+          <Select className="input" style={{ width: 200 }} value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })}>
             <option value="mcp">Claude (MCP)</option><option value="darwin">Darwin</option><option value="linkedin">LinkedIn</option><option value="api">API / tableros</option>
-          </select>
+          </Select>
           <button className="btn primary" disabled={!f.name.trim()} onClick={async () => {
             try { const r = await http<{ token: string }>('POST', '/tokens', f); setFresh({ token: r.token, source: f.source }); setF({ name: '', source: f.source }); tokens.reload(); } catch (e) { toast((e as Error).message, true); }
           }}>Crear token</button>
@@ -461,9 +462,9 @@ function OutboundHooks() {
         {list.map((h, i) => (
           <div key={i} className="row wrap">
             <input className="input" style={{ width: 140 }} placeholder="Nombre" value={h.name ?? ''} onChange={(e) => set(i, { name: e.target.value })} />
-            <select className="input" style={{ width: 200 }} value={h.event} onChange={(e) => set(i, { event: e.target.value as Hook['event'] })}>
+            <Select className="input" style={{ width: 200 }} value={h.event} onChange={(e) => set(i, { event: e.target.value as Hook['event'] })}>
               <option value="deal.won">Negocio ganado</option><option value="deal.stage_changed">Cambio de etapa</option>
-            </select>
+            </Select>
             <input className="input grow" style={{ minWidth: 240 }} placeholder="https://…" value={h.url} onChange={(e) => set(i, { url: e.target.value })} />
             <input className="input" style={{ width: 160 }} placeholder="Clave para firmar (opcional)" value={h.secret ?? ''} onChange={(e) => set(i, { secret: e.target.value || undefined })} />
             <button className="btn ghost sm" onClick={() => setDraft(list.filter((_, j) => j !== i))}>Quitar</button>
@@ -544,15 +545,15 @@ function TagEditor({ tag, onClose, onSaved }: { tag: Partial<Tag>; onClose: () =
       <div className="row wrap">
         <label className="field" style={{ flex: 2 }}>Nombre<input className="input" autoFocus value={t.name ?? ''} onChange={(e) => setT({ ...t, name: e.target.value })} /></label>
         <label className="field" style={{ flex: 1 }}>De
-          <select className="input" value={type} onChange={(e) => setT({ ...t, object_type: e.target.value as ObjectType, rule: { groups: [[]], pipelines: [] } })}>
+          <Select className="input" value={type} onChange={(e) => setT({ ...t, object_type: e.target.value as ObjectType, rule: { groups: [[]], pipelines: [] } })}>
             {(['deal', 'company', 'contact', 'order'] as ObjectType[]).map((o) => <option key={o} value={o}>{OBJECTS[o].plural}</option>)}
-          </select>
+          </Select>
         </label>
       </div>
       <div className="field">Color
         <div className="row wrap" style={{ gap: 6 }}>
           {TAG_COLORS.map((c) => <button key={c} type="button" aria-label={`Color ${c}`} className={`swatch${t.color === c ? ' on' : ''}`} style={{ background: c }} onClick={() => setT({ ...t, color: c })} />)}
-          <span className="tag-chip" style={{ background: `${t.color}1a`, color: t.color, borderColor: `${t.color}55` }}>{t.name || 'Vista previa'}</span>
+          <span className="tag-chip" style={{ '--tag': t.color } as CSSProperties}>{t.name || 'Vista previa'}</span>
         </div>
       </div>
       {type === 'deal' && (

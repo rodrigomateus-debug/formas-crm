@@ -7,14 +7,14 @@ import { requireRole, canWrite, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
   archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
-  type Filter, type RecordRow, type SearchParams, UNIDADES } from './records';
+  type CrmRecord, type Filter, type RecordRow, type SearchParams, UNIDADES } from './records';
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { orderProducts } from './productos';
+import { fotosDePedidos, orderProducts } from './productos';
 import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -468,6 +468,13 @@ api.get('/board', async (c) => {
   return c.json({ pipeline, columns });
 });
 
+// Tarjetas de pedidos: hasta 3 fotos de sus productos y cuántos productos tiene (miniaturas del tablero).
+async function conFotos(db: D1Database, type: ObjectType, records: CrmRecord[]) {
+  if (type !== 'order' || !records.length) return records;
+  const f = await fotosDePedidos(db, records.map((r) => r.id));
+  return records.map((r) => (f.get(r.id)?.fotos.length ? { ...r, fotos: f.get(r.id)!.fotos, productos: f.get(r.id)!.productos } : r));
+}
+
 // Etapas de pedido que ya no están activas: entregado y anulado.
 const ORDER_CLOSED = ['1237498998', '3c85a297-e9ce-400b-b42e-9f16853d69d6'];
 
@@ -494,12 +501,12 @@ api.get('/board-prop/:type', async (c) => {
   if (q.value !== undefined) {
     const { results } = await db.prepare(`SELECT r.* FROM records r WHERE ${whereSql} AND COALESCE(CAST(${expr} AS TEXT), '') = ?
       ORDER BY ${order} LIMIT ? OFFSET ?`).bind(...binds, q.value, perColumn, Math.max(0, Number(q.offset) || 0)).all();
-    return c.json({ records: (results as unknown as RecordRow[]).map(rowToRecord) });
+    return c.json({ records: await conFotos(db, type, (results as unknown as RecordRow[]).map(rowToRecord)) });
   }
-  // Pedidos: cuántos siguen activos (ni entregados ni anulados), agrupe por lo que agrupe el tablero.
+  // Pedidos: cuántos siguen activos (ni entregados ni anulados) y cuánto suman sin IVA, agrupe por lo que agrupe el tablero.
   const activosSql = type === 'order'
-    ? db.prepare(`SELECT COUNT(*) AS n FROM records r WHERE ${whereSql} AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?)`).bind(...binds, ...ORDER_CLOSED)
-    : db.prepare('SELECT NULL AS n');
+    ? db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r WHERE ${whereSql} AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?)`).bind(...binds, ...ORDER_CLOSED)
+    : db.prepare('SELECT NULL AS n, NULL AS amount');
   const [cards, totals, activos] = await db.batch([
     db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
       FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`).bind(...binds),
@@ -516,12 +523,15 @@ api.get('/board-prop/:type', async (c) => {
   const known = new Set(options.map((o) => o.value));
   const others = [...counts.keys()].filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v }));
   const rows = cards.results as unknown as Array<RecordRow & { board_value: string | null }>;
+  const recs = await conFotos(db, type, rows.map(rowToRecord));
+  const valueOf = new Map(rows.map((r) => [r.id, r.board_value ?? '']));
   const columns = [...options, ...others, { value: '', label: 'Sin dato' }]
     // Monto de la columna (pedidos: el total sin IVA) y cuántas tarjetas no lo tienen, para el pie de la columna.
     .map((o) => ({ value: o.value, label: o.label, total: counts.get(o.value) ?? 0, amount: tot.get(o.value)?.amount ?? 0, sin_monto: tot.get(o.value)?.sin_monto ?? 0,
-      records: rows.filter((r) => (r.board_value ?? '') === o.value).map(rowToRecord) }))
+      records: recs.filter((r) => valueOf.get(r.id) === o.value) }))
     .filter((col) => col.value !== '' || col.total > 0 || prop.type !== 'owner');
-  return c.json({ prop: { name: prop.name, label: prop.label, type: prop.type }, columns, activos: (activos.results[0] as { n: number | null } | undefined)?.n ?? null });
+  return c.json({ prop: { name: prop.name, label: prop.label, type: prop.type }, columns,
+    activos: (activos.results[0] as { n: number | null } | undefined)?.n ?? null, activos_monto: (activos.results[0] as { amount: number | null } | undefined)?.amount ?? null });
 });
 
 // ---------- Inicio / reportes ----------

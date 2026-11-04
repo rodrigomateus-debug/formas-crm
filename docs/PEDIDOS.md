@@ -68,6 +68,14 @@ El CRM lo guarda con `POST /hooks/pedidos/totales` (token de administrador; `GET
 los que cambiaron, en el historial de la propiedad, sin tocar la fecha de modificación del pedido (así el tablero no se
 reordena). Los anulados no están en el informe y quedan sin monto; el pie de la columna dice cuántos pedidos no tienen.
 
+## Miniaturas de los productos en la tarjeta
+
+Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, la tarjeta muestra hasta 3 fotos de los productos del pedido,
+una al lado de la otra, y «+X» si tiene más productos; un clic abre la vista previa con la lista. Solo aparece si algún
+producto tiene foto (la de su ficha en Finnegans). Los productos de cada pedido se leen de Finnegans (o de los artículos
+del PDV de ClickUp) y quedan guardados; `scripts/pedidos-productos.mjs`, en el mismo workflow que los totales, lee de a
+tandas (`POST /hooks/productos/pendientes`) los que todavía no se leyeron y, una vez por día, los de los pedidos activos.
+
 ## Migración desde HubSpot
 
 Si ClickUp creó un pedido antes de la migración, al migrar se combina con el de HubSpot por número de PDV: queda el de

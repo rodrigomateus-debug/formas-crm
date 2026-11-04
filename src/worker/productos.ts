@@ -13,9 +13,8 @@ const RENGLONES_HORAS = 6;
 const FICHA_DIAS = 30;
 const MONEDA: Record<string, string> = { PES: 'ARS', DOL: 'USD' };
 
-async function refresh(env: Env, recordId: number, pedido: string | null, taskId: string | null): Promise<'finnegans' | 'clickup' | null> {
+async function refresh(env: Env, recordId: number, pedido: string | null, taskId: string | null, b: Budget): Promise<'finnegans' | 'clickup' | null> {
   const db = env.DB;
-  const b = Budget.of(env);
   const token = await finnegansToken(env, b);
   const p = token && pedido ? await finnegansPedidoVenta(env, token, pedido, b) : null;
   const items = p?.Items ?? [];
@@ -61,7 +60,7 @@ async function fichas(env: Env, token: string, all: Array<string | null | undefi
   }
 }
 
-export async function orderProducts(env: Env, recordId: number, props: Record<string, unknown>, opts: { refresh?: boolean } = {}) {
+export async function orderProducts(env: Env, recordId: number, props: Record<string, unknown>, opts: { refresh?: boolean; budget?: Budget } = {}) {
   const db = env.DB;
   const pedido = typeof props.pedido_finnegans === 'string' && /PEDVTA/i.test(props.pedido_finnegans) ? props.pedido_finnegans : null;
   const taskId = String(props.url_clickup ?? '').match(/\/t\/([A-Za-z0-9]+)/)?.[1] ?? null;
@@ -73,9 +72,16 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   if (canRead && stale) {
     let error: string | null = null;
     let source: string | null = null;
-    try { source = await refresh(env, recordId, pedido, taskId); } catch (e) { error = e instanceof OutOfBudget ? null : (e as Error).message; }
-    sync = { fetched_at: new Date().toISOString(), error, source };
-    await db.prepare('INSERT OR REPLACE INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, ?, ?)').bind(recordId, sync.fetched_at, error, source).run();
+    let cortado = false;
+    try { source = await refresh(env, recordId, pedido, taskId, opts.budget ?? Budget.of(env)); } catch (e) {
+      // Si se acabó el tope de consultas a mitad de camino, el pedido queda pendiente (no se marca como leído).
+      if (e instanceof OutOfBudget) cortado = true; else error = (e as Error).message;
+    }
+    if (cortado) { if (opts.budget) throw new OutOfBudget(); }
+    else {
+      sync = { fetched_at: new Date().toISOString(), error, source };
+      await db.prepare('INSERT OR REPLACE INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, ?, ?)').bind(recordId, sync.fetched_at, error, source).run();
+    }
   }
   const { results } = await db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
       li.name AS li_name, li.status, p.name, p.description AS product_description, p.image_url
@@ -91,4 +97,62 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     pedido, configured, clickup: !!taskId, source: sync?.source ?? null, fetched_at: sync?.fetched_at ?? null, error: sync?.error ?? null, items,
     total: items.reduce((t, i) => t + (i.subtotal ?? 0), 0), currency: items[0]?.currency ?? 'ARS', tax_included: items.some((i) => i.tax_included),
   };
+}
+
+// ---------- Productos de todos los pedidos (para las miniaturas de las tarjetas del tablero) ----------
+
+const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
+const ENTREGADO = '1237498998';
+
+// Pedidos cuyos productos todavía no se leyeron (o, si siguen activos, hace más de un día; si falló, hace más de 10
+// minutos). Primero los que nunca se leyeron y los activos. Los anulados no.
+const PENDIENTES_WHERE = `r.object_type = 'order' AND r.archived = 0
+      AND (json_extract(r.props, '$.pedido_finnegans') IS NOT NULL OR json_extract(r.props, '$.url_clickup') IS NOT NULL)
+      AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') != ?1
+      AND (s.record_id IS NULL OR (s.error IS NOT NULL AND s.fetched_at < ?2)
+        OR (COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') != ?3 AND s.fetched_at < ?4))`;
+const pendientesBinds = () => [ANULADO, new Date(Date.now() - 10 * 60_000).toISOString(), ENTREGADO, new Date(Date.now() - 24 * 3600_000).toISOString()];
+
+// Una tanda: tantos pedidos como entren en el tope de consultas de esta corrida (scripts/pedidos-totales.mjs la llama en
+// vueltas hasta que no quedan pendientes).
+export async function cargarProductosPendientes(env: Env, limit = 25) {
+  const b = Budget.of(env);
+  const db = env.DB;
+  const { results } = await db.prepare(`SELECT r.id, r.props FROM records r LEFT JOIN line_item_sync s ON s.record_id = r.id WHERE ${PENDIENTES_WHERE}
+    ORDER BY (s.record_id IS NULL) DESC, (COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') != ?3) DESC, r.updated_at DESC LIMIT ?5`)
+    .bind(...pendientesBinds(), limit).all<{ id: number; props: string }>();
+  let leidos = 0;
+  for (const r of results) {
+    if (b.left() < 12) break;   // un pedido puede pedir varias fichas de producto: no se empieza si no alcanza
+    const t0 = new Date().toISOString();
+    let res;
+    try { res = await orderProducts(env, r.id, JSON.parse(r.props), { refresh: true, budget: b }); } catch (e) { if (e instanceof OutOfBudget) break; throw e; }
+    // Si no había de dónde leerlo (sin pedido de Finnegans ni PDV de ClickUp utilizables), queda como revisado igual.
+    if (!res.fetched_at || res.fetched_at < t0) {
+      await db.prepare(`INSERT INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, NULL, NULL)
+        ON CONFLICT(record_id) DO UPDATE SET fetched_at = excluded.fetched_at`).bind(r.id, new Date().toISOString()).run();
+    }
+    leidos++;
+  }
+  const quedan = await db.prepare(`SELECT COUNT(*) AS n FROM records r LEFT JOIN line_item_sync s ON s.record_id = r.id WHERE ${PENDIENTES_WHERE}`)
+    .bind(...pendientesBinds()).first<{ n: number }>();
+  return { leidos, quedan: quedan?.n ?? 0 };
+}
+
+// Miniaturas de las tarjetas: hasta 3 fotos distintas de los productos de cada pedido y cuántos productos tiene.
+export async function fotosDePedidos(db: D1Database, ids: number[]) {
+  const out = new Map<number, { fotos: string[]; productos: number }>();
+  if (!ids.length) return out;
+  const lista = JSON.stringify(ids);
+  const [cuantos, fotos] = await db.batch([
+    db.prepare('SELECT record_id, COUNT(*) AS n FROM line_items WHERE record_id IN (SELECT value FROM json_each(?)) GROUP BY record_id').bind(lista),
+    db.prepare(`SELECT li.record_id, p.image_url FROM line_items li JOIN products p ON p.code = li.code
+      WHERE li.record_id IN (SELECT value FROM json_each(?)) AND p.image_url IS NOT NULL ORDER BY li.record_id, li.position`).bind(lista),
+  ]);
+  for (const r of cuantos.results as Array<{ record_id: number; n: number }>) out.set(r.record_id, { fotos: [], productos: r.n });
+  for (const r of fotos.results as Array<{ record_id: number; image_url: string }>) {
+    const o = out.get(r.record_id);
+    if (o && o.fotos.length < 3 && !o.fotos.includes(r.image_url)) o.fotos.push(r.image_url);
+  }
+  return out;
 }

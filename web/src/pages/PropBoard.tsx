@@ -42,6 +42,23 @@ function OrderLine({ r }: { r: CrmRecord }) {
   );
 }
 
+// Miniaturas de los productos del pedido (solo si alguno tiene foto): hasta 3, una al lado de la otra, y «+X» si tiene más
+// productos. Un clic abre la vista previa del pedido, con la lista de productos.
+function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
+  const { fotos, productos } = r as CrmRecord & { fotos?: string[]; productos?: number };
+  const [rotas, setRotas] = useState<string[]>([]);
+  const ok = (fotos ?? []).filter((u) => !rotas.includes(u));
+  if (!ok.length) return null;
+  const mas = Math.max(0, (productos ?? ok.length) - ok.length);
+  return (
+    <button type="button" className="card-fotos" title={`Ver ${productos === 1 ? 'el producto' : `los ${productos} productos`}`}
+      aria-label={`Ver los productos de ${r.name}`} onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+      {ok.map((u) => <span key={u} className="thumb"><img src={u} alt="" loading="lazy" draggable={false} onError={() => setRotas((x) => [...x, u])} /></span>)}
+      {mas > 0 && <span className="thumb more">+{mas}</span>}
+    </button>
+  );
+}
+
 // Por qué propiedad se agrupa cada tablero si la vista no dice otra cosa: los pedidos por su etapa, el resto por ciclo de vida.
 export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecyclestage', company: 'lifecyclestage', deal: 'dealstage', order: 'hs_pipeline_stage' };
 
@@ -60,10 +77,11 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const prop = propIn && groupable.some((p) => p.name === propIn) ? propIn
     : groupable.some((p) => p.name === DEFAULT_BOARD_PROP[type]) ? DEFAULT_BOARD_PROP[type] : groupable[0]?.name ?? 'owner_id';
   const params = { prop, q, groups: groups?.length ? groups : undefined, sort, dir };
-  const board = useAsync(() => http<{ columns: Column[]; activos: number | null }>('GET', `/board-prop/${type}${qs(params)}`), [type, prop, q, JSON.stringify(groups ?? []), sort, dir, reloadKey]);
+  const board = useAsync(() => http<{ columns: Column[]; activos: number | null; activos_monto: number | null }>('GET', `/board-prop/${type}${qs(params)}`), [type, prop, q, JSON.stringify(groups ?? []), sort, dir, reloadKey]);
   const [cols, setCols] = useState<Column[]>([]);
   const [activos, setActivos] = useState<number | null>(null);
-  useEffect(() => { if (board.data) { setCols(board.data.columns); setActivos(board.data.activos ?? null); } }, [board.data]);
+  const [montoActivos, setMontoActivos] = useState<number | null>(null);
+  useEffect(() => { if (board.data) { setCols(board.data.columns); setActivos(board.data.activos ?? null); setMontoActivos(board.data.activos_monto ?? null); } }, [board.data]);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
@@ -75,7 +93,6 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const conMonto = type === 'order';
   // Pedidos agrupados por etapa: cada columna con el ícono y el color suave de su etapa.
   const etapa = (v: string) => (type === 'order' && prop === 'hs_pipeline_stage' ? etapaPedidoSlug(v) : undefined);
-  const totalMonto = cols.reduce((n, c) => n + (c.amount ?? 0), 0);
   const activo = (stage: string) => ![ENTREGADO, ANULADO].includes(stage);
   const montoDe = (r: CrmRecord) => { const v = r.props.hs_total_price; return v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null; };
   useEffect(() => { if (board.data) onTotal?.(total); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [total, board.data]);
@@ -86,7 +103,11 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
     if (!from || !rec || from.value === to.value) return;
     const m = montoDe(rec);
     // Al mover entre etapas, un pedido puede dejar de estar activo (entregado, anulado) o volver a estarlo.
-    if (type === 'order' && prop === 'hs_pipeline_stage') setActivos((n) => (n == null ? n : n + (activo(to.value) ? 1 : 0) - (activo(from.value) ? 1 : 0)));
+    if (type === 'order' && prop === 'hs_pipeline_stage') {
+      const d = (activo(to.value) ? 1 : 0) - (activo(from.value) ? 1 : 0);
+      setActivos((n) => (n == null ? n : n + d));
+      setMontoActivos((n) => (n == null ? n : n + d * (m ?? 0)));
+    }
     setCols((cs) => cs.map((c) => (c.value === from.value ? { ...c, records: c.records.filter((r) => r.id !== id), total: c.total - 1, amount: c.amount - (m ?? 0), sin_monto: c.sin_monto - (m == null ? 1 : 0) }
       : c.value === to.value ? { ...c, records: [{ ...rec, props: { ...rec.props, [prop]: to.value } }, ...c.records], total: c.total + 1, amount: c.amount + (m ?? 0), sin_monto: c.sin_monto + (m == null ? 1 : 0) } : c)));
     try {
@@ -139,7 +160,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
         {board.loading && <span className="muted small">Actualizando…</span>}
         <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero
           {activos != null && <><span className="sep">·</span><b className="num" title="Ni entregados ni anulados">{activos.toLocaleString('es-AR')}</b> {activos === 1 ? 'activo' : 'activos'}</>}
-          {conMonto && <><span className="sep">·</span>Total sin IVA <b className="num" title={fmtMoneyExact(totalMonto, 'ARS')}>{fmtMoney(totalMonto, 'ARS') || '$ 0'}</b></>}</span>
+          {/* Arriba, el total de los activos (lo que está en curso); el de cada etapa va abajo de su columna. */}
+          {conMonto && montoActivos != null && <><span className="sep">·</span>Total activos sin IVA <b className="num" title={fmtMoneyExact(montoActivos, 'ARS')}>{fmtMoney(montoActivos, 'ARS') || '$ 0'}</b></>}</span>
       </div>
       <div className={`board${boardStyle ? ' fill' : ''}`} ref={boardRef} style={boardStyle}>
         {cols.map((c) => (collapsed.has(c.value) ? (
@@ -174,6 +196,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
                       ? cardProps.map((k) => { const v = formatValue(meta, type, k, r.props[k], r.props); return v ? <div key={k} className="meta" title={propOf(meta, type, k)?.label}><span className="ellipsis">{v}</span></div> : null; })
                       : subtitle(r) && <div className="meta"><span className="ellipsis">{subtitle(r)}</span></div>}
                     {type === 'order' && !cardProps?.length && <OrderLine r={r} />}
+                    {type === 'order' && <Fotos r={r} onOpen={() => onOpen?.(r.id)} />}
                     <div className="meta">
                       <Avatar name={userName(meta, r.props.owner_id) || '—'} />
                       <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>

@@ -11,6 +11,7 @@ import { avisosConfig, correrAvisos } from './avisos';
 import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from './clientes';
 import { refrescarFce } from './facturar';
 import { aplicarTotales } from './totales';
+import { cargarProductosPendientes } from './productos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -232,6 +233,13 @@ hooks.get('/pedidos/totales', async (c) => {
   await adminToken(c.env, c.req.raw);
   const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'totales_pedidos'").first<{ value: string }>();
   return c.json(r ? JSON.parse(r.value) : null);
+});
+
+// Productos de los pedidos que todavía no se leyeron (para las miniaturas de las tarjetas): una tanda por llamada,
+// la que entre en el tope de consultas. Devuelve cuántos leyó y cuántos quedan.
+hooks.post('/productos/pendientes', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
 });
 
 // La lista de empresas grandes de ARCA (Factura de Crédito Electrónica): se baja sola una vez por día; esto la trae ya.

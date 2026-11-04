@@ -380,7 +380,7 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .preview-sum { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; }
 .preview-sum .input.select-like { height: 30px; font-size: 13px; width: auto; max-width: 100%; display: inline-flex; }
-.act-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--ui-ink-2); background: none; border: 0; cursor: pointer; width: 50px; padding: 0; }
+.act-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--ui-ink-2); background: none; border: 0; cursor: pointer; width: 56px; padding: 0; white-space: nowrap; }
 .act-btn span.ic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--ui-line-strong); display: grid; place-items: center; background: var(--ui-surface); color: var(--accent-ink);
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .act-btn:hover span.ic { border-color: var(--accent-ink); background: var(--accent-soft); }
@@ -647,3 +647,11 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 [data-theme="dark"] .col-head.etapa-col, [data-theme="dark"] .col.collapsed.etapa-col { background: color-mix(in srgb, var(--e) 16%, var(--ui-surface-sunken)); }
 [data-theme="contrast"] .etapa { color: color-mix(in srgb, var(--e) 55%, #000); box-shadow: inset 0 0 0 1px currentColor; }
 [data-theme="contrast"] .etapa-ic { color: color-mix(in srgb, var(--e) 55%, #000); }
+
+/* Miniaturas de los productos en la tarjeta del pedido: hasta 3 y «+X»; las fotos van sobre blanco, como en la ficha. */
+.card-fotos { display: flex; gap: 6px; align-items: center; padding: 0; margin: 2px 0; border: 0; background: none; cursor: pointer; align-self: flex-start; border-radius: var(--r-control); }
+.card-fotos .thumb { width: 40px; height: 40px; flex: none; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-control);
+  border: 1px solid var(--ui-line); background: var(--image-well); transition: border-color var(--dur) var(--ease); }
+.card-fotos .thumb img { width: 100%; height: 100%; object-fit: contain; }
+.card-fotos .thumb.more { background: var(--ui-surface-sunken); color: var(--ui-ink-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card-fotos:hover .thumb { border-color: var(--accent-ink); }

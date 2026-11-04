@@ -783,7 +783,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Celular', record.props.mobilephone || record.props.phone || '—'],
     ['Propietario', userName(meta, record.props.owner_id) || '—'],
   ] : [
-    ['Total', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
+    ['Total sin IVA', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
     ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],
     ['Tipo', record.props.tipo_de_pedido || '—'],
     ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],

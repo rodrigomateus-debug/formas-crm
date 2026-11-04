@@ -269,4 +269,15 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   const porDueño = (await api('GET', `/board-prop/order?prop=owner_id&groups=${groups}`)).data;
   assert.equal(porDueño.activos, board.activos, 'agrupe por lo que agrupe');
   assert.equal((await api('GET', '/board-prop/company?prop=lifecyclestage')).data.activos, null, 'solo en pedidos');
+  const enCurso = board.columns.filter((c) => !cerradas.includes(c.value)).flatMap((c) => c.records).reduce((n, rec) => n + Number(rec.props.hs_total_price ?? 0), 0);
+  assert.equal(board.activos_monto, enCurso, 'el total de arriba suma solo los activos');
+  // Miniaturas: el pedido A tiene 2 productos y uno con foto (ver «Productos» más arriba).
+  const cardA = board.columns.flatMap((c) => c.records).find((rec) => rec.id === a.id);
+  assert.deepEqual(cardA.fotos, ['https://www.promoproductos.com/upload/bolsa.jpg']);
+  assert.equal(cardA.productos, 2);
+  const cardB = board.columns.flatMap((c) => c.records).find((rec) => rec.id === b.id);
+  assert.equal(cardB.fotos, undefined, 'sin fotos, sin miniaturas');
+  // Carga en tandas de los productos de los pedidos que no se leyeron.
+  const tanda = (await api('POST', '/hooks/productos/pendientes?limit=5', {}, H)).data;
+  assert.ok(Number.isInteger(tanda.leidos) && Number.isInteger(tanda.quedan), JSON.stringify(tanda));
 });

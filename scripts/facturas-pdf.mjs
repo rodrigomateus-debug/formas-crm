@@ -19,10 +19,17 @@ const EMPRESA_ID = { EMPRE01: 16 };
 if (!CRM || !TOKEN) { console.error('Faltan CRM_URL y CRM_TOKEN.'); process.exit(1); }
 const crm = (path, init = {}) => fetch(`${CRM}${path}`, { ...init, headers: { authorization: `Bearer ${TOKEN}`, ...(init.headers ?? {}) } });
 
-const res = await crm('/hooks/facturas/pendientes');
-if (!res.ok) { console.error(`CRM: HTTP ${res.status} ${await res.text()}`); process.exit(1); }
-const pending = (await res.json()).filter((f) => f.transaccion_id && EMPRESA_ID[f.empresa ?? 'EMPRE01']);
-console.log(`${pending.length} facturas sin PDF.`);
+// Las pendientes, de a 100. La corrida sigue hasta bajarlas todas (o hasta 20 minutos): GitHub a veces saltea corridas
+// programadas y, de a 50 por corrida, se acumulaban.
+const saltear = new Set();   // las que Finnegans no devolvió en esta corrida
+async function pendientes() {
+  const res = await crm('/hooks/facturas/pendientes?limit=100');
+  if (!res.ok) { console.error(`CRM: HTTP ${res.status} ${await res.text()}`); process.exit(1); }
+  const total = Number(res.headers.get('x-total') ?? 0);
+  return { total, list: (await res.json()).filter((f) => f.transaccion_id && EMPRESA_ID[f.empresa ?? 'EMPRE01'] && !saltear.has(f.id)) };
+}
+let { total, list: pending } = await pendientes();
+console.log(`${total || pending.length} facturas sin PDF.`);
 if (!pending.length) process.exit(0);
 if (!USER || !PASS) { console.error('Faltan FINNEGANS_GO_USUARIO y FINNEGANS_GO_PASSWORD.'); process.exit(1); }
 
@@ -43,16 +50,20 @@ await page.waitForTimeout(15000);
 const frame = page.frames().map((f) => f.url()).find((u) => u.includes('/BSA/'));
 const host = frame ? new URL(frame).host : 'oneteam.finneg.com';
 
-let ok = 0;
+let ok = 0, fallidas = 0;
+const hasta = Date.now() + 20 * 60_000;
+while (pending.length && Date.now() < hasta) {
 for (const f of pending) {
   const url = `https://${host}/BSA/Sr2?XMLFILE=FacturaSF.jrxml&DATASOURCE=SOUTEXVF_0240&primaryKey=${f.transaccion_id}`
     + `&MULTIREPORTPARAMS=FacturaSF.jrxml%7CSOUTEXVF_0240%7CFACTURA%20DE%20VENTA%20FP%7C1%7C&EMPRESAIDTRANSACCION=${EMPRESA_ID[f.empresa ?? 'EMPRE01']}`;
   const pdf = await ctx.request.get(url);
   const body = await pdf.body();
-  if (!pdf.ok() || body.subarray(0, 5).toString() !== '%PDF-') { console.error(`${f.numero}: Finnegans no devolvió el PDF (HTTP ${pdf.status()}).`); continue; }
+  if (!pdf.ok() || body.subarray(0, 5).toString() !== '%PDF-') { console.error(`${f.numero}: Finnegans no devolvió el PDF (HTTP ${pdf.status()}).`); saltear.add(f.id); fallidas++; continue; }
   const up = await crm(`/hooks/facturas/${f.id}/pdf`, { method: 'PUT', headers: { 'content-type': 'application/pdf' }, body });
-  if (up.ok) { ok++; console.log(`${f.numero}: listo (${body.length} bytes).`); } else console.error(`${f.numero}: el CRM respondió ${up.status} ${await up.text()}`);
+  if (up.ok) { ok++; console.log(`${f.numero}: listo (${body.length} bytes).`); } else { console.error(`${f.numero}: el CRM respondió ${up.status} ${await up.text()}`); saltear.add(f.id); fallidas++; }
+}
+({ list: pending } = await pendientes());
 }
 await browser.close();
-console.log(`${ok} de ${pending.length} PDF subidos.`);
-process.exit(ok === pending.length ? 0 : 1);
+console.log(`${ok} PDF subidos${fallidas ? `, ${fallidas} no se pudieron bajar` : ''}${pending.length ? `; quedan ${pending.length} para la próxima corrida` : ''}.`);
+process.exit(fallidas ? 1 : 0);

@@ -159,7 +159,10 @@ async function adminToken(env: Env, req: Request) {
 }
 hooks.get('/facturas/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
-  const { results } = await c.env.DB.prepare("SELECT id, name, meta FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL ORDER BY id LIMIT 50").all<{ id: number; name: string; meta: string }>();
+  const limit = Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 200);
+  const { results } = await c.env.DB.prepare("SELECT id, name, meta FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL ORDER BY id LIMIT ?").bind(limit).all<{ id: number; name: string; meta: string }>();
+  const total = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL").first<{ n: number }>();
+  c.header('x-total', String(total?.n ?? results.length));
   return c.json(results.map((f) => { const m = JSON.parse(f.meta || '{}'); return { id: f.id, name: f.name, transaccion_id: m.transaccion_id, empresa: m.empresa, numero: m.numero }; }));
 });
 // Estado de las conexiones de los pedidos (lo mismo que Configuración → Integraciones), para revisarlo con un token.

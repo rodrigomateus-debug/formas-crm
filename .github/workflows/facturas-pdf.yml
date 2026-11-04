@@ -5,12 +5,19 @@ name: Facturas de pedidos (PDF)
 
 on:
   schedule:
-    - cron: '17 11-22 * * 1-5'   # cada hora, de 8 a 19 de Buenos Aires, de lunes a viernes
+    # Cada media hora de 8 a 19 de Buenos Aires, de lunes a viernes. GitHub a veces saltea corridas programadas: cada
+    # corrida baja todas las pendientes, así una sola alcanza para ponerse al día.
+    - cron: '17,47 11-22 * * 1-5'
   workflow_dispatch:
+
+concurrency:
+  group: facturas-pdf
+  cancel-in-progress: false
 
 jobs:
   pdf:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: vars.CRM_URL != ''
     steps:
       - uses: actions/checkout@v4

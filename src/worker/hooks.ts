@@ -229,6 +229,14 @@ hooks.post('/arca/fce', async (c) => {
   return c.json(await refrescarFce(c.env));
 });
 
+// Lo que el CRM le mandó a ClickUp (pedidos que pasaron a «pdv»): lo último, con su resultado o error.
+hooks.get('/clickup/salida', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const { results } = await c.env.DB.prepare(`SELECT s.id, s.record_id, r.name AS pedido, s.action, s.created_at, s.done_at, s.attempts, s.result, s.error
+    FROM clickup_salida s LEFT JOIN records r ON r.id = s.record_id ORDER BY s.id DESC LIMIT 50`).all();
+  return c.json(results);
+});
+
 // Avisos por mail: configuración, estado y envío a pedido (`?resumen=1` manda el resumen de tareas aunque no sea la hora).
 hooks.get('/avisos', async (c) => {
   await adminToken(c.env, c.req.raw);

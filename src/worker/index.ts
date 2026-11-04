@@ -11,7 +11,7 @@ import { migrate } from './migrate';
 import { syncAll } from './gmail';
 import { correrAvisos } from './avisos';
 import { Budget } from './budget';
-import { syncClickup } from './clickup';
+import { procesarSalidaClickup, syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
@@ -90,6 +90,7 @@ export default {
         // Primero los avisos por mail (pocos y con hora), después la lectura de Gmail con lo que quede del tope.
         const b = Budget.of(env);
         await safe(() => correrAvisos(env, b));
+        await safe(() => procesarSalidaClickup(env, b));   // lo que quedó pendiente para ClickUp (pedidos a «pdv»)
         await safe(() => syncAll(env, b));
       }
       else {

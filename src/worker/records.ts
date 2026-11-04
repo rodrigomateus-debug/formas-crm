@@ -398,6 +398,11 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   await db.batch(stmts);
   if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
+  // La vendedora pasó el pedido a «Listo para producción»: en ClickUp, el PDV pasa de «ingreso de pedido» a «pdv».
+  if (type === 'order' && changed.includes('hs_pipeline_stage') && String(current.hs_pipeline_stage ?? ORDER_CONFIRMED) === ORDER_CONFIRMED
+    && next.hs_pipeline_stage === ORDER_READY && !opts.system && ['crm', 'mcp', 'api'].includes(ctx.source)) {
+    await db.prepare("INSERT INTO clickup_salida (record_id, action, user_id) VALUES (?, 'pasar_a_pdv', ?)").bind(id, ctx.user.id).run();
+  }
   if (type === 'deal' && stageMoved) {
     const st = (await meta.stage(next.dealstage as string))!;
     await stageAutomation(db, ctx, id, st, c.owner_id, c.name);

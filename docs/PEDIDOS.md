@@ -5,7 +5,12 @@ comerciales para saber dónde están sus pedidos, y que se adjunten solos la fac
 remito (cuando lo cargan en ClickUp al entregar). Las vendedoras solo mueven el pedido de «Pedido confirmado» a «Listo
 para producción»; lo demás lo mueve ClickUp.
 
-**ClickUp y Finnegans solo se leen.** Nada de esto escribe en ellos.
+**Finnegans solo se lee. De ClickUp se lee todo y se escribe una sola cosa** (pedido de Rodrigo del 4/11/2026): cuando la
+vendedora pasa el pedido de «Pedido confirmado» a «Listo para producción» (en la pantalla, en masa o desde Claude), el PDV y
+sus artículos que siguen en «ingreso de pedido» pasan a «pdv» en ClickUp. Lo que ya avanzó no se toca. El pedido queda en
+la cola `clickup_salida` y sale enseguida; si ClickUp falla, se reintenta cada 10 minutos (hasta 6 veces). Con token de
+administrador, `GET /hooks/clickup/salida` muestra lo último que se mandó y si hubo errores. Los cambios en ClickUp
+quedan a nombre del dueño del token `CLICKUP_TOKEN`.
 
 ## De dónde sale cada cosa
 

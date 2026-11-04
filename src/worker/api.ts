@@ -1,3 +1,4 @@
+import { procesarSalidaClickup } from './clickup';
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType } from './env';
@@ -195,6 +196,8 @@ api.patch('/records/:type/:id', async (c) => {
   const body = await c.req.json<{ props: Record<string, unknown> }>();
   if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, Number(c.req.param('id')), type)).pipeline_id);
   const row = await updateRecord(c.env.DB, ctx, type, Number(c.req.param('id')), body.props ?? {});
+  // Si el pedido pasó a «Listo para producción», el cambio en ClickUp sale enseguida (sin demorar la respuesta).
+  if (type === 'order' && 'hs_pipeline_stage' in (body.props ?? {})) c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
   return c.json(rowToRecord(row));
 });
 
@@ -250,6 +253,7 @@ api.post('/records/:type/batch', async (c) => {
       failed.push({ id, name, error: err.message, ...(err.missing ? { missing: err.missing } : {}) });
     }
   }
+  if (type === 'order' && body.props && 'hs_pipeline_stage' in body.props) c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
   return c.json({ updated, tasks, failed });
 });
 

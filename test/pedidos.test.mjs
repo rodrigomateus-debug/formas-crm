@@ -37,7 +37,7 @@ const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.no
     text_content: `PDV - ${npdv}\nProducto: Taza ${i}\nCantidad: 1.000\nCódigo: TAZA\\_${i}`, custom_fields: [field('CANTIDAD ', '150', 'number')] })),
   attachments,
 });
-const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false };
+const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false, puts: [] };
 const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`, true);
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
@@ -50,6 +50,13 @@ before(async () => {
     hits++;
     const send = (b, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
     const p = decodeURIComponent(url.pathname);
+    // Lo único que el CRM escribe en ClickUp: el estado de las tareas («ingreso de pedido» → «pdv»).
+    if (req.method === 'PUT' && p.startsWith('/clickup/task/')) {
+      let body = '';
+      req.on('data', (ch) => { body += ch; });
+      req.on('end', () => { cu.puts.push({ id: p.slice(14), status: JSON.parse(body || '{}').status }); send({ id: p.slice(14) }); });
+      return;
+    }
     if (p === '/clickup/list/901326159292/task') {
       const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']), pdvC(),
         ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER))].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
@@ -126,6 +133,9 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '1237498994' } })).status, 403, 'no a En producción');
   assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '3725360f-519b-4b18-a593-494d60a29c9f' } })).status, 200);
   asUser = null;
+  // En ClickUp, lo que seguía en «ingreso de pedido» pasa a «pdv» (el artículo 0); lo que ya estaba en «pdv» no se toca.
+  for (let i = 0; i < 30 && !cu.puts.length; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(cu.puts, [{ id: 'cuA-0', status: 'pdv' }]);
 
   // 3. El estado sale de los artículos.
   cu.statuses = ['en el impresor', 'boceto pendiente'];

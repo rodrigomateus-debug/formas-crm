@@ -126,6 +126,50 @@ export async function articulosDelPdv(env: Env, taskId: string, b?: Budget): Pro
   return out;
 }
 
+// ---------- Lo que el CRM escribe en ClickUp ----------
+// Solo esto, por pedido de Rodrigo (4/11/2026): al pasar el pedido a «Listo para producción», el PDV y sus artículos que
+// siguen en «ingreso de pedido» pasan a «pdv». Lo que ya avanzó no se toca.
+const INGRESO = 'ingreso de pedido';
+const PDV_STATUS = 'pdv';
+
+export async function pasarAPdv(env: Env, taskId: string, b?: Budget) {
+  const t = await cu<CuTask>(env, `/task/${encodeURIComponent(taskId)}`, { include_subtasks: 'true' }, b);
+  let movidas = 0;
+  for (const x of [t, ...(t.subtasks ?? [])]) {
+    if ((x.status?.status ?? '').toLowerCase().trim() !== INGRESO) continue;
+    b?.take();
+    const res = await fetch(`${API(env)}/task/${encodeURIComponent(x.id)}`, {
+      method: 'PUT', headers: { Authorization: env.CLICKUP_TOKEN!, 'content-type': 'application/json' }, body: JSON.stringify({ status: PDV_STATUS }),
+    });
+    if (!res.ok) throw new Error(`ClickUp no cambió el estado de ${x.name}: HTTP ${res.status}`);
+    movidas++;
+  }
+  return movidas;
+}
+
+export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)) {
+  if (!env.CLICKUP_TOKEN) return { skipped: 'Falta CLICKUP_TOKEN.' };
+  const db = env.DB;
+  const { results } = await db.prepare(`SELECT s.id, s.record_id, s.action, json_extract(r.props, '$.url_clickup') AS url FROM clickup_salida s
+    JOIN records r ON r.id = s.record_id WHERE s.done_at IS NULL AND s.attempts < 6 ORDER BY s.id LIMIT 10`).all<{ id: number; record_id: number; action: string; url: string | null }>();
+  let hechas = 0;
+  for (const row of results) {
+    if (b.left() < 6) break;
+    const taskId = String(row.url ?? '').match(/\/t\/([A-Za-z0-9]+)/)?.[1];
+    try {
+      if (!taskId) throw new Error('El pedido no tiene PDV de ClickUp.');
+      const n = await pasarAPdv(env, taskId, b);
+      await db.prepare('UPDATE clickup_salida SET done_at = ?, result = ?, error = NULL, attempts = attempts + 1 WHERE id = ?')
+        .bind(new Date().toISOString(), JSON.stringify({ movidas: n }), row.id).run();
+      hechas++;
+    } catch (e) {
+      if (e instanceof OutOfBudget) break;
+      await db.prepare('UPDATE clickup_salida SET error = ?, attempts = attempts + 1 WHERE id = ?').bind((e as Error).message.slice(0, 300), row.id).run();
+    }
+  }
+  return { hechas, pendientes: results.length - hechas };
+}
+
 // Datos del PDV que necesita el pedido.
 export function readPdv(t: CuTask) {
   const f = fields(t);

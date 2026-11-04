@@ -32,7 +32,7 @@ export default function Tasks() {
     list.reload();
   };
   return (
-    <div className="content">
+    <div className="content list-fixed">
       <div className="page-head"><h1>Tareas</h1>
         <select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
           <option value={String(meta.me.id)}>Mis tareas</option>

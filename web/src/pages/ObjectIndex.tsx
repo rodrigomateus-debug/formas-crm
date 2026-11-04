@@ -205,7 +205,8 @@ function IndexFor({ type }: { type: ObjectType }) {
   };
 
   return (
-    <div className="content">
+    // En la tabla, la lista ocupa el alto que queda y se desplaza adentro, con sus dos barras siempre a mano (como HubSpot).
+    <div className={`content${mode === 'table' ? ' list-fixed' : ''}`}>
       <div className="page-head">
         {type === 'deal' ? (
           <div className="pipe-head">

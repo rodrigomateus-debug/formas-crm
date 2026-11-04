@@ -94,7 +94,7 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .tag { display: inline-block; padding: 1px 8px; border-radius: var(--r-pill); font-size: 12px; background: var(--sunken); color: var(--ink-2); }
 .tag.ok { background: var(--ok-soft); color: var(--ok); } .tag.bad { background: var(--bad-soft); color: var(--bad); }
 .tag.warn { background: var(--warn-soft); color: var(--warn); } .tag.info { background: var(--info-soft); color: var(--info); }
-.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; overflow-y: hidden; }
 .tab { padding: 8px 12px; border: 0; background: none; cursor: pointer; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
 .tab:hover { color: var(--ink); }
 .tab.on { color: var(--navy); border-bottom-color: var(--navy); font-weight: 600; }
@@ -367,7 +367,7 @@ table.grid td .tag-chips { margin-top: 0; flex-wrap: nowrap; }
 .swatch.on { border-color: var(--ink); box-shadow: 0 0 0 2px var(--surface) inset; }
 
 /* Tabla: casilla y nombre fijos al desplazar a los costados; menú ⋮ en cada encabezado. */
-table.grid th.check, table.grid td.check { position: sticky; left: 0; z-index: 2; }
+table.grid th.check, table.grid td.check { position: sticky; left: 0; z-index: 2; width: 36px; min-width: 36px; max-width: 36px; box-sizing: border-box; }
 table.grid th.namecol, table.grid td.name { position: sticky; left: 36px; z-index: 1; box-shadow: 1px 0 0 var(--line); }
 table.grid th.check { z-index: 4; }
 table.grid th.namecol { z-index: 3; }
@@ -394,3 +394,20 @@ table.grid th .col-menu:hover { background: var(--line); color: var(--navy); }
 .fact-row.bad { color: var(--bad, #b42318); font-weight: 600; }
 .fact-row.warn { color: #9a5b00; }
 .fact-row.ok { color: var(--muted, #5b6472); }
+
+/* Lista en tabla con alto fijo: encabezados, vistas y filtros quedan arriba; la tabla ocupa el resto de la pantalla y
+   se desplaza adentro, para los costados y para abajo, con el paginado siempre visible (como HubSpot). En el celular la
+   página se desplaza entera. */
+@media (min-width: 861px) {
+  .content.list-fixed { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 6px; }
+  .content.list-fixed > * { flex: none; }
+  .content.list-fixed > .table-wrap { flex: 1 1 auto; min-height: 200px; }
+  .content.list-fixed > .pager { padding-bottom: 4px; }
+}
+/* Barras de desplazamiento visibles en la tabla (en Mac se esconden si no se fuerzan). */
+.table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }
+.table-wrap::-webkit-scrollbar-track { background: var(--sunken); }
+.table-wrap::-webkit-scrollbar-thumb { background: #c3c7d4; border-radius: 8px; border: 3px solid var(--sunken); }
+.table-wrap::-webkit-scrollbar-thumb:hover { background: #9aa0b4; }
+.table-wrap::-webkit-scrollbar-corner { background: var(--sunken); }
+.table-wrap { scrollbar-color: #c3c7d4 var(--sunken); }

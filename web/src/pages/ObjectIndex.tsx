@@ -3,29 +3,29 @@ import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline, TagChips,
-  type Activity, type CrmRecord, type Filter, type ObjectType,
+  type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
-import { EstadoCliente } from '../components';
+import { EstadoCliente, UnidadBadge } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
 const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
-  contact: ['email', 'phone', '__company', 'owner_id', 'lifecyclestage', 'notes_last_updated', 'createdate'],
-  company: ['domain', 'owner_id', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
-  deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', 'notes_last_updated', 'createdate'],
-  order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'createdate'],
+  contact: ['email', 'phone', '__company', 'owner_id', '__unidad', 'lifecyclestage', 'notes_last_updated', 'createdate'],
+  company: ['domain', 'owner_id', '__unidad', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
+  deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
 };
 
 // `owner` es de las vistas viejas (un solo propietario); ahora van `owners` (varios) y `dates` (filtros rápidos de fecha).
 interface ViewConfig {
-  q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[];
+  q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[]; unidades?: string[];
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string; cardProps?: string[];
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
@@ -106,13 +106,13 @@ function IndexFor({ type }: { type: ObjectType }) {
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
 
   useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.sort, cfg.dir, pipelineSel, mode]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.sort, cfg.dir, pipelineSel, mode]);
 
   // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
   const viewGroups = useMemo(() => {
-    const quick = quickFilters(cfg.owners, cfg.dates, cfg.tags);
+    const quick = quickFilters(cfg.owners, cfg.dates, cfg.tags, cfg.unidades);
     return (cfg.groups.length ? cfg.groups : [[]]).map((g) => [...g, ...quick]).filter((g) => g.length);
-  }, [cfg.groups, cfg.owners, cfg.dates, cfg.tags]);
+  }, [cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades]);
   // La tabla además filtra por el pipeline elegido.
   const groups = useMemo(() => {
     const pipe: Filter[] = type === 'deal' && pipelineSel !== 'all' ? [{ prop: 'pipeline', op: 'eq', value: pipelineSel }] : [];
@@ -139,26 +139,26 @@ function IndexFor({ type }: { type: ObjectType }) {
       if (pipe) p.set('pipeline', pipe);
       return p;
     }, { replace: true });
-    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: [], dates: {}, tags: [] }));
-    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: ['me'], dates: {}, tags: [] }));
-    else if (v) { setCfg(withOwners({ ...loadLocal(type), owners: [], dates: {}, tags: [], ...v.config })); setQ(v.config.q ?? ''); }
+    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: [], dates: {}, tags: [], unidades: [] }));
+    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: ['me'], dates: {}, tags: [], unidades: [] }));
+    else if (v) { setCfg(withOwners({ ...loadLocal(type), owners: [], dates: {}, tags: [], unidades: [], ...v.config })); setQ(v.config.q ?? ''); }
   };
   // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
   const current: ViewConfig = {
-    q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], mode,
+    q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], unidades: cfg.unidades ?? [], mode,
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   // Lo recién guardado vale enseguida (la barra se va al guardar, sin esperar a que se recarguen las vistas).
   const [justSaved, setJustSaved] = useState<Record<string, ViewConfig>>({});
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
-    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), c.mode ?? base.mode,
+    c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), [...(c.unidades ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '',
   ]);
   const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
-  const filtersChanged = (activeView === 'all' || activeView === 'mine') && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? []])
-    !== JSON.stringify([[], activeView === 'mine' ? ['me'] : [], {}, []]);
+  const filtersChanged = (activeView === 'all' || activeView === 'mine') && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? [], cfg.unidades ?? []])
+    !== JSON.stringify([[], activeView === 'mine' ? ['me'] : [], {}, [], []]);
   const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
   const saveView = async () => {
     if (!activeSaved) return;
@@ -175,7 +175,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     const prop = col === '__name' ? (type === 'contact' || type === 'company' ? 'name' : OBJECTS[type].nameProp) : col;
     setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
   };
-  const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : propOf(meta, type, col)?.label ?? col;
+  const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : col === '__unidad' ? 'Unidad de negocio' : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
   const [patched, setPatched] = useState<Record<number, CrmRecord>>({});
@@ -184,9 +184,10 @@ function IndexFor({ type }: { type: ObjectType }) {
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   const quickBar = (
-    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} extra={cfg.groups.length > 0}
+    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
-      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], groups: [] }))} />
+      onUnidades={(unidades) => setCfg((c) => ({ ...c, unidades }))}
+      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [] }))} />
   );
   const filterButton = <button className={`btn${mode === 'board' ? ' sm' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
   const filterChips = (
@@ -309,6 +310,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                   {columns.map((col) => (col === '__company'
                     ? <td key={col}>{r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>}</td>
                     : col === '__tags' ? <td key={col}><TagChips meta={meta} ids={r.tags} small />{!r.tags?.length && <span className="muted">—</span>}</td>
+                    : col === '__unidad' ? <td key={col}><Unidades keys={unidadesDe(meta, type, r.props)} /></td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
               ))}
@@ -338,6 +340,10 @@ function IndexFor({ type }: { type: ObjectType }) {
   );
 }
 
+function Unidades({ keys }: { keys: UnidadKey[] }) {
+  return keys.length ? <span className="unidades">{keys.map((k) => <UnidadBadge key={k} k={k} />)}</span> : <span className="muted">—</span>;
+}
+
 // Edición en la celda, como en HubSpot: el lápiz (o doble clic) abre el campo. Los desplegables guardan al elegir;
 // el resto con Guardar o Enter. Quien es de solo lectura no ve el lápiz (y el servidor tampoco lo deja).
 function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: CrmRecord; col: string; onSaved: (r: CrmRecord) => void }) {
@@ -347,7 +353,8 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   const [at, setAt] = useState<DOMRect | null>(null);
   const [val, setVal] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
-  const shown = formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
+  const shown = col === 'unidad_de_negocio' && unidadesDe(meta, 'order', record.props).length ? <Unidades keys={unidadesDe(meta, 'order', record.props)} />
+    : formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
   if (col === 'estado_cliente' && record.props[col]) return <td><EstadoCliente value={String(record.props[col])} /></td>;
   if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td>{shown}</td>;
   const instant = ['owner', 'enum', 'bool'].includes(prop.type) || col === 'dealstage';
@@ -460,6 +467,7 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
   const options = [
     ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
     ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
+    ...(type !== 'order' ? [{ name: '__unidad', label: 'Unidad de negocio' }] : []),
     ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
   ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };
@@ -602,7 +610,8 @@ function PipelineSwitcher({ value, onChange, allowAll }: { value: string; onChan
     <div ref={ref} style={{ position: 'relative' }}>
       <button className="pipe-switch" onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} title="Cambiar de pipeline">
         <span className="ellipsis">{cur ? cur.label : 'Todos los pipelines'}</span>
-        {cur?.team_id && !cur.label.toLowerCase().startsWith(String(team(cur.team_id)).toLowerCase().split(' ')[0]) && <span className="team">{team(cur.team_id)}</span>}
+        {cur?.team_id && (unidadDeEquipo(cur.team_id) ? <UnidadBadge k={unidadDeEquipo(cur.team_id)!} compact />
+          : !cur.label.toLowerCase().startsWith(String(team(cur.team_id)).toLowerCase().split(' ')[0]) && <span className="team">{team(cur.team_id)}</span>)}
         <span aria-hidden="true" className="caret">▾</span>
       </button>
       {open && (
@@ -610,7 +619,7 @@ function PipelineSwitcher({ value, onChange, allowAll }: { value: string; onChan
           {allowAll && <div className={`opt${value === 'all' ? ' on' : ''}`} role="option" aria-selected={value === 'all'} onClick={() => pick('all')}><b>Todos los pipelines</b></div>}
           {groups.map((g) => (
             <div key={String(g)}>
-              <div className="grp">{team(g) ?? 'Sin equipo'}</div>
+              <div className="grp">{unidadDeEquipo(g) ? <UnidadBadge k={unidadDeEquipo(g)!} /> : team(g) ?? 'Sin equipo'}</div>
               {meta.pipelines.filter((p) => p.team_id === g).map((p) => (
                 <div key={p.id} className={`opt${p.id === value ? ' on' : ''}`} role="option" aria-selected={p.id === value} onClick={() => pick(p.id)}>
                   <span className="grow">{p.label}</span><span className="small muted">{p.stages.length} etapas</span>

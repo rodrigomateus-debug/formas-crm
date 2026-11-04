@@ -411,3 +411,11 @@ table.grid th .col-menu:hover { background: var(--line); color: var(--navy); }
 .table-wrap::-webkit-scrollbar-thumb:hover { background: #9aa0b4; }
 .table-wrap::-webkit-scrollbar-corner { background: var(--sunken); }
 .table-wrap { scrollbar-color: #c3c7d4 var(--sunken); }
+
+/* Unidades de negocio: ícono y color de cada una. */
+.unidad { display: inline-flex; align-items: center; gap: 4px; border: 1px solid; border-radius: var(--r-pill); padding: 0 8px 0 6px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; vertical-align: middle; }
+.unidad.compact { padding: 2px; gap: 0; line-height: 0; }
+.unidades { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
+.qf-pop .opt .unidad { margin-left: 2px; }
+.qf-btn .unidad.compact { margin-left: 2px; }
+.pipe-menu .grp .unidad { text-transform: none; letter-spacing: normal; font-size: 12px; }

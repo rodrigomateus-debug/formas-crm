@@ -1,3 +1,4 @@
+import { ownersOfUnitsSql, UNIDADES } from './records';
 import { avisarAsignacion } from './avisos';
 import type { Ctx } from './env';
 import { HttpError, now } from './env';
@@ -206,6 +207,7 @@ export interface TaskQuery {
   due?: 'overdue' | 'today' | 'week' | 'upcoming' | 'all';
   q?: string;
   record?: number;
+  unidades?: string[];   // por el equipo de quien tiene la tarea
   limit?: number;
   offset?: number;
 }
@@ -215,6 +217,8 @@ export async function listTasks(db: D1Database, ctx: Ctx, q: TaskQuery) {
   const binds: unknown[] = [];
   const owner = q.owner ?? ctx.user.id;
   if (owner !== 'all') { where.push('a.owner_id = ?'); binds.push(owner); }
+  const unidades = (q.unidades ?? []).filter((k) => UNIDADES[k]);
+  if (unidades.length) where.push(ownersOfUnitsSql(unidades, binds, 'a.owner_id'));
   if ((q.status ?? 'open') === 'open') where.push("a.status != 'COMPLETED'");
   if (q.status === 'done') where.push("a.status = 'COMPLETED'");
   const start = new Date(); start.setUTCHours(3, 0, 0, 0); // medianoche en Argentina (UTC-3)

@@ -6,8 +6,7 @@ import { requireRole, canWrite, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
   archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
-  type Filter, type RecordRow, type SearchParams,
-} from './records';
+  type Filter, type RecordRow, type SearchParams, UNIDADES } from './records';
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
@@ -376,6 +375,7 @@ api.get('/tasks', async (c) => {
     due: (q.due as 'overdue' | 'today' | 'week' | 'upcoming' | 'all') ?? 'all',
     q: q.q,
     record: num(q.record),
+    unidades: q.unidades ? q.unidades.split(',') : undefined,
     limit: num(q.limit),
     offset: num(q.offset),
   }));
@@ -518,8 +518,11 @@ api.get('/dashboard', async (c) => {
   const month = new Date(); month.setUTCDate(1); month.setUTCHours(3, 0, 0, 0);
   const m = month.toISOString();
   const hidden = await hiddenPipelines(db, ctx);
-  const ow = `${ownerId ? 'AND r.owner_id = ?' : ''} AND (r.pipeline_id IS NULL OR r.pipeline_id NOT IN (SELECT value FROM json_each(?)))`;
-  const ob = [...(ownerId ? [ownerId] : []), JSON.stringify(hidden)];
+  // Unidades de negocio: los negocios de los pipelines de esos equipos.
+  const teams = (c.req.query('unidades') ?? '').split(',').filter((k) => UNIDADES[k]).map((k) => UNIDADES[k].team);
+  const ow = `${ownerId ? 'AND r.owner_id = ?' : ''} AND (r.pipeline_id IS NULL OR r.pipeline_id NOT IN (SELECT value FROM json_each(?)))${teams.length
+    ? ` AND r.pipeline_id IN (SELECT id FROM pipelines WHERE team_id IN (${teams.map(() => '?').join(', ')}))` : ''}`;
+  const ob = [...(ownerId ? [ownerId] : []), JSON.stringify(hidden), ...teams];
   const [open, won, created, lost, tasks] = await db.batch([
     db.prepare(`SELECT r.pipeline_id, r.stage_id, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r JOIN stages s ON s.id = r.stage_id
       WHERE r.object_type = 'deal' AND r.archived = 0 AND s.is_closed = 0 ${ow} GROUP BY r.pipeline_id, r.stage_id`).bind(...ob),

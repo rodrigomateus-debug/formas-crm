@@ -228,6 +228,9 @@ export function useDebounced<T>(value: T, ms = 300) {
 // ---------- Íconos (trazo simple, 24x24) ----------
 
 const paths: Record<string, string> = {
+  bag: 'M5 8h14l-1.2 12.1a1 1 0 0 1-1 .9H7.2a1 1 0 0 1-1-.9zM9 8V6.5a3 3 0 0 1 6 0V8',
+  briefcase: 'M3 8h18v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM8 8V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V8M3 13h18',
+  smile: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01',
   home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
   contact: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 9a7 7 0 0 1 14 0',
   company: 'M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18',
@@ -282,4 +285,27 @@ export function TagChips({ meta, ids, small }: { meta: Meta; ids?: number[]; sma
       {tags.map((t) => <span key={t.id} className="tag-chip" style={{ background: `${t.color}1a`, color: t.color, borderColor: `${t.color}55` }} title={t.description || t.name}>{t.name}</span>)}
     </span>
   );
+}
+
+// Unidades de negocio: el negocio, por el equipo de su pipeline; el pedido, por la unidad de ClickUp; contactos, empresas y
+// tareas, por el equipo de su propietario. Cada una con su ícono y su color (filtro rápido, columna y etiquetas).
+export const UNIDADES = [
+  { key: 'shop', label: 'Formas Shop', team: 57132078, icon: 'bag', color: '#17703d', bg: '#e3f5e9', border: '#a8dcb8' },
+  { key: 'corporate', label: 'Corporate', team: 58079782, icon: 'briefcase', color: '#1e40af', bg: '#e6edff', border: '#b3c5f5' },
+  { key: 'noestres', label: 'NoEstres', team: 57393663, icon: 'smile', color: '#b4410c', bg: '#fff0e4', border: '#f6c39d' },
+] as const;
+export type UnidadKey = (typeof UNIDADES)[number]['key'];
+const PEDIDO_UNIDAD: Record<string, UnidadKey> = { 'FORMAS SHOP': 'shop', CORPORATE: 'corporate', 'NO ESTRÉS': 'noestres', 'NO ESTRES': 'noestres', NOESTRES: 'noestres' };
+export const unidadDeEquipo = (team: number | null | undefined) => UNIDADES.find((u) => u.team === Number(team))?.key;
+export function teamsOf(u: User | undefined): number[] {
+  if (!u) return [];
+  let extra: number[] = [];
+  try { extra = JSON.parse(u.extra_teams ?? '[]').map(Number); } catch { /* sin equipos extra */ }
+  return [u.team_id, ...extra].filter((t): t is number => t != null);
+}
+export function unidadesDe(meta: Meta, type: ObjectType | 'task', props: Record<string, any>): UnidadKey[] {
+  if (type === 'deal') { const k = unidadDeEquipo(meta.pipelines.find((p) => p.id === props.pipeline)?.team_id); return k ? [k] : []; }
+  if (type === 'order') { const k = PEDIDO_UNIDAD[String(props.unidad_de_negocio ?? '').toUpperCase()]; return k ? [k] : []; }
+  const owner = meta.users.find((u) => u.id === Number(props.owner_id));
+  return [...new Set(teamsOf(owner).map(unidadDeEquipo).filter((k): k is UnidadKey => !!k))];
 }

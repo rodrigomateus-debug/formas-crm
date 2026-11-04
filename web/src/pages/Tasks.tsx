@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, useDebounced, fmtDate, recordUrl, Icon, type Activity } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, useDebounced, fmtDate, recordUrl, Icon, unidadesDe, type Activity } from '../lib';
+import { UnidadBadge } from '../components';
+import { UnidadFilter } from './QuickFilters';
 import { EditActivity } from './RecordPage';
 
 const TABS: Array<[string, string]> = [['overdue', 'Vencidas'], ['today', 'Para hoy'], ['week', 'Esta semana'], ['upcoming', 'Próximas'], ['all', 'Todas abiertas'], ['done', 'Completadas']];
@@ -13,11 +15,12 @@ export default function Tasks() {
   const [tab, setTab] = useState('today');
   const [owner, setOwner] = useState<string>(String(meta.me.id));
   const [q, setQ] = useState('');
+  const [unidades, setUnidades] = useState<string[]>([]);
   const dq = useDebounced(q, 300);
   const [edit, setEdit] = useState<Activity | null>(null);
   const list = useAsync(() => http<{ results: Activity[]; total: number }>('GET', `/tasks${qs({
-    owner, status: tab === 'done' ? 'done' : 'open', due: tab === 'done' ? 'all' : tab, q: dq, limit: 200,
-  })}`), [tab, owner, dq]);
+    owner, status: tab === 'done' ? 'done' : 'open', due: tab === 'done' ? 'all' : tab, q: dq, limit: 200, unidades: unidades.length ? unidades.join(',') : undefined,
+  })}`), [tab, owner, dq, unidades.join(',')]);
   const toggle = async (a: Activity) => {
     try {
       await http('PATCH', `/activities/${a.id}`, { status: a.status === 'COMPLETED' ? 'NOT_STARTED' : 'COMPLETED' });
@@ -43,11 +46,12 @@ export default function Tasks() {
       <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div>
       <div className="toolbar">
         <div className="search" style={{ width: 320 }}><Icon name="search" /><input className="input" placeholder="Buscar en título o detalle (ej. Prospectar)…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <UnidadFilter value={unidades} onChange={setUnidades} />
         <span className="muted small">{list.data ? `${list.data.total} tareas` : ''}</span>
       </div>
       <div className="table-wrap">
         <table className="grid">
-          <thead><tr><th className="check nosort" /><th className="nosort">Tarea</th><th className="nosort">Asociada a</th><th className="nosort">Vence</th><th className="nosort">Tipo</th><th className="nosort">Prioridad</th>{owner === 'all' && <th className="nosort">Responsable</th>}<th className="nosort" /></tr></thead>
+          <thead><tr><th className="check nosort" /><th className="nosort">Tarea</th><th className="nosort">Asociada a</th><th className="nosort">Vence</th><th className="nosort">Tipo</th><th className="nosort">Prioridad</th>{owner === 'all' && <th className="nosort">Responsable</th>}<th className="nosort">Unidad</th><th className="nosort" /></tr></thead>
           <tbody>
             {list.data?.results.map((a) => {
               const overdue = a.status !== 'COMPLETED' && a.due_at && Date.parse(a.due_at) < Date.now();
@@ -61,6 +65,7 @@ export default function Tasks() {
                   <td>{TASK_TYPE[a.task_type ?? 'todo'] ?? a.task_type}</td>
                   <td>{a.priority && PRIORITY[a.priority] ? <span className={`tag ${PRIORITY[a.priority][1]}`}>{PRIORITY[a.priority][0]}</span> : <span className="muted">—</span>}</td>
                   {owner === 'all' && <td>{meta.users.find((u) => u.id === a.owner_id)?.name}</td>}
+                  <td><span className="unidades">{unidadesDe(meta, 'task', { owner_id: a.owner_id }).map((k) => <UnidadBadge key={k} k={k} compact />)}</span></td>
                   <td>{a.status !== 'COMPLETED' && <span className="row"><button className="btn sm ghost" onClick={() => postpone(a, 1)}>+1 día</button><button className="btn sm ghost" onClick={() => postpone(a, 7)}>+1 semana</button></span>}</td>
                 </tr>
               );

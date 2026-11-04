@@ -128,6 +128,14 @@ le fue, pedir un referido si le fue bien y, a los 10 días, la reseña de Google
 que «PARA HACER URGENTE» del tablero). Varios pedidos del mismo cliente en la misma semana van en una sola tarea. No va para
 clientes internos ni para lo que carga la tienda con vendedor «STP».
 
+## Unidades de negocio
+
+Formas Shop (bolsa, verde), Corporate (maletín, azul) y NoEstres (carita, naranja), con su ícono y color en todo el CRM. El
+filtro «Unidad de negocio» (varias a la vez) está en contactos, empresas, negocios y pedidos (tabla y tablero), en Tareas y
+en Inicio; también en los filtros avanzados y se guarda en las vistas. De dónde sale la unidad: el negocio, del equipo de
+su pipeline; el pedido, de la unidad que trae ClickUp; contactos, empresas y tareas, del equipo de su propietario (el
+principal o uno de los extra, en Configuración → Usuarios). La columna «Unidad de negocio» viene en las listas.
+
 ## Datos para facturar
 
 Cuando un negocio pasa a ganado, el CRM revisa la empresa principal (`src/worker/facturar.ts`): que tenga CUIT y que sea

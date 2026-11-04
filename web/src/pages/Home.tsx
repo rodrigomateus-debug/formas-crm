@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { UnidadFilter } from './QuickFilters';
 import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, userName, stageOf, type Activity, type CrmRecord } from '../lib';
 
 interface Dash {
@@ -13,17 +14,20 @@ interface Dash {
 export default function Home() {
   const { meta } = useMeta();
   const [owner, setOwner] = useState(meta.me.role === 'admin' || meta.me.role === 'manager' ? 'all' : 'me');
-  const dash = useAsync(() => http<Dash>('GET', `/dashboard${qs({ owner })}`), [owner]);
-  const tasks = useAsync(() => http<{ results: Activity[] }>('GET', `/tasks${qs({ due: 'today', limit: 8 })}`), []);
+  const [unidades, setUnidades] = useState<string[]>([]);
+  const u = unidades.length ? unidades.join(',') : undefined;
+  const dash = useAsync(() => http<Dash>('GET', `/dashboard${qs({ owner, unidades: u })}`), [owner, u]);
+  const tasks = useAsync(() => http<{ results: Activity[] }>('GET', `/tasks${qs({ due: 'today', limit: 8, unidades: u })}`), [u]);
   const closed = meta.pipelines.flatMap((p) => p.stages.filter((s) => s.is_closed).map((s) => s.id));
   const stale = useAsync(() => http<{ results: CrmRecord[]; total: number }>('GET', `/records/deal${qs({
     filters: [
       ...(owner === 'all' ? [] : [{ prop: 'owner_id', op: 'eq', value: owner }]),
+      ...(unidades.length ? [{ prop: '__unidad', op: 'in', values: unidades }] : []),
       { prop: 'dealstage', op: 'not_in', values: closed },
       { prop: 'notes_last_updated', op: 'before_days_ago', value: 14 },
     ],
     sort: 'amount', dir: 'desc', limit: 8,
-  })}`), [owner]);
+  })}`), [owner, u]);
   const d = dash.data;
   const sum = (xs: Array<{ n: number; amount?: number }> = [], k: 'n' | 'amount' = 'n') => xs.reduce((a, x) => a + Number(x[k] ?? 0), 0);
   const month = new Date().toLocaleDateString('es-AR', { month: 'long' });
@@ -33,6 +37,7 @@ export default function Home() {
     <div className="content">
       <div className="page-head">
         <h1>Hola, {meta.me.name.split(' ')[0]}</h1>
+        <UnidadFilter value={unidades} onChange={setUnidades} />
         <select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
           <option value="me">Mis números</option>
           <option value="all">Todo el equipo</option>

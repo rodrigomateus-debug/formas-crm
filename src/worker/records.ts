@@ -529,7 +529,42 @@ export async function tagsFor(db: D1Database, ctx: Ctx, type: ObjectType, ids: n
   return out;
 }
 
+// Unidades de negocio (Formas Shop, Corporate, NoEstres): el negocio, por el equipo de su pipeline; el pedido, por la unidad
+// que trae ClickUp; contactos, empresas y tareas, por el equipo de su propietario (el principal o uno de los extra).
+export const UNIDADES: Record<string, { team: number; pedido: string[] }> = {
+  shop: { team: 57132078, pedido: ['FORMAS SHOP'] },
+  corporate: { team: 58079782, pedido: ['CORPORATE'] },
+  noestres: { team: 57393663, pedido: ['NO ESTRÉS', 'NO ESTRES', 'NOESTRES'] },
+};
+
+export function ownersOfUnitsSql(keys: string[], binds: unknown[], col = 'r.owner_id') {
+  const teams = keys.map((k) => UNIDADES[k].team);
+  const ph = teams.map(() => '?').join(', ');
+  binds.push(...teams, ...teams);
+  return `${col} IN (SELECT u.id FROM users u WHERE u.team_id IN (${ph}) OR EXISTS (SELECT 1 FROM json_each(COALESCE(u.extra_teams, '[]')) j WHERE j.value IN (${ph})))`;
+}
+
+function unidadSql(type: ObjectType, keys: string[], binds: unknown[]) {
+  if (!keys.length) return '0';
+  if (type === 'deal') {
+    const teams = keys.map((k) => UNIDADES[k].team);
+    binds.push(...teams);
+    return `r.pipeline_id IN (SELECT id FROM pipelines WHERE team_id IN (${teams.map(() => '?').join(', ')}))`;
+  }
+  if (type === 'order') {
+    const vals = keys.flatMap((k) => UNIDADES[k].pedido);
+    binds.push(...vals);
+    return `UPPER(COALESCE(json_extract(r.props, '$.unidad_de_negocio'), '')) IN (${vals.map(() => '?').join(', ')})`;
+  }
+  return ownersOfUnitsSql(keys, binds);
+}
+
 async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, binds: unknown[]): Promise<string> {
+  if (f.prop === '__unidad') {
+    const want = (f.values ?? String(f.value ?? '').split(';')).map(String).filter((k) => UNIDADES[k]);
+    const cond = `(${unidadSql(type, want, binds)})`;
+    return ['neq', 'not_in'].includes(f.op) ? `NOT ${cond}` : cond;
+  }
   // Por etiqueta: «tiene la etiqueta X» es cumplir su regla.
   if (f.prop === '__tag') {
     const all = await meta.tags(type);

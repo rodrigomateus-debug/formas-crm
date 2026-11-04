@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useMeta, propOf, type Filter, type ObjectType } from '../lib';
+import { useMeta, propOf, UNIDADES, type Filter, type ObjectType } from '../lib';
+import { UnidadBadge } from '../components';
 
 // Filtros rápidos, como los de HubSpot: propietarios (varios a la vez) y fechas con rangos listos.
-// Se guardan en la vista (`owners` y `dates`) y se suman a los filtros avanzados en cada grupo.
+// Se guardan en la vista (`owners`, `dates`, `tags` y `unidades`) y se suman a los filtros avanzados en cada grupo.
 
 type Preset = { key: string; label: string };
 const PAST: Preset[] = [
@@ -56,8 +57,9 @@ export function presetFilter(prop: string, key: string): Filter | null {
   }
 }
 
-export function quickFilters(owners: string[] | undefined, dates: Record<string, string> | undefined, tags?: string[]): Filter[] {
+export function quickFilters(owners: string[] | undefined, dates: Record<string, string> | undefined, tags?: string[], unidades?: string[]): Filter[] {
   const out: Filter[] = [];
+  if (unidades?.length) out.push({ prop: '__unidad', op: 'in', values: unidades });
   if (tags?.length) out.push({ prop: '__tag', op: 'in', values: tags });
   if (owners?.length) out.push(owners.length === 1 && owners[0] === 'none' ? { prop: 'owner_id', op: 'unknown' } : { prop: 'owner_id', op: 'in', values: owners });
   for (const [prop, key] of Object.entries(dates ?? {})) { const f = presetFilter(prop, key); if (f) out.push(f); }
@@ -82,19 +84,38 @@ function Pop({ label, on, children }: { label: ReactNode; on: boolean; children:
   );
 }
 
-export function QuickFilterBar({ type, owners, dates, tags, onOwners, onDates, onTags, onClear, extra }: {
-  type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[];
-  onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onClear: () => void; extra?: boolean;
+// Unidad de negocio (Formas Shop, Corporate, NoEstres): varias a la vez, con su ícono y color. Se usa también en Tareas.
+export function UnidadFilter({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const sel = UNIDADES.filter((u) => value.includes(u.key));
+  return (
+    <Pop label={sel.length ? <>Unidad{sel.map((u) => <UnidadBadge key={u.key} k={u.key} compact />)}</> : 'Unidad de negocio'} on={sel.length > 0}>
+      {() => (
+        <div className="stack" style={{ gap: 0 }}>
+          {UNIDADES.map((u) => (
+            <label key={u.key} className="opt"><input type="checkbox" checked={value.includes(u.key)}
+              onChange={() => onChange(value.includes(u.key) ? value.filter((x) => x !== u.key) : [...value, u.key])} /><UnidadBadge k={u.key} /></label>
+          ))}
+          {value.length > 0 && <button className="btn sm ghost" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => onChange([])}>Cualquiera</button>}
+        </div>
+      )}
+    </Pop>
+  );
+}
+
+export function QuickFilterBar({ type, owners, dates, tags, unidades, onOwners, onDates, onTags, onUnidades, onClear, extra }: {
+  type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[]; unidades: string[];
+  onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onUnidades: (u: string[]) => void; onClear: () => void; extra?: boolean;
 }) {
   const { meta } = useMeta();
   const name = (v: string) => (v === 'me' ? 'Yo' : v === 'none' ? 'Sin asignar' : meta.users.find((u) => String(u.id) === v)?.name ?? v);
   const ownerLabel = owners.length ? `Propietario: ${owners.slice(0, 2).map(name).join(', ')}${owners.length > 2 ? ` +${owners.length - 2}` : ''}` : 'Propietario';
   const toggle = (v: string) => onOwners(owners.includes(v) ? owners.filter((x) => x !== v) : [...owners, v]);
-  const any = owners.length > 0 || Object.keys(dates).length > 0 || tags.length > 0 || extra;
+  const any = owners.length > 0 || Object.keys(dates).length > 0 || tags.length > 0 || unidades.length > 0 || extra;
   const typeTags = meta.tags?.filter((t) => t.object_type === type) ?? [];
   const tagName = (v: string) => typeTags.find((t) => String(t.id) === v)?.name ?? v;
   return (
     <>
+      <UnidadFilter value={unidades} onChange={onUnidades} />
       <Pop label={ownerLabel} on={owners.length > 0}>
         {() => (
           <div className="stack" style={{ gap: 0, maxHeight: 320, overflow: 'auto' }}>

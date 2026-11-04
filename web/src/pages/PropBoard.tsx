@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
-import { Avatar, MultiPick } from '../components';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
+import { Avatar, MultiPick, UnidadBadge } from '../components';
 import { SortPick, useCollapsed, useFillHeight } from './Board';
 
 interface Column { value: string; label: string; total: number; records: CrmRecord[] }
@@ -15,6 +15,7 @@ const shortDate = (v: string) => new Date(`${String(v).slice(0, 10)}T12:00:00`).
 // La línea del pedido en la tarjeta: «Evento» (los normales no llevan marca) y la entrega. Uno ya entregado dice cuándo se
 // entregó; uno anulado, nada; el resto, cuánto falta para la fecha prometida (en rojo si ya pasó, en ámbar si es hoy o mañana).
 function OrderLine({ r }: { r: CrmRecord }) {
+  const { meta } = useMeta();
   const p = r.props;
   const evento = p.tipo_de_pedido === 'EVENTO';
   let when: { text: string; cls: string; title: string } | null = null;
@@ -28,9 +29,11 @@ function OrderLine({ r }: { r: CrmRecord }) {
       title: `Entrega prometida: ${shortDate(p.fecha_de_entrega)}`,
     };
   }
-  if (!evento && !when) return null;
+  const unidad = unidadesDe(meta, 'order', p)[0];
+  if (!evento && !when && !unidad) return null;
   return (
     <div className="meta order-line">
+      {unidad && <UnidadBadge k={unidad} compact />}
       {evento && <span className="chip-evento">Evento</span>}
       {when && <span className={`when${when.cls}`} title={when.title}><Icon name="meeting" size={13} /><span className="ellipsis">{when.text}</span></span>}
     </div>

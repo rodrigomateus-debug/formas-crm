@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor,
+  http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
 } from './lib';
 
 // Las empresas muestran el favicon de su dominio y los contactos la foto de su mail, como en HubSpot; si no hay, las iniciales.
@@ -274,7 +274,8 @@ export function filterableProps(meta: Meta, type: ObjectType) {
   const assoc = (ASSOC_FILTERS[type] ?? []).flatMap(([t, l]) => propsOf(meta, t)
     .filter((p) => !['source', 'pipeline', 'dealstage'].includes(p.name) && !p.name.startsWith('num_'))
     .map((p) => ({ ...p, name: `${t}.${p.name}`, label: `${l} · ${p.label}`, group_name: `${l} asociada` })));
-  return [...own, ...tagProp, ...assoc];
+  const unidadProp: Property = { ...own[0], name: '__unidad', label: 'Unidad de negocio', type: 'enum', options: UNIDADES.map((u) => ({ value: u.key, label: u.label })), group_name: 'Unidad de negocio' };
+  return [...own, unidadProp, ...tagProp, ...assoc];
 }
 
 export function optionsFor(meta: Meta, type: ObjectType, p: Property) {
@@ -356,4 +357,15 @@ export function describeFilter(meta: Meta, type: ObjectType, f: Filter) {
 export function EstadoCliente({ value }: { value: string }) {
   const slug = value.toLowerCase().normalize('NFD').replace(/[^a-z]+/g, '-');
   return <span className={`estado-cliente ec-${slug}`}>{value}</span>;
+}
+
+// Unidad de negocio con su ícono y su color.
+export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean }) {
+  const u = UNIDADES.find((x) => x.key === k);
+  if (!u) return null;
+  return (
+    <span className={`unidad${compact ? ' compact' : ''}`} style={{ color: u.color, background: u.bg, borderColor: u.border }} title={u.label}>
+      <Icon name={u.icon} size={compact ? 12 : 13} />{!compact && u.label}
+    </span>
+  );
 }

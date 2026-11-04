@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, Icon, defaultPipeline, TagChips,
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -355,8 +355,11 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   const [saving, setSaving] = useState(false);
   const shown = col === 'unidad_de_negocio' && unidadesDe(meta, 'order', record.props).length ? <Unidades keys={unidadesDe(meta, 'order', record.props)} />
     : formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
+  // Montos abreviados en la celda; la cifra exacta, al pasar el mouse.
+  const exact = prop?.type === 'currency' && record.props[col] != null && record.props[col] !== ''
+    ? fmtMoneyExact(record.props[col], col.endsWith('_usd') ? 'USD' : record.props.deal_currency_code ?? record.props.hs_currency_code) : undefined;
   if (col === 'estado_cliente' && record.props[col]) return <td><EstadoCliente value={String(record.props[col])} /></td>;
-  if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td>{shown}</td>;
+  if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td title={exact}>{shown}</td>;
   const instant = ['owner', 'enum', 'bool'].includes(prop.type) || col === 'dealstage';
   const open = (e: React.MouseEvent) => { setVal(record.props[col]); setAt((e.currentTarget.closest('td') as HTMLElement).getBoundingClientRect()); };
   const save = async (v: unknown) => {
@@ -372,7 +375,7 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
     } finally { setSaving(false); }
   };
   return (
-    <td className="editable" onDoubleClick={open}>
+    <td className="editable" onDoubleClick={open} title={exact}>
       <span className="cell-v">{shown}</span>
       <button className="cell-edit" title={`Editar ${prop.label}`} aria-label={`Editar ${prop.label} de ${record.name}`} onClick={open}><Icon name="edit" size={14} /></button>
       {at && createPortal(

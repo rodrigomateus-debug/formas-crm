@@ -135,7 +135,18 @@ export const userName = (meta: Meta, id: unknown) => meta.users.find((u) => u.id
 const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 const moneyUsd = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const number = new Intl.NumberFormat('es-AR');
-export const fmtMoney = (v: unknown, currency?: string) => (v == null || v === '' ? '' : (currency === 'USD' ? moneyUsd : money).format(Number(v)));
+// Montos: desde un millón, abreviados («$ 23,4 M»; desde 100 millones sin decimales: «$ 190 M», «$ 4.762 M»).
+// fmtMoneyExact da la cifra completa (para el título al pasar el mouse y donde haga falta exacto).
+const millones1 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 1 });
+const millones0 = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 });
+export const fmtMoneyExact = (v: unknown, currency?: string) => (v == null || v === '' ? '' : (currency === 'USD' ? moneyUsd : money).format(Number(v)));
+export const fmtMoney = (v: unknown, currency?: string) => {
+  if (v == null || v === '') return '';
+  const n = Number(v);
+  if (!Number.isFinite(n) || Math.abs(n) < 1_000_000) return fmtMoneyExact(v, currency);
+  const m = Math.abs(n) / 1_000_000;
+  return `${n < 0 ? '-' : ''}${currency === 'USD' ? 'US$' : '$'}\u00a0${(m >= 100 ? millones0 : millones1).format(m)}\u00a0M`;
+};
 export const fmtNumber = (v: unknown) => (v == null || v === '' ? '' : number.format(Number(v)));
 export function fmtDate(v: unknown, withTime = false) {
   if (!v) return '';

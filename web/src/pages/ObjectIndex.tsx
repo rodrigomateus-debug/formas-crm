@@ -10,7 +10,7 @@ import Board from './Board';
 import PropBoard from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
-import { ColumnWidths, EstadoCliente, UnidadBadge, useColumnResize } from '../components';
+import { ColumnWidths, EstadoCliente, EtapaPedido, UnidadBadge, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
 import { Select } from '../Select';
@@ -359,7 +359,8 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   const [at, setAt] = useState<DOMRect | null>(null);
   const [val, setVal] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
-  const shown = col === 'unidad_de_negocio' && unidadesDe(meta, 'order', record.props).length ? <Unidades keys={unidadesDe(meta, 'order', record.props)} />
+  const shown = type === 'order' && col === 'hs_pipeline_stage' && record.props[col] ? <EtapaPedido value={record.props[col]} label={formatValue(meta, type, col, record.props[col])} />
+    : col === 'unidad_de_negocio' && unidadesDe(meta, 'order', record.props).length ? <Unidades keys={unidadesDe(meta, 'order', record.props)} />
     : formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
   // Montos abreviados en la celda; la cifra exacta, al pasar el mouse.
   const exact = prop?.type === 'currency' && record.props[col] != null && record.props[col] !== ''

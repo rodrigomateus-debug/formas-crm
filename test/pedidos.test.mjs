@@ -262,4 +262,11 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   assert.equal(cols.reduce((n, c) => n + c.total, 0), 2, JSON.stringify(cols.map((c) => [c.label, c.total])));
   assert.equal(cols.reduce((n, c) => n + c.amount, 0), 3000.5);
   assert.equal(cols.reduce((n, c) => n + c.sin_monto, 0), 0);
+  // Arriba del tablero, cuántos siguen activos (ni entregados ni anulados).
+  const board = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&groups=${groups}`)).data;
+  const cerradas = ['1237498998', '3c85a297-e9ce-400b-b42e-9f16853d69d6'];
+  assert.equal(board.activos, board.columns.filter((c) => !cerradas.includes(c.value)).reduce((n, c) => n + c.total, 0));
+  const porDueño = (await api('GET', `/board-prop/order?prop=owner_id&groups=${groups}`)).data;
+  assert.equal(porDueño.activos, board.activos, 'agrupe por lo que agrupe');
+  assert.equal((await api('GET', '/board-prop/company?prop=lifecyclestage')).data.activos, null, 'solo en pedidos');
 });

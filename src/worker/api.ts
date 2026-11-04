@@ -468,6 +468,9 @@ api.get('/board', async (c) => {
   return c.json({ pipeline, columns });
 });
 
+// Etapas de pedido que ya no están activas: entregado y anulado.
+const ORDER_CLOSED = ['1237498998', '3c85a297-e9ce-400b-b42e-9f16853d69d6'];
+
 // Tablero por propiedad (empresas y contactos, como el tablero por etapa del ciclo de vida de HubSpot):
 // una columna por opción de la propiedad (desplegable, sí/no o propietario) y las primeras N tarjetas de cada una.
 api.get('/board-prop/:type', async (c) => {
@@ -493,11 +496,16 @@ api.get('/board-prop/:type', async (c) => {
       ORDER BY ${order} LIMIT ? OFFSET ?`).bind(...binds, q.value, perColumn, Math.max(0, Number(q.offset) || 0)).all();
     return c.json({ records: (results as unknown as RecordRow[]).map(rowToRecord) });
   }
-  const [cards, totals] = await db.batch([
+  // Pedidos: cuántos siguen activos (ni entregados ni anulados), agrupe por lo que agrupe el tablero.
+  const activosSql = type === 'order'
+    ? db.prepare(`SELECT COUNT(*) AS n FROM records r WHERE ${whereSql} AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?)`).bind(...binds, ...ORDER_CLOSED)
+    : db.prepare('SELECT NULL AS n');
+  const [cards, totals, activos] = await db.batch([
     db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
       FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`).bind(...binds),
     db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount, SUM(CASE WHEN r.amount IS NULL THEN 1 ELSE 0 END) AS sin_monto
       FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
+    activosSql,
   ]);
   const options = prop.type === 'owner'
     ? (await db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name').all<{ id: number; name: string }>()).results.map((u) => ({ value: String(u.id), label: u.name }))
@@ -513,7 +521,7 @@ api.get('/board-prop/:type', async (c) => {
     .map((o) => ({ value: o.value, label: o.label, total: counts.get(o.value) ?? 0, amount: tot.get(o.value)?.amount ?? 0, sin_monto: tot.get(o.value)?.sin_monto ?? 0,
       records: rows.filter((r) => (r.board_value ?? '') === o.value).map(rowToRecord) }))
     .filter((col) => col.value !== '' || col.total > 0 || prop.type !== 'owner');
-  return c.json({ prop: { name: prop.name, label: prop.label, type: prop.type }, columns });
+  return c.json({ prop: { name: prop.name, label: prop.label, type: prop.type }, columns, activos: (activos.results[0] as { n: number | null } | undefined)?.n ?? null });
 });
 
 // ---------- Inicio / reportes ----------

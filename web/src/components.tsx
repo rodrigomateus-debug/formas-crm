@@ -98,7 +98,7 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type }: {
         <Select className="input" value={v} onChange={(e) => onChange(e.target.value || null)} autoFocus={autoFocus}>
           <option value="">—</option>
           {(prop.type === 'bool' && !prop.options.length ? [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }] : prop.options)
-            .map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            .map((o) => <option key={o.value} value={o.value}>{type === 'order' && prop.name === 'hs_pipeline_stage' ? <><EtapaIcono value={o.value} />{o.label}</> : o.label}</option>)}
         </Select>
       );
     case 'multienum': {
@@ -428,4 +428,42 @@ export function ColumnWidths({ scope, order, widths }: { scope: string; order: s
   const css = order.map((col, i) => (widths[col] ? `table.${scope} > thead > tr > th:nth-child(${i + 1}), table.${scope} > tbody > tr > td:nth-child(${i + 1}) {
     width: ${widths[col]}px; min-width: ${widths[col]}px; max-width: ${widths[col]}px; box-sizing: border-box; }` : '')).join('\n');
   return css ? <style>{css}</style> : null;
+}
+
+// Etapas de los pedidos (solo pedidos): cada una con un ícono propio y un color suave (styles.css, .e-*), en el tablero,
+// la lista, la ficha, la vista previa y el desplegable para cambiarla.
+const ETAPAS_PEDIDO: Record<string, { slug: string; d: string }> = {
+  // Pedido confirmado: la planilla con el tilde.
+  '4b27b500-f031-4927-9811-68a0b525cbae': { slug: 'confirmado', d: 'M9 3.5h6v3H9zM15 5h3v16H6V5h3M9 13.5l2 2 4-4.5' },
+  // Listo para producción: la bandera de largada.
+  '3725360f-519b-4b18-a593-494d60a29c9f': { slug: 'listo-produccion', d: 'M5 21V4M5 4h12l-2.5 4L17 12H5' },
+  // Esperando boceto o confirmación: el reloj de arena.
+  esperando_boceto: { slug: 'esperando', d: 'M7 3h10M7 21h10M8 3v3a4 4 0 0 0 8 0V3M8 21v-3a4 4 0 0 1 8 0v3M12 10v4' },
+  // En producción: el engranaje.
+  '1237498994': { slug: 'produccion', d: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1' },
+  // Listo para entregar: la caja cerrada.
+  '1237498996': { slug: 'listo-entregar', d: 'M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5 12 12l9-4.5M12 12v9' },
+  // Entregado parcial: el camión en viaje.
+  entregado_parcial: { slug: 'parcial', d: 'M2 6h11v10H2zM13 9h4l3 3.5V16h-7M8 18.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0zM18.5 18.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z' },
+  // Entregado: el círculo con el tilde.
+  '1237498998': { slug: 'entregado', d: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 12.5l2.8 2.8L16 10' },
+  // Anulado: el círculo tachado.
+  '3c85a297-e9ce-400b-b42e-9f16853d69d6': { slug: 'anulado', d: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.7 5.7l12.6 12.6' },
+};
+export const etapaPedidoSlug = (value: unknown) => ETAPAS_PEDIDO[String(value ?? '')]?.slug;
+
+export function EtapaIcono({ value, size = 14 }: { value: unknown; size?: number }) {
+  const e = ETAPAS_PEDIDO[String(value ?? '')];
+  if (!e) return null;
+  return (
+    <span className={`etapa-ic e-${e.slug}`} aria-hidden="true">
+      <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round"><path d={e.d} /></svg>
+    </span>
+  );
+}
+
+export function EtapaPedido({ value, label }: { value: unknown; label: string }) {
+  const slug = etapaPedidoSlug(value);
+  if (!slug) return <>{label}</>;
+  return <span className={`etapa e-${slug}`}><EtapaIcono value={value} size={13} />{label}</span>;
 }

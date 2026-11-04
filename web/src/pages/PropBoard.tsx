@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
-import { Avatar, MultiPick, UnidadBadge } from '../components';
+import { Avatar, EtapaIcono, MultiPick, UnidadBadge, etapaPedidoSlug } from '../components';
 import { SortPick, useCollapsed, useFillHeight } from './Board';
 import { Select } from '../Select';
 
@@ -60,9 +60,10 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const prop = propIn && groupable.some((p) => p.name === propIn) ? propIn
     : groupable.some((p) => p.name === DEFAULT_BOARD_PROP[type]) ? DEFAULT_BOARD_PROP[type] : groupable[0]?.name ?? 'owner_id';
   const params = { prop, q, groups: groups?.length ? groups : undefined, sort, dir };
-  const board = useAsync(() => http<{ columns: Column[] }>('GET', `/board-prop/${type}${qs(params)}`), [type, prop, q, JSON.stringify(groups ?? []), sort, dir, reloadKey]);
+  const board = useAsync(() => http<{ columns: Column[]; activos: number | null }>('GET', `/board-prop/${type}${qs(params)}`), [type, prop, q, JSON.stringify(groups ?? []), sort, dir, reloadKey]);
   const [cols, setCols] = useState<Column[]>([]);
-  useEffect(() => { if (board.data) setCols(board.data.columns); }, [board.data]);
+  const [activos, setActivos] = useState<number | null>(null);
+  useEffect(() => { if (board.data) { setCols(board.data.columns); setActivos(board.data.activos ?? null); } }, [board.data]);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
@@ -72,7 +73,10 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const total = cols.reduce((n, c) => n + c.total, 0);
   // Pedidos: el total sin IVA abajo de cada columna y arriba, el del tablero (como el monto en el tablero de negocios).
   const conMonto = type === 'order';
+  // Pedidos agrupados por etapa: cada columna con el ícono y el color suave de su etapa.
+  const etapa = (v: string) => (type === 'order' && prop === 'hs_pipeline_stage' ? etapaPedidoSlug(v) : undefined);
   const totalMonto = cols.reduce((n, c) => n + (c.amount ?? 0), 0);
+  const activo = (stage: string) => ![ENTREGADO, ANULADO].includes(stage);
   const montoDe = (r: CrmRecord) => { const v = r.props.hs_total_price; return v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null; };
   useEffect(() => { if (board.data) onTotal?.(total); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [total, board.data]);
 
@@ -81,6 +85,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
     const rec = from?.records.find((r) => r.id === id);
     if (!from || !rec || from.value === to.value) return;
     const m = montoDe(rec);
+    // Al mover entre etapas, un pedido puede dejar de estar activo (entregado, anulado) o volver a estarlo.
+    if (type === 'order' && prop === 'hs_pipeline_stage') setActivos((n) => (n == null ? n : n + (activo(to.value) ? 1 : 0) - (activo(from.value) ? 1 : 0)));
     setCols((cs) => cs.map((c) => (c.value === from.value ? { ...c, records: c.records.filter((r) => r.id !== id), total: c.total - 1, amount: c.amount - (m ?? 0), sin_monto: c.sin_monto - (m == null ? 1 : 0) }
       : c.value === to.value ? { ...c, records: [{ ...rec, props: { ...rec.props, [prop]: to.value } }, ...c.records], total: c.total + 1, amount: c.amount + (m ?? 0), sin_monto: c.sin_monto + (m == null ? 1 : 0) } : c)));
     try {
@@ -132,20 +138,23 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
         {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
         <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero
+          {activos != null && <><span className="sep">·</span><b className="num" title="Ni entregados ni anulados">{activos.toLocaleString('es-AR')}</b> {activos === 1 ? 'activo' : 'activos'}</>}
           {conMonto && <><span className="sep">·</span>Total sin IVA <b className="num" title={fmtMoneyExact(totalMonto, 'ARS')}>{fmtMoney(totalMonto, 'ARS') || '$ 0'}</b></>}</span>
       </div>
       <div className={`board${boardStyle ? ' fill' : ''}`} ref={boardRef} style={boardStyle}>
         {cols.map((c) => (collapsed.has(c.value) ? (
-          <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
+          <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
             title={`${c.label}: ${c.total}${conMonto ? ` · ${fmtMoneyExact(c.amount, 'ARS')} sin IVA` : ''}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
             <Icon name="chevron" size={14} />
+            {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
             <span className="n num">{c.total}</span>
             <span className="vlabel">{c.label}</span>
           </div>
         ) : (
           <div key={c.value || 'vacio'} className={`col${over === c.value ? ' over' : ''}`} {...drop(c)}>
-            <div className="col-head">
+            <div className={`col-head${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`}>
               <div className="t">
+                {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
                 <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
                 {onCreate && c.value !== '' && def?.type !== 'owner' && <button className="col-fold" title={`Crear en «${c.label}»`} aria-label={`Crear en ${c.label}`} onClick={() => onCreate({ [prop]: c.value })}><Icon name="plus" size={14} /></button>}
                 <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>

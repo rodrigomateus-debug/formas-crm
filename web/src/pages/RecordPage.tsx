@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
-import { Avatar, CreateRecord, Drawer, EstadoCliente, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
+import { Avatar, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
 import { StageProps } from './Board';
 import { Select } from '../Select';
 
@@ -226,7 +226,8 @@ function PropRow({ type, prop, record, onSave, onHistory }: { type: ObjectType; 
       <div className={`v${shown ? '' : ' blank'}`}>
         {shown && prop.type === 'url' && safeUrl(record.props[prop.name]) ? <a href={safeUrl(record.props[prop.name])} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{shown}</a>
           : shown && prop.type === 'email' ? <a href={`mailto:${shown}`} onClick={(e) => e.stopPropagation()}>{shown}</a>
-            : shown || '—'}
+            : shown && type === 'order' && prop.name === 'hs_pipeline_stage' ? <EtapaPedido value={record.props[prop.name]} label={shown} />
+              : shown || '—'}
       </div>
     </div>
   );
@@ -783,7 +784,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Propietario', userName(meta, record.props.owner_id) || '—'],
   ] : [
     ['Total', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
-    ['Etapa', formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage) || '—'],
+    ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],
     ['Tipo', record.props.tipo_de_pedido || '—'],
     ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
     ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],

@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter } from '../lib';
 import { Avatar, MultiPick, UnidadBadge } from '../components';
 import { SortPick, useCollapsed, useFillHeight } from './Board';
 import { Select } from '../Select';
 
-interface Column { value: string; label: string; total: number; records: CrmRecord[] }
+// amount: suma del monto de la columna (en pedidos, el total sin IVA); sin_monto: cuántas tarjetas no lo tienen.
+interface Column { value: string; label: string; total: number; amount: number; sin_monto: number; records: CrmRecord[] }
 
 // Fecha de entrega de un pedido contada desde hoy, como «7 días a partir de ahora» en HubSpot.
 const daysTo = (v: string) => { const d = new Date(`${String(v).slice(0, 10)}T00:00:00`); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d.getTime() - t.getTime()) / 86_400_000); };
@@ -69,14 +70,19 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const [boardRef, boardStyle] = useFillHeight();
   const def = groupable.find((p) => p.name === prop);
   const total = cols.reduce((n, c) => n + c.total, 0);
+  // Pedidos: el total sin IVA abajo de cada columna y arriba, el del tablero (como el monto en el tablero de negocios).
+  const conMonto = type === 'order';
+  const totalMonto = cols.reduce((n, c) => n + (c.amount ?? 0), 0);
+  const montoDe = (r: CrmRecord) => { const v = r.props.hs_total_price; return v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null; };
   useEffect(() => { if (board.data) onTotal?.(total); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [total, board.data]);
 
   const move = async (id: number, to: Column) => {
     const from = cols.find((c) => c.records.some((r) => r.id === id));
     const rec = from?.records.find((r) => r.id === id);
     if (!from || !rec || from.value === to.value) return;
-    setCols((cs) => cs.map((c) => (c.value === from.value ? { ...c, records: c.records.filter((r) => r.id !== id), total: c.total - 1 }
-      : c.value === to.value ? { ...c, records: [{ ...rec, props: { ...rec.props, [prop]: to.value } }, ...c.records], total: c.total + 1 } : c)));
+    const m = montoDe(rec);
+    setCols((cs) => cs.map((c) => (c.value === from.value ? { ...c, records: c.records.filter((r) => r.id !== id), total: c.total - 1, amount: c.amount - (m ?? 0), sin_monto: c.sin_monto - (m == null ? 1 : 0) }
+      : c.value === to.value ? { ...c, records: [{ ...rec, props: { ...rec.props, [prop]: to.value } }, ...c.records], total: c.total + 1, amount: c.amount + (m ?? 0), sin_monto: c.sin_monto + (m == null ? 1 : 0) } : c)));
     try {
       const value = to.value === '' ? null : def?.type === 'owner' ? Number(to.value) : to.value;
       await http('PATCH', `/records/${type}/${id}`, { props: { [prop]: value } });
@@ -125,12 +131,13 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
         </div>
         {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
-        <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero</span>
+        <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero
+          {conMonto && <><span className="sep">·</span>Total sin IVA <b className="num" title={fmtMoneyExact(totalMonto, 'ARS')}>{fmtMoney(totalMonto, 'ARS') || '$ 0'}</b></>}</span>
       </div>
       <div className={`board${boardStyle ? ' fill' : ''}`} ref={boardRef} style={boardStyle}>
         {cols.map((c) => (collapsed.has(c.value) ? (
           <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
-            title={`${c.label}: ${c.total}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
+            title={`${c.label}: ${c.total}${conMonto ? ` · ${fmtMoneyExact(c.amount, 'ARS')} sin IVA` : ''}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
             <Icon name="chevron" size={14} />
             <span className="n num">{c.total}</span>
             <span className="vlabel">{c.label}</span>
@@ -179,6 +186,12 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
               )}
               {!c.total && <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>Vacío</div>}
             </div>
+            {conMonto && (
+              <div className="col-foot" title={`${fmtMoneyExact(c.amount, 'ARS')} sin IVA`}>
+                <div><b className="num">{fmtMoney(c.amount, 'ARS') || '$ 0'}</b> <span className="muted">total sin IVA</span></div>
+                {c.sin_monto > 0 && <div className="muted">{c.sin_monto.toLocaleString('es-AR')} {c.sin_monto === 1 ? 'pedido' : 'pedidos'} sin monto</div>}
+              </div>
+            )}
           </div>
         )))}
       </div>

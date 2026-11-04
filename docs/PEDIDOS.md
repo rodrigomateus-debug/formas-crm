@@ -55,6 +55,19 @@ vendedora), queda sin ellas y se completa la próxima vez que se revisa el PDV. 
 Configuración → Integraciones → «Revisar todo» (o `POST /hooks/pedidos/revisar` con un token de administrador). La
 vendedora se completa ya al releer la lista, en las primeras corridas; la empresa, a medida que se revisa cada PDV.
 
+## Total sin IVA y el pie de las columnas
+
+Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, como en el de negocios, abajo de cada columna el monto de esa
+etapa, sin IVA. El «Total sin IVA» de cada pedido es el neto de su pedido de venta en Finnegans (la suma de sus renglones,
+en pesos). Lo trae `scripts/pedidos-totales.mjs` (`.github/workflows/pedidos-totales.yml`, solo lectura de Finnegans) del
+informe de pedidos de venta por producto: cada hora de 9 a 20, de lunes a viernes, con los pedidos de los últimos 120 días,
+y a las 7 todos desde 2023. Cruza por el número interno del pedido («PEDVTASTP - 31277», con o sin ceros adelante);
+primero Formas Publicitarias y, si no está, FP DEMO. No cuentan los renglones anulados ni los objetivos de venta.
+
+El CRM lo guarda con `POST /hooks/pedidos/totales` (token de administrador; `GET` da el resumen de la última corrida): solo
+los que cambiaron, en el historial de la propiedad, sin tocar la fecha de modificación del pedido (así el tablero no se
+reordena). Los anulados no están en el informe y quedan sin monto; el pie de la columna dice cuántos pedidos no tienen.
+
 ## Migración desde HubSpot
 
 Si ClickUp creó un pedido antes de la migración, al migrar se combina con el de HubSpot por número de PDV: queda el de

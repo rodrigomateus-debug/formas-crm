@@ -239,3 +239,27 @@ test('productos: el pedido de los PDV viejos y, si Finnegans no tiene renglones,
   assert.equal(prods.items.length, 1);
   assert.deepEqual([prods.items[0].name, prods.items[0].quantity, prods.items[0].code, prods.items[0].status, prods.items[0].unit_price], ['Taza 0', 150, 'TAZA_0', 'pdv', null]);
 });
+
+test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tablero', async () => {
+  asUser = null;
+  const a = await order();
+  const b = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_B}`)}`)).data.results[0];
+  if (!a?.props.pedido_finnegans || !b?.props.pedido_finnegans) return;   // sin ClickUp de prueba no hay pedidos
+  const tok = (await api('POST', '/tokens', { name: `Totales ${RUN}`, source: 'api' })).data.token;
+  const H = { authorization: `Bearer ${tok}` };
+  // Como lo manda scripts/pedidos-totales.mjs, con el número como lo guarda Finnegans (con ceros adelante).
+  const pad = (p) => p.replace(/(\d+)$/, (n) => n.padStart(8, '0'));
+  const body = { totales: { [pad(a.props.pedido_finnegans)]: 1000.5, [b.props.pedido_finnegans]: 2000 } };
+  const r = (await api('POST', '/hooks/pedidos/totales', body, H)).data;
+  assert.ok(r.cruzados >= 2 && r.actualizados >= 2, JSON.stringify(r));
+  const pa = (await api('GET', `/records/order/${a.id}`)).data.record.props;
+  assert.equal(Number(pa.hs_total_price), 1000.5);
+  assert.equal(pa.hs_currency_code, 'ARS');
+  assert.equal((await api('POST', '/hooks/pedidos/totales', body, H)).data.actualizados, 0, 'si no cambió, no se toca');
+  // El tablero de pedidos suma cada columna (el monto) y cuenta los que no tienen monto.
+  const groups = encodeURIComponent(JSON.stringify([[{ prop: 'pedido_finnegans', op: 'in', values: [a.props.pedido_finnegans, b.props.pedido_finnegans] }]]));
+  const cols = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&groups=${groups}`)).data.columns;
+  assert.equal(cols.reduce((n, c) => n + c.total, 0), 2, JSON.stringify(cols.map((c) => [c.label, c.total])));
+  assert.equal(cols.reduce((n, c) => n + c.amount, 0), 3000.5);
+  assert.equal(cols.reduce((n, c) => n + c.sin_monto, 0), 0);
+});

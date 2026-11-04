@@ -496,18 +496,22 @@ api.get('/board-prop/:type', async (c) => {
   const [cards, totals] = await db.batch([
     db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
       FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`).bind(...binds),
-    db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
+    db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount, SUM(CASE WHEN r.amount IS NULL THEN 1 ELSE 0 END) AS sin_monto
+      FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
   ]);
   const options = prop.type === 'owner'
     ? (await db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name').all<{ id: number; name: string }>()).results.map((u) => ({ value: String(u.id), label: u.name }))
     : prop.type === 'bool' && !prop.options.length ? [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }] : prop.options;
-  const counts = new Map((totals.results as Array<{ v: string | null; n: number }>).map((t) => [t.v ?? '', t.n]));
+  const tot = new Map((totals.results as Array<{ v: string | null; n: number; amount: number; sin_monto: number }>).map((t) => [t.v ?? '', t]));
+  const counts = new Map([...tot].map(([k, t]) => [k, t.n]));
   // Valores que no están entre las opciones (viejos o de otro sistema) también tienen su columna.
   const known = new Set(options.map((o) => o.value));
   const others = [...counts.keys()].filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v }));
   const rows = cards.results as unknown as Array<RecordRow & { board_value: string | null }>;
   const columns = [...options, ...others, { value: '', label: 'Sin dato' }]
-    .map((o) => ({ value: o.value, label: o.label, total: counts.get(o.value) ?? 0, records: rows.filter((r) => (r.board_value ?? '') === o.value).map(rowToRecord) }))
+    // Monto de la columna (pedidos: el total sin IVA) y cuántas tarjetas no lo tienen, para el pie de la columna.
+    .map((o) => ({ value: o.value, label: o.label, total: counts.get(o.value) ?? 0, amount: tot.get(o.value)?.amount ?? 0, sin_monto: tot.get(o.value)?.sin_monto ?? 0,
+      records: rows.filter((r) => (r.board_value ?? '') === o.value).map(rowToRecord) }))
     .filter((col) => col.value !== '' || col.total > 0 || prop.type !== 'owner');
   return c.json({ prop: { name: prop.name, label: prop.label, type: prop.type }, columns });
 });

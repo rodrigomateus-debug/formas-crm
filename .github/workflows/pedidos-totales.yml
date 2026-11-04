@@ -1,0 +1,37 @@
+# Total sin IVA de cada pedido, desde Finnegans (solo lectura) a los pedidos del CRM (scripts/pedidos-totales.mjs). Lo usa
+# el pie de las columnas del tablero de pedidos. Cada hora de 9 a 20 (lunes a viernes) con los pedidos de los últimos 120
+# días; a las 7 de la mañana, todos desde 2023. Necesita la variable CRM_URL y los secretos CRM_TOKEN (de un administrador) y
+# FINNEGANS_CLIENT_ID / FINNEGANS_CLIENT_SECRET (o FIN_*). El repo es público: el script solo imprime cantidades.
+name: Totales de pedidos
+
+on:
+  schedule:
+    - cron: '13 12-23 * * 1-5'   # cada hora de 9 a 20 de Buenos Aires
+    - cron: '7 10 * * *'          # todos los días a las 7:07, desde 2023
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: 'Desde qué fecha (AAAA-MM-DD). Vacío: los últimos 120 días.'
+        required: false
+
+concurrency:
+  group: pedidos-totales
+  cancel-in-progress: false
+
+jobs:
+  totales:
+    runs-on: ubuntu-latest
+    if: vars.CRM_URL != ''
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/pedidos-totales.mjs
+        env:
+          DESDE: ${{ github.event.schedule == '7 10 * * *' && '2023-01-01' || inputs.desde || '' }}
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+          FINNEGANS_CLIENT_ID: ${{ secrets.FINNEGANS_CLIENT_ID || secrets.FIN_CLIENT_ID }}
+          FINNEGANS_CLIENT_SECRET: ${{ secrets.FINNEGANS_CLIENT_SECRET || secrets.FIN_SECRET }}

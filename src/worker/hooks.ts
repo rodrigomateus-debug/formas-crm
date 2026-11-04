@@ -10,6 +10,7 @@ import { gmailConfig, syncAll } from './gmail';
 import { avisosConfig, correrAvisos } from './avisos';
 import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from './clientes';
 import { refrescarFce } from './facturar';
+import { aplicarTotales } from './totales';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -219,6 +220,17 @@ hooks.post('/clientes/aplicar', async (c) => {
 hooks.get('/clientes/estado', async (c) => {
   await adminToken(c.env, c.req.raw);
   const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'clientes_estado'").first<{ value: string }>();
+  return c.json(r ? JSON.parse(r.value) : null);
+});
+
+// Total sin IVA de cada pedido (scripts/pedidos-totales.mjs): {totales: {"PEDVTASTP - 31277": 123456.78, …}}.
+hooks.post('/pedidos/totales', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await aplicarTotales(c.env, await c.req.json()));
+});
+hooks.get('/pedidos/totales', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'totales_pedidos'").first<{ value: string }>();
   return c.json(r ? JSON.parse(r.value) : null);
 });
 

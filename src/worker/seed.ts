@@ -263,7 +263,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['hs_order_name', 'Nombre del pedido', 'string', 'Pedido', [], { ...CORE, ...FORM, required: true }],
     ['pdv_finnegans', 'PDV Finnegans', 'string', 'Pedido', [], FORM],
     ['owner_id', 'Propietario', 'owner', 'Pedido', [], { ...CORE, ...FORM }],
-    ['hs_total_price', 'Total', 'currency', 'Pedido', [], CORE],
+    ['hs_total_price', 'Total sin IVA', 'currency', 'Pedido', [], CORE],
     ['hs_currency_code', 'Moneda', 'enum', 'Pedido', ['ARS', 'USD'], CORE],
     ['hs_external_order_id', 'Número de pedido web', 'string', 'Pedido', [], CORE],
     ['hs_pipeline_stage', 'Etapa del pedido', 'enum', 'Pedido', ORDER_STAGES, { ...CORE, ...FORM }],

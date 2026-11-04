@@ -18,6 +18,21 @@ export function Avatar({ name, type, size, domain, email }: { name: string; type
   return <span className={cls}>{initials(name)}</span>;
 }
 
+// La vista previa no deja ver la página de atrás bloqueada: la rueda del mouse fuera del panel desplaza lo que está debajo.
+function scrollBehind(e: React.WheelEvent<HTMLDivElement>) {
+  const overlay = e.currentTarget;
+  overlay.style.pointerEvents = 'none';
+  let el = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+  overlay.style.pointerEvents = '';
+  while (el && el !== document.body) {
+    const st = getComputedStyle(el);
+    const canY = /(auto|scroll)/.test(st.overflowY) && el.scrollHeight > el.clientHeight;
+    const canX = /(auto|scroll)/.test(st.overflowX) && el.scrollWidth > el.clientWidth;
+    if ((canY && e.deltaY) || (canX && (e.deltaX || e.shiftKey))) { el.scrollBy({ left: e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX, top: e.shiftKey ? 0 : e.deltaY }); return; }
+    el = el.parentElement;
+  }
+}
+
 export function Drawer({ title, onClose, children, footer, clear }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; clear?: boolean }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -25,7 +40,10 @@ export function Drawer({ title, onClose, children, footer, clear }: { title: str
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
   return (
-    <div className={`overlay${clear ? ' clear' : ''}`} onMouseDown={(e) => !clear && e.target === e.currentTarget && onClose()}>
+    // Clic fuera del panel: se cierra (en todas las vistas previas y en los paneles laterales). Afuera, el mouse muestra
+    // un círculo con una cruz. La rueda sigue moviendo la lista o el tablero de atrás.
+    <div className={`overlay drawer-overlay${clear ? ' clear' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      onWheel={clear ? (e) => { if (e.target === e.currentTarget) scrollBehind(e) } : undefined}>
       <div className="drawer" role="dialog" aria-label={title}>
         <div className="drawer-head"><h2>{title}</h2><button className="btn ghost icon" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={18} /></button></div>
         <div className="drawer-body">{children}</div>

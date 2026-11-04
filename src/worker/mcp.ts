@@ -5,6 +5,7 @@ import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor,
 import { associate, associationsOf, dissociate, primaryCompanyId } from './associations';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
+import { orderProducts } from './productos';
 import { assertDealVisible, canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
@@ -71,7 +72,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'get_record',
-    description: 'Trae un registro por id con todas sus propiedades, sus asociaciones (contactos, empresas, negocios, pedidos) y la actividad reciente (notas, mails, llamadas, reuniones, WhatsApp, tareas).',
+    description: 'Trae un registro por id con todas sus propiedades, sus asociaciones (contactos, empresas, negocios, pedidos) y la actividad reciente (notas, mails, llamadas, reuniones, WhatsApp, tareas). En los pedidos, también sus productos (de Finnegans o, si no tiene renglones, los artículos del PDV de ClickUp).',
     readOnly: true,
     inputSchema: {
       type: 'object',
@@ -96,6 +97,8 @@ const TOOLS: Tool[] = [
           direction: x.direction, status: x.status, owner_id: x.owner_id,
         })),
         activity_counts: tl?.counts,
+        ...(row.object_type === 'order' ? { productos: await orderProducts(env, row.id, rowToRecord(row).props).then((r) => ({ origen: r.source, error: r.error,
+          items: r.items.map((i) => ({ nombre: i.name, codigo: i.code, cantidad: i.quantity, precio: i.unit_price, subtotal: i.subtotal, estado: i.status })) })).catch((e) => ({ error: (e as Error).message })) } : {}),
       };
     },
   },

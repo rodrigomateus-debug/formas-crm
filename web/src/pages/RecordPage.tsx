@@ -526,9 +526,10 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 // ---------- Columna derecha: asociaciones ----------
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
-interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null }
-interface OrderProducts { pedido: string | null; configured: boolean; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean }
-// Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio.
+interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null }
+interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean }
+// Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
+// los artículos del PDV de ClickUp (producto, cantidad, código y estado de producción, sin precio).
 // En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
 // El total es siempre el de todos.
 function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
@@ -538,15 +539,17 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   const items = d?.items ?? [];
   const shown = all ? items : items.slice(0, max);
   const qty = (n: number | null) => (n == null ? '' : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }));
-  const empty = res.loading ? 'Buscando los productos en Finnegans…'
+  const deClickup = d?.source === 'clickup';
+  const empty = res.loading ? 'Buscando los productos…'
     : res.error ? res.error
-    : !d?.pedido ? 'Este pedido no tiene pedido de Finnegans asociado.'
-    : !d.configured ? 'Falta conectar Finnegans (Configuración → Integraciones).'
-    : d.error ? `No se pudieron leer de Finnegans: ${d.error}`
-    : `El pedido ${d.pedido} no tiene productos en Finnegans.`;
+    : d?.error ? `No se pudieron leer los productos: ${d.error}`
+    : !d?.pedido && !d?.clickup ? 'Este pedido no tiene pedido de Finnegans ni PDV de ClickUp asociado.'
+    : !d?.configured && !d?.clickup ? 'Falta conectar Finnegans (Configuración → Integraciones).'
+    : 'Ni Finnegans ni ClickUp tienen productos para este pedido (pasa con los anulados).';
   return (
     <div className="panel assoc-card">
       <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3></div>
+      {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
       {shown.map((it, i) => (
         <div key={i} className="assoc-item product-item">
           {it.image_url
@@ -554,16 +557,19 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
             : <span className="product-img none" aria-hidden><Icon name="order" size={18} /></span>}
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="product-name">{it.name}</div>
-            <div className="small muted">{qty(it.quantity)} × {fmtMoney(it.unit_price, it.currency)}{it.discount ? ` · ${qty(it.discount)} % de descuento` : ''}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
+            <div className="small muted">{it.unit_price != null
+              ? <>{qty(it.quantity)} × {fmtMoney(it.unit_price, it.currency)}{it.discount ? ` · ${qty(it.discount)} % de descuento` : ''}</>
+              : it.quantity != null ? `${qty(it.quantity)} unidades` : 'Cantidad sin cargar'}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
+            {it.status && <div className="small"><span className="tag info" style={{ textTransform: 'capitalize' }}>{it.status}</span></div>}
             {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
           </div>
-          <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>
+          {it.subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>}
         </div>
       ))}
       {items.length > max && (
         <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)} aria-expanded={all}>{all ? 'Ver menos' : `Ver más (${items.length - max})`}</button></div>
       )}
-      {items.length > 0 && (
+      {items.length > 0 && !deClickup && (
         <div className="assoc-item product-total">
           <span className="grow">Total{d!.tax_included ? '' : ' sin IVA'}</span>
           <b className="num">{fmtMoney(d!.total, d!.currency)}</b>

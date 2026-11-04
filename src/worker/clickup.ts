@@ -94,6 +94,38 @@ const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,
 // Nombre de empresa para comparar: sin la forma societaria del final ("Memes Games SRL" = "MEMES GAMES S.R.L.").
 const companyKey = (s: string) => norm(s).replace(/[.,]/g, '').replace(/(\s(s ?r ?l|s ?a ?s|s ?a ?u|s ?a ?i ?c|s ?a ?c ?i ?f|s ?a|s ?h))+$/, '').trim();
 
+// El pedido de Finnegans del PDV: la línea «Pedido: PEDVTASTP - 31277» (al principio de la línea; no «Fecha pedido: …»).
+// Los PDV más viejos no la tienen y traen «Tipo de Documento: PEDVTAFP»: el pedido es ese tipo con el número del PDV.
+export function pedidoDe(text: string, npdv: string) {
+  const linea = text.match(/^[ \t]*Pedido:[ \t]*(.+)$/im)?.[1]?.trim().replace(/\s+/g, ' ') ?? '';
+  if (/PEDVTA/i.test(linea)) return linea;
+  const tipo = text.match(/^[ \t]*Tipo de Documento:[ \t]*(PEDVTA[A-Z]*)/im)?.[1]?.toUpperCase();
+  return tipo && npdv ? `${tipo} - ${npdv}` : '';
+}
+
+// Los artículos de un PDV (sus subtareas): producto, código de Finnegans, cantidad y estado de producción. Son los
+// productos del pedido cuando Finnegans no tiene los renglones.
+export interface Articulo { task_id: string; name: string; code: string | null; quantity: number | null; status: string }
+export function leerArticulo(s: CuTask): Articulo {
+  const f = fields(s);
+  const text = s.text_content || s.description || '';
+  const line = (k: string) => text.match(new RegExp(`^[ \\t]*${k}:[ \\t]*(.*)$`, 'im'))?.[1]?.trim() ?? '';
+  const nombre = line('Producto') || s.name.split(/\r?\n/)[0].replace(/\s+-\s+[^-]+$/, '').trim() || s.name;
+  const q = Number(String(f.CANTIDAD ?? line('Cantidad')).replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
+  return { task_id: s.id, name: nombre, code: line('Código').replace(/\\/g, '') || null, quantity: Number.isFinite(q) && q > 0 ? q : null, status: s.status?.status ?? '' };
+}
+export async function articulosDelPdv(env: Env, taskId: string, b?: Budget): Promise<Articulo[]> {
+  if (!env.CLICKUP_TOKEN) return [];
+  const t = await cu<CuTask>(env, `/task/${encodeURIComponent(taskId)}`, { include_subtasks: 'true' }, b);
+  const out: Articulo[] = [];
+  for (const s0 of (t.subtasks ?? []).slice(0, 40)) {
+    // Si la lista de subtareas no trae la descripción ni los campos, se lee cada artículo.
+    const s = s0.text_content || s0.custom_fields?.length ? s0 : await cu<CuTask>(env, `/task/${encodeURIComponent(s0.id)}`, {}, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return s0; });
+    out.push(leerArticulo(s));
+  }
+  return out;
+}
+
 // Datos del PDV que necesita el pedido.
 export function readPdv(t: CuTask) {
   const f = fields(t);
@@ -108,7 +140,7 @@ export function readPdv(t: CuTask) {
   for (const st of statuses) count.set(st, (count.get(st) ?? 0) + 1);
   return {
     npdv, unidad, url: t.url,
-    pedido: line('Pedido').replace(/\s+/g, ' '),
+    pedido: pedidoDe(text, npdv),
     cliente: f.CLIENTE || line('Cliente'),
     vendedor: f['🧑‍💻 VENDEDOR'] || f.VENDEDOR || line('Vendedor'),
     mailVendedor: f['MAIL VENDEDOR'] ?? '',
@@ -217,6 +249,8 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     owner = (change.owner_id ?? cur.owner_id ?? null) as number | null;
     entregadoAhora = change.hs_pipeline_stage === STAGE.entregado;
     if (Object.keys(change).length) { await updateRecord(db, ctx, 'order', id, change, { system: true, strict: false }); result = 'actualizado'; }
+    // Cambió el pedido de Finnegans: los productos se vuelven a leer al abrir el pedido.
+    if ('pedido_finnegans' in change) await db.prepare('DELETE FROM line_item_sync WHERE record_id = ?').bind(id).run();
     // Sin empresa (por ejemplo, entró antes de que la empresa estuviera en el CRM): se vuelve a buscar.
     const hasCompany = await db.prepare(`SELECT 1 FROM associations WHERE (from_id = ? AND to_type = 'company') OR (to_id = ? AND from_type = 'company') LIMIT 1`).bind(id, id).first();
     if (!hasCompany) {

@@ -25,16 +25,20 @@ async function api(method, path, body, headers = {}) {
 const JPG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
 const PDF = Buffer.from('%PDF-1.4 factura de prueba');
 const field = (name, value, type = 'short_text') => ({ name, type, value });
-const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.now(), vendedor = 'Rodrigo Mateus') => ({
+const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.now(), vendedor = 'Rodrigo Mateus', viejo = false) => ({
   id, name: `PDV - ${npdv}`, parent: null, url: `https://app.clickup.com/t/${id}`, date_updated: String(updated), status: { status: 'pdv' },
-  text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: ${vendedor}\nEs evento: Sí\nFecha entrega: 30-11-2026`,
+  // Los PDV viejos no tienen «Pedido:»: traen «Tipo de Documento» y una «Fecha pedido» que no es el número.
+  text_content: viejo
+    ? `PDV - ${npdv}\nTipo de Documento: PEDVTAFP\nCliente: Cliente ${RUN} S.R.L.\nVendedor: ${vendedor}\nEs evento: No\nFecha pedido: 31-03-2026\nFecha entrega: 30-11-2026`
+    : `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: ${vendedor}\nEs evento: Sí\nFecha entrega: 30-11-2026`,
   custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', `Cliente ${RUN} S.R.L.`), field('🧑‍💻 VENDEDOR', vendedor),
     { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: unidad } }, field('ENTREGAS (FECHA REAL)', String(RECIBIDO), 'date')],
-  subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Artículo ${i}`, parent: id, date_updated: String(updated), status: { status: s } })),
+  subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Taza ${i} - Proveedor`, parent: id, date_updated: String(updated), status: { status: s },
+    text_content: `PDV - ${npdv}\nProducto: Taza ${i}\nCantidad: 1.000\nCódigo: TAZA\\_${i}`, custom_fields: [field('CANTIDAD ', '150', 'number')] })),
   attachments,
 });
 const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false };
-const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`);
+const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`, true);
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
 let hits = 0;   // consultas que recibe el ClickUp/Finnegans simulado
@@ -211,4 +215,17 @@ test('pedidos desde ClickUp: cada corrida respeta el tope de consultas y sigue e
     assert.equal(o?.props.hs_pipeline_stage, '1237498994', `PDV ${BULK(i)} en producción`);
   }
   cu.bulk = 0;
+});
+
+test('productos: el pedido de los PDV viejos y, si Finnegans no tiene renglones, los artículos de ClickUp', async () => {
+  // PDV viejo: «Tipo de Documento: PEDVTAFP» + número del PDV (no la «Fecha pedido»).
+  const c = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_C}`)}`)).data.results[0];
+  if (c) assert.equal(c.props.pedido_finnegans, `PEDVTAFP - ${PDV_C}`);
+  // PDV_B: su pedido no está en Finnegans (el simulado responde 404) → los artículos de ClickUp, sin precio.
+  const b = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_B}`)}`)).data.results[0];
+  assert.ok(b, 'pedido B');
+  const prods = (await api('GET', `/records/order/${b.id}/products`)).data;
+  assert.equal(prods.source, 'clickup');
+  assert.equal(prods.items.length, 1);
+  assert.deepEqual([prods.items[0].name, prods.items[0].quantity, prods.items[0].code, prods.items[0].status, prods.items[0].unit_price], ['Taza 0', 150, 'TAZA_0', 'pdv', null]);
 });

@@ -161,6 +161,7 @@ async function loadCrmProps() {
 }
 
 const PROPS = {};
+const DE_FINNEGANS = new Set(['saldo_pendiente_de_pago_mxn']);
 for (const type of ['contacts', 'companies', 'deals', 'orders']) {
   if (!want('config') && !want(type)) continue;
   let defs = [];
@@ -172,10 +173,11 @@ for (const type of ['contacts', 'companies', 'deals', 'orders']) {
       object_type: type, name: d.name, label: d.label, type: d.type, fieldType: d.fieldType, description: d.description, options: d.options?.filter((o) => !o.hidden),
     })));
   }
-  PROPS[type] = defs.filter((d) => !d.name.startsWith('hs_') && !d.calculated).map((d) => d.name);
+  // El saldo pendiente de los pedidos ya no viene de HubSpot: lo trae Finnegans (scripts/pedidos-totales.mjs).
+  PROPS[type] = defs.filter((d) => !d.name.startsWith('hs_') && !d.calculated && !DE_FINNEGANS.has(d.name)).map((d) => d.name);
 }
 crmProps = await loadCrmProps();
-if (crmProps) for (const type of Object.keys(PROPS)) PROPS[type] = crmProps[CRM_TYPES[type]] ?? PROPS[type];
+if (crmProps) for (const type of Object.keys(PROPS)) PROPS[type] = (crmProps[CRM_TYPES[type]] ?? PROPS[type]).filter((p) => !DE_FINNEGANS.has(p));
 
 // ---------- 3. Registros ----------
 const EXTRA = {

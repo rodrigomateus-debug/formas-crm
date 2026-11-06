@@ -71,6 +71,20 @@ async function filasDe(tok, emp, desde, hasta) {
   return filas;
 }
 
+// Saldo pendiente de cada pedido: el informe de composición de saldos (las dos empresas juntas, con la coma y los
+// corchetes sin escapar; si no, vuelve vacío). Solo los deudores en cuenta corriente: cada fila es un comprobante con lo
+// que falta cobrar, con IVA. El CRM la cruza con su pedido (/hooks/pedidos/saldos). Del cliente no se manda nada más.
+export function filasDeSaldo(reporte) {
+  return (Array.isArray(reporte) ? reporte : []).filter((x) => x.CUENTA === 'Deudores en Cta. Cte.').map((x) => ({
+    ie: x.IDENTIFICACIONEXTERNA ?? null, doc: x.DOCUMENTO ?? null, desc: x.DESCRIPCION ?? null, importe: Number(x.IMPORTEMONPPAL ?? 0), vto: x.FECHAVTO ?? null,
+  })).filter((f) => Number.isFinite(f.importe) && f.importe !== 0);
+}
+async function saldos(tok, hoy) {
+  const r = await getJson(`${FIN}/reports/COMPOSICIONSALDOSCLIENTES?${new URLSearchParams({ PARAMWEBREPORT_fecha: hoy, ACCESS_TOKEN: tok })}&PARAMWEBREPORT_Empresa=[${EMPRESAS.join(',')}]`);
+  if (!Array.isArray(r)) throw new Error('El informe de saldos no volvió como lista.');
+  return filasDeSaldo(r);
+}
+
 async function main() {
   const hoy = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
   const desde = process.env.DESDE || masDias(hoy, -120);
@@ -87,6 +101,13 @@ async function main() {
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
   console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados.`);
+  // Si el informe de saldos falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
+  const filasSaldo = await saldos(tok, hoy);
+  const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ filas: filasSaldo, completo: true }) });
+  if (!rs.ok) throw new Error(`CRM /hooks/pedidos/saldos: HTTP ${rs.status}`);
+  const s = await rs.json();
+  console.log(`Saldos: ${s.filas} comprobantes con saldo, ${s.cruzadas} cruzan con un pedido; ${s.pedidos_con_saldo} pedidos con saldo, ${s.actualizados} actualizados.`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch((e) => { console.error(e.message); process.exit(1); });

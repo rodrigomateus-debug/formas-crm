@@ -295,6 +295,26 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   assert.equal(cardA.productos, 2);
   const cardB = board.columns.flatMap((c) => c.records).find((rec) => rec.id === b.id);
   assert.equal(cardB.fotos, undefined, 'sin fotos, sin miniaturas');
+  // Saldo pendiente desde Finnegans (informe de composición de saldos): la factura de A por su identificación; una de B por
+  // el PDV con que empieza la descripción (como las que salen de un remito), con una nota de crédito que la corrige; una
+  // cobranza sin aplicar no es de ningún pedido.
+  const saldoDe = async (rec) => (await api('GET', `/records/order/${rec.id}`)).data.record.props.saldo_pendiente_de_pago_mxn;
+  assert.equal((await api('POST', '/hooks/pedidos/saldos', { filas: [] })).status, 401, 'sin token no');
+  assert.equal((await api('POST', '/hooks/pedidos/saldos', { nada: 1 }, H)).status, 400);
+  let sal = (await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [
+    { ie: `FC PEDVTASTP-${PDV.padStart(8, '0')} 1`, doc: 'FCVTAELECT - 9999', desc: PDV, importe: 60500 },
+    { ie: 'FC FPREMVTA-1979 1', doc: 'FCVTAELECT - 9001', desc: `${b.props.pdv_finnegans} / OC N°: 4400197895`, importe: 1000 },
+    { ie: 'NC FCVTAELECT-9001 1', doc: 'NCVEE - 5', desc: 'NC ANULA FC 9001', importe: -300 },
+    { ie: 'COBRANZAFORMAS - 1', doc: 'COBRANZAFORMAS - 1', desc: '', importe: -50 },
+  ] }, H)).data;
+  assert.deepEqual([sal.cruzadas, sal.sin_cruce], [3, 1], JSON.stringify(sal));
+  assert.equal(await saldoDe(a), 60500);
+  assert.equal(await saldoDe(b), 700, 'la factura menos la nota de crédito');
+  // Cuando se cobra, deja de aparecer: A (facturado) queda en 0; B (sin factura en el CRM) queda vacío.
+  sal = (await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [] }, H)).data;
+  assert.equal(await saldoDe(a), 0);
+  assert.equal(await saldoDe(b), undefined);
+  assert.equal((await api('GET', '/hooks/pedidos/saldos', undefined, H)).data.filas, 0, 'lo último que llegó');
   // Carga en tandas de los productos de los pedidos que no se leyeron.
   const tanda = (await api('POST', '/hooks/productos/pendientes?limit=5', {}, H)).data;
   assert.ok(Number.isInteger(tanda.leidos) && Number.isInteger(tanda.quedan), JSON.stringify(tanda));

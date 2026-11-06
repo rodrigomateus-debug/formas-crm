@@ -69,6 +69,22 @@ El CRM lo guarda con `POST /hooks/pedidos/totales` (token de administrador; `GET
 los que cambiaron, en el historial de la propiedad, sin tocar la fecha de modificación del pedido (así el tablero no se
 reordena). Los anulados no están en el informe y quedan sin monto; el pie de la columna dice cuántos pedidos no tienen.
 
+## Saldo pendiente de cada pedido
+
+Pedido de Rodrigo del 6/11/2026: el «Saldo pendiente de pago» del pedido sale de Finnegans, ya no de HubSpot ni a mano.
+`scripts/pedidos-totales.mjs`, cada hora, baja el informe de composición de saldos (`COMPOSICIONSALDOSCLIENTES`, las
+dos empresas; el mismo que usa el saldo de cada empresa) y manda a `POST /hooks/pedidos/saldos` una fila por comprobante
+con saldo: lo que falta cobrar, con IVA. El CRM la cruza con su pedido (`aplicarSaldos` en `totales.ts`):
+
+1. Por la factura que el CRM ya tiene enganchada al pedido (tabla `files`).
+2. Si no, por la identificación de la factura («FC PEDVTASTP-00031277 1»).
+3. Si no, por el número de PDV con que empieza la descripción («31089», «2407 / OC N°…», «PDV:36 NOESTRES»), que también
+   tienen las facturas que salen de un remito («FC FPREMVTA-1979 1»).
+
+Las notas de crédito restan en el pedido de la factura que corrigen; las cobranzas sin aplicar no son de ningún pedido.
+Un pedido facturado que ya no aparece está cobrado (saldo 0, «Cobrado» en la vista previa); uno sin factura queda vacío
+(«Sin facturar»). Si el informe falla, no se manda nada. Es solo lectura: en Finnegans no se escribe nada.
+
 ## Miniaturas de los productos en la tarjeta
 
 Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, la tarjeta muestra hasta 3 fotos de los productos del pedido,

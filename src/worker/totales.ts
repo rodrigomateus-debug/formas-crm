@@ -50,3 +50,113 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totales_pedidos', ?)").bind(JSON.stringify(out)).run();
   return out;
 }
+
+// ---------- Saldo pendiente de cada pedido ----------
+// Del informe de composición de saldos de Finnegans (scripts/pedidos-totales.mjs): una fila por comprobante con saldo
+// (facturas, notas de crédito, cobranzas sin aplicar), con lo que falta cobrar, con IVA. Cada factura se cruza con su
+// pedido: por la factura que el CRM ya tiene enganchada al pedido; si no, por su identificación («FC PEDVTASTP-00031277 1»)
+// o por el número de PDV con que empieza la descripción («31089», «2407 / OC N°…», «PDV:36 NOESTRES»), que también lo
+// tienen las facturas que salen de un remito. Las notas de crédito restan en el pedido de la factura que corrigen. Los
+// pedidos facturados que no aparecen ya están cobrados (saldo 0); los que no tienen factura quedan vacíos.
+
+export interface FilaSaldo { ie?: string | null; doc?: string | null; desc?: string | null; importe: number; vto?: string | null }
+export interface SaldosEstado { filas: number; cruzadas: number; sin_cruce: number; pedidos_con_saldo: number; total: number; actualizados: number; at: string }
+
+const norm = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
+// «FCVTAELECT - 0002583», «FCVTAELECT-2583» → «FCVTAELECT - 2583».
+const claveDoc = (s: unknown) => { const m = String(s ?? '').match(/([A-Za-z]+)\s*-\s*0*(\d+)/); return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null; };
+const esNota = (f: FilaSaldo) => /^NC/i.test(String(f.doc ?? '')) || /^NC\s/i.test(String(f.ie ?? ''));
+
+export async function aplicarSaldos(env: Env, body: { filas?: unknown; completo?: boolean }): Promise<SaldosEstado> {
+  if (!Array.isArray(body?.filas)) throw new HttpError(400, 'Falta filas: [{ie, doc, desc, importe}, …].');
+  const filas = (body.filas as FilaSaldo[]).filter((f) => f && Number.isFinite(Number(f.importe)));
+  const db = env.DB;
+  const [pedidos, facturas] = await db.batch([
+    db.prepare(`SELECT id, json_extract(props, '$.pedido_finnegans') AS pedido, json_extract(props, '$.pdv_finnegans') AS pdv,
+        json_extract(props, '$.factura_numero') AS factura, json_extract(props, '$.saldo_pendiente_de_pago_mxn') AS saldo
+      FROM records WHERE object_type = 'order' AND archived = 0 AND json_extract(props, '$.pedido_finnegans') IS NOT NULL`),
+    db.prepare("SELECT record_id, source_ref, json_extract(meta, '$.documento') AS documento FROM files WHERE kind = 'factura' AND source = 'finnegans'"),
+  ]);
+  const ped = pedidos.results as Array<{ id: number; pedido: string; pdv: string | number | null; factura: string | null; saldo: number | string | null }>;
+  const fac = facturas.results as Array<{ record_id: number; source_ref: string; documento: string | null }>;
+  const porIe = new Map(fac.map((f) => [norm(f.source_ref), f.record_id]));
+  const porDoc = new Map(fac.filter((f) => claveDoc(f.documento)).map((f) => [claveDoc(f.documento)!, f.record_id]));
+  const porPedido = new Map(ped.map((p) => [clavePedido(p.pedido), p.id]));
+  const porPdv = new Map<number, Array<{ id: number; tipo: string }>>();
+  for (const p of ped) {
+    const n = Number(String(p.pdv ?? '').match(/\d+/)?.[0] ?? clavePedido(p.pedido)?.split(' - ')[1]);
+    if (!n) continue;
+    const l = porPdv.get(n) ?? [];
+    l.push({ id: p.id, tipo: clavePedido(p.pedido)?.split(' - ')[0] ?? '' });
+    porPdv.set(n, l);
+  }
+  const conFactura = new Set([...fac.map((f) => f.record_id), ...ped.filter((p) => p.factura).map((p) => p.id)]);
+
+  const pedidoDe = (f: FilaSaldo): number | undefined => {
+    const ie = norm(f.ie);
+    if (porIe.has(ie)) return porIe.get(ie);
+    const d = claveDoc(f.doc);
+    if (d && porDoc.has(d)) return porDoc.get(d);
+    const m = ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
+    if (m && porPedido.has(`${m[1]} - ${Number(m[2])}`)) return porPedido.get(`${m[1]} - ${Number(m[2])}`);
+    const n = Number(String(f.desc ?? '').match(/^\s*(?:PDV\s*:?\s*)?(\d+)/i)?.[1]);
+    let cand = n ? porPdv.get(n) ?? [] : [];
+    if (cand.length > 1) {
+      // Mismo número en otra unidad: la descripción o la identificación dicen cuál.
+      const tipo = /NO\s*ESTRES/i.test(String(f.desc ?? '')) ? 'PEDVTANE' : m?.[1] ?? null;
+      if (tipo) cand = cand.filter((c) => c.tipo === tipo);
+    }
+    return cand.length === 1 ? cand[0].id : undefined;
+  };
+
+  const saldo = new Map<number, number>();
+  const pedidoDeDoc = new Map<string, number>();
+  let cruzadas = 0;
+  // Primero las facturas; después las notas de crédito, que van al pedido de la factura que corrigen.
+  for (const f of filas.filter((x) => !esNota(x))) {
+    const id = pedidoDe(f);
+    if (id === undefined) continue;
+    cruzadas++;
+    saldo.set(id, (saldo.get(id) ?? 0) + Number(f.importe));
+    const d = claveDoc(f.doc);
+    if (d) pedidoDeDoc.set(d, id);
+  }
+  for (const f of filas.filter(esNota)) {
+    const ref = String(f.ie ?? '').match(/^NC\s+([A-Za-z]+)-0*(\d+)/i);
+    const refDoc = ref ? `${ref[1].toUpperCase()} - ${Number(ref[2])}` : null;
+    const anula = Number(String(f.desc ?? '').match(/ANULA\s+FC\s*0*(\d+)/i)?.[1]);
+    let id = (refDoc && (pedidoDeDoc.get(refDoc) ?? porDoc.get(refDoc))) || undefined;
+    if (id === undefined && anula) id = [...pedidoDeDoc].find(([k]) => Number(k.split(' - ')[1]) === anula)?.[1];
+    id ??= pedidoDe(f);
+    if (id === undefined) continue;
+    cruzadas++;
+    saldo.set(id, (saldo.get(id) ?? 0) + Number(f.importe));
+  }
+
+  const sys = await db.prepare("SELECT id FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<{ id: number }>();
+  const ts = new Date().toISOString();
+  const stmts: D1PreparedStatement[] = [];
+  let actualizados = 0;
+  for (const p of ped) {
+    // Sin la lista completa (body.completo), solo se tocan los pedidos que aparecen.
+    if (!saldo.has(p.id) && !body.completo) continue;
+    const nuevo = saldo.has(p.id) ? Math.max(0, Math.round(saldo.get(p.id)! * 100) / 100) : conFactura.has(p.id) ? 0 : null;
+    const viejo = p.saldo == null || p.saldo === '' ? null : Number(p.saldo);
+    if (nuevo === viejo || (nuevo != null && viejo != null && Math.abs(nuevo - viejo) < 0.01)) continue;
+    actualizados++;
+    stmts.push(
+      nuevo == null
+        ? db.prepare("UPDATE records SET props = json_remove(props, '$.saldo_pendiente_de_pago_mxn') WHERE id = ?").bind(p.id)
+        : db.prepare("UPDATE records SET props = json_set(props, '$.saldo_pendiente_de_pago_mxn', ?) WHERE id = ?").bind(nuevo, p.id),
+      db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(p.id, 'saldo_pendiente_de_pago_mxn', viejo == null ? null : String(viejo), nuevo == null ? null : String(nuevo), ts, sys?.id ?? null, 'finnegans'),
+    );
+  }
+  for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
+  const conSaldo = [...saldo.values()].filter((v) => v > 0.005);
+  const out = { filas: filas.length, cruzadas, sin_cruce: filas.length - cruzadas, pedidos_con_saldo: conSaldo.length,
+    total: Math.round(conSaldo.reduce((t, v) => t + v, 0)), actualizados, at: ts };
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('saldos_pedidos', ?)").bind(JSON.stringify(out)).run();
+  return out;
+}
+

@@ -2,7 +2,7 @@
 // columna del tablero de pedidos.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { totalesPorPedido, clavePedido } from '../scripts/pedidos-totales.mjs';
+import { totalesPorPedido, clavePedido, filasDeSaldo } from '../scripts/pedidos-totales.mjs';
 
 const CRM = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
@@ -31,4 +31,14 @@ test('el hook de totales pide token de administrador y valida el cuerpo', async 
   assert.equal(r.recibidos, 1, 'solo los números de pedido válidos');
   // Los pedidos con su número de Finnegans los crea la sincronización de ClickUp: la prueba de punta a punta está en
   // test/pedidos.test.mjs («total sin IVA de Finnegans…»).
+});
+
+test('saldos: del informe de composición solo van los deudores, sin datos del cliente', () => {
+  const f = filasDeSaldo([
+    { CUENTA: 'Deudores en Cta. Cte.', IDENTIFICACIONEXTERNA: 'FCVTAELECT - 2583', DOCUMENTO: 'FCVTAELECT - 2583', DESCRIPCION: '31089 / SIN OC', IMPORTEMONPPAL: '1210.5', FECHAVTO: '20-11-2026', ORGANIZACION: 'CLIENTE SA', CUIT: '30-11111111-1' },
+    { CUENTA: 'Proveedores', DOCUMENTO: 'FCCOMPRA - 1', IMPORTEMONPPAL: '-500' },
+    { CUENTA: 'Deudores en Cta. Cte.', DOCUMENTO: 'FCVTAELECT - 1', IMPORTEMONPPAL: '0' },
+  ]);
+  assert.deepEqual(f, [{ ie: 'FCVTAELECT - 2583', doc: 'FCVTAELECT - 2583', desc: '31089 / SIN OC', importe: 1210.5, vto: '20-11-2026' }]);
+  assert.deepEqual(filasDeSaldo(null), []);
 });

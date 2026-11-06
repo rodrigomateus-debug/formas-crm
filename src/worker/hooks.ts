@@ -10,7 +10,7 @@ import { gmailConfig, syncAll } from './gmail';
 import { avisosConfig, correrAvisos } from './avisos';
 import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from './clientes';
 import { refrescarFce } from './facturar';
-import { aplicarTotales } from './totales';
+import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 
@@ -233,6 +233,18 @@ hooks.post('/pedidos/totales', async (c) => {
 hooks.get('/pedidos/totales', async (c) => {
   await adminToken(c.env, c.req.raw);
   const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'totales_pedidos'").first<{ value: string }>();
+  return c.json(r ? JSON.parse(r.value) : null);
+});
+
+// Saldo pendiente de cada pedido (scripts/pedidos-totales.mjs): las filas del informe de composición de saldos de
+// Finnegans, {filas: [{ie, doc, desc, importe, vto}], completo: true}.
+hooks.post('/pedidos/saldos', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await aplicarSaldos(c.env, await c.req.json()));
+});
+hooks.get('/pedidos/saldos', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'saldos_pedidos'").first<{ value: string }>();
   return c.json(r ? JSON.parse(r.value) : null);
 });
 

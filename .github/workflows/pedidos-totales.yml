@@ -1,5 +1,5 @@
-# Total sin IVA de cada pedido, desde Finnegans (solo lectura) a los pedidos del CRM (scripts/pedidos-totales.mjs). Lo usa
-# el pie de las columnas del tablero de pedidos. Después, los productos de los pedidos que todavía no se leyeron, para las
+# Total sin IVA y saldo pendiente de cada pedido, desde Finnegans (solo lectura) a los pedidos del CRM
+# (scripts/pedidos-totales.mjs). El total lo usa el pie de las columnas del tablero de pedidos. Después, los productos de los pedidos que todavía no se leyeron, para las
 # miniaturas de las tarjetas (scripts/pedidos-productos.mjs), y las fotos de los productos del registro de cotizaciones del
 # STP (scripts/stp-imagenes.mjs, con el secreto STPO_TOKEN; sin él se saltea). Cada hora de 9 a 20 (lunes a viernes) con los pedidos de los últimos 120
 # días; a las 7 de la mañana, todos desde 2023. Necesita la variable CRM_URL y los secretos CRM_TOKEN (de un administrador) y

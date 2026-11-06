@@ -30,6 +30,8 @@ test('bocetos en el negocio y después en el pedido, guardados en Drive', async 
   if (!cfg0.cuenta_de_servicio) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba (node test/gmail-dev-vars.mjs)'); return; }
   const cfg = (await api('PUT', '/integrations/bocetos', { carpeta: 'https://drive.google.com/drive/folders/0ARaizDeBocetos123?usp=sharing', usuario: 'Rodrigo.Mateus@formaspublicitarias.com' })).data;
   assert.deepEqual([cfg.carpeta, cfg.usuario], ['0ARaizDeBocetos123', 'rodrigo.mateus@formaspublicitarias.com'], 'del link queda el id de la carpeta');
+  const prueba = (await api('GET', '/integrations/bocetos/probar')).data;
+  assert.deepEqual([prueba.ok, prueba.unidad_compartida, prueba.error], [true, true, null], JSON.stringify(prueba));
 
   const emp = (await api('POST', '/records/company', { props: { name: `Illumin ${RUN}` } })).data;
   const deal = (await api('POST', '/records/deal', { props: { dealname: `Abanicos ${RUN}` }, associations: [emp.id] })).data;

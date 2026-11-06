@@ -12,6 +12,7 @@ import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from '
 import { refrescarFce } from './facturar';
 import { aplicarTotales } from './totales';
 import { cargarProductosPendientes } from './productos';
+import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -240,6 +241,20 @@ hooks.get('/pedidos/totales', async (c) => {
 hooks.post('/productos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
+});
+
+// Bocetos en Drive: dónde se guardan (lo mismo que Configuración → Integraciones) y probar el acceso.
+hooks.get('/bocetos', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await driveConfig(c.env));
+});
+hooks.put('/bocetos', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await guardarDriveConfig(c.env, await c.req.json()));
+});
+hooks.get('/bocetos/probar', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await probarDrive(c.env));
 });
 
 // La lista de empresas grandes de ARCA (Factura de Crédito Electrónica): se baja sola una vez por día; esto la trae ya.

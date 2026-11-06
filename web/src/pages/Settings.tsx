@@ -356,6 +356,12 @@ function BocetosDrive() {
           <button className="btn primary" disabled={!f} onClick={async () => {
             try { await http('PUT', '/integrations/bocetos', v); toast('Carpeta de bocetos guardada'); setF(null); cfg.reload(); } catch (e) { toast((e as Error).message, true); }
           }}>Guardar</button>
+          <button className="btn" disabled={!!f || !cfg.data?.carpeta} onClick={async () => {
+            try {
+              const r = await http<{ ok: boolean; carpeta: string | null; unidad_compartida: boolean; error: string | null }>('GET', '/integrations/bocetos/probar');
+              toast(r.ok ? `Anda: el CRM puede guardar en «${r.carpeta}»${r.unidad_compartida ? ' (unidad compartida)' : ''}.` : r.error ?? 'No anda.', !r.ok);
+            } catch (e) { toast((e as Error).message, true); }
+          }}>Probar acceso</button>
         </div>
       </div>
     </div>

@@ -42,6 +42,11 @@ export async function googleFalso() {
         return send({ id: f.id, webViewLink: `https://drive.google.com/file/d/${f.id}/view` });
       }
       const m = url.pathname.match(/^\/drive\/v3\/files\/([^/]+)$/);
+      if (m && url.searchParams.get('alt') !== 'media') {
+        const id = decodeURIComponent(m[1]);
+        const c = drive.carpetas.find((x) => x.id === id) ?? (id.startsWith('0A') || id.startsWith('1') ? { name: 'Bocetos de producción' } : null);
+        return c ? send({ name: c.name, driveId: id.startsWith('0A') ? id : undefined, capabilities: { canAddChildren: true } }) : send({ error: 'no está' }, 404);
+      }
       if (m && url.searchParams.get('alt') === 'media') {
         const f = drive.archivos.find((x) => x.id === decodeURIComponent(m[1]));
         if (!f) return send({ error: 'no está' }, 404);

@@ -18,6 +18,37 @@ export async function driveConfig(env: Env): Promise<DriveConfig> {
   return { carpeta: c.carpeta || env.BOCETOS_DRIVE_FOLDER || null, usuario: c.usuario || env.ADMIN_EMAIL || null };
 }
 
+// Guarda dónde van los bocetos: acepta el link de la carpeta o de la unidad compartida (queda solo su id) y el mail.
+export async function guardarDriveConfig(env: Env, b: { carpeta?: string; usuario?: string }) {
+  const crudo = String(b.carpeta ?? '').trim();
+  const carpeta = crudo.match(/(?:folders\/|id=)([A-Za-z0-9_-]{10,})/)?.[1] ?? crudo;
+  const usuario = String(b.usuario ?? '').trim().toLowerCase();
+  if (carpeta && !/^[A-Za-z0-9_-]{10,}$/.test(carpeta)) throw new HttpError(400, 'Pegá el link de la carpeta o de la unidad compartida de Drive.');
+  if (usuario && !/^[^@\s]+@[^@\s]+$/.test(usuario)) throw new HttpError(400, 'El usuario tiene que ser un mail de Formas.');
+  await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('bocetos', ?)").bind(JSON.stringify({ carpeta: carpeta || null, usuario: usuario || null })).run();
+  return driveConfig(env);
+}
+
+// ¿Puede el CRM entrar a la carpeta? Pide el permiso de Drive (si falta en la delegación, Google lo rechaza acá) y lee
+// la carpeta: nombre, si está en una unidad compartida y si se puede escribir.
+export async function probarDrive(env: Env) {
+  const cfg = await driveConfig(env);
+  try {
+    const { token } = await acceso(env);
+    const f = await drive<{ name: string; driveId?: string; capabilities?: { canAddChildren?: boolean } }>(env, token,
+      `/drive/v3/files/${encodeURIComponent(cfg.carpeta!)}?supportsAllDrives=true&fields=name,driveId,capabilities(canAddChildren)`);
+    const puede = f.capabilities?.canAddChildren !== false;
+    return { ok: puede, carpeta: f.name, unidad_compartida: !!f.driveId, usuario: cfg.usuario,
+      error: puede ? null : `${cfg.usuario} puede ver la carpeta pero no agregar archivos: dale permiso de edición.` };
+  } catch (e) {
+    const m = (e as Error).message;
+    const error = /unauthorized|not authorized|access_denied/i.test(m)
+      ? 'A la cuenta de servicio le falta el permiso de Drive (https://www.googleapis.com/auth/drive) en la delegación de todo el dominio de Google Workspace.'
+      : /HTTP 404/.test(m) ? `${cfg.usuario} no ve esa carpeta: compartísela (con permiso de edición) o elegí otro usuario.` : m;
+    return { ok: false, carpeta: null, unidad_compartida: false, usuario: cfg.usuario, error };
+  }
+}
+
 async function acceso(env: Env) {
   const cfg = await driveConfig(env);
   if (!env.GOOGLE_SA_JSON) throw new HttpError(503, 'Falta la cuenta de servicio de Google (GOOGLE_SA_JSON).');

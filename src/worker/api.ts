@@ -16,7 +16,7 @@ import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visib
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { armarFotos, fotosDePedidos, fotosSql, orderProducts } from './productos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
-import { bajarArchivo, driveConfig } from './drive';
+import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -833,14 +833,11 @@ api.get('/integrations/bocetos', async (c) => {
 });
 api.put('/integrations/bocetos', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ carpeta?: string; usuario?: string }>();
-  // Se acepta el link de la carpeta o de la unidad compartida: queda solo su id.
-  const carpeta = String(b.carpeta ?? '').trim().match(/(?:folders\/|id=)([A-Za-z0-9_-]{10,})/)?.[1] ?? String(b.carpeta ?? '').trim();
-  const usuario = String(b.usuario ?? '').trim().toLowerCase();
-  if (carpeta && !/^[A-Za-z0-9_-]{10,}$/.test(carpeta)) throw new HttpError(400, 'Pegá el link de la carpeta o de la unidad compartida de Drive.');
-  if (usuario && !/^[^@\s]+@[^@\s]+$/.test(usuario)) throw new HttpError(400, 'El usuario tiene que ser un mail de Formas.');
-  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('bocetos', ?)").bind(JSON.stringify({ carpeta: carpeta || null, usuario: usuario || null })).run();
-  return c.json(await driveConfig(c.env));
+  return c.json(await guardarDriveConfig(c.env, await c.req.json()));
+});
+api.get('/integrations/bocetos/probar', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await probarDrive(c.env));
 });
 
 // Estado de las conexiones con ClickUp y Finnegans, y correrlas a mano.

@@ -145,6 +145,14 @@ tiene saldo vencido y si es empresa grande para ARCA (va con Factura de Crédito
 es la oficial de ARCA, sin captcha, y se baja una vez por día (`POST /hooks/arca/fce` la trae ya). En la ficha del negocio,
 la tarjeta «Datos para facturar» muestra lo mismo.
 
+## Bocetos de producción
+
+En cada producto del pedido se suben sus bocetos (PDF o fotos de referencia): versiones, técnico o referencia, aprobado.
+El CRM propone a qué producto va leyendo el PDF. Al aprobarlo, se adjunta solo en ClickUp a la subtarea de ese artículo,
+donde trabaja producción. También se suben en el negocio, antes del pedido, y después se usan en el pedido de la misma
+empresa. Se guardan en una unidad compartida de Drive (Configuración → Integraciones → Bocetos en Drive; la cuenta de
+servicio necesita el permiso de Drive en la delegación). Detalle en [docs/PEDIDOS.md](docs/PEDIDOS.md#bocetos-de-producción).
+
 ## Preparar la reunión con Claude
 
 En la ficha de una empresa, contacto o negocio, «Preparar reunión con Claude» abre claude.ai con el pedido escrito. Claude usa

@@ -336,6 +336,32 @@ function Pedidos() {
   );
 }
 
+// Dónde se guardan los bocetos de producción: una unidad compartida (o carpeta) de Drive de Formas, y el usuario con el que
+// entra el CRM (necesita el permiso de Drive en la delegación de la cuenta de servicio).
+function BocetosDrive() {
+  const toast = useToast();
+  const cfg = useAsync(() => http<{ carpeta: string | null; usuario: string | null; cuenta_de_servicio: boolean }>('GET', '/integrations/bocetos'), []);
+  const [f, setF] = useState<{ carpeta: string; usuario: string } | null>(null);
+  const v = f ?? { carpeta: cfg.data?.carpeta ?? '', usuario: cfg.data?.usuario ?? '' };
+  return (
+    <div className="panel"><div className="panel-head"><h2>Bocetos en Drive</h2>
+      {cfg.data?.carpeta && cfg.data.usuario ? <span className="tag ok">Configurado</span> : <span className="tag warn">Sin configurar</span>}</div>
+      <div className="panel-body stack">
+        <p className="small muted" style={{ margin: 0 }}>Los bocetos de producción (PDF o fotos) se guardan en una unidad compartida de Drive, con una carpeta por
+          empresa y, adentro, una por pedido o negocio. Pegá el link de la unidad compartida (o de una carpeta) y el mail con el que entra el CRM, que tiene que
+          poder editar ahí.{!cfg.data?.cuenta_de_servicio && ' Falta la cuenta de servicio de Google (GOOGLE_SA_JSON).'}</p>
+        <div className="row wrap">
+          <input className="input" style={{ width: 380 }} placeholder="Link de la unidad compartida o carpeta de Drive" value={v.carpeta} onChange={(e) => setF({ ...v, carpeta: e.target.value })} />
+          <input className="input" style={{ width: 260 }} placeholder="Mail con el que entra (ej. rodrigo.mateus@…)" value={v.usuario} onChange={(e) => setF({ ...v, usuario: e.target.value })} />
+          <button className="btn primary" disabled={!f} onClick={async () => {
+            try { await http('PUT', '/integrations/bocetos', v); toast('Carpeta de bocetos guardada'); setF(null); cfg.reload(); } catch (e) { toast((e as Error).message, true); }
+          }}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Integrations() {
   const toast = useToast();
   const tokens = useAsync(() => http<Array<{ id: number; name: string; source: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string }>>('GET', '/tokens'), []);
@@ -345,6 +371,7 @@ function Integrations() {
   return (
     <div className="stack" style={{ gap: 16 }}>
       <Pedidos />
+      <BocetosDrive />
       <Gmail />
       <OutboundHooks />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">

@@ -5,6 +5,7 @@ import {
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
 import { StageProps } from './Board';
+import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
@@ -41,6 +42,7 @@ export default function RecordPage() {
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
           {type === 'deal' && <FacturarCard record={record} />}
+          {type === 'deal' && <BocetosNegocioCard dealId={record.id} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
@@ -540,6 +542,21 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   const d = res.data;
   const items = d?.items ?? [];
   const shown = all ? items : items.slice(0, max);
+  // Bocetos de cada producto (PDF o foto en Drive); se suben con el botón o soltándolos encima del recuadro.
+  const toast = useToast();
+  const bo = useBocetos('order', recordId);
+  const [ver, setVer] = useState<Boceto | null>(null);
+  const productos: ProductoRef[] = items.map((it) => ({ key: it.code || it.name, nombre: it.name }));
+  const sub = useSubirBocetos('order', recordId, productos, () => bo.reload());
+  const bocetos = bo.data?.bocetos ?? [];
+  const deProducto = (k: string) => bocetos.filter((b) => b.producto === k);
+  const sinProducto = bocetos.filter((b) => !productos.some((p) => p.key === b.producto));
+  const puedeSubir = !!bo.data?.configurado;
+  const usar = async (b: Boceto, key: string) => {
+    const p = productos.find((x) => x.key === key);
+    try { await http('POST', `/bocetos/${b.id}/usar`, { order_id: recordId, producto: p?.key ?? null, producto_nombre: p?.nombre ?? b.producto_nombre }); toast('Boceto agregado al pedido'); bo.reload(); }
+    catch (e) { toast((e as Error).message, true); }
+  };
   const qty = (n: number | null) => (n == null ? '' : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }));
   const deClickup = d?.source === 'clickup';
   const empty = res.loading ? 'Buscando los productos…'
@@ -549,8 +566,10 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
     : !d?.configured && !d?.clickup ? 'Falta conectar Finnegans (Configuración → Integraciones).'
     : 'Ni Finnegans ni ClickUp tienen productos para este pedido (pasa con los anulados).';
   return (
-    <div className="panel assoc-card">
-      <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3></div>
+    <SoltarBocetos className="panel assoc-card soltar" onArchivos={(f) => (puedeSubir ? sub.elegir(f) : toast('Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).', true))}>
+      <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3>
+        {puedeSubir && items.length > 0 && <BotonArchivos onArchivos={sub.elegir} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
+      </div>
       {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
       {shown.map((it, i) => (
         <div key={i} className="assoc-item product-item">
@@ -564,6 +583,11 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
               : it.quantity != null ? `${qty(it.quantity)} unidades` : 'Cantidad sin cargar'}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
             {it.status && <div className="small"><span className="tag info" style={{ textTransform: 'capitalize' }}>{it.status}</span></div>}
             {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
+            <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+              <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={setVer} />
+              {puedeSubir && <BotonArchivos className="btn ghost sm boceto-mas" multiple={false} title={`Subir un boceto de ${it.name}`}
+                onArchivos={(f) => sub.elegir(f, { key: it.code || it.name, nombre: it.name })}>+ Boceto</BotonArchivos>}
+            </div>
           </div>
           {it.subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>}
         </div>
@@ -578,7 +602,31 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
         </div>
       )}
       {!items.length && <div className="panel-body muted small">{empty}</div>}
-    </div>
+      {sinProducto.length > 0 && (
+        <div className="assoc-item" style={{ flexDirection: 'column', gap: 4 }}>
+          <div className="small muted">Bocetos sin producto (abrilos para elegir a cuál van)</div>
+          <BocetoChips lista={sinProducto} onAbrir={setVer} />
+        </div>
+      )}
+      {(bo.data?.de_negocios.length ?? 0) > 0 && (
+        <div className="assoc-item" style={{ flexDirection: 'column', gap: 6 }}>
+          <div className="small muted">Bocetos de negocios de esta empresa (hechos antes del pedido)</div>
+          {bo.data!.de_negocios.map((b) => (
+            <div key={b.id} className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+              <BocetoChips lista={[b]} onAbrir={setVer} />
+              <span className="small ellipsis grow" title={`Negocio: ${b.negocio}`}>{b.producto_nombre || b.nombre} · {b.negocio}</span>
+              <Select className="input sm" style={{ width: 170 }} value="" aria-label="Usar en el producto" onChange={(e) => e.target.value && usar(b, e.target.value)}>
+                <option value="">Usar para…</option>
+                {productos.map((p) => <option key={p.key} value={p.key}>{p.nombre}</option>)}
+              </Select>
+            </div>
+          ))}
+        </div>
+      )}
+      {bo.data && !puedeSubir && items.length > 0 && <div className="panel-body small muted">Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).</div>}
+      {sub.cuadro}
+      {ver && <BocetoVisor b={ver} esPedido productos={productos} onClose={() => setVer(null)} onCambio={() => bo.reload()} />}
+    </SoltarBocetos>
   );
 }
 

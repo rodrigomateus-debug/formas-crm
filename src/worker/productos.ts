@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import { Budget, OutOfBudget } from './budget';
 import { finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
-import { articulosDelPdv } from './clickup';
+import { articulosDelPdv, articulosLivianos, type Articulo } from './clickup';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -22,22 +22,40 @@ async function refresh(env: Env, recordId: number, pedido: string | null, taskId
     const arts = await articulosDelPdv(env, taskId, b);
     await db.batch([
       db.prepare('DELETE FROM line_items WHERE record_id = ?').bind(recordId),
-      ...arts.map((a, i) => db.prepare(`INSERT INTO line_items (record_id, position, code, name, quantity, source, status) VALUES (?, ?, ?, ?, ?, 'clickup', ?)`)
-        .bind(recordId, i, a.code, a.name, a.quantity, a.status || null)),
+      ...arts.map((a, i) => db.prepare(`INSERT INTO line_items (record_id, position, code, name, quantity, source, status, clickup_task) VALUES (?, ?, ?, ?, ?, 'clickup', ?, ?)`)
+        .bind(recordId, i, a.code, a.name, a.quantity, a.status || null, a.task_id)),
     ]);
     if (token) await fichas(env, token, arts.map((a) => a.code), b);
     return arts.length ? 'clickup' : null;
   }
   if (!token) return null;
   const currency = MONEDA[p?.MonedaCodigo ?? 'PES'] ?? p?.MonedaCodigo ?? 'ARS';
+  // En ClickUp cada producto tiene su estado (el PDV junta los de todos): se busca el artículo de cada renglón por código
+  // o por nombre, para mostrar su estado y saber a qué subtarea va su boceto.
+  let arts: Articulo[] = [];
+  if (taskId && env.CLICKUP_TOKEN && items.length) {
+    try { arts = await articulosLivianos(env, taskId, b); } catch (e) { if (e instanceof OutOfBudget) throw e; }
+  }
+  const norm = (s: unknown) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const usados = new Set<string>();
+  const articuloDe = (code: string | undefined, desc: string | undefined) => {
+    const c = norm(code), d = norm(desc);
+    const a = arts.find((x) => !usados.has(x.task_id) && c && norm(x.code) === c)
+      ?? arts.find((x) => !usados.has(x.task_id) && c && norm(x.name).includes(c))
+      ?? arts.find((x) => !usados.has(x.task_id) && d && (norm(x.name).includes(d) || d.includes(norm(x.name))))
+      ?? (arts.length === 1 && items.length === 1 ? arts[0] : undefined);
+    if (a) usados.add(a.task_id);
+    return a;
+  };
   await db.batch([
     db.prepare('DELETE FROM line_items WHERE record_id = ?').bind(recordId),
     ...items.map((it, i) => {
       // Los dos descuentos de Finnegans van uno sobre otro.
       const discount = 1 - (1 - (it.Descuento1 ?? 0) / 100) * (1 - (it.Descuento2 ?? 0) / 100);
-      return db.prepare(`INSERT INTO line_items (record_id, position, code, description, quantity, unit_price, discount, tax_included, currency)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(recordId, i, it.ProductoCodigo ?? null, it.Descripcion?.trim() || null, it.Cantidad ?? null,
-        it.Precio ?? null, Math.round(discount * 10000) / 100, it.IncluyeImpuesto ? 1 : 0, currency);
+      const art = articuloDe(it.ProductoCodigo, it.Descripcion);
+      return db.prepare(`INSERT INTO line_items (record_id, position, code, description, quantity, unit_price, discount, tax_included, currency, status, clickup_task)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(recordId, i, it.ProductoCodigo ?? null, it.Descripcion?.trim() || null, it.Cantidad ?? null,
+        it.Precio ?? null, Math.round(discount * 10000) / 100, it.IncluyeImpuesto ? 1 : 0, currency, art?.status || null, art?.task_id ?? null);
     }),
   ]);
   await fichas(env, token, items.map((it) => it.ProductoCodigo), b);
@@ -84,12 +102,12 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     }
   }
   const { results } = await db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
-      li.name AS li_name, li.status, p.name, p.description AS product_description, p.image_url
+      li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description, p.image_url
     FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(recordId)
     .all<{ code: string | null; description: string | null; quantity: number | null; unit_price: number | null; discount: number; tax_included: number; currency: string | null;
-      li_name: string | null; status: string | null; name: string | null; product_description: string | null; image_url: string | null }>();
+      li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null; image_url: string | null }>();
   const items = results.map((r) => ({
-    code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: r.image_url, status: r.status,
+    code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: r.image_url, status: r.status, clickup_task: r.clickup_task,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,
   }));

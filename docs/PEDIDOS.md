@@ -5,12 +5,13 @@ comerciales para saber dónde están sus pedidos, y que se adjunten solos la fac
 remito (cuando lo cargan en ClickUp al entregar). Las vendedoras solo mueven el pedido de «Pedido confirmado» a «Listo
 para producción»; lo demás lo mueve ClickUp.
 
-**Finnegans solo se lee. De ClickUp se lee todo y se escribe una sola cosa** (pedido de Rodrigo del 4/11/2026): cuando la
+**Finnegans solo se lee. De ClickUp se lee todo y se escriben solo dos cosas.** La primera (pedido de Rodrigo del 4/11/2026): cuando la
 vendedora pasa el pedido de «Pedido confirmado» a «Listo para producción» (en la pantalla, en masa o desde Claude), el PDV y
 sus artículos que siguen en «ingreso de pedido» pasan a «pdv» en ClickUp. Lo que ya avanzó no se toca. El pedido queda en
 la cola `clickup_salida` y sale enseguida; si ClickUp falla, se reintenta cada 10 minutos (hasta 6 veces). Con token de
 administrador, `GET /hooks/clickup/salida` muestra lo último que se mandó y si hubo errores. Los cambios en ClickUp
-quedan a nombre del dueño del token `CLICKUP_TOKEN`.
+quedan a nombre del dueño del token `CLICKUP_TOKEN`. La segunda (pedido de Rodrigo del 6/11/2026): el boceto aprobado de un producto se adjunta a la subtarea de ese
+artículo en el PDV (ver «Bocetos de producción»); solo se adjunta, no se cambia ningún estado.
 
 ## De dónde sale cada cosa
 
@@ -75,6 +76,27 @@ una al lado de la otra, y «+X» si tiene más productos; un clic abre la vista 
 producto tiene foto (la de su ficha en Finnegans). Los productos de cada pedido se leen de Finnegans (o de los artículos
 del PDV de ClickUp) y quedan guardados; `scripts/pedidos-productos.mjs`, en el mismo workflow que los totales, lee de a
 tandas (`POST /hooks/productos/pendientes`) los que todavía no se leyeron y, una vez por día, los de los pedidos activos.
+
+## Bocetos de producción
+
+Pedido de Rodrigo del 6/11/2026: los bocetos (PDF, o una foto de referencia) que producción le manda a los impresores.
+Cada boceto es de un producto del pedido. En una primera etapa producción sigue trabajando en ClickUp.
+
+- **En el pedido**, en «Productos»: cada producto muestra su estado en ClickUp (cada artículo tiene el suyo; el del PDV junta
+  los de todos) y sus bocetos. «+ Boceto» sube uno para ese producto; «+ Bocetos» o soltar archivos encima del recuadro sube
+  varios: el CRM lee cada PDF (el boceto de producción dice «PRODUCTO» y el nombre) y propone a qué producto va.
+- **Referencia o técnico**: una foto o un boceto rápido para avanzar, o el técnico final con medidas. Cada producto puede
+  tener varias versiones (v1, v2…); se marca cuál está **aprobado**.
+- **Al aprobar uno en un pedido**, el CRM lo adjunta en ClickUp a la subtarea del artículo de ese producto (por código del
+  producto o, si no, por nombre; si el PDV no tiene ese artículo, al PDV). Si el PDV todavía no existe, se adjunta cuando
+  aparece. Corre con la cola de salida a ClickUp (`clickup_salida`, acción `adjuntar_boceto`).
+- **En el negocio**, antes de que exista el pedido: recuadro «Bocetos» con el nombre del producto (lo propone leyendo el PDF).
+  Cuando llega el pedido de la misma empresa, en sus productos aparecen «Bocetos de negocios de esta empresa» para usarlos.
+- **Dónde se guardan**: en una unidad compartida de Google Drive de Formas (Configuración → Integraciones → Bocetos en Drive),
+  con una carpeta por empresa y, adentro, una por pedido («PDV 31277») o negocio. Entra la cuenta de servicio como el
+  usuario elegido; necesita el permiso `https://www.googleapis.com/auth/drive` en la delegación de todo el dominio. En el CRM
+  se ven aunque no se tenga acceso a la unidad (el CRM los trae de Drive). Quitar un boceto lo saca del CRM; el archivo queda
+  en Drive.
 
 ## Migración desde HubSpot
 

@@ -15,6 +15,8 @@ import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { armarFotos, fotosDePedidos, fotosSql, orderProducts } from './productos';
+import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
+import { bajarArchivo, driveConfig } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -760,6 +762,85 @@ api.get('/files/:id', async (c) => {
     return new Response(a.body, { headers: { 'content-type': a.type, 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(a.name)}` } });
   }
   throw new HttpError(404, 'El PDF de la factura todavía no se bajó de Finnegans (se baja solo en la próxima hora).');
+});
+
+// ---------- Bocetos de producción (bocetos.ts, drive.ts) ----------
+
+async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
+  const rec = await getRow(c.env.DB, id);
+  if (rec.object_type === 'deal') await assertDealVisible(new Meta(c.env.DB), c.get('ctx').user, rec.pipeline_id);
+  return rec;
+}
+
+// Los bocetos de un pedido o negocio; en un pedido, también los de los negocios de su empresa que todavía no se usaron.
+api.get('/records/:type/:id/bocetos', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const cfg = await driveConfig(c.env);
+  return c.json({
+    bocetos: await bocetosDe(c.env.DB, rec.id),
+    de_negocios: rec.object_type === 'order' ? await bocetosDeNegocios(c.env.DB, rec.id) : [],
+    configurado: !!(cfg.carpeta && cfg.usuario && c.env.GOOGLE_SA_JSON),
+  });
+});
+// Subir uno (formulario con «archivo», «producto», «producto_nombre» y «tipo»).
+api.post('/records/:type/:id/bocetos', async (c) => {
+  canWrite(c.get('ctx'));
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const form = await c.req.formData();
+  const archivo = form.get('archivo');
+  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del boceto.');
+  const s = (k: string) => (typeof form.get(k) === 'string' ? (form.get(k) as string) : null);
+  return c.json(await subirBoceto(c.env, c.get('ctx'), rec, archivo, { producto: s('producto'), producto_nombre: s('producto_nombre'), tipo: s('tipo') ?? undefined }), 201);
+});
+api.patch('/bocetos/:id', async (c) => {
+  canWrite(c.get('ctx'));
+  const b0 = await bocetoPorId(c.env.DB, Number(c.req.param('id')));
+  const rec = await registroVisible(c, b0.record_id);
+  const b = await actualizarBoceto(c.env.DB, b0.id, await c.req.json());
+  // Aprobado en un pedido: a ClickUp (a la subtarea del artículo) enseguida, sin esperar la próxima corrida.
+  if (rec.object_type === 'order' && b.estado === 'aprobado' && !b.clickup_at) c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  return c.json(b);
+});
+api.post('/bocetos/:id/usar', async (c) => {
+  canWrite(c.get('ctx'));
+  const b0 = await bocetoPorId(c.env.DB, Number(c.req.param('id')));
+  await registroVisible(c, b0.record_id);
+  const body = await c.req.json<{ order_id: number; producto?: string | null; producto_nombre?: string | null }>();
+  const b = await usarEnPedido(c.env.DB, c.get('ctx'), b0.id, Number(body.order_id), body.producto ?? null, body.producto_nombre ?? null);
+  if (b.estado === 'aprobado') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  return c.json(b, 201);
+});
+api.delete('/bocetos/:id', async (c) => {
+  canWrite(c.get('ctx'));
+  const b0 = await bocetoPorId(c.env.DB, Number(c.req.param('id')));
+  await registroVisible(c, b0.record_id);
+  await quitarBoceto(c.env.DB, b0.id);
+  return c.json({ ok: true });
+});
+// El archivo, desde Drive (para verlo en el CRM aunque no se tenga acceso a la unidad de Drive).
+api.get('/bocetos/:id/archivo', async (c) => {
+  const b = await bocetoPorId(c.env.DB, Number(c.req.param('id')));
+  await registroVisible(c, b.record_id);
+  const res = await bajarArchivo(c.env, b.drive_id);
+  const disp = c.req.query('descargar') ? 'attachment' : 'inline';
+  return new Response(res.body, { headers: { 'content-type': b.mime ?? res.headers.get('content-type') ?? 'application/octet-stream',
+    'content-disposition': `${disp}; filename*=UTF-8''${encodeURIComponent(b.nombre)}`, 'cache-control': 'private, max-age=3600' } });
+});
+// Dónde se guardan (Configuración → Integraciones): la carpeta o unidad compartida de Drive y con qué usuario se entra.
+api.get('/integrations/bocetos', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json({ ...(await driveConfig(c.env)), cuenta_de_servicio: !!c.env.GOOGLE_SA_JSON });
+});
+api.put('/integrations/bocetos', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const b = await c.req.json<{ carpeta?: string; usuario?: string }>();
+  // Se acepta el link de la carpeta o de la unidad compartida: queda solo su id.
+  const carpeta = String(b.carpeta ?? '').trim().match(/(?:folders\/|id=)([A-Za-z0-9_-]{10,})/)?.[1] ?? String(b.carpeta ?? '').trim();
+  const usuario = String(b.usuario ?? '').trim().toLowerCase();
+  if (carpeta && !/^[A-Za-z0-9_-]{10,}$/.test(carpeta)) throw new HttpError(400, 'Pegá el link de la carpeta o de la unidad compartida de Drive.');
+  if (usuario && !/^[^@\s]+@[^@\s]+$/.test(usuario)) throw new HttpError(400, 'El usuario tiene que ser un mail de Formas.');
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('bocetos', ?)").bind(JSON.stringify({ carpeta: carpeta || null, usuario: usuario || null })).run();
+  return c.json(await driveConfig(c.env));
 });
 
 // Estado de las conexiones con ClickUp y Finnegans, y correrlas a mano.

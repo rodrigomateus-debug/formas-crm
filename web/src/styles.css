@@ -672,3 +672,31 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .tab-wrap.marca-antes::before, .tab-wrap.marca-despues::after { content: ''; position: absolute; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent-ink); }
 .tab-wrap.marca-antes::before { left: -11px; }
 .tab-wrap.marca-despues::after { right: -11px; }
+
+/* Bocetos de producción (pages/Bocetos.tsx): fichitas por producto, zona para soltar y visor. */
+.soltar { position: relative; }
+.soltar.soltar-encima { outline: 2px dashed var(--accent-ink); outline-offset: -2px; }
+.soltar-aviso { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--ui-surface) 82%, transparent); border-radius: var(--r-panel);
+  color: var(--accent-ink); font-weight: 600; pointer-events: none; z-index: 2; }
+.boceto-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.boceto-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px 0 4px; border: 1px solid var(--ui-line); border-radius: var(--r-control);
+  background: var(--ui-surface); color: var(--ui-ink-2); font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: border-color var(--dur) var(--ease); }
+.boceto-chip:hover { border-color: var(--accent-ink); color: var(--ui-ink); }
+.boceto-chip.ok { color: var(--ui-positive-ink); border-color: color-mix(in srgb, var(--ui-positive) 45%, var(--ui-line)); }
+.boceto-chip .boceto-ext { font-size: 9px; font-weight: 700; letter-spacing: .04em; padding: 2px 4px; border-radius: 4px; background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.boceto-chip .boceto-pend { width: 6px; height: 6px; border-radius: 3px; background: var(--ui-warning); }
+.btn.boceto-mas { height: 24px; padding: 0 6px; font-size: 12px; color: var(--accent-ink); }
+.boceto-subir { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+.modal.wide { width: min(1080px, calc(100% - 32px)); max-height: 90vh; }
+.boceto-visor { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; min-height: 0; }
+.boceto-vista { background: var(--ui-surface-sunken); border-radius: var(--r-control); overflow: hidden; height: min(72vh, 820px); display: grid; place-items: center; }
+.boceto-vista { place-items: start center; overflow: auto; }
+.boceto-paginas { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px; width: 100%; }
+.boceto-paginas canvas { max-width: 100%; height: auto; background: #fff; box-shadow: 0 0 0 1px var(--ui-line); border-radius: 4px; }
+.boceto-vista img { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
+.boceto-datos { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+@media (max-width: 860px) {
+  .boceto-visor { grid-template-columns: 1fr; }
+  .boceto-vista { height: 60vh; }
+  .boceto-subir { grid-template-columns: 1fr; }
+}

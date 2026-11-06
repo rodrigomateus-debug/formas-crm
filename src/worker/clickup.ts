@@ -4,6 +4,7 @@ import { createRecord, updateRecord, ORDER_CONFIRMED } from './records';
 import { associate } from './associations';
 import { finnegansPedido, finnegansToken } from './finnegans';
 import { Budget, OutOfBudget } from './budget';
+import { bajarArchivo } from './drive';
 import { tareaPostEntrega } from './postentrega';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
@@ -114,6 +115,14 @@ export function leerArticulo(s: CuTask): Articulo {
   const q = Number(String(f.CANTIDAD ?? line('Cantidad')).replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
   return { task_id: s.id, name: nombre, code: line('Código').replace(/\\/g, '') || null, quantity: Number.isFinite(q) && q > 0 ? q : null, status: s.status?.status ?? '' };
 }
+// Los artículos con una sola consulta (sin leer cada subtarea): nombre, estado y, si la lista lo trae, el código. Alcanza
+// para saber el estado de cada producto de un pedido que vino de Finnegans y a qué subtarea va su boceto.
+export async function articulosLivianos(env: Env, taskId: string, b?: Budget): Promise<Articulo[]> {
+  if (!env.CLICKUP_TOKEN) return [];
+  const t = await cu<CuTask>(env, `/task/${encodeURIComponent(taskId)}`, { include_subtasks: 'true' }, b);
+  return (t.subtasks ?? []).slice(0, 60).map(leerArticulo);
+}
+
 export async function articulosDelPdv(env: Env, taskId: string, b?: Budget): Promise<Articulo[]> {
   if (!env.CLICKUP_TOKEN) return [];
   const t = await cu<CuTask>(env, `/task/${encodeURIComponent(taskId)}`, { include_subtasks: 'true' }, b);
@@ -127,8 +136,9 @@ export async function articulosDelPdv(env: Env, taskId: string, b?: Budget): Pro
 }
 
 // ---------- Lo que el CRM escribe en ClickUp ----------
-// Solo esto, por pedido de Rodrigo (4/11/2026): al pasar el pedido a «Listo para producción», el PDV y sus artículos que
-// siguen en «ingreso de pedido» pasan a «pdv». Lo que ya avanzó no se toca.
+// Solo dos cosas, por pedido de Rodrigo: (1) al pasar el pedido a «Listo para producción», el PDV y sus artículos que
+// siguen en «ingreso de pedido» pasan a «pdv» (4/11/2026; lo que ya avanzó no se toca); (2) el boceto aprobado de un
+// producto se adjunta a la subtarea de ese artículo (6/11/2026; solo adjunta, no cambia estados).
 const INGRESO = 'ingreso de pedido';
 const PDV_STATUS = 'pdv';
 
@@ -147,20 +157,66 @@ export async function pasarAPdv(env: Env, taskId: string, b?: Budget) {
   return movidas;
 }
 
+// Bocetos aprobados en pedidos que ya tienen su PDV en ClickUp y todavía no se adjuntaron: a la cola (también los que se
+// aprobaron antes de que existiera el PDV).
+export async function encolarBocetos(db: D1Database) {
+  await db.prepare(`INSERT INTO clickup_salida (record_id, action, user_id, ref)
+    SELECT b.record_id, 'adjuntar_boceto', b.user_id, CAST(b.id AS TEXT) FROM bocetos b JOIN records r ON r.id = b.record_id
+    WHERE b.estado = 'aprobado' AND b.archived = 0 AND b.clickup_at IS NULL AND r.object_type = 'order' AND r.archived = 0
+      AND json_extract(r.props, '$.url_clickup') IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM clickup_salida s WHERE s.action = 'adjuntar_boceto' AND s.ref = CAST(b.id AS TEXT) AND s.done_at IS NULL)`).run();
+}
+
+const normProd = (s: unknown) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
+// Adjunta el boceto a la subtarea del artículo (por código del producto o, si no, por nombre); si el PDV no tiene ese
+// artículo, al PDV.
+async function adjuntarBoceto(env: Env, taskId: string, bocetoId: number, b: Budget) {
+  const db = env.DB;
+  const bo = await db.prepare('SELECT id, record_id, producto, producto_nombre, nombre, mime, drive_id, estado, archived, clickup_at FROM bocetos WHERE id = ?').bind(bocetoId)
+    .first<{ id: number; record_id: number; producto: string | null; producto_nombre: string | null; nombre: string; mime: string | null; drive_id: string; estado: string; archived: number; clickup_at: string | null }>();
+  if (!bo || bo.archived || bo.estado !== 'aprobado') return { omitido: 'ya no está aprobado' };
+  if (bo.clickup_at) return { omitido: 'ya estaba adjunto' };
+  const guardada = await db.prepare('SELECT clickup_task FROM line_items WHERE record_id = ? AND clickup_task IS NOT NULL AND (code = ? OR name = ?) LIMIT 1')
+    .bind(bo.record_id, bo.producto ?? '', bo.producto_nombre ?? '').first<{ clickup_task: string }>();
+  let destino = guardada?.clickup_task ?? null;
+  if (!destino) {
+    const arts = await articulosDelPdv(env, taskId, b);
+    const cod = normProd(bo.producto);
+    const nom = normProd(bo.producto_nombre);
+    destino = arts.find((a) => cod && normProd(a.code) === cod)?.task_id
+      ?? arts.find((a) => nom && (normProd(a.name) === nom || normProd(a.name).includes(nom) || nom.includes(normProd(a.name))))?.task_id
+      ?? (arts.length === 1 ? arts[0].task_id : null);
+  }
+  const target = destino ?? taskId;
+  b.take();
+  const archivo = await bajarArchivo(env, bo.drive_id);
+  const datos = await archivo.arrayBuffer();
+  const fd = new FormData();
+  fd.append('attachment', new Blob([datos], { type: bo.mime ?? 'application/pdf' }), bo.nombre);
+  b.take();
+  const res = await fetch(`${API(env)}/task/${encodeURIComponent(target)}/attachment`, { method: 'POST', headers: { Authorization: env.CLICKUP_TOKEN! }, body: fd });
+  if (!res.ok) throw new Error(`ClickUp no aceptó el boceto: HTTP ${res.status}`);
+  const adj = (await res.json().catch(() => ({}))) as { id?: string };
+  await db.prepare('UPDATE bocetos SET clickup_task = ?, clickup_adjunto = ?, clickup_at = ? WHERE id = ?').bind(target, adj.id ?? null, new Date().toISOString(), bo.id).run();
+  return { adjunto: target, en: destino ? 'artículo' : 'PDV' };
+}
+
 export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)) {
   if (!env.CLICKUP_TOKEN) return { skipped: 'Falta CLICKUP_TOKEN.' };
   const db = env.DB;
-  const { results } = await db.prepare(`SELECT s.id, s.record_id, s.action, json_extract(r.props, '$.url_clickup') AS url FROM clickup_salida s
-    JOIN records r ON r.id = s.record_id WHERE s.done_at IS NULL AND s.attempts < 6 ORDER BY s.id LIMIT 10`).all<{ id: number; record_id: number; action: string; url: string | null }>();
+  await encolarBocetos(db);
+  const { results } = await db.prepare(`SELECT s.id, s.record_id, s.action, s.ref, json_extract(r.props, '$.url_clickup') AS url FROM clickup_salida s
+    JOIN records r ON r.id = s.record_id WHERE s.done_at IS NULL AND s.attempts < 6 ORDER BY s.id LIMIT 10`).all<{ id: number; record_id: number; action: string; ref: string | null; url: string | null }>();
   let hechas = 0;
   for (const row of results) {
     if (b.left() < 6) break;
     const taskId = String(row.url ?? '').match(/\/t\/([A-Za-z0-9]+)/)?.[1];
     try {
       if (!taskId) throw new Error('El pedido no tiene PDV de ClickUp.');
-      const n = await pasarAPdv(env, taskId, b);
+      const result = row.action === 'adjuntar_boceto' ? await adjuntarBoceto(env, taskId, Number(row.ref), b) : { movidas: await pasarAPdv(env, taskId, b) };
       await db.prepare('UPDATE clickup_salida SET done_at = ?, result = ?, error = NULL, attempts = attempts + 1 WHERE id = ?')
-        .bind(new Date().toISOString(), JSON.stringify({ movidas: n }), row.id).run();
+        .bind(new Date().toISOString(), JSON.stringify(result), row.id).run();
       hechas++;
     } catch (e) {
       if (e instanceof OutOfBudget) break;

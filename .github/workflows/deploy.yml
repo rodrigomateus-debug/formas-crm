@@ -18,7 +18,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
-      - run: cp .dev.vars.example .dev.vars && npm run db:local
+      # Cuenta de servicio y Google simulados (Gmail, Drive) para las pruebas; ver test/gmail-dev-vars.mjs.
+      - run: cp .dev.vars.example .dev.vars && node test/gmail-dev-vars.mjs && npm run db:local
       - name: Pruebas de punta a punta contra wrangler dev
         run: |
           npx wrangler dev --port 8787 > wrangler.log 2>&1 &

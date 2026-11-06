@@ -3,6 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { googleFalso } from './google-falso.mjs';
 
 const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
@@ -37,7 +38,7 @@ const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.no
     text_content: `PDV - ${npdv}\nProducto: Taza ${i}\nCantidad: 1.000\nCódigo: TAZA\\_${i}`, custom_fields: [field('CANTIDAD ', '150', 'number')] })),
   attachments,
 });
-const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false, puts: [] };
+const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false, puts: [], adjuntos: [] };
 const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`, true);
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
@@ -50,7 +51,14 @@ before(async () => {
     hits++;
     const send = (b, status = 200) => { res.statusCode = status; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
     const p = decodeURIComponent(url.pathname);
-    // Lo único que el CRM escribe en ClickUp: el estado de las tareas («ingreso de pedido» → «pdv»).
+    // Lo que el CRM escribe en ClickUp: el boceto aprobado, adjunto a la subtarea del artículo…
+    if (req.method === 'POST' && /^\/clickup\/task\/[^/]+\/attachment$/.test(p)) {
+      const chunks = [];
+      req.on('data', (ch) => chunks.push(ch));
+      req.on('end', () => { cu.adjuntos.push({ id: p.split('/')[3], body: Buffer.concat(chunks).toString('latin1') }); send({ id: `adj${cu.adjuntos.length}` }); });
+      return;
+    }
+    // …y el estado de las tareas («ingreso de pedido» → «pdv»).
     if (req.method === 'PUT' && p.startsWith('/clickup/task/')) {
       let body = '';
       req.on('data', (ch) => { body += ch; });
@@ -280,4 +288,42 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   // Carga en tandas de los productos de los pedidos que no se leyeron.
   const tanda = (await api('POST', '/hooks/productos/pendientes?limit=5', {}, H)).data;
   assert.ok(Number.isInteger(tanda.leidos) && Number.isInteger(tanda.quedan), JSON.stringify(tanda));
+});
+
+test('bocetos: el aprobado se adjunta en ClickUp a la subtarea de su artículo, y cada producto trae su estado', async (t) => {
+  asUser = null;
+  const b = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_B}`)}`)).data.results[0];
+  if (!b) return;   // sin ClickUp de prueba no hay pedidos
+  if (!(await api('GET', '/integrations/bocetos')).data.cuenta_de_servicio) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba (node test/gmail-dev-vars.mjs)'); return; }
+  const g = await googleFalso();
+  try {
+    await api('PUT', '/integrations/bocetos', { carpeta: '0ARaizDeBocetos123', usuario: 'rodrigo.mateus@formaspublicitarias.com' });
+    // Cada producto con su estado y su subtarea de ClickUp (el PDV junta productos en estados distintos).
+    const prods = (await api('GET', `/records/order/${b.id}/products?refresh=1`)).data;
+    assert.deepEqual([prods.items[0].code, prods.items[0].status, prods.items[0].clickup_task], ['TAZA_0', 'pdv', 'cuB-0']);
+    const fd = new FormData();
+    fd.append('archivo', new File([Buffer.from(`%PDF-1.4 boceto taza ${RUN}`)], `Boceto taza ${RUN}.pdf`, { type: 'application/pdf' }));
+    fd.append('producto', 'TAZA_0');
+    fd.append('producto_nombre', 'Taza 0');
+    const res = await fetch(`${BASE}/api/records/order/${b.id}/bocetos`, { method: 'POST', body: fd });
+    const bo = await res.json();
+    assert.equal(res.status, 201, JSON.stringify(bo));
+    assert.equal(cu.adjuntos.length, 0, 'sin aprobar no va a ClickUp');
+    await api('PATCH', `/bocetos/${bo.id}`, { estado: 'aprobado' });
+    let x;
+    for (let i = 0; i < 40; i++) {
+      x = (await api('GET', `/records/order/${b.id}/bocetos`)).data.bocetos.find((y) => y.id === bo.id);
+      if (x.clickup_at) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.ok(x.clickup_at, 'quedó adjunto');
+    assert.equal(x.clickup_task, 'cuB-0', 'en la subtarea del artículo, no en el PDV');
+    assert.equal(cu.adjuntos.length, 1);
+    assert.equal(cu.adjuntos[0].id, 'cuB-0');
+    assert.ok(cu.adjuntos[0].body.includes(`Boceto taza ${RUN}.pdf`) && cu.adjuntos[0].body.includes(`boceto taza ${RUN}`), 'con el archivo de Drive');
+    // Aprobarlo de nuevo no lo vuelve a mandar.
+    await api('PATCH', `/bocetos/${bo.id}`, { estado: 'aprobado' });
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(cu.adjuntos.length, 1);
+  } finally { await g.cerrar(); }
 });

@@ -15,6 +15,8 @@ export interface Env {
   // Solo para pruebas: otras URLs de Google.
   GOOGLE_TOKEN_URL?: string;
   GMAIL_API_URL?: string;
+  DRIVE_API_URL?: string;          // Drive simulado en las pruebas
+  BOCETOS_DRIVE_FOLDER?: string;   // carpeta (o unidad compartida) de los bocetos, si no está en Configuración
   // ClickUp (lista PEC): los pedidos y su estado. Solo lectura.
   CLICKUP_TOKEN?: string;
   // Finnegans: las facturas de los pedidos. Solo lectura.

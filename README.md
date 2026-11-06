@@ -145,6 +145,13 @@ tiene saldo vencido y si es empresa grande para ARCA (va con Factura de Crédito
 es la oficial de ARCA, sin captcha, y se baja una vez por día (`POST /hooks/arca/fce` la trae ya). En la ficha del negocio,
 la tarjeta «Datos para facturar» muestra lo mismo.
 
+## Fotos de los productos
+
+Las miniaturas de las tarjetas de pedidos y las fotos de sus productos salen de la cotización del STP (la imagen que eligió
+la vendedora), de la ficha del producto en Finnegans o, si no, de la foto del SKU en otras cotizaciones del STP. El registro
+de cotizaciones se baja cada hora con el workflow «Totales de pedidos»; necesita el secreto `STPO_TOKEN` en GitHub (el mismo
+que usa formas-tablero). Detalle en [docs/PEDIDOS.md](docs/PEDIDOS.md#fotos-del-registro-de-cotizaciones-del-stp).
+
 ## Bocetos de producción
 
 En cada producto del pedido se suben sus bocetos (PDF o fotos de referencia): versiones, técnico o referencia, aprobado.

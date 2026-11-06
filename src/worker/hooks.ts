@@ -11,7 +11,7 @@ import { avisosConfig, correrAvisos } from './avisos';
 import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from './clientes';
 import { refrescarFce } from './facturar';
 import { aplicarTotales } from './totales';
-import { cargarProductosPendientes } from './productos';
+import { aplicarImagenes, cargarProductosPendientes } from './productos';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
@@ -241,6 +241,18 @@ hooks.get('/pedidos/totales', async (c) => {
 hooks.post('/productos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
+});
+
+// Fotos de los productos desde el registro de cotizaciones del STP (scripts/stp-imagenes.mjs):
+// {filas: [["PEDVTASTP - 31277", "SKU", "https://…"], ["", "SKU", "https://…"], …]}.
+hooks.post('/productos/imagenes', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await aplicarImagenes(c.env, await c.req.json()));
+});
+hooks.get('/productos/imagenes', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'imagenes_stp'").first<{ value: string }>();
+  return c.json(r ? JSON.parse(r.value) : null);
 });
 
 // Bocetos en Drive: dónde se guardan (lo mismo que Configuración → Integraciones) y probar el acceso.

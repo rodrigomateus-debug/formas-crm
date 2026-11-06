@@ -1,6 +1,7 @@
 # Total sin IVA de cada pedido, desde Finnegans (solo lectura) a los pedidos del CRM (scripts/pedidos-totales.mjs). Lo usa
 # el pie de las columnas del tablero de pedidos. Después, los productos de los pedidos que todavía no se leyeron, para las
-# miniaturas de las tarjetas (scripts/pedidos-productos.mjs). Cada hora de 9 a 20 (lunes a viernes) con los pedidos de los últimos 120
+# miniaturas de las tarjetas (scripts/pedidos-productos.mjs), y las fotos de los productos del registro de cotizaciones del
+# STP (scripts/stp-imagenes.mjs, con el secreto STPO_TOKEN; sin él se saltea). Cada hora de 9 a 20 (lunes a viernes) con los pedidos de los últimos 120
 # días; a las 7 de la mañana, todos desde 2023. Necesita la variable CRM_URL y los secretos CRM_TOKEN (de un administrador) y
 # FINNEGANS_CLIENT_ID / FINNEGANS_CLIENT_SECRET (o FIN_*). El repo es público: el script solo imprime cantidades.
 name: Totales de pedidos
@@ -41,3 +42,9 @@ jobs:
         env:
           CRM_URL: ${{ vars.CRM_URL }}
           CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+      - run: node scripts/stp-imagenes.mjs
+        if: always()
+        env:
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+          STPO_TOKEN: ${{ secrets.STPO_TOKEN }}

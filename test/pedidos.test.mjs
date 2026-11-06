@@ -290,6 +290,43 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   assert.ok(Number.isInteger(tanda.leidos) && Number.isInteger(tanda.quedan), JSON.stringify(tanda));
 });
 
+test('fotos del STP: la de la cotización del pedido; si no, la de Finnegans; si no, la del SKU', async () => {
+  asUser = null;
+  const a = await order();
+  if (!a?.props.pedido_finnegans) return;   // sin ClickUp de prueba no hay pedidos
+  const tok = (await api('POST', '/tokens', { name: `Fotos ${RUN}`, source: 'api' })).data.token;
+  const H = { authorization: `Bearer ${tok}` };
+  const subir = async (filas) => (await api('POST', '/hooks/productos/imagenes', { filas }, H)).data;
+  assert.equal((await api('POST', '/hooks/productos/imagenes', { filas: [] })).status, 401, 'sin token no');
+  assert.equal((await api('POST', '/hooks/productos/imagenes', { nada: 1 }, H)).status, 400);
+  const fotos = async () => (await api('GET', `/records/order/${a.id}/products`)).data.items.map((i) => i.image_url);
+  const tarjeta = async () => {
+    const groups = encodeURIComponent(JSON.stringify([[{ prop: 'pedido_finnegans', op: 'in', values: [a.props.pedido_finnegans] }]]));
+    return (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&groups=${groups}`)).data.columns.flatMap((c) => c.records).find((r) => r.id === a.id);
+  };
+  const BOLSA = 'https://www.promoproductos.com/upload/bolsa.jpg';
+  // Por SKU: solo para el producto que no tiene foto en Finnegans (la de Finnegans va antes).
+  let r = await subir([['', 'otro-1', 'https://img.test/otro.jpg'], ['', 'IMP_P18.030.03', 'https://img.test/bolsa-stp.jpg'],
+    ['', 'X', 'javascript:alert(1)'], ['no es un pedido', 'X', 'https://img.test/x.jpg']]);
+  assert.equal(r.guardadas, 2, 'sin las direcciones raras ni los pedidos mal escritos');
+  assert.deepEqual(await fotos(), [BOLSA, 'https://img.test/otro.jpg']);
+  // La de la cotización del pedido va antes que todas (el número, escrito como venga).
+  r = await subir([[a.props.pedido_finnegans.toLowerCase(), 'IMP_P18.030.03', 'https://img.test/bolsa-azul.jpg'],
+    [a.props.pedido_finnegans, 'ESTAMPA', 'https://img.test/estampa.jpg']]);
+  assert.equal(r.guardadas, 2);
+  assert.deepEqual(await fotos(), ['https://img.test/bolsa-azul.jpg', 'https://img.test/otro.jpg']);
+  // En la tarjeta del tablero: las de sus productos y, después, las otras de su cotización (hasta 3).
+  const card = await tarjeta();
+  assert.deepEqual(card.fotos, ['https://img.test/bolsa-azul.jpg', 'https://img.test/otro.jpg', 'https://img.test/estampa.jpg']);
+  assert.equal(card.productos, 2);
+  // Una fila sin foto borra la que había (así la prueba deja la base como estaba).
+  r = await subir([['', 'OTRO-1', ''], ['', 'IMP_P18.030.03', ''], [a.props.pedido_finnegans, 'IMP_P18.030.03', ''], [a.props.pedido_finnegans, 'ESTAMPA', '']]);
+  assert.equal(r.borradas, 4);
+  assert.deepEqual(await fotos(), [BOLSA, null]);
+  assert.deepEqual((await tarjeta()).fotos, [BOLSA]);
+  assert.equal((await api('GET', '/hooks/productos/imagenes', undefined, H)).data.borradas, 4, 'lo último que llegó');
+});
+
 test('bocetos: el aprobado se adjunta en ClickUp a la subtarea de su artículo, y cada producto trae su estado', async (t) => {
   asUser = null;
   const b = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_B}`)}`)).data.results[0];

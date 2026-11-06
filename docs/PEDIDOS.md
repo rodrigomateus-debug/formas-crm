@@ -77,6 +77,22 @@ producto tiene foto (la de su ficha en Finnegans). Los productos de cada pedido 
 del PDV de ClickUp) y quedan guardados; `scripts/pedidos-productos.mjs`, en el mismo workflow que los totales, lee de a
 tandas (`POST /hooks/productos/pendientes`) los que todavía no se leyeron y, una vez por día, los de los pedidos activos.
 
+### Fotos del registro de cotizaciones del STP
+
+Pedido de Rodrigo del 6/11/2026: las fotos salen también del registro de cotizaciones del STP (`registro_cotizaciones`,
+todas las cotizaciones, confirmadas o no, el export que pasó Franco), que trae la imagen que eligió la vendedora para cada
+producto. `scripts/stp-imagenes.mjs`, en el mismo workflow, lo baja con el secreto `STPO_TOKEN` (sin él, se saltea) y
+manda a `POST /hooks/productos/imagenes` (tabla `stp_imagenes`):
+
+- **Por pedido**: el PDV de Finnegans de la cotización y el SKU → la foto de ese pedido (la variante que se cotizó).
+- **Por SKU**: la foto que más se repite en todas las cotizaciones, sin las personalizadas con el logo de un cliente
+  (Zecat y Zakeke), para los pedidos que no tienen cotización en el STP.
+
+Para cada producto del pedido manda la de su cotización; si no hay, la de su ficha en Finnegans; si tampoco, la del SKU.
+En la tarjeta, después de las fotos de los productos van las otras de su cotización (sirven aunque los productos todavía no
+se hayan leído o sus códigos no coincidan con los SKU). Los pedidos de NoEstres no pasan por el STP. Una fila sin foto
+borra la que había; `GET /hooks/productos/imagenes` dice qué llegó la última vez.
+
 ## Bocetos de producción
 
 Pedido de Rodrigo del 6/11/2026: los bocetos (PDF, o una foto de referencia) que producción le manda a los impresores.

@@ -2,6 +2,8 @@ import type { Env } from './env';
 import { Budget, OutOfBudget } from './budget';
 import { finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
 import { articulosDelPdv, articulosLivianos, type Articulo } from './clickup';
+import { clavePedido } from './totales';
+import { HttpError } from './env';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -102,8 +104,9 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     }
   }
   const { results } = await db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
-      li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description, p.image_url
-    FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(recordId)
+      li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description, ${FOTO} AS image_url
+    FROM line_items li LEFT JOIN products p ON p.code = li.code ${FOTO_STP('?')} WHERE li.record_id = ? ORDER BY li.position`)
+    .bind(clavePedido(props.pedido_finnegans), recordId)
     .all<{ code: string | null; description: string | null; quantity: number | null; unit_price: number | null; discount: number; tax_included: number; currency: string | null;
       li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null; image_url: string | null }>();
   const items = results.map((r) => ({
@@ -157,6 +160,51 @@ export async function cargarProductosPendientes(env: Env, limit = 25) {
   return { leidos, quedan: quedan?.n ?? 0 };
 }
 
+// ---------- Fotos del registro de cotizaciones del STP ----------
+// La que eligió la vendedora al cotizar, por pedido de Finnegans y SKU, y la de cada SKU para los demás pedidos (tabla
+// stp_imagenes, la carga scripts/stp-imagenes.mjs). Para cada producto del pedido manda la de su cotización; si no hay,
+// la de Finnegans; si tampoco, la del SKU en otras cotizaciones.
+const FOTO = 'COALESCE(so.image_url, p.image_url, sk.image_url)';
+const FOTO_STP = (pedido: string) => `LEFT JOIN stp_imagenes so ON so.pedido = ${pedido} AND so.sku = UPPER(TRIM(li.code))
+    LEFT JOIN stp_imagenes sk ON sk.pedido = '' AND sk.sku = UPPER(TRIM(li.code))`;
+const PEDIDO_DE_R = "NULLIF(UPPER(TRIM(json_extract(r.props, '$.pedido_finnegans'))), '')";
+const URL_OK = /^https?:\/\/[^\s"'<>]{4,600}$/;
+
+export interface ImagenesEstado { recibidas: number; guardadas: number; borradas: number; pedidos: number; skus: number; at: string }
+
+// {filas: [["PEDVTASTP - 31277", "SKU", "https://…"], ["", "SKU", "https://…"], …]}: pedido vacío es la foto del SKU; una
+// fila sin foto borra la que había.
+export async function aplicarImagenes(env: Env, body: { filas?: unknown }): Promise<ImagenesEstado> {
+  if (!Array.isArray(body?.filas)) throw new HttpError(400, 'Falta filas: [["PEDVTASTP - 31277", "SKU", "https://…"], …].');
+  const filas = new Map<string, [string, string, string]>();
+  for (const f of body.filas as unknown[]) {
+    if (!Array.isArray(f)) continue;
+    const pedido = f[0] ? clavePedido(f[0]) : '';
+    const sku = String(f[1] ?? '').trim().toUpperCase();
+    const url = String(f[2] ?? '').trim();
+    if (pedido === null || !sku || sku.length > 120 || (url && !URL_OK.test(url))) continue;
+    filas.set(`${pedido}|${sku}`, [pedido, sku, url]);
+  }
+  const db = env.DB;
+  const guardar = [...filas.values()].filter((f) => f[2]);
+  const borrar = [...filas.values()].filter((f) => !f[2]);
+  const tandas = [];
+  for (let i = 0; i < guardar.length; i += 1000) {
+    tandas.push(db.prepare(`INSERT INTO stp_imagenes (pedido, sku, image_url)
+      SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]') FROM json_each(?) WHERE true
+      ON CONFLICT(pedido, sku) DO UPDATE SET image_url = excluded.image_url`).bind(JSON.stringify(guardar.slice(i, i + 1000))));
+  }
+  if (borrar.length) {
+    tandas.push(db.prepare(`DELETE FROM stp_imagenes WHERE (pedido, sku) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))`)
+      .bind(JSON.stringify(borrar)));
+  }
+  if (tandas.length) await db.batch(tandas);
+  const n = await db.prepare("SELECT COALESCE(SUM(pedido != ''), 0) AS pedidos, COALESCE(SUM(pedido = ''), 0) AS skus FROM stp_imagenes").first<{ pedidos: number; skus: number }>();
+  const estado = { recibidas: (body.filas as unknown[]).length, guardadas: guardar.length, borradas: borrar.length, pedidos: n?.pedidos ?? 0, skus: n?.skus ?? 0, at: new Date().toISOString() };
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('imagenes_stp', ?)").bind(JSON.stringify(estado)).run();
+  return estado;
+}
+
 // Miniaturas de las tarjetas: hasta 3 fotos distintas de los productos de cada pedido y cuántos productos tiene.
 export async function fotosDePedidos(db: D1Database, ids: number[]) {
   if (!ids.length) return new Map<number, { fotos: string[]; productos: number }>();
@@ -166,17 +214,26 @@ export async function fotosDePedidos(db: D1Database, ids: number[]) {
 }
 
 // Las dos consultas de las miniaturas, para los pedidos que devuelve `ids` (una subconsulta con sus parámetros): así el
-// tablero las pide en el mismo viaje a la base que las tarjetas.
+// tablero las pide en el mismo viaje a la base que las tarjetas. Primero las fotos de sus productos; después, las de su
+// cotización en el STP (sirven también si los productos todavía no se leyeron o sus códigos no coinciden).
 export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
+  const conIds = `WITH ids(id) AS MATERIALIZED (${ids})`;
   return [
-    db.prepare(`SELECT record_id, COUNT(*) AS n FROM line_items WHERE record_id IN (${ids}) GROUP BY record_id`).bind(...binds),
-    db.prepare(`SELECT li.record_id, p.image_url FROM line_items li JOIN products p ON p.code = li.code
-      WHERE li.record_id IN (${ids}) AND p.image_url IS NOT NULL ORDER BY li.record_id, li.position`).bind(...binds),
+    db.prepare(`${conIds} SELECT * FROM (SELECT r.id AS record_id, (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS n,
+        (SELECT COUNT(*) FROM stp_imagenes s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_stp
+      FROM records r WHERE r.id IN (SELECT id FROM ids)) WHERE n > 0 OR n_stp > 0`).bind(...binds),
+    db.prepare(`${conIds} SELECT record_id, image_url FROM (
+        SELECT li.record_id, ${FOTO} AS image_url, 0 AS o, li.position AS pos
+          FROM line_items li JOIN records r ON r.id = li.record_id LEFT JOIN products p ON p.code = li.code ${FOTO_STP(PEDIDO_DE_R)}
+          WHERE li.record_id IN (SELECT id FROM ids)
+        UNION ALL
+        SELECT r.id, s.image_url, 1, 0 FROM records r JOIN stp_imagenes s ON s.pedido = ${PEDIDO_DE_R} WHERE r.id IN (SELECT id FROM ids)
+      ) WHERE image_url IS NOT NULL ORDER BY record_id, o, pos`).bind(...binds),
   ];
 }
 export function armarFotos(cuantos: unknown[], fotos: unknown[]) {
   const out = new Map<number, { fotos: string[]; productos: number }>();
-  for (const r of cuantos as Array<{ record_id: number; n: number }>) out.set(r.record_id, { fotos: [], productos: r.n });
+  for (const r of cuantos as Array<{ record_id: number; n: number; n_stp: number }>) out.set(r.record_id, { fotos: [], productos: r.n || r.n_stp });
   for (const r of fotos as Array<{ record_id: number; image_url: string }>) {
     const o = out.get(r.record_id);
     if (o && o.fotos.length < 3 && !o.fotos.includes(r.image_url)) o.fotos.push(r.image_url);

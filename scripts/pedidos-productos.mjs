@@ -12,7 +12,7 @@ const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');
 if (!base || !process.env.CRM_TOKEN) { console.error('Faltan CRM_URL y CRM_TOKEN.'); process.exit(1); }
 
 // Llama a un hook de a tandas hasta que no queda nada, no avanza o se termina el tiempo.
-async function tandas(path, minutos, campo) {
+async function tandas(path, minutos, campo, pausa = 0) {
   const hasta = Date.now() + minutos * 60_000;
   const suma = {};
   let vueltas = 0, quedan = null, fallas = 0;
@@ -29,11 +29,13 @@ async function tandas(path, minutos, campo) {
     for (const [k, v] of Object.entries(r)) if (typeof v === 'number' && k !== 'quedan') suma[k] = (suma[k] ?? 0) + v;
     quedan = r.quedan;
     if (!r[campo] || !r.quedan) break;
+    if (pausa) await new Promise((ok) => setTimeout(ok, pausa));
   }
   return { ...suma, vueltas, quedan };
 }
 
 const p = await tandas('/hooks/productos/pendientes?limit=25', 20, 'leidos');
 console.log(`Productos: ${p.leidos ?? 0} pedidos leídos en ${p.vueltas} tandas; quedan ${p.quedan ?? '?'}.`);
-const r = await tandas('/hooks/pedidos/remitos/pendientes?limit=20', 8, 'revisados');
+// Cada tanda usa hasta ~45 consultas a ClickUp, que deja 100 por minuto (y la sincronización también usa): una cada 30 s.
+const r = await tandas('/hooks/pedidos/remitos/pendientes?limit=20', 8, 'revisados', 30_000);
 console.log(`Remitos: ${r.revisados ?? 0} pedidos entregados revisados en ${r.vueltas} tandas, ${r.encontrados ?? 0} remitos nuevos; quedan ${r.quedan ?? '?'}.`);

@@ -392,16 +392,23 @@ export async function clickupRemitos(env: Env, recordId: number, props: Record<s
   if (last && Date.now() - Number(last.value) < (opts.cada ?? 30 * 60_000)) return 0;
   await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, String(Date.now())).run();
   const b = opts.budget ?? Budget.of(env);
-  const t = await cu<CuTask>(env, `/task/${taskId}`, { include_subtasks: 'true' }, b);
-  const npdv = readPdv(t).npdv;
-  let n = await saveRemitos(db, recordId, t, npdv);
-  for (const s of t.subtasks ?? []) {
-    if (b.left() < 1) break;
-    const full = await cu<CuTask>(env, `/task/${s.id}`, {}, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
-    if (full) n += await saveRemitos(db, recordId, full, npdv);
+  try {
+    const t = await cu<CuTask>(env, `/task/${taskId}`, { include_subtasks: 'true' }, b);
+    const npdv = readPdv(t).npdv;
+    let n = await saveRemitos(db, recordId, t, npdv);
+    for (const s of t.subtasks ?? []) {
+      if (b.left() < 1) throw new OutOfBudget();
+      const full = await cu<CuTask>(env, `/task/${s.id}`, {}, b).catch((e) => { if (frenar(e)) throw e; return null; });
+      if (full) n += await saveRemitos(db, recordId, full, npdv);
+    }
+    return n;
+  } catch (e) {
+    // Si no se pudo revisar entero (se acabó el tope o ClickUp pidió esperar), no queda como revisado.
+    if (frenar(e)) await db.prepare('DELETE FROM settings WHERE key = ?').bind(key).run();
+    throw e;
   }
-  return n;
 }
+const frenar = (e: unknown) => e instanceof OutOfBudget || /HTTP 429/.test((e as Error)?.message ?? '');
 
 // De fondo (scripts/pedidos-productos.mjs): los pedidos entregados sin remito, para que la tarjeta del tablero sepa si lo
 // tiene aunque nadie haya abierto el pedido. Cada uno se vuelve a revisar como mucho una vez por semana.
@@ -421,7 +428,7 @@ export async function remitosPendientes(env: Env, limit = 20) {
   for (const r of results) {
     if (b.left() < 10) break;   // un PDV puede tener varios artículos: no se empieza si no alcanza
     try { encontrados += await clickupRemitos(env, r.id, JSON.parse(r.props), { budget: b, cada: SEMANA }); } catch (e) {
-      if (e instanceof OutOfBudget) break;
+      if (frenar(e)) break;
       console.error('remito', r.id, (e as Error).message);   // queda anotado como revisado: se reintenta la semana que viene
     }
     revisados++;

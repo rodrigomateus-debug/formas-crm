@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
-import { Avatar, EtapaIcono, MultiPick, UnidadBadge, etapaPedidoSlug } from '../components';
+import { EtapaIcono, MultiPick, UnidadBadge, UserAvatar, etapaPedidoSlug } from '../components';
 import { SortPick, useCollapsed, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 
@@ -88,7 +88,7 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
       {type === 'order' && !cardProps?.length && <OrderLine r={r} />}
       {type === 'order' && <Fotos r={r} onOpen={() => onOpen(r.id)} />}
       <div className="meta">
-        <Avatar name={userName(meta, r.props.owner_id) || '—'} />
+        <UserAvatar id={r.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>
       </div>
       <div className="card-actions">
@@ -215,6 +215,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
             title={`${c.label}: ${c.total}${conMonto ? ` · ${fmtMoneyExact(c.amount, 'ARS')} sin IVA` : ''}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
             <Icon name="chevron" size={14} />
             {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
+            {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
             <span className="n num">{c.total}</span>
             <span className="vlabel">{c.label}</span>
           </div>
@@ -223,6 +224,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
             <div className={`col-head${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`}>
               <div className="t">
                 {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
+                {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
                 <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
                 {onCreate && c.value !== '' && def?.type !== 'owner' && <button className="col-fold" title={`Crear en «${c.label}»`} aria-label={`Crear en ${c.label}`} onClick={() => onCreate({ [prop]: c.value })}><Icon name="plus" size={14} /></button>}
                 <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>

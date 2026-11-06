@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { http, qs, useMeta, useToast, propsOf, propOf, stageOf, missingFor, OBJECTS, Icon, type Filter, type ObjectType, type Property } from '../lib';
-import { Modal, PropertyInput, StageSelect } from '../components';
+import { Modal, PropertyInput, StageSelect, userOption } from '../components';
 import { Select } from '../Select';
 
 // Acciones masivas, como la barra de selección de HubSpot: Asignar, Editar, Crear tareas y Borrar, en la tabla y en el
@@ -88,7 +88,7 @@ function AssignModal({ count, onClose, onSave }: { count: number; onClose: () =>
       <label className="field">Propietario
         <Select className="input" value={owner} onChange={(e) => setOwner(e.target.value)} autoFocus>
           <option value="">Sin asignar</option>
-          {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}{u.id === meta.me.id ? ' (yo)' : ''}</option>)}
+          {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{userOption(u, u.id === meta.me.id ? ' (yo)' : '')}</option>)}
         </Select>
       </label>
     </Modal>

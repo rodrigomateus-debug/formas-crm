@@ -4,7 +4,7 @@ import {
   http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
-import { Avatar, Modal, PropertyInput } from '../components';
+import { Modal, PropertyInput, UserAvatar } from '../components';
 import { Select } from '../Select';
 
 // Lo que el servidor agrega a cada tarjeta: contacto y empresa asociados y la próxima actividad.
@@ -231,7 +231,7 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
           : 'Sin próximas actividades'}
       </div>
       <div className="meta">
-        <Avatar name={owner || '—'} />
+        <UserAvatar id={d.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{owner || 'Sin propietario'}</span>
         {days != null && <span className="days" title="Días en esta etapa">{days} d</span>}
       </div>

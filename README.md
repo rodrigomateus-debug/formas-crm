@@ -20,7 +20,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
 | `/hooks/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`), con token de administrador. Va por `/hooks` porque `/api` pide el login de Access. |
-| Cron a los :05, :15… | Avisos por mail (`src/worker/avisos.ts`: resumen de tareas a la mañana y lo que te asignan) y registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
+| Cron a los :05, :15… | Avisos por mail (`src/worker/avisos.ts`: resumen de tareas a la mañana y lo que te asignan), fotos de Google de los usuarios (`src/worker/fotos.ts`) y registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
 | Tareas de GitHub | Compras de clientes cada mañana (`scripts/clientes.mjs`, [docs/CLIENTES.md](docs/CLIENTES.md)), PDF de facturas (`scripts/facturas-pdf.mjs`) y respaldo diario. |
 
 Quién entra: Cloudflare Access con el mail de Formas (igual que el tablero). Las integraciones y Claude entran con
@@ -151,6 +151,16 @@ Las miniaturas de las tarjetas de pedidos y las fotos de sus productos salen de 
 la vendedora), de la ficha del producto en Finnegans o, si no, de la foto del SKU en otras cotizaciones del STP. El registro
 de cotizaciones se baja cada hora con el workflow «Totales de pedidos»; necesita el secreto `STPO_TOKEN` en GitHub (el mismo
 que usa formas-tablero). Detalle en [docs/PEDIDOS.md](docs/PEDIDOS.md#fotos-del-registro-de-cotizaciones-del-stp).
+
+## Fotos de los usuarios
+
+Cada usuario se ve con la foto de su cuenta de Google (la misma de Gmail) en todo el CRM: el menú de abajo, las tarjetas del
+tablero, la columna Propietario de las tablas, la ficha (propietario, actividad e historial), Tareas, Inicio, los desplegables
+de usuario y Configuración → Usuarios. Si no tiene foto, sus iniciales. La trae la cuenta de servicio de Gmail
+(`src/worker/fotos.ts`) con el permiso `https://www.googleapis.com/auth/userinfo.profile` (solo nombre y foto) en la
+delegación de todo el dominio; si ese permiso no está, usa el de Drive de los bocetos. Llega sola al agregar un usuario y se
+revisa una vez por semana; el botón «Traer fotos de Google» de Configuración → Usuarios las trae ya, y ahí mismo avisa si
+falta el permiso.
 
 ## Bocetos de producción
 

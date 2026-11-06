@@ -255,6 +255,12 @@ body:has(.save-bar) .toast { bottom: 88px; }
 @keyframes save-bar-in { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
 .avatar.lg { width: 48px; height: 48px; font-size: 17px; }
+.avatar.sm { width: 20px; height: 20px; font-size: 8px; }
+.avatar.xs { width: 18px; height: 18px; font-size: 7px; }
+/* Usuario con su foto de Google y su nombre (UserChip en components.tsx): propietario en tablas, fichas, tareas… */
+.user-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; vertical-align: middle; }
+.user-inline .avatar { margin-right: 4px; vertical-align: middle; }
+.select-value .avatar, .select-text .avatar { margin-right: 8px; vertical-align: middle; }
 .avatar.company { border-radius: 8px; background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
 .avatar.deal { border-radius: 8px; background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .avatar.order { border-radius: 8px; background: var(--ui-info-soft); color: var(--ui-info-ink); }

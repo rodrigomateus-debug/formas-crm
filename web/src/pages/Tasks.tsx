@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, useDebounced, fmtDate, recordUrl, Icon, unidadesDe, type Activity } from '../lib';
-import { ColumnWidths, UnidadBadge, useColumnResize } from '../components';
+import { ColumnWidths, UnidadBadge, UserChip, useColumnResize, userOption } from '../components';
 import { UnidadFilter } from './QuickFilters';
 import { EditActivity } from './RecordPage';
 import { Select } from '../Select';
@@ -46,7 +46,7 @@ export default function Tasks() {
         <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
           <option value={String(meta.me.id)}>Mis tareas</option>
           <option value="all">Todo el equipo</option>
-          {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
       </div>
       <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div>
@@ -73,7 +73,7 @@ export default function Tasks() {
                   <td className={overdue ? 'overdue' : ''}>{fmtDate(a.due_at, true)}</td>
                   <td>{TASK_TYPE[a.task_type ?? 'todo'] ?? a.task_type}</td>
                   <td>{a.priority && PRIORITY[a.priority] ? <span className={`tag ${PRIORITY[a.priority][1]}`}>{PRIORITY[a.priority][0]}</span> : <span className="muted">—</span>}</td>
-                  {owner === 'all' && <td>{meta.users.find((u) => u.id === a.owner_id)?.name}</td>}
+                  {owner === 'all' && <td><UserChip id={a.owner_id} empty="" /></td>}
                   <td><span className="unidades">{unidadesDe(meta, 'task', { owner_id: a.owner_id }).map((k) => <UnidadBadge key={k} k={k} compact />)}</span></td>
                   <td>{a.status !== 'COMPLETED' && <span className="row"><button className="btn sm ghost" onClick={() => postpone(a, 1)}>+1 día</button><button className="btn sm ghost" onClick={() => postpone(a, 7)}>+1 semana</button></span>}</td>
                 </tr>

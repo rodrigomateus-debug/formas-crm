@@ -16,6 +16,7 @@ export interface Env {
   GOOGLE_TOKEN_URL?: string;
   GMAIL_API_URL?: string;
   DRIVE_API_URL?: string;          // Drive simulado en las pruebas
+  GOOGLE_USERINFO_URL?: string;    // perfil de Google (foto de los usuarios) simulado en las pruebas
   BOCETOS_DRIVE_FOLDER?: string;   // carpeta (o unidad compartida) de los bocetos, si no está en Configuración
   // ClickUp (lista PEC): los pedidos y su estado. Solo lectura.
   CLICKUP_TOKEN?: string;
@@ -43,6 +44,7 @@ export interface User {
   team_id: number | null;
   extra_teams?: string;
   active: number;
+  photo_url?: string | null;   // foto de su cuenta de Google (fotos.ts)
 }
 
 export interface Ctx {

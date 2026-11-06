@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, userName, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
-import { Avatar, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput } from '../components';
+import { Avatar, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput, UserChip, userOption } from '../components';
 import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
@@ -229,7 +229,8 @@ function PropRow({ type, prop, record, onSave, onHistory }: { type: ObjectType; 
         {shown && prop.type === 'url' && safeUrl(record.props[prop.name]) ? <a href={safeUrl(record.props[prop.name])} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{shown}</a>
           : shown && prop.type === 'email' ? <a href={`mailto:${shown}`} onClick={(e) => e.stopPropagation()}>{shown}</a>
             : shown && type === 'order' && prop.name === 'hs_pipeline_stage' ? <EtapaPedido value={record.props[prop.name]} label={shown} />
-              : shown || '—'}
+              : shown && prop.type === 'owner' ? <UserChip id={record.props[prop.name]} />
+                : shown || '—'}
       </div>
     </div>
   );
@@ -237,14 +238,14 @@ function PropRow({ type, prop, record, onSave, onHistory }: { type: ObjectType; 
 
 function HistoryModal({ type, id, prop, onClose }: { type: ObjectType; id: number; prop: string; onClose: () => void }) {
   const { meta } = useMeta();
-  const h = useAsync(() => http<Array<{ old_value: string; new_value: string; changed_at: string; user_name: string; source: string }>>('GET', `/records/${type}/${id}/history${qs({ prop })}`), [id, prop]);
+  const h = useAsync(() => http<Array<{ old_value: string; new_value: string; changed_at: string; user_id: number | null; user_name: string; source: string }>>('GET', `/records/${type}/${id}/history${qs({ prop })}`), [id, prop]);
   return (
     <Modal title={`Historial: ${propOf(meta, type, prop)?.label ?? prop}`} onClose={onClose}>
       {h.data?.length ? h.data.map((c, i) => (
         <div key={i} className="row" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 6 }}>
           <div className="grow"><b>{formatValue(meta, type, prop, c.new_value) || '(vacío)'}</b>
             <div className="small muted">antes: {formatValue(meta, type, prop, c.old_value) || '(vacío)'}</div></div>
-          <div className="small muted" style={{ textAlign: 'right' }}>{fmtDate(c.changed_at, true)}<br />{c.user_name ?? '—'} · {c.source}</div>
+          <div className="small muted" style={{ textAlign: 'right' }}>{fmtDate(c.changed_at, true)}<br /><UserChip id={c.user_id} name={c.user_name} empty="—" size="xs" /> · {c.source}</div>
         </div>
       )) : <div className="muted">Sin cambios registrados.</div>}
     </Modal>
@@ -325,7 +326,7 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
   const [search, setSearch] = useState('');
   const dsearch = useDebounced(search, 300);
   const [owner, setOwner] = useState('');
-  const tl = useAsync(() => http<{ activities: Activity[]; changes: Array<{ prop: string; old_value: string; new_value: string; changed_at: string; user_name: string; source: string }>; counts: Record<string, number> }>(
+  const tl = useAsync(() => http<{ activities: Activity[]; changes: Array<{ prop: string; old_value: string; new_value: string; changed_at: string; user_id: number | null; user_name: string; source: string }>; counts: Record<string, number> }>(
     'GET', `/records/${type}/${record.id}/timeline${qs({ types: filter || undefined, rollup: rollup ? undefined : 0, limit, q: dsearch || undefined, owner: owner || undefined })}`), [record.id, filter, rollup, limit, dsearch, owner]);
   useEffect(() => {
     const h = (e: Event) => setCompose((e as CustomEvent).detail);
@@ -350,7 +351,7 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
         <div className="search grow" style={{ minWidth: 180 }}><Icon name="search" /><input className="input sm" placeholder="Buscar en la actividad…" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
         <Select className="input sm" style={{ width: 200 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
           <option value="">Todos los responsables</option>
-          {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
       </div>
       {type !== 'contact' && (
@@ -374,7 +375,7 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
         if (it.kind === 'c') {
           const c = it.c;
           const val = (v: string) => (c.prop === 'merged' ? v : formatValue(meta, type, c.prop, v) || '—');
-          return <div key={`c${c.changed_at}${c.prop}`}>{head}<div className="tl-change">{CHANGE_LABEL[c.prop] ?? c.prop}: {c.old_value != null && c.prop !== 'merged' ? `${val(c.old_value)} → ` : ''}<b>{c.prop === 'merged' ? c.new_value : val(c.new_value)}</b> · {c.user_name ?? 'sistema'}{c.source !== 'crm' ? ` (${c.source})` : ''} · {new Date(c.changed_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</div></div>;
+          return <div key={`c${c.changed_at}${c.prop}`}>{head}<div className="tl-change">{CHANGE_LABEL[c.prop] ?? c.prop}: {c.old_value != null && c.prop !== 'merged' ? `${val(c.old_value)} → ` : ''}<b>{c.prop === 'merged' ? c.new_value : val(c.new_value)}</b> · <UserChip id={c.user_id} name={c.user_name} empty="sistema" size="xs" />{c.source !== 'crm' ? ` (${c.source})` : ''} · {new Date(c.changed_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</div></div>;
         }
         return <div key={`a${it.a.id}`}>{head}<ActivityItem a={it.a} currentId={record.id} onChange={reload} /></div>;
       })}
@@ -409,7 +410,7 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         {a.type === 'task'
           ? <button className={`check-round${done ? ' on' : ''}`} onClick={toggle} aria-label={done ? 'Marcar pendiente' : 'Completar'}>{done && <Icon name="check" />}</button>
           : <span className="ic"><Icon name={a.type} /></span>}
-        <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· {userName(meta, a.owner_id)}{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
+        <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· <UserChip id={a.owner_id} size="xs" />{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
         <span className={`when${overdue ? ' overdue' : ''}`}>{a.type === 'task' ? `Vence ${fmtDate(a.due_at, true)}` : fmtDate(a.occurred_at, true)}</span>
         <button className="btn ghost sm" onClick={pin} title={a.meta?.pinned ? 'Desfijar' : 'Fijar arriba de todo'}>{a.meta?.pinned ? 'Desfijar' : 'Fijar'}</button>
         <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>
@@ -440,7 +441,7 @@ export function EditActivity({ a, onClose, onSaved }: { a: Activity; onClose: ()
         ? <label className="field">Vence<input className="input" type="datetime-local" value={f.due_at ? toLocalInput(f.due_at) : ''} onChange={(e) => setF({ ...f, due_at: new Date(e.target.value).toISOString() })} /></label>
         : <label className="field">Fecha<input className="input" type="datetime-local" value={toLocalInput(f.occurred_at)} onChange={(e) => setF({ ...f, occurred_at: new Date(e.target.value).toISOString() })} /></label>}
       <label className="field">Responsable<Select className="input" value={f.owner_id ?? ''} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })}>
-        {meta.users.filter((u) => u.active || u.id === f.owner_id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</Select></label>
+        {meta.users.filter((u) => u.active || u.id === f.owner_id).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}</Select></label>
       {a.type === 'task' && <label className="field">Prioridad<Select className="input" value={f.priority ?? 'none'} onChange={(e) => setF({ ...f, priority: e.target.value })}>
         <option value="none">Sin prioridad</option><option value="low">Baja</option><option value="medium">Media</option><option value="high">Alta</option></Select></label>}
       <label className="field">Detalle<textarea className="input" rows={8} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} /></label>
@@ -505,7 +506,7 @@ function Composer({ type, record, associations, onClose, onSaved }: {
             <label className="row small">{type === 'meeting' ? 'Empieza' : 'Fecha'}<input className="input" style={{ width: 210 }} type="datetime-local" value={toLocalInput(f.occurred_at)} onChange={(e) => setF({ ...f, occurred_at: new Date(e.target.value).toISOString() })} /></label>
           )}
           <Select className="input" style={{ width: 190 }} value={f.owner_id} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })} aria-label="Responsable">
-            {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
           </Select>
         </div>
         {type === 'meeting' && <input className="input" placeholder="Lugar o link" value={f.meta?.location ?? ''} onChange={(e) => setF({ ...f, meta: { ...f.meta, location: e.target.value } })} />}
@@ -825,11 +826,11 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Próxima actividad', next ? fmtDate(next) : <span className="warn-text">Sin próximas actividades</span>],
   ] : type === 'company' ? [
     ['Dominio', record.props.domain || '—'],
-    ['Propietario', userName(meta, record.props.owner_id) || '—'],
+    ['Propietario', <UserChip key="owner" id={record.props.owner_id} empty="—" />],
   ] : type === 'contact' ? [
     ['Email', record.props.email || '—'],
     ['Celular', record.props.mobilephone || record.props.phone || '—'],
-    ['Propietario', userName(meta, record.props.owner_id) || '—'],
+    ['Propietario', <UserChip key="owner" id={record.props.owner_id} empty="—" />],
   ] : [
     ['Total sin IVA', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
     ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],

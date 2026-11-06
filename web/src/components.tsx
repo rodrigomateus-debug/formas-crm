@@ -2,22 +2,48 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
+  userOf, userName, type User,
 } from './lib';
 import { Select } from './Select';
 
-// Las empresas muestran el favicon de su dominio y los contactos la foto de su mail, como en HubSpot; si no hay, las iniciales.
+// Las empresas muestran el favicon de su dominio y los contactos la foto de su mail, como en HubSpot; los usuarios, la
+// de su cuenta de Google (`photo`). Si no hay, las iniciales.
 const sinImagen = new Set<string>();
-export function Avatar({ name, type, size, domain, email }: { name: string; type?: ObjectType; size?: 'lg'; domain?: string | null; email?: string | null }) {
-  const src = type === 'company' && domain ? `/api/favicon/${encodeURIComponent(String(domain).trim().toLowerCase())}`
+export function Avatar({ name, type, size, domain, email, photo }: { name: string; type?: ObjectType; size?: 'lg' | 'sm' | 'xs'; domain?: string | null; email?: string | null; photo?: string | null }) {
+  const src = photo ? photo
+    : type === 'company' && domain ? `/api/favicon/${encodeURIComponent(String(domain).trim().toLowerCase())}`
     : type === 'contact' && email ? `/api/avatar/${encodeURIComponent(String(email).trim().toLowerCase())}` : '';
   const [failed, setFailed] = useState(() => !src || sinImagen.has(src));
   useEffect(() => { setFailed(!src || sinImagen.has(src)); }, [src]);
   const cls = `avatar ${type && type !== 'contact' ? type : ''} ${size ?? ''}`;
   if (!failed) {
-    return <span className={`${cls} ${type === 'company' ? 'logo' : 'photo'}`}><img src={src} alt="" loading="lazy" onError={() => { sinImagen.add(src); setFailed(true); }} /></span>;
+    // Las fotos de Google (lh3.googleusercontent.com) a veces no cargan si el pedido lleva de qué página viene.
+    return <span className={`${cls} ${type === 'company' && !photo ? 'logo' : 'photo'}`}><img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => { sinImagen.add(src); setFailed(true); }} /></span>;
   }
   return <span className={cls}>{initials(name)}</span>;
 }
+
+// Un usuario del CRM (propietario, responsable, quien hizo un cambio) con la foto de su cuenta de Google.
+export function UserAvatar({ id, size }: { id: unknown; size?: 'lg' | 'sm' | 'xs' }) {
+  const { meta } = useMeta();
+  const u = userOf(meta, id);
+  return <Avatar name={u?.name ?? userName(meta, id)} photo={u?.photo_url} size={size} />;
+}
+
+// Foto y nombre juntos (tablas, fichas, tareas). Sin usuario, `empty`. El chico (xs) va dentro de una línea de texto
+// (actividad, historial): ahí el nombre se corta con «…» como el resto de la línea.
+export function UserChip({ id, name, empty = 'Sin asignar', size = 'sm' }: { id: unknown; name?: string | null; empty?: ReactNode; size?: 'sm' | 'xs' }) {
+  const { meta } = useMeta();
+  if (id == null || id === '') return <>{empty}</>;
+  const u = userOf(meta, id);
+  const n = u?.name ?? name ?? userName(meta, id);
+  if (size === 'xs') return <span className="user-inline"><Avatar name={n} photo={u?.photo_url} size="xs" />{n}</span>;
+  return <span className="user-chip" title={n}><Avatar name={n} photo={u?.photo_url} size={size} /><span className="ellipsis">{n}</span></span>;
+}
+
+// Contenido de un <option> de usuario en los desplegables (Select): la foto y el nombre. Va como fragmento para que el
+// buscador del desplegable siga encontrando por nombre.
+export const userOption = (u: User, extra = '') => <><Avatar name={u.name} photo={u.photo_url} size="xs" />{u.name}{extra}</>;
 
 // La vista previa no deja ver la página de atrás bloqueada: la rueda del mouse fuera del panel desplaza lo que está debajo.
 function scrollBehind(e: React.WheelEvent<HTMLDivElement>) {
@@ -89,7 +115,7 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type }: {
       return (
         <Select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus}>
           <option value="">Sin asignar</option>
-          {meta.users.filter((u) => u.active || u.id === Number(v)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {meta.users.filter((u) => u.active || u.id === Number(v)).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
       );
     case 'enum':

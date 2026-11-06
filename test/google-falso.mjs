@@ -1,9 +1,15 @@
-// Google simulado para las pruebas (puerto 8799, el de GOOGLE_TOKEN_URL y DRIVE_API_URL en .dev.vars; ver
-// test/gmail-dev-vars.mjs): el token de la cuenta de servicio y lo justo de Drive (carpetas, subida reanudable, bajada).
+// Google simulado para las pruebas (puerto 8799, el de GOOGLE_TOKEN_URL, DRIVE_API_URL y GOOGLE_USERINFO_URL en .dev.vars;
+// ver test/gmail-dev-vars.mjs): el token de la cuenta de servicio, lo justo de Drive (carpetas, subida reanudable, bajada)
+// y la foto del perfil de cada usuario (por el perfil o por Drive). `perfil` cambia lo que contesta: sin el permiso de
+// perfil o de Drive en la delegación, o mails que Google no conoce.
 import http from 'node:http';
 
 export async function googleFalso() {
   const drive = { carpetas: [], archivos: [], tokens: [], subidas: new Map() };
+  const perfil = { negar: new Set(), sinCuenta: new Set() };
+  const PERFIL = 'https://www.googleapis.com/auth/userinfo.profile';
+  const DRIVE = 'https://www.googleapis.com/auth/drive';
+  const quien = (req) => (req.headers.authorization ?? '').split(':')[1];
   let n = 0;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -16,8 +22,15 @@ export async function googleFalso() {
         const assertion = new URLSearchParams(body.toString()).get('assertion') ?? '';
         const claims = JSON.parse(Buffer.from(assertion.split('.')[1] ?? '', 'base64url').toString() || '{}');
         drive.tokens.push({ sub: claims.sub, scope: claims.scope });
+        if ((claims.scope === PERFIL && perfil.negar.has('perfil')) || (claims.scope === DRIVE && perfil.negar.has('drive'))) {
+          return send({ error: 'unauthorized_client', error_description: 'Client is unauthorized to retrieve access tokens using this method, or client not authorized for any of the scopes requested.' }, 401);
+        }
+        if (perfil.sinCuenta.has(claims.sub)) return send({ error: 'invalid_grant', error_description: 'Invalid email or User ID' }, 400);
         return send({ access_token: `tok:${claims.sub}:${claims.scope}`, expires_in: 3600 });
       }
+      // La misma foto por las dos formas (cada una con su tamaño): el CRM la deja en 96 px.
+      if (url.pathname === '/oauth2/v3/userinfo') return send({ sub: '1', picture: `https://lh3.googleusercontent.com/a/foto-${quien(req)}=s96-c` });
+      if (url.pathname === '/drive/v3/about') return send({ user: { photoLink: `https://lh3.googleusercontent.com/a/foto-${quien(req)}=s64` } });
       if (url.pathname === '/drive/v3/files' && req.method === 'GET') {
         const q = url.searchParams.get('q') ?? '';
         const padre = q.match(/'([^']+)' in parents/)?.[1];
@@ -57,5 +70,5 @@ export async function googleFalso() {
     });
   });
   await new Promise((r) => server.listen(8799, r));
-  return { drive, cerrar: () => new Promise((r) => server.close(r)) };
+  return { drive, perfil, cerrar: () => new Promise((r) => server.close(r)) };
 }

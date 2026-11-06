@@ -11,6 +11,7 @@ import { migrate } from './migrate';
 import { syncAll } from './gmail';
 import { correrAvisos } from './avisos';
 import { Budget } from './budget';
+import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
 import { refrescarFce } from './facturar';
@@ -91,6 +92,7 @@ export default {
         const b = Budget.of(env);
         await safe(() => correrAvisos(env, b));
         await safe(() => procesarSalidaClickup(env, b));   // lo que quedó pendiente para ClickUp (pedidos a «pdv»)
+        await safe(() => actualizarFotos(env, b));          // fotos de Google de los usuarios: unas pocas, una vez por semana
         await safe(() => syncAll(env, b));
       }
       else {

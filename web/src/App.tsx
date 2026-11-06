@@ -34,7 +34,7 @@ export default function App() {
           <div className="nav-group">Cuenta</div>
           <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>
         </>}
-        <UserMenu name={meta.me.name} email={meta.me.email} />
+        <UserMenu name={meta.me.name} email={meta.me.email} photo={meta.me.photo_url} />
       </nav>
       <div className="main">
         <header className="topbar">
@@ -131,7 +131,7 @@ function CreateMenu() {
 }
 
 // Usuario, abajo en el menú: desde acá cada uno elige el tema (Automático, Claro, Oscuro o Alto contraste).
-function UserMenu({ name, email }: { name: string; email: string }) {
+function UserMenu({ name, email, photo }: { name: string; email: string; photo?: string | null }) {
   const { tema, elegir } = useTema();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -158,7 +158,7 @@ function UserMenu({ name, email }: { name: string; email: string }) {
         </div>
       )}
       <button type="button" className="me" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title="Tema y usuario">
-        <Avatar name={name} /><div><b>{name}</b>{email}</div><Icon name="updown" size={16} />
+        <Avatar name={name} photo={photo} /><div><b>{name}</b>{email}</div><Icon name="updown" size={16} />
       </button>
     </div>
   );

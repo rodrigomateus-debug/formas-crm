@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams, PROFILE_LABEL, ROLE_LABEL } from '../lib';
-import { FilterRow, Modal, MultiPick, describeFilter, filterableProps, opsFor } from '../components';
+import { Avatar, FilterRow, Modal, MultiPick, UserChip, describeFilter, filterableProps, opsFor } from '../components';
 import { Select } from '../Select';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['tags', 'Etiquetas'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
@@ -25,8 +25,19 @@ export default function Settings() {
 function Users() {
   const { meta, reload } = useMeta();
   const toast = useToast();
-  const users = useAsync(() => http<Array<{ id: number; email: string; name: string; role: string; profile: string; team_id: number | null; active: number; hs_owner_id: string | null }>>('GET', '/users'), []);
+  const users = useAsync(() => http<Array<{ id: number; email: string; name: string; role: string; profile: string; team_id: number | null; active: number; hs_owner_id: string | null; photo_url: string | null }>>('GET', '/users'), []);
   const [add, setAdd] = useState(false);
+  // Fotos: las de la cuenta de Google de cada uno (src/worker/fotos.ts). Se actualizan solas una vez por semana; el botón las trae ya.
+  const fotos = useAsync(() => http<{ cuenta_de_servicio: boolean; error?: string | null }>('GET', '/users/fotos'), []);
+  const [trayendo, setTrayendo] = useState(false);
+  const traerFotos = async () => {
+    setTrayendo(true);
+    try {
+      const r = await http<{ error: string | null; actualizadas: number; sin_foto: number; pendientes: number }>('POST', '/users/fotos');
+      users.reload(); reload(); fotos.reload();
+      toast(r.error ?? `Fotos de Google: ${r.actualizadas} ${r.actualizadas === 1 ? 'usuario' : 'usuarios'} con foto${r.sin_foto ? `, ${r.sin_foto} sin cuenta de Google` : ''}${r.pendientes ? `; ${r.pendientes} más en unos minutos` : ''}.`, !!r.error);
+    } catch (e) { toast((e as Error).message, true); } finally { setTrayendo(false); }
+  };
   // Resumen corto: «Todos», «Todos menos: …» o la lista de los que ve.
   const pipelinesSummary = (u: Parameters<typeof canSeePipeline>[0]) => {
     if (u.role === 'admin') return 'Todos (administrador)';
@@ -51,12 +62,16 @@ function Users() {
   return (
     <>
       <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas (login de Cloudflare Access). Para dar acceso, agregalo; para sacarlo, desactivalo.</span>
+        <button className="btn" disabled={trayendo || !fotos.data?.cuenta_de_servicio} onClick={traerFotos}
+          title={fotos.data && !fotos.data.cuenta_de_servicio ? 'Falta la cuenta de servicio de Google (GOOGLE_SA_JSON).' : 'Trae la foto de la cuenta de Google de cada usuario (también se actualizan solas una vez por semana).'}>
+          {trayendo ? 'Trayendo fotos…' : 'Traer fotos de Google'}</button>
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
+      {fotos.data?.error && <p className="small danger-text" style={{ marginTop: 0 }}>Fotos de Google: {fotos.data.error}</p>}
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
         <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort">Equipo</th><th className="nosort">Otros equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
-            <td style={{ maxWidth: 160 }} title={u.name}>{u.name}</td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
+            <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
             <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }))}</td>
             <td>{u.role === 'admin' ? <span className="small muted">Todo</span> : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
             <td><Select className="input sm" style={{ minWidth: 150, maxWidth: 170 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
@@ -370,7 +385,7 @@ function BocetosDrive() {
 
 function Integrations() {
   const toast = useToast();
-  const tokens = useAsync(() => http<Array<{ id: number; name: string; source: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string }>>('GET', '/tokens'), []);
+  const tokens = useAsync(() => http<Array<{ id: number; name: string; source: string; created_at: string; last_used_at: string | null; revoked: number; user_id: number; user_name: string }>>('GET', '/tokens'), []);
   const [fresh, setFresh] = useState<{ token: string; source: string } | null>(null);
   const [f, setF] = useState({ name: '', source: 'mcp' });
   const origin = window.location.origin;
@@ -411,7 +426,7 @@ function Integrations() {
           <thead><tr><th className="nosort">Nombre</th><th className="nosort">Tipo</th><th className="nosort">Usuario</th><th className="nosort">Creado</th><th className="nosort">Último uso</th><th className="nosort" /></tr></thead>
           <tbody>{tokens.data?.map((t) => (
             <tr key={t.id} style={{ opacity: t.revoked ? 0.5 : 1 }}>
-              <td>{t.name}</td><td>{t.source}</td><td>{t.user_name}</td><td>{fmtDate(t.created_at)}</td><td>{t.last_used_at ? fmtDate(t.last_used_at, true) : '—'}</td>
+              <td>{t.name}</td><td>{t.source}</td><td><UserChip id={t.user_id} name={t.user_name} /></td><td>{fmtDate(t.created_at)}</td><td>{t.last_used_at ? fmtDate(t.last_used_at, true) : '—'}</td>
               <td>{!t.revoked ? <button className="btn sm danger" onClick={async () => { if (confirm('¿Revocar el token? Lo que lo use deja de andar.')) { await http('DELETE', `/tokens/${t.id}`); tokens.reload(); } }}>Revocar</button> : 'revocado'}</td>
             </tr>
           ))}</tbody>

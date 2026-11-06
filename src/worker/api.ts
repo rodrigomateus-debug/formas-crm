@@ -18,6 +18,8 @@ import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orde
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
+import { actualizarFotos, fotosEstado } from './fotos';
+import { Budget } from './budget';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -57,7 +59,7 @@ api.get('/meta', async (c) => {
   const meta = new Meta(db);
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps] = await db.batch([
-    db.prepare('SELECT id, email, name, role, team_id, extra_teams, active FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, team_id, extra_teams, active, photo_url FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -1035,8 +1037,20 @@ api.post('/users', async (c) => {
   const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null }>();
   const { profile, role } = profileAndRole(b, { profile: 'comercial', role: 'member' });
   const row = await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id) VALUES (?, ?, ?, ?, ?) RETURNING *')
-    .bind(b.email.trim().toLowerCase(), b.name, role, profile, b.team_id ?? null).first();
+    .bind(b.email.trim().toLowerCase(), b.name, role, profile, b.team_id ?? null).first<{ id: number }>();
+  // Su foto de Google, ya (si no se puede, la trae el cron).
+  if (c.env.GOOGLE_SA_JSON) c.executionCtx.waitUntil(actualizarFotos(c.env, Budget.of(c.env), { ids: [row!.id] }).catch((e) => console.error((e as Error).message)));
   return c.json(row, 201);
+});
+
+// Fotos de los usuarios (las de su cuenta de Google, fotos.ts): cómo quedó la última vez y traerlas ya.
+api.get('/users/fotos', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json({ cuenta_de_servicio: !!c.env.GOOGLE_SA_JSON, ...(await fotosEstado(c.env.DB)) });
+});
+api.post('/users/fotos', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await actualizarFotos(c.env, Budget.of(c.env), { todos: true }));
 });
 
 api.patch('/users/:id', async (c) => {
@@ -1058,7 +1072,7 @@ api.patch('/users/:id', async (c) => {
 api.get('/tokens', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   const { results } = await c.env.DB.prepare(
-    'SELECT t.id, t.name, t.source, t.created_at, t.last_used_at, t.revoked, u.name AS user_name, u.email AS user_email FROM api_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.revoked, t.created_at DESC',
+    'SELECT t.id, t.name, t.source, t.created_at, t.last_used_at, t.revoked, t.user_id, u.name AS user_name, u.email AS user_email FROM api_tokens t JOIN users u ON u.id = t.user_id ORDER BY t.revoked, t.created_at DESC',
   ).all();
   return c.json(results);
 });

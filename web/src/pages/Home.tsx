@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
-import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, userName, stageOf, type Activity, type CrmRecord } from '../lib';
+import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
+import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 
 interface Dash {
@@ -42,7 +43,7 @@ export default function Home() {
         <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
           <option value="me">Mis números</option>
           <option value="all">Todo el equipo</option>
-          {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
       </div>
       <div className="kpis">
@@ -67,7 +68,7 @@ export default function Home() {
           {stale.data?.results.length ? stale.data.results.map((r) => (
             <div key={r.id} className="assoc-item">
               <div className="grow" style={{ minWidth: 0 }}><Link to={recordUrl('deal', r.id)} className="ellipsis" style={{ display: 'block' }}>{r.name}</Link>
-                <div className="small muted">{stageOf(meta, r.props.dealstage)?.stage.label} · {userName(meta, r.props.owner_id)}</div></div>
+                <div className="small muted">{stageOf(meta, r.props.dealstage)?.stage.label} · <UserChip id={r.props.owner_id} size="xs" /></div></div>
               <span className="small num">{fmtMoney(r.props.amount)}</span>
             </div>
           )) : <div className="empty">Todo con movimiento.</div>}
@@ -101,7 +102,7 @@ export default function Home() {
             {Object.entries((d?.won ?? []).reduce<Record<string, { n: number; amount: number }>>((acc, w) => {
               const k = String(w.owner_id); acc[k] = { n: (acc[k]?.n ?? 0) + w.n, amount: (acc[k]?.amount ?? 0) + w.amount }; return acc;
             }, {})).sort((a, b) => b[1].amount - a[1].amount).map(([o, v]) => (
-              <div key={o} className="row"><span className="grow">{userName(meta, o)}</span><span className="small muted">{v.n} {v.n === 1 ? 'negocio' : 'negocios'}</span><b className="num">{fmtMoney(v.amount)}</b></div>
+              <div key={o} className="row"><span className="grow" style={{ minWidth: 0 }}><UserChip id={o === 'null' ? null : o} /></span><span className="small muted">{v.n} {v.n === 1 ? 'negocio' : 'negocios'}</span><b className="num">{fmtMoney(v.amount)}</b></div>
             ))}
             {!d?.won.length && <div className="muted">Todavía no hay cierres ganados este mes.</div>}
             {d?.lost.length ? <>

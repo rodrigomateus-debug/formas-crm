@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMeta, propOf, UNIDADES, type Filter, type ObjectType } from '../lib';
-import { UnidadBadge } from '../components';
+import { Avatar, UnidadBadge } from '../components';
 
 // Filtros rápidos, como los de HubSpot: propietarios (varios a la vez) y fechas con rangos listos.
 // Se guardan en la vista (`owners`, `dates`, `tags` y `unidades`) y se suman a los filtros avanzados en cada grupo.
@@ -119,8 +119,8 @@ export function QuickFilterBar({ type, owners, dates, tags, unidades, onOwners, 
       <Pop label={ownerLabel} on={owners.length > 0}>
         {() => (
           <div className="stack" style={{ gap: 0, maxHeight: 320, overflow: 'auto' }}>
-            {[['me', 'Yo'], ['none', 'Sin asignar'], ...meta.users.filter((u) => u.active).map((u) => [String(u.id), u.name])].map(([v, l]) => (
-              <label key={v} className="opt"><input type="checkbox" checked={owners.includes(v)} onChange={() => toggle(v)} />{l}</label>
+            {[{ v: 'me', l: 'Yo', u: meta.me }, { v: 'none', l: 'Sin asignar', u: null }, ...meta.users.filter((u) => u.active).map((u) => ({ v: String(u.id), l: u.name, u }))].map(({ v, l, u }) => (
+              <label key={v} className="opt"><input type="checkbox" checked={owners.includes(v)} onChange={() => toggle(v)} />{u && <Avatar name={u.name} photo={u.photo_url} size="xs" />}{l}</label>
             ))}
             {owners.length > 0 && <button className="btn sm ghost" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => onOwners([])}>Cualquiera</button>}
           </div>

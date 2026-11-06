@@ -42,7 +42,10 @@ export async function probarDrive(env: Env) {
       error: puede ? null : `${cfg.usuario} puede ver la carpeta pero no agregar archivos: dale permiso de edición.` };
   } catch (e) {
     const m = (e as Error).message;
-    const error = /unauthorized|not authorized|access_denied/i.test(m)
+    const proyecto = m.match(/has not been used in project (\d+)|SERVICE_DISABLED.*?project[s/ ]+(\d+)/s);
+    const error = proyecto
+      ? `Falta activar la API de Google Drive en el proyecto de Google Cloud de la cuenta de servicio: https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=${proyecto[1] ?? proyecto[2]} (botón «Habilitar»; tarda unos minutos).`
+      : /unauthorized|not authorized|access_denied/i.test(m)
       ? 'A la cuenta de servicio le falta el permiso de Drive (https://www.googleapis.com/auth/drive) en la delegación de todo el dominio de Google Workspace.'
       : /HTTP 404/.test(m) ? `${cfg.usuario} no ve esa carpeta: compartísela (con permiso de edición) o elegí otro usuario.` : m;
     return { ok: false, carpeta: null, unidad_compartida: false, usuario: cfg.usuario, error };

@@ -368,9 +368,19 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   return result;
 }
 
+// ¿Es el remito de ese PDV? En ClickUp, además del remito firmado, suben fotos del producto, capturas y bocetos (también
+// los que adjunta el CRM). El remito se sube con el número del PDV como nombre: «PDV 31167.jpeg», «PDV 31224 - 1.jpg»,
+// «PDV NE 36.jpg», «pdv28888.PNG» o, en los más viejos, «28924.JPG». Lo demás («image.png», «Captura de pantalla…»,
+// «chomba.jpg», «BOCETO….pdf») no es remito. Si se sabe el número del PDV, tiene que ser ese.
+export function esRemito(nombre: string | null | undefined, npdv?: string | null) {
+  const m = String(nombre ?? '').trim().match(/^(?:remito\s*)?(?:pdv\s*-?\s*)?(?:ne\s*-?\s*)?0*(\d+)(?:\s*[-_]\s*\d{1,2}|\s*\(\d{1,2}\))?\s*\.(?:jpe?g|png|heic|heif|webp|pdf)$/i);
+  if (!m) return false;
+  return !npdv || Number(m[1]) === Number(npdv);
+}
+
 async function saveRemitos(db: D1Database, recordId: number, t: CuTask, npdv: string) {
   let added = 0;
-  for (const a of t.attachments ?? []) {
+  for (const a of (t.attachments ?? []).filter((x) => esRemito(x.title, npdv))) {
     const r = await db.prepare(`INSERT OR IGNORE INTO files (record_id, kind, name, mime, size, source, source_ref, meta)
       VALUES (?, 'remito', ?, ?, ?, 'clickup', ?, ?)`).bind(recordId, a.title || `Remito PDV ${npdv}`, a.mimetype ?? null, a.size ?? null, `${t.id}:${a.id}`,
       JSON.stringify({ task: t.id, attachment: a.id, date: a.date ? new Date(Number(a.date)).toISOString() : null })).run();
@@ -409,6 +419,16 @@ export async function clickupRemitos(env: Env, recordId: number, props: Record<s
   }
 }
 const frenar = (e: unknown) => e instanceof OutOfBudget || /HTTP 429/.test((e as Error)?.message ?? '');
+
+// Saca los «remitos» guardados antes de que se miraran los nombres (fotos de producto, capturas, bocetos): solo en el CRM,
+// en ClickUp no se toca nada.
+export async function limpiarRemitos(db: D1Database) {
+  const { results } = await db.prepare(`SELECT f.id, f.name, json_extract(r.props, '$.pdv_finnegans') AS pdv FROM files f JOIN records r ON r.id = f.record_id
+    WHERE f.kind = 'remito' AND f.source = 'clickup'`).all<{ id: number; name: string; pdv: string | number | null }>();
+  const malos = results.filter((f) => !esRemito(f.name, f.pdv == null ? null : String(f.pdv).match(/\d+/)?.[0])).map((f) => f.id);
+  if (malos.length) await db.prepare('DELETE FROM files WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(malos)).run();
+  return { revisados: results.length, borrados: malos.length };
+}
 
 // De fondo (scripts/pedidos-productos.mjs): los pedidos entregados sin remito, para que la tarjeta del tablero sepa si lo
 // tiene aunque nadie haya abierto el pedido. Cada uno se vuelve a revisar como mucho una vez por semana.

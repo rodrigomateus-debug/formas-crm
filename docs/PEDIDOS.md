@@ -89,6 +89,13 @@ Como el remito casi siempre lo suben al artículo y no al PDV, el CRM lo buscaba
 /hooks/pedidos/remitos/pendientes`, `remitosPendientes` en `clickup.ts`), dentro del tope de consultas a ClickUp; cada
 pedido se vuelve a revisar como mucho una vez por semana. Es solo lectura: no escribe nada en ClickUp.
 
+**Qué es remito y qué no** (aviso de Rodrigo del 6/11/2026: algunos «remitos» eran fotos del producto). En ClickUp, además
+del remito firmado, suben fotos del producto, capturas y bocetos. El remito se sube con el número del PDV como nombre
+(«PDV 31167.jpeg», «PDV 31224 - 1.jpg», «PDV NE 36.jpg», «pdv28888.PNG»; los más viejos, «28924.JPG»), así que solo se
+toma como remito el adjunto cuyo nombre es el número de ese PDV (`esRemito` en `clickup.ts`). Lo demás («image.png»,
+«Captura de pantalla…», «chomba.jpg», «BOCETO….pdf», los bocetos que adjunta el CRM, o el remito de otro PDV) no se
+guarda. `POST /hooks/pedidos/remitos/limpiar` borra del CRM los que se habían guardado antes de esta regla.
+
 ### Fotos del registro de cotizaciones del STP
 
 Pedido de Rodrigo del 6/11/2026: las fotos salen también del registro de cotizaciones del STP (`registro_cotizaciones`,

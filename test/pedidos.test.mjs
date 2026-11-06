@@ -156,7 +156,10 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
 
   // 4. Entregado: con el remito que suben a ClickUp (al artículo, como hacen en la realidad; se busca al abrir el pedido).
   cu.statuses = ['entregados', 'entregados'];
-  cu.artAttachments = [{ id: 'att1', title: `PDV ${PDV}.jpeg`, mimetype: 'image/jpeg', size: JPG.length, date: String(Date.now()) }];
+  // En el artículo, además del remito, una foto del producto, una captura y un boceto: esos no son remitos.
+  cu.artAttachments = [{ id: 'att1', title: `PDV ${PDV}.jpeg`, mimetype: 'image/jpeg', size: JPG.length, date: String(Date.now()) },
+    { id: 'att2', title: 'image.png', mimetype: 'image/png', size: 10 }, { id: 'att3', title: 'Captura de pantalla 2026-10-20 151931.jpg', mimetype: 'image/jpeg', size: 10 },
+    { id: 'att4', title: `Boceto - Taza - ${PDV}.pdf`, mimetype: 'application/pdf', size: 10 }, { id: 'att5', title: 'PDV 99999.jpg', mimetype: 'image/jpeg', size: 10 }];
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.equal((await order()).props.hs_pipeline_stage, '1237498998');
   // De fondo (scripts/pedidos-productos.mjs) se buscan los remitos de los entregados, sin que nadie abra el pedido.
@@ -164,6 +167,9 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.ok(rem.revisados >= 1 && rem.encontrados >= 1, JSON.stringify(rem));
   assert.equal((await api('POST', '/hooks/pedidos/remitos/pendientes', {})).status, 401, 'sin token no');
   let files = (await api('GET', `/records/order/${o.id}/files`)).data;
+  assert.deepEqual(files.filter((f) => f.kind === 'remito').map((f) => f.name), [`PDV ${PDV}.jpeg`], 'solo el remito, no las fotos ni el de otro PDV');
+  const limpieza = (await api('POST', '/hooks/pedidos/remitos/limpiar', {}, { authorization: `Bearer ${tokR}` })).data;
+  assert.ok(limpieza.revisados >= 1 && Number.isInteger(limpieza.borrados), JSON.stringify(limpieza));
   const remito = files.find((f) => f.kind === 'remito');
   assert.ok(remito?.ready, 'remito adjunto');
   const img = await api('GET', `/files/${remito.id}`);

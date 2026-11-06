@@ -4,7 +4,7 @@ import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { normLinkedin, splitName } from './records';
-import { clickupStatus, remitosPendientes, syncClickup } from './clickup';
+import { clickupStatus, limpiarRemitos, remitosPendientes, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
 import { gmailConfig, syncAll } from './gmail';
 import { avisosConfig, correrAvisos } from './avisos';
@@ -248,6 +248,12 @@ hooks.post('/productos/pendientes', async (c) => {
 hooks.post('/pedidos/remitos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await remitosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 20, 1), 40)));
+});
+
+// Borra del CRM los adjuntos de ClickUp guardados como remito que no lo son (fotos de producto, capturas, bocetos).
+hooks.post('/pedidos/remitos/limpiar', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await limpiarRemitos(c.env.DB));
 });
 
 // Fotos de los productos desde el registro de cotizaciones del STP (scripts/stp-imagenes.mjs):

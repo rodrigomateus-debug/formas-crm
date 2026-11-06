@@ -98,7 +98,7 @@ const TOOLS: Tool[] = [
         })),
         activity_counts: tl?.counts,
         ...(row.object_type === 'order' ? { productos: await orderProducts(env, row.id, rowToRecord(row).props).then((r) => ({ origen: r.source, error: r.error,
-          items: r.items.map((i) => ({ nombre: i.name, codigo: i.code, cantidad: i.quantity, precio: i.unit_price, subtotal: i.subtotal, estado: i.status })) })).catch((e) => ({ error: (e as Error).message })) } : {}),
+          items: r.items.map((i) => ({ nombre: i.name, codigo: i.code, cantidad: i.quantity, precio: i.unit_price, subtotal: i.subtotal, estado: i.status, foto: i.image_url })) })).catch((e) => ({ error: (e as Error).message })) } : {}),
       };
     },
   },

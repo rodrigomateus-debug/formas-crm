@@ -217,7 +217,7 @@ export async function fotosDePedidos(db: D1Database, ids: number[]) {
 // tablero las pide en el mismo viaje a la base que las tarjetas. Primero las fotos de sus productos; después, las de su
 // cotización en el STP (sirven también si los productos todavía no se leyeron o sus códigos no coinciden).
 export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
-  const conIds = `WITH ids(id) AS MATERIALIZED (${ids})`;
+  const conIds = `WITH ids(id) AS (${ids})`;   // usada dos veces, SQLite la calcula una sola
   return [
     db.prepare(`${conIds} SELECT * FROM (SELECT r.id AS record_id, (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS n,
         (SELECT COUNT(*) FROM stp_imagenes s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_stp

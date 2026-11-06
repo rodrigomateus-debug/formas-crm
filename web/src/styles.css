@@ -658,3 +658,10 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .card-fotos .thumb img { width: 100%; height: 100%; object-fit: contain; }
 .card-fotos .thumb.more { background: var(--ui-surface-sunken); color: var(--ui-ink-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .card-fotos:hover .thumb { border-color: var(--accent-ink); }
+
+/* Al cambiar de pestaña o vista: si lo nuevo tarda más de un instante, lo de antes se ve apagado hasta que llega (y no se
+   puede tocar por error). Lo ya visto aparece al toque (memoria de useAsync) y se actualiza atrás. */
+.board, .table-wrap { transition: opacity var(--dur-fast) var(--ease); }
+.board.cargando, .table-wrap.cargando { opacity: .45; pointer-events: none; transition: opacity var(--dur) var(--ease) 150ms; }
+/* Las tarjetas que quedan fuera de la pantalla no se dibujan hasta que se llega a ellas (tableros con cientos). */
+.col-body .card { content-visibility: auto; contain-intrinsic-size: auto 150px; }

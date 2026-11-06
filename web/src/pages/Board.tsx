@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
+  http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
 import { Avatar, Modal, PropertyInput } from '../components';
@@ -82,11 +82,15 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
   const [collapsed, toggleCol] = useCollapsed(`crm.board.collapsed.${pipelineId}`);
   const [boardRef, boardStyle] = useFillHeight();
   const params = { pipeline: pipelineId, q, closed_days: closedDays, groups: groups?.length ? groups : undefined, sort, dir };
-  const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', `/board${qs(params)}`),
-    [pipelineId, q, closedDays, JSON.stringify(groups ?? []), sort, dir, reloadKey]);
+  const url = `/board${qs(params)}`;
+  const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', url),
+    [pipelineId, q, closedDays, JSON.stringify(groups ?? []), sort, dir, reloadKey], url);
   const [cols, setCols] = useState<Column[]>([]);
   const pipe = meta.pipelines.find((p) => p.id === pipelineId);
-  const cardProps = pipe?.config.card_props?.length ? pipe.config.card_props : ['amount', 'closedate'];
+  const cardProps = useMemo(() => (pipe?.config.card_props?.length ? pipe.config.card_props : ['amount', 'closedate']), [pipe]);
+  // Las tarjetas no se vuelven a dibujar si no cambiaron: lo que hacen al tocarlas lo leen de acá.
+  const acciones = useRef<CardActions>({});
+  acciones.current = { onOpen, onSelect, setDragId };
   useEffect(() => { if (board.data) setCols(board.data.columns); }, [board.data]);
   const sum = cols.reduce((a, c) => ({ n: a.n + c.total, amount: a.amount + c.amount, weighted: a.weighted + c.weighted }), { n: 0, amount: 0, weighted: 0 });
   useEffect(() => { if (board.data) onTotal?.(sum.n); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [sum.n, board.data]);
@@ -107,6 +111,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
       } : c));
     try {
       await http('PATCH', `/records/deal/${dealId}`, { props: { dealstage: stage.id, ...extra } });
+      olvidarMemoria('/board');
       toast(`«${deal.name}» pasó a ${stage.label}`);
     } catch (e) {
       const missing = (e as Error & { data?: { missing?: string[] } }).data?.missing;
@@ -148,7 +153,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
           <span className="sep">·</span>Ponderado <b className="num">{fmtMoney(sum.weighted) || '$ 0'}</b>
         </span>
       </div>
-      <div className={`board${boardStyle ? ' fill' : ''}`} ref={boardRef} style={boardStyle}>
+      <div className={`board${boardStyle ? ' fill' : ''}${board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
         {cols.map((c) => (collapsed.has(c.stage.id) ? (
           <div key={c.stage.id} className={`col collapsed${over === c.stage.id ? ' over' : ''}`} {...drop(c)} onClick={() => toggleCol(c.stage.id)}
             title={`${c.stage.label}: ${c.total} · ${fmtMoney(c.amount) || '$ 0'}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.stage.label}`}>
@@ -167,9 +172,8 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
               <div className="prob" title={`Probabilidad ${Math.round(c.stage.probability * 100)}%`}><i style={{ width: `${c.stage.probability * 100}%` }} /></div>
             </div>
             <div className="col-body">
-              {c.deals.map((d) => <DealCard key={d.id} d={d} cardProps={cardProps} on={openId === d.id} dragging={dragId === d.id} onOpen={onOpen}
-                sel={!!selected?.has(d.id)} selecting={!!selected?.size} onSelect={onSelect}
-                onDragStart={() => setDragId(d.id)} onDragEnd={() => setDragId(null)} />)}
+              {c.deals.map((d) => <DealCard key={d.id} d={d} cardProps={cardProps} on={openId === d.id} dragging={dragId === d.id}
+                sel={!!selected?.has(d.id)} selecting={!!selected?.size} canSelect={!!onSelect} acciones={acciones} />)}
               {c.total > c.deals.length && (
                 <button className="btn sm ghost more" disabled={loadingMore === c.stage.id} onClick={() => loadMore(c)}>
                   {loadingMore === c.stage.id ? 'Cargando…' : `Cargar más (quedan ${(c.total - c.deals.length).toLocaleString('es-AR')})`}
@@ -190,11 +194,14 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
 
 // Tarjeta de negocio, como en HubSpot: datos del pipeline, con quién es, la próxima actividad, propietario,
 // días en la etapa y atajos (Darwin, nota, tarea).
-function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd, sel, selecting, onSelect }: {
-  d: Card; cardProps: string[]; on: boolean; dragging: boolean; onOpen?: (id: number, compose?: Activity['type']) => void; onDragStart: () => void; onDragEnd: () => void;
-  sel: boolean; selecting: boolean; onSelect?: (id: number) => void;
+export interface CardActions { onOpen?: (id: number, compose?: Activity['type']) => void; onSelect?: (id: number) => void; setDragId?: (id: number | null) => void }
+
+const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selecting, canSelect, acciones }: {
+  d: Card; cardProps: string[]; on: boolean; dragging: boolean; sel: boolean; selecting: boolean; canSelect: boolean; acciones: { current: CardActions };
 }) {
   const { meta } = useMeta();
+  const onOpen = (id: number, t?: Activity['type']) => acciones.current.onOpen?.(id, t);
+  const onSelect = canSelect ? (id: number) => acciones.current.onSelect?.(id) : undefined;
   const day = 86_400_000;
   const stale = d.props.notes_last_updated && Date.now() - Date.parse(d.props.notes_last_updated) > 14 * day;
   const entered = d.props.hs_v2_date_entered_current_stage ? Date.parse(d.props.hs_v2_date_entered_current_stage) : NaN;
@@ -208,9 +215,9 @@ function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd, 
   return (
     <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable
       onClick={(e) => (onSelect && (e.metaKey || e.ctrlKey || e.shiftKey || selecting) ? onSelect(d.id) : onOpen?.(d.id))}
-      onDragStart={(e) => { onDragStart(); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={onDragEnd}>
+      onDragStart={(e) => { acciones.current.setDragId?.(d.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => acciones.current.setDragId?.(null)}>
       {onSelect && <input type="checkbox" className="card-check" checked={sel} aria-label={`Seleccionar ${d.name}`} onClick={(e) => e.stopPropagation()} onChange={() => onSelect(d.id)} />}
-      <Link className="t" to={recordUrl('deal', d.id)} draggable={false} onClick={(e) => { if (onOpen && !e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{d.name}</Link>
+      <Link className="t" to={recordUrl('deal', d.id)} draggable={false} onClick={(e) => { if (!e.metaKey && !e.ctrlKey && !e.shiftKey) e.preventDefault(); }}>{d.name}</Link>
       <TagChips meta={meta} ids={d.tags} small />
       {cardProps.map((k) => {
         if (k === 'link_a_darwin') return null;
@@ -239,7 +246,7 @@ function DealCard({ d, cardProps, on, dragging, onOpen, onDragStart, onDragEnd, 
       </div>
     </div>
   );
-}
+});
 
 // Antes de mover un negocio a una etapa que pide datos (motivo de pérdida, monto…), se piden en un cuadro.
 export function StageProps({ deal, stage, missing, onClose, onSave }: { deal: CrmRecord; stage: Stage; missing: string[]; onClose: () => void; onSave: (extra: Record<string, unknown>) => void }) {

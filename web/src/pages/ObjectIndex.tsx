@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips,
+  http, qs, useMeta, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
-import PropBoard from './PropBoard';
+import PropBoard, { urlTableroProp } from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
 import { ColumnWidths, EstadoCliente, EtapaPedido, UnidadBadge, useColumnResize } from '../components';
@@ -37,6 +37,14 @@ const defaultViewKey = (t: ObjectType) => `crm.view.default.${t}`;
 const readDefault = (t: ObjectType) => { try { return localStorage.getItem(defaultViewKey(t)); } catch { return null; } };
 
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
+// Filtros de una vista: los avanzados (grupos O) más los rápidos (propietarios, fechas, etiquetas, unidades) en cada grupo.
+function gruposDeVista(c: ViewConfig) {
+  const quick = quickFilters(c.owners, c.dates, c.tags, c.unidades);
+  return (c.groups?.length ? c.groups : [[]]).map((g) => [...g, ...quick]).filter((g) => g.length);
+}
+const urlLista = (type: ObjectType, q: string, groups: Filter[][], c: ViewConfig, limit: number, offset: number) => `/records/${type}${qs({
+  q, groups: groups.length ? groups : undefined, sort: c.sort, dir: c.dir, limit, offset, with: c.columns.includes('__company') ? 'company' : undefined,
+})}`;
 function loadLocal(t: ObjectType): ViewConfig {
   try {
     const v = JSON.parse(localStorage.getItem(storeKey(t)) ?? '');
@@ -111,10 +119,8 @@ function IndexFor({ type }: { type: ObjectType }) {
   useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.sort, cfg.dir, pipelineSel, mode]);
 
   // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
-  const viewGroups = useMemo(() => {
-    const quick = quickFilters(cfg.owners, cfg.dates, cfg.tags, cfg.unidades);
-    return (cfg.groups.length ? cfg.groups : [[]]).map((g) => [...g, ...quick]).filter((g) => g.length);
-  }, [cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const viewGroups = useMemo(() => gruposDeVista(cfg), [cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades]);
   // La tabla además filtra por el pipeline elegido.
   const groups = useMemo(() => {
     const pipe: Filter[] = type === 'deal' && pipelineSel !== 'all' ? [{ prop: 'pipeline', op: 'eq', value: pipelineSel }] : [];
@@ -124,13 +130,17 @@ function IndexFor({ type }: { type: ObjectType }) {
   const columns = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
 
   type ListRes = { results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number };
-  const list = useAsync(() => (mode === 'board' ? Promise.resolve(undefined as unknown as ListRes) : http<ListRes>('GET', `/records/${type}${qs({
-    q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, limit: pageSize, offset: page * pageSize,
-    with: cfg.columns.includes('__company') ? 'company' : undefined,
-  })}`)), [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), mode]);
+  const listUrl = urlLista(type, dq, groups, cfg, pageSize, page * pageSize);
+  const list = useAsync(() => (mode === 'board' ? Promise.resolve(undefined as unknown as ListRes) : http<ListRes>('GET', listUrl)),
+    [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), mode], mode === 'board' ? undefined : listUrl);
 
+  const [, startTransition] = useTransition();
+  // Al tocar una pestaña se marca enseguida; el resto (filtros, link, tablero o tabla) va después, sin trabar la pantalla.
   const applyView = (key: string) => {
     setActiveView(key);
+    startTransition(() => applyViewConfig(key));
+  };
+  const applyViewConfig = (key: string) => {
     const v = views.data?.find((x) => String(x.id) === key);
     const pipe = type === 'deal' && v?.config.pipeline && (v.config.pipeline === 'all' || meta.pipelines.some((p) => p.id === v.config.pipeline)) ? v.config.pipeline : null;
     if (pipe) { setPipelineSelRaw(pipe); try { localStorage.setItem(PIPE_KEY, pipe); } catch { /* ignorar */ } }
@@ -173,6 +183,31 @@ function IndexFor({ type }: { type: ObjectType }) {
     } catch (e) { toast((e as Error).message, true); }
   };
   useEffect(() => { if (views.data && activeView !== 'all' && activeView !== 'mine') applyView(activeView); /* eslint-disable-next-line */ }, [views.data]);
+
+  // Las otras pestañas (Todos, Míos y las vistas guardadas) se traen en segundo plano, de a una, un rato después de abrir
+  // la lista: al tocarlas aparecen al instante (y se actualizan atrás). Negocios no: su tablero depende del pipeline.
+  useEffect(() => {
+    if (!views.data || type === 'deal') return;
+    let vivo = true;
+    const t = window.setTimeout(async () => {
+      const base: ViewConfig = { ...cfg, q: dq, groups: [], owners: [], dates: {}, tags: [], unidades: [] };
+      const otras: Array<[string, ViewConfig, 'board' | 'table']> = [
+        ['all', base, mode], ['mine', { ...base, owners: ['me'] }, mode],
+        ...views.data!.map((v): [string, ViewConfig, 'board' | 'table'] => {
+          const c = withOwners({ ...loadLocal(type), owners: [], dates: {}, tags: [], unidades: [], ...v.config });
+          return [String(v.id), c, c.mode === 'board' || c.mode === 'table' ? c.mode : mode];
+        }),
+      ];
+      for (const [key, c, m] of otras) {
+        if (!vivo) return;
+        if (key === activeView) continue;
+        const g = gruposDeVista(c);
+        await precargar(m === 'board' ? urlTableroProp(meta, type, c.boardProp, c.q ?? '', g, c.sort, c.dir).url : urlLista(type, c.q ?? '', g, c, pageSize, 0));
+      }
+    }, 1200);
+    return () => { vivo = false; window.clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [views.data, type]);
 
   const sortBy = (col: string) => {
     const prop = col === '__name' ? (type === 'contact' || type === 'company' ? 'name' : OBJECTS[type].nameProp) : col;
@@ -284,7 +319,7 @@ function IndexFor({ type }: { type: ObjectType }) {
           {filterChips}
         </div>
 
-        <div className="table-wrap">
+        <div className={`table-wrap${list.fresh ? '' : ' cargando'}`} aria-busy={list.loading}>
           <ColumnWidths scope="grid-list" order={['__check', '__name', ...columns]} widths={resize.widths} />
           <table className="grid grid-list">
             <thead>

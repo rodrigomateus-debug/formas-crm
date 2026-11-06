@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { fotosDePedidos, orderProducts } from './productos';
+import { armarFotos, fotosDePedidos, fotosSql, orderProducts } from './productos';
 import { finnegansState, syncFacturas } from './finnegans';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -507,15 +507,22 @@ api.get('/board-prop/:type', async (c) => {
   const activosSql = type === 'order'
     ? db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r WHERE ${whereSql} AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?)`).bind(...binds, ...ORDER_CLOSED)
     : db.prepare('SELECT NULL AS n, NULL AS amount');
-  const [cards, totals, activos] = await db.batch([
-    db.prepare(`SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
-      FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`).bind(...binds),
+  // Todo en un solo viaje a la base: las tarjetas, los totales por columna, los activos, las miniaturas de los pedidos y,
+  // si se agrupa por propietario, los usuarios.
+  const cardsSql = `SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
+      FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`;
+  const [cards, totals, activos, ...resto] = await db.batch([
+    db.prepare(cardsSql).bind(...binds),
     db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount, SUM(CASE WHEN r.amount IS NULL THEN 1 ELSE 0 END) AS sin_monto
       FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
     activosSql,
+    ...(type === 'order' ? fotosSql(db, `SELECT id FROM (${cardsSql})`, binds) : []),
+    ...(prop.type === 'owner' ? [db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name')] : []),
   ]);
+  const fotos = type === 'order' ? armarFotos(resto[0].results, resto[1].results) : null;
+  const usuarios = prop.type === 'owner' ? resto[resto.length - 1].results as Array<{ id: number; name: string }> : [];
   const options = prop.type === 'owner'
-    ? (await db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name').all<{ id: number; name: string }>()).results.map((u) => ({ value: String(u.id), label: u.name }))
+    ? usuarios.map((u) => ({ value: String(u.id), label: u.name }))
     : prop.type === 'bool' && !prop.options.length ? [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }] : prop.options;
   const tot = new Map((totals.results as Array<{ v: string | null; n: number; amount: number; sin_monto: number }>).map((t) => [t.v ?? '', t]));
   const counts = new Map([...tot].map(([k, t]) => [k, t.n]));
@@ -523,7 +530,7 @@ api.get('/board-prop/:type', async (c) => {
   const known = new Set(options.map((o) => o.value));
   const others = [...counts.keys()].filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v }));
   const rows = cards.results as unknown as Array<RecordRow & { board_value: string | null }>;
-  const recs = await conFotos(db, type, rows.map(rowToRecord));
+  const recs = rows.map(rowToRecord).map((r) => (fotos?.get(r.id)?.fotos.length ? { ...r, fotos: fotos.get(r.id)!.fotos, productos: fotos.get(r.id)!.productos } : r));
   const valueOf = new Map(rows.map((r) => [r.id, r.board_value ?? '']));
   const columns = [...options, ...others, { value: '', label: 'Sin dato' }]
     // Monto de la columna (pedidos: el total sin IVA) y cuántas tarjetas no lo tienen, para el pie de la columna.

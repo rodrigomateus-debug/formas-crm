@@ -141,16 +141,25 @@ export async function cargarProductosPendientes(env: Env, limit = 25) {
 
 // Miniaturas de las tarjetas: hasta 3 fotos distintas de los productos de cada pedido y cuántos productos tiene.
 export async function fotosDePedidos(db: D1Database, ids: number[]) {
-  const out = new Map<number, { fotos: string[]; productos: number }>();
-  if (!ids.length) return out;
+  if (!ids.length) return new Map<number, { fotos: string[]; productos: number }>();
   const lista = JSON.stringify(ids);
-  const [cuantos, fotos] = await db.batch([
-    db.prepare('SELECT record_id, COUNT(*) AS n FROM line_items WHERE record_id IN (SELECT value FROM json_each(?)) GROUP BY record_id').bind(lista),
+  const [cuantos, fotos] = await db.batch(fotosSql(db, 'SELECT value FROM json_each(?)', [lista]));
+  return armarFotos(cuantos.results, fotos.results);
+}
+
+// Las dos consultas de las miniaturas, para los pedidos que devuelve `ids` (una subconsulta con sus parámetros): así el
+// tablero las pide en el mismo viaje a la base que las tarjetas.
+export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
+  return [
+    db.prepare(`SELECT record_id, COUNT(*) AS n FROM line_items WHERE record_id IN (${ids}) GROUP BY record_id`).bind(...binds),
     db.prepare(`SELECT li.record_id, p.image_url FROM line_items li JOIN products p ON p.code = li.code
-      WHERE li.record_id IN (SELECT value FROM json_each(?)) AND p.image_url IS NOT NULL ORDER BY li.record_id, li.position`).bind(lista),
-  ]);
-  for (const r of cuantos.results as Array<{ record_id: number; n: number }>) out.set(r.record_id, { fotos: [], productos: r.n });
-  for (const r of fotos.results as Array<{ record_id: number; image_url: string }>) {
+      WHERE li.record_id IN (${ids}) AND p.image_url IS NOT NULL ORDER BY li.record_id, li.position`).bind(...binds),
+  ];
+}
+export function armarFotos(cuantos: unknown[], fotos: unknown[]) {
+  const out = new Map<number, { fotos: string[]; productos: number }>();
+  for (const r of cuantos as Array<{ record_id: number; n: number }>) out.set(r.record_id, { fotos: [], productos: r.n });
+  for (const r of fotos as Array<{ record_id: number; image_url: string }>) {
     const o = out.get(r.record_id);
     if (o && o.fotos.length < 3 && !o.fotos.includes(r.image_url)) o.fotos.push(r.image_url);
   }

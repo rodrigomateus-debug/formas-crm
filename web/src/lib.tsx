@@ -222,17 +222,41 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 export const useToast = () => useContext(ToastCtx);
 
-export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
-  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean }>({ loading: true });
+// Lo último que trajo cada pedido al servidor (tableros y listas), para mostrarlo al toque al volver a una pestaña o vista
+// mientras se actualiza (como HubSpot). Se guarda solo en la memoria de la página; las últimas 40 respuestas.
+const memoria = new Map<string, unknown>();
+export function olvidarMemoria(prefijo = '') { for (const k of [...memoria.keys()]) if (k.startsWith(prefijo)) memoria.delete(k); }
+function recordar(key: string, data: unknown) {
+  memoria.delete(key);
+  memoria.set(key, data);
+  if (memoria.size > 40) memoria.delete(memoria.keys().next().value as string);
+}
+
+// Trae algo para tenerlo en la memoria antes de que se lo pida (las otras pestañas de la lista). Sin errores a la vista.
+export function precargar(path: string) {
+  if (memoria.has(path)) return Promise.resolve();
+  return http('GET', path).then((d) => recordar(path, d), () => undefined);
+}
+
+// Datos de un pedido al servidor. Con `key` (la dirección del pedido) usa la memoria: si ya se vio, lo muestra enseguida
+// y lo actualiza atrás. `fresh` dice si lo que se ve corresponde a lo pedido ahora (si no, es lo de antes, esperando).
+export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], key?: string) {
+  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean; key?: string }>({ loading: true });
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let alive = true;
     setState((s) => ({ ...s, loading: true }));
-    fn().then((data) => alive && setState({ data, loading: false })).catch((e) => alive && setState({ error: (e as Error).message, loading: false }));
+    fn().then((data) => { if (key) recordar(key, data); if (alive) setState({ data, loading: false, key }); })
+      .catch((e) => alive && setState((s) => ({ ...s, error: (e as Error).message, loading: false, key })));
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
-  return { ...state, reload: () => setTick((x) => x + 1) };
+  const otro = key !== undefined && state.key !== key;
+  const guardado = otro && memoria.has(key) ? (memoria.get(key) as T) : undefined;
+  return {
+    ...state, data: guardado ?? state.data, loading: state.loading || otro,
+    fresh: !otro || guardado !== undefined, reload: () => setTick((x) => x + 1),
+  };
 }
 
 export function useDebounced<T>(value: T, ms = 300) {

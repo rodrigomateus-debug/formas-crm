@@ -380,26 +380,54 @@ async function saveRemitos(db: D1Database, recordId: number, t: CuTask, npdv: st
 }
 
 // Remitos subidos a los artículos del PDV (no a la tarea del PDV): se buscan al abrir un pedido entregado que todavía no
-// tiene remito, como mucho cada 30 minutos.
-export async function clickupRemitos(env: Env, recordId: number, props: Record<string, unknown>) {
+// tiene remito, como mucho cada 30 minutos, y de fondo con remitosPendientes. Devuelve cuántos encontró.
+export async function clickupRemitos(env: Env, recordId: number, props: Record<string, unknown>, opts: { budget?: Budget; cada?: number } = {}) {
   const db = env.DB;
   const stage = props.hs_pipeline_stage;
   const taskId = String(props.url_clickup ?? '').match(/\/t\/([\w-]+)/)?.[1];
-  if (!env.CLICKUP_TOKEN || !taskId || (stage !== STAGE.entregado && stage !== STAGE.parcial)) return;
-  if (await db.prepare("SELECT 1 FROM files WHERE record_id = ? AND kind = 'remito' LIMIT 1").bind(recordId).first()) return;
+  if (!env.CLICKUP_TOKEN || !taskId || (stage !== STAGE.entregado && stage !== STAGE.parcial)) return 0;
+  if (await db.prepare("SELECT 1 FROM files WHERE record_id = ? AND kind = 'remito' LIMIT 1").bind(recordId).first()) return 0;
   const key = `remito_check:${recordId}`;
   const last = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(key).first<{ value: string }>();
-  if (last && Date.now() - Number(last.value) < 30 * 60_000) return;
+  if (last && Date.now() - Number(last.value) < (opts.cada ?? 30 * 60_000)) return 0;
   await db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').bind(key, String(Date.now())).run();
-  const b = Budget.of(env);
+  const b = opts.budget ?? Budget.of(env);
   const t = await cu<CuTask>(env, `/task/${taskId}`, { include_subtasks: 'true' }, b);
   const npdv = readPdv(t).npdv;
-  await saveRemitos(db, recordId, t, npdv);
+  let n = await saveRemitos(db, recordId, t, npdv);
   for (const s of t.subtasks ?? []) {
     if (b.left() < 1) break;
-    const full = await cu<CuTask>(env, `/task/${s.id}`, {}, b).catch(() => null);
-    if (full) await saveRemitos(db, recordId, full, npdv);
+    const full = await cu<CuTask>(env, `/task/${s.id}`, {}, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
+    if (full) n += await saveRemitos(db, recordId, full, npdv);
   }
+  return n;
+}
+
+// De fondo (scripts/pedidos-productos.mjs): los pedidos entregados sin remito, para que la tarjeta del tablero sepa si lo
+// tiene aunque nadie haya abierto el pedido. Cada uno se vuelve a revisar como mucho una vez por semana.
+const REMITOS_WHERE = `r.object_type = 'order' AND r.archived = 0 AND json_extract(r.props, '$.hs_pipeline_stage') IN (?1, ?2)
+    AND json_extract(r.props, '$.url_clickup') IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM files f WHERE f.record_id = r.id AND f.kind = 'remito')
+    AND COALESCE((SELECT CAST(s.value AS INTEGER) FROM settings s WHERE s.key = 'remito_check:' || r.id), 0) < ?3`;
+export async function remitosPendientes(env: Env, limit = 20) {
+  if (!env.CLICKUP_TOKEN) return { revisados: 0, encontrados: 0, quedan: 0, skipped: 'Falta CLICKUP_TOKEN.' };
+  const db = env.DB;
+  const b = Budget.of(env);
+  const SEMANA = 7 * 86_400_000;
+  const binds = [STAGE.entregado, STAGE.parcial, Date.now() - SEMANA];
+  const { results } = await db.prepare(`SELECT r.id, r.props FROM records r WHERE ${REMITOS_WHERE} ORDER BY r.updated_at DESC LIMIT ?4`)
+    .bind(...binds, limit).all<{ id: number; props: string }>();
+  let revisados = 0, encontrados = 0;
+  for (const r of results) {
+    if (b.left() < 10) break;   // un PDV puede tener varios artículos: no se empieza si no alcanza
+    try { encontrados += await clickupRemitos(env, r.id, JSON.parse(r.props), { budget: b, cada: SEMANA }); } catch (e) {
+      if (e instanceof OutOfBudget) break;
+      console.error('remito', r.id, (e as Error).message);   // queda anotado como revisado: se reintenta la semana que viene
+    }
+    revisados++;
+  }
+  const quedan = await db.prepare(`SELECT COUNT(*) AS n FROM records r WHERE ${REMITOS_WHERE}`).bind(...binds).first<{ n: number }>();
+  return { revisados, encontrados, quedan: quedan?.n ?? 0 };
 }
 
 export interface ClickupState {

@@ -658,6 +658,13 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .card-fotos .thumb img { width: 100%; height: 100%; object-fit: contain; }
 .card-fotos .thumb.more { background: var(--ui-surface-sunken); color: var(--ui-ink-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .card-fotos:hover .thumb { border-color: var(--accent-ink); }
+/* Factura, remito y bocetos del pedido: apagados si no están, pintados si están. */
+.card-adj { display: inline-flex; align-items: center; gap: 7px; margin-left: 6px; color: var(--text-3); }
+.card-adj .adj { display: inline-flex; align-items: center; gap: 2px; opacity: .45; }
+.card-adj .adj svg { vertical-align: 0; }
+.card-adj .adj.ok { opacity: 1; color: var(--ui-positive-ink); }
+.card-adj .adj.parcial { opacity: 1; color: var(--accent-ink); }
+.card-adj .n { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; }
 
 /* Al cambiar de pestaña o vista: si lo nuevo tarda más de un instante, lo de antes se ve apagado hasta que llega (y no se
    puede tocar por error). Lo ya visto aparece al toque (memoria de useAsync) y se actualiza atrás. */

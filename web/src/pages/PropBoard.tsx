@@ -59,6 +59,27 @@ function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
   );
 }
 
+// Abajo de la tarjeta de pedido: si tiene factura, remito y bocetos (cuántos de sus productos tienen), con un iconito
+// cada uno que se pinta cuando está.
+interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number }
+function Adjuntos({ r }: { r: CrmRecord }) {
+  const a = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos;
+  if (!a) return null;
+  const n = (k: number, uno: string, varios: string) => `${k} ${k === 1 ? uno : varios}`;
+  const factura = a.facturas ? (a.facturas > 1 ? `${a.facturas} facturas` : 'Con factura') : 'Sin factura';
+  const remito = a.remitos ? (a.remitos > 1 ? `${a.remitos} remitos` : 'Con remito') : 'Sin remito';
+  const [bocetos, bClase, bTexto] = a.productos
+    ? [`Bocetos: ${a.con_boceto} de ${n(a.productos, 'producto', 'productos')}`, a.con_boceto >= a.productos ? ' ok' : a.con_boceto ? ' parcial' : '', `${a.con_boceto}/${a.productos}`]
+    : a.bocetos ? [n(a.bocetos, 'boceto', 'bocetos'), ' parcial', String(a.bocetos)] : ['Sin bocetos', '', ''];
+  return (
+    <span className="card-adj" role="img" aria-label={`${factura}. ${remito}. ${bocetos}.`}>
+      <span className={`adj${a.facturas ? ' ok' : ''}`} title={factura}><Icon name="receipt" size={14} /></span>
+      <span className={`adj${a.remitos ? ' ok' : ''}`} title={remito}><Icon name="truck" size={14} /></span>
+      <span className={`adj${bClase}`} title={bocetos}><Icon name="boceto" size={14} />{bTexto && <span className="n">{bTexto}</span>}</span>
+    </span>
+  );
+}
+
 // Tarjeta del tablero (empresas, contactos o pedidos). No se vuelve a dibujar si no cambió: lo que hace al tocarla lo lee
 // de `acciones`, que el tablero actualiza en cada vuelta.
 const subtitleDe = (type: ObjectType, r: CrmRecord) => (type === 'company' ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
@@ -94,6 +115,7 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
       <div className="card-actions">
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
+        {type === 'order' && <Adjuntos r={r} />}
         <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title="Última actividad">
           {r.props.notes_last_updated ? fmtRelative(r.props.notes_last_updated) : 'Sin actividad'}
         </span>

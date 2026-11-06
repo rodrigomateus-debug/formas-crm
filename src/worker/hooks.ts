@@ -4,7 +4,7 @@ import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { normLinkedin, splitName } from './records';
-import { clickupStatus, syncClickup } from './clickup';
+import { clickupStatus, remitosPendientes, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
 import { gmailConfig, syncAll } from './gmail';
 import { avisosConfig, correrAvisos } from './avisos';
@@ -241,6 +241,13 @@ hooks.get('/pedidos/totales', async (c) => {
 hooks.post('/productos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
+});
+
+// Remitos de los pedidos entregados que todavía no tienen (los que suben a los artículos en ClickUp): una tanda por
+// llamada; devuelve cuántos revisó, cuántos encontró y cuántos quedan.
+hooks.post('/pedidos/remitos/pendientes', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await remitosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 20, 1), 40)));
 });
 
 // Fotos de los productos desde el registro de cotizaciones del STP (scripts/stp-imagenes.mjs):

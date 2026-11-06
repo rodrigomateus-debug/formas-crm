@@ -159,6 +159,10 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   cu.artAttachments = [{ id: 'att1', title: `PDV ${PDV}.jpeg`, mimetype: 'image/jpeg', size: JPG.length, date: String(Date.now()) }];
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.equal((await order()).props.hs_pipeline_stage, '1237498998');
+  // De fondo (scripts/pedidos-productos.mjs) se buscan los remitos de los entregados, sin que nadie abra el pedido.
+  const rem = (await api('POST', '/hooks/pedidos/remitos/pendientes', {}, { authorization: `Bearer ${tokR}` })).data;
+  assert.ok(rem.revisados >= 1 && rem.encontrados >= 1, JSON.stringify(rem));
+  assert.equal((await api('POST', '/hooks/pedidos/remitos/pendientes', {})).status, 401, 'sin token no');
   let files = (await api('GET', `/records/order/${o.id}/files`)).data;
   const remito = files.find((f) => f.kind === 'remito');
   assert.ok(remito?.ready, 'remito adjunto');
@@ -319,6 +323,9 @@ test('fotos del STP: la de la cotización del pedido; si no, la de Finnegans; si
   const card = await tarjeta();
   assert.deepEqual(card.fotos, ['https://img.test/bolsa-azul.jpg', 'https://img.test/otro.jpg', 'https://img.test/estampa.jpg']);
   assert.equal(card.productos, 2);
+  // Los iconitos de abajo: factura y remito adjuntos, y de sus 2 productos ninguno con boceto.
+  assert.ok(card.adjuntos.facturas >= 1 && card.adjuntos.remitos >= 1, JSON.stringify(card.adjuntos));
+  assert.deepEqual([card.adjuntos.bocetos, card.adjuntos.con_boceto, card.adjuntos.productos], [0, 0, 2]);
   // Una fila sin foto borra la que había (así la prueba deja la base como estaba).
   r = await subir([['', 'OTRO-1', ''], ['', 'IMP_P18.030.03', ''], [a.props.pedido_finnegans, 'IMP_P18.030.03', ''], [a.props.pedido_finnegans, 'ESTAMPA', '']]);
   assert.equal(r.borradas, 4);
@@ -354,6 +361,10 @@ test('bocetos: el aprobado se adjunta en ClickUp a la subtarea de su artículo, 
       await new Promise((r) => setTimeout(r, 250));
     }
     assert.ok(x.clickup_at, 'quedó adjunto');
+    // En la tarjeta del tablero: 1 de sus productos con boceto.
+    const groups = encodeURIComponent(JSON.stringify([[{ prop: 'pedido_finnegans', op: 'in', values: [b.props.pedido_finnegans] }]]));
+    const card = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&groups=${groups}`)).data.columns.flatMap((c) => c.records).find((r) => r.id === b.id);
+    assert.deepEqual([card.adjuntos.bocetos, card.adjuntos.con_boceto, card.adjuntos.productos], [1, 1, 1]);
     assert.equal(x.clickup_task, 'cuB-0', 'en la subtarea del artículo, no en el PDV');
     assert.equal(cu.adjuntos.length, 1);
     assert.equal(cu.adjuntos[0].id, 'cuB-0');

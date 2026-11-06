@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { armarFotos, fotosDePedidos, fotosSql, orderProducts } from './productos';
+import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
@@ -470,11 +470,17 @@ api.get('/board', async (c) => {
   return c.json({ pipeline, columns });
 });
 
-// Tarjetas de pedidos: hasta 3 fotos de sus productos y cuántos productos tiene (miniaturas del tablero).
+// Tarjetas de pedidos: hasta 3 fotos de sus productos y cuántos productos tiene (miniaturas del tablero), y lo adjunto
+// (factura, remito y bocetos) para los iconitos de abajo.
+function sumarExtras(r: CrmRecord, fotos: Map<number, { fotos: string[]; productos: number }> | null, adjuntos: Map<number, Adjuntos> | null) {
+  const f = fotos?.get(r.id);
+  const a = adjuntos?.get(r.id);
+  return { ...r, ...(f?.fotos.length ? { fotos: f.fotos, productos: f.productos } : {}), ...(a ? { adjuntos: a } : {}) };
+}
 async function conFotos(db: D1Database, type: ObjectType, records: CrmRecord[]) {
   if (type !== 'order' || !records.length) return records;
-  const f = await fotosDePedidos(db, records.map((r) => r.id));
-  return records.map((r) => (f.get(r.id)?.fotos.length ? { ...r, fotos: f.get(r.id)!.fotos, productos: f.get(r.id)!.productos } : r));
+  const { fotos, adjuntos } = await extrasDePedidos(db, records.map((r) => r.id));
+  return records.map((r) => sumarExtras(r, fotos, adjuntos));
 }
 
 // Etapas de pedido que ya no están activas: entregado y anulado.
@@ -518,10 +524,11 @@ api.get('/board-prop/:type', async (c) => {
     db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount, SUM(CASE WHEN r.amount IS NULL THEN 1 ELSE 0 END) AS sin_monto
       FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
     activosSql,
-    ...(type === 'order' ? fotosSql(db, `SELECT id FROM (${cardsSql})`, binds) : []),
+    ...(type === 'order' ? [...fotosSql(db, `SELECT id FROM (${cardsSql})`, binds), adjuntosSql(db, `SELECT id FROM (${cardsSql})`, binds)] : []),
     ...(prop.type === 'owner' ? [db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name')] : []),
   ]);
   const fotos = type === 'order' ? armarFotos(resto[0].results, resto[1].results) : null;
+  const adjuntos = type === 'order' ? armarAdjuntos(resto[2].results) : null;
   const usuarios = prop.type === 'owner' ? resto[resto.length - 1].results as Array<{ id: number; name: string }> : [];
   const options = prop.type === 'owner'
     ? usuarios.map((u) => ({ value: String(u.id), label: u.name }))
@@ -532,7 +539,7 @@ api.get('/board-prop/:type', async (c) => {
   const known = new Set(options.map((o) => o.value));
   const others = [...counts.keys()].filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v }));
   const rows = cards.results as unknown as Array<RecordRow & { board_value: string | null }>;
-  const recs = rows.map(rowToRecord).map((r) => (fotos?.get(r.id)?.fotos.length ? { ...r, fotos: fotos.get(r.id)!.fotos, productos: fotos.get(r.id)!.productos } : r));
+  const recs = rows.map(rowToRecord).map((r) => (type === 'order' ? sumarExtras(r, fotos, adjuntos) : r));
   const valueOf = new Map(rows.map((r) => [r.id, r.board_value ?? '']));
   const columns = [...options, ...others, { value: '', label: 'Sin dato' }]
     // Monto de la columna (pedidos: el total sin IVA) y cuántas tarjetas no lo tienen, para el pie de la columna.

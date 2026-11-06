@@ -77,6 +77,18 @@ producto tiene foto (la de su ficha en Finnegans). Los productos de cada pedido 
 del PDV de ClickUp) y quedan guardados; `scripts/pedidos-productos.mjs`, en el mismo workflow que los totales, lee de a
 tandas (`POST /hooks/productos/pendientes`) los que todavía no se leyeron y, una vez por día, los de los pedidos activos.
 
+### Factura, remito y bocetos en la tarjeta
+
+Pedido de Rodrigo del 6/11/2026: abajo de la tarjeta de cada pedido, tres iconitos que se pintan cuando están: la
+factura (de Finnegans), el remito firmado (de ClickUp) y los bocetos, con cuántos de sus productos tienen al menos uno
+(«1/5»; en verde cuando están todos, en azul si faltan). Salen de las tablas `files` y `bocetos` en la misma consulta del
+tablero (`adjuntosSql` en `productos.ts`).
+
+Como el remito casi siempre lo suben al artículo y no al PDV, el CRM lo buscaba recién al abrir el pedido. Ahora
+`scripts/pedidos-productos.mjs` también recorre de fondo los pedidos entregados sin remito (`POST
+/hooks/pedidos/remitos/pendientes`, `remitosPendientes` en `clickup.ts`), dentro del tope de consultas a ClickUp; cada
+pedido se vuelve a revisar como mucho una vez por semana. Es solo lectura: no escribe nada en ClickUp.
+
 ### Fotos del registro de cotizaciones del STP
 
 Pedido de Rodrigo del 6/11/2026: las fotos salen también del registro de cotizaciones del STP (`registro_cotizaciones`,

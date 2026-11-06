@@ -205,14 +205,6 @@ export async function aplicarImagenes(env: Env, body: { filas?: unknown }): Prom
   return estado;
 }
 
-// Miniaturas de las tarjetas: hasta 3 fotos distintas de los productos de cada pedido y cuántos productos tiene.
-export async function fotosDePedidos(db: D1Database, ids: number[]) {
-  if (!ids.length) return new Map<number, { fotos: string[]; productos: number }>();
-  const lista = JSON.stringify(ids);
-  const [cuantos, fotos] = await db.batch(fotosSql(db, 'SELECT value FROM json_each(?)', [lista]));
-  return armarFotos(cuantos.results, fotos.results);
-}
-
 // Las dos consultas de las miniaturas, para los pedidos que devuelve `ids` (una subconsulta con sus parámetros): así el
 // tablero las pide en el mismo viaje a la base que las tarjetas. Primero las fotos de sus productos; después, las de su
 // cotización en el STP (sirven también si los productos todavía no se leyeron o sus códigos no coinciden).
@@ -231,6 +223,31 @@ export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
       ) WHERE image_url IS NOT NULL ORDER BY record_id, o, pos`).bind(...binds),
   ];
 }
+// Lo adjunto de cada pedido, para los iconitos de abajo de la tarjeta: facturas, remitos y bocetos (cuántos de sus
+// productos tienen al menos uno; el boceto va atado al código del producto o, si no tiene, a su nombre).
+export interface Adjuntos { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number }
+export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
+  return db.prepare(`WITH ids(id) AS (${ids}) SELECT r.id AS record_id,
+      (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'factura') AS facturas,
+      (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'remito') AS remitos,
+      (SELECT COUNT(*) FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0) AS bocetos,
+      (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id
+        AND EXISTS (SELECT 1 FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0 AND b.producto IN (li.code, li.name, p.name))) AS con_boceto,
+      (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS productos
+    FROM records r WHERE r.id IN (SELECT id FROM ids)`).bind(...binds);
+}
+export function armarAdjuntos(rows: unknown[]) {
+  return new Map((rows as Array<Adjuntos & { record_id: number }>).map(({ record_id, ...a }) => [record_id, a as Adjuntos]));
+}
+
+// Fotos y adjuntos de una tanda de pedidos (las tarjetas que se suman con «Cargar más»).
+export async function extrasDePedidos(db: D1Database, ids: number[]) {
+  if (!ids.length) return { fotos: new Map<number, { fotos: string[]; productos: number }>(), adjuntos: new Map<number, Adjuntos>() };
+  const lista = JSON.stringify(ids);
+  const [cuantos, fotos, adj] = await db.batch([...fotosSql(db, 'SELECT value FROM json_each(?)', [lista]), adjuntosSql(db, 'SELECT value FROM json_each(?)', [lista])]);
+  return { fotos: armarFotos(cuantos.results, fotos.results), adjuntos: armarAdjuntos(adj.results) };
+}
+
 export function armarFotos(cuantos: unknown[], fotos: unknown[]) {
   const out = new Map<number, { fotos: string[]; productos: number }>();
   for (const r of cuantos as Array<{ record_id: number; n: number; n_stp: number }>) out.set(r.record_id, { fotos: [], productos: r.n || r.n_stp });

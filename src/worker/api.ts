@@ -584,10 +584,28 @@ function todayBounds(): [string, string, string] {
 api.get('/views/:type', async (c) => {
   const type = assertType(c.req.param('type'));
   const user = c.get('ctx').user;
-  const { results } = await c.env.DB.prepare(`SELECT * FROM views WHERE object_type = ?
-    AND (shared = 1 OR user_id = ? OR team_id IN (SELECT value FROM json_each(?))) ORDER BY display_order, id`)
-    .bind(type, user.id, JSON.stringify([...teamsOf(user)])).all<{ config: string }>();
-  return c.json(results.map((v) => ({ ...v, config: JSON.parse(v.config) })));
+  const [vistas, orden] = await c.env.DB.batch([
+    c.env.DB.prepare(`SELECT * FROM views WHERE object_type = ?
+      AND (shared = 1 OR user_id = ? OR team_id IN (SELECT value FROM json_each(?))) ORDER BY display_order, id`).bind(type, user.id, JSON.stringify([...teamsOf(user)])),
+    c.env.DB.prepare('SELECT ids FROM view_order WHERE user_id = ? AND object_type = ?').bind(user.id, type),
+  ]);
+  // En el orden que eligió cada uno (arrastrando las pestañas); las vistas nuevas van al final.
+  const ids = JSON.parse((orden.results[0] as { ids: string } | undefined)?.ids ?? '[]') as number[];
+  const pos = (id: number) => { const i = ids.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+  const rows = (vistas.results as Array<{ id: number; config: string }>).map((v, i) => ({ v, i }))
+    .sort((a, b) => pos(a.v.id) - pos(b.v.id) || a.i - b.i).map(({ v }) => v);
+  return c.json(rows.map((v) => ({ ...v, config: JSON.parse(v.config) })));
+});
+
+// El orden de las pestañas de vistas de quien lo pide: {ids: [3, 1, 2]}.
+api.put('/views/:type/orden', async (c) => {
+  const type = assertType(c.req.param('type'));
+  const b = await c.req.json<{ ids?: unknown }>();
+  if (!Array.isArray(b.ids) || !b.ids.every((x) => Number.isInteger(x))) throw new HttpError(400, 'Falta ids: la lista de vistas en orden.');
+  await c.env.DB.prepare(`INSERT INTO view_order (user_id, object_type, ids, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, object_type) DO UPDATE SET ids = excluded.ids, updated_at = excluded.updated_at`)
+    .bind(c.get('ctx').user.id, type, JSON.stringify(b.ids.slice(0, 200)), new Date().toISOString()).run();
+  return c.json({ ok: true });
 });
 
 api.post('/views/:type', async (c) => {

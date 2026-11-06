@@ -114,6 +114,34 @@ function IndexFor({ type }: { type: ObjectType }) {
   const [boardKey, setBoardKey] = useState(0);
   const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'save' | 'import'>('');
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
+  // Orden de las pestañas: el del servidor (el de cada usuario) o, recién arrastradas, el nuevo mientras se guarda.
+  const [orden, setOrden] = useState<number[] | null>(null);
+  useEffect(() => setOrden(null), [views.data]);
+  const vistas = useMemo(() => {
+    const l = views.data ?? [];
+    if (!orden) return l;
+    const pos = (id: number) => { const i = orden.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
+    return [...l].sort((a, b) => pos(a.id) - pos(b.id));
+  }, [views.data, orden]);
+  const [arrastrando, setArrastrando] = useState<number | null>(null);
+  const [marca, setMarca] = useState<{ id: number; lado: 'antes' | 'despues' } | null>(null);
+  const guardarOrden = async (ids: number[]) => {
+    setOrden(ids);
+    try { await http('PUT', `/views/${type}/orden`, { ids }); } catch (e) { toast((e as Error).message, true); setOrden(null); }
+  };
+  const soltarVista = (id: number, destino: number, lado: 'antes' | 'despues') => {
+    if (id === destino) return;
+    const ids = vistas.map((v) => v.id).filter((x) => x !== id);
+    ids.splice(ids.indexOf(destino) + (lado === 'despues' ? 1 : 0), 0, id);
+    guardarOrden(ids);
+  };
+  const moverVista = (id: number, d: -1 | 1) => {
+    const ids = vistas.map((v) => v.id);
+    const i = ids.indexOf(id);
+    if (i < 0 || i + d < 0 || i + d >= ids.length) return;
+    [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
+    guardarOrden(ids);
+  };
 
   useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
   useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.sort, cfg.dir, pipelineSel, mode]);
@@ -272,14 +300,26 @@ function IndexFor({ type }: { type: ObjectType }) {
       <div className="tabs">
         <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
         <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
-        {views.data?.map((v) => (
-          <div key={v.id} className={`tab-wrap${activeView === String(v.id) ? ' on' : ''}`}>
+        {vistas.map((v, i) => (
+          // Cada uno ordena sus pestañas arrastrándolas (el orden queda en su usuario); con quién se comparte, al pasar el mouse.
+          <div key={v.id} className={`tab-wrap${activeView === String(v.id) ? ' on' : ''}${arrastrando === v.id ? ' arrastrando' : ''}${marca?.id === v.id ? ` marca-${marca.lado}` : ''}`}
+            draggable onDragStart={(e) => { setArrastrando(v.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(v.id)); }}
+            onDragEnd={() => { setArrastrando(null); setMarca(null); }}
+            onDragOver={(e) => {
+              if (arrastrando == null || arrastrando === v.id) return;
+              e.preventDefault();
+              const r = e.currentTarget.getBoundingClientRect();
+              const lado = e.clientX < r.left + r.width / 2 ? 'antes' : 'despues';
+              if (marca?.id !== v.id || marca.lado !== lado) setMarca({ id: v.id, lado });
+            }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setMarca((m) => (m?.id === v.id ? null : m)); }}
+            onDrop={(e) => { e.preventDefault(); if (arrastrando != null && marca) soltarVista(arrastrando, v.id, marca.lado); setArrastrando(null); setMarca(null); }}>
             <button className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}
-              title={v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}>
+              title={`${v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}. Arrastrala para cambiar el orden.`}>
               {v.config.mode === 'board' && <Icon name="board" size={13} />}{v.name}
-              {(v.shared || v.team_id) ? <span className="x">{v.shared ? '(todos)' : `(${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'equipo'})`}</span> : null}
             </button>
-            {activeView === String(v.id) && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView('all'); }} />}
+            {activeView === String(v.id) && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView('all'); }}
+              onMover={(d) => moverVista(v.id, d)} puedeIzq={i > 0} puedeDer={i < vistas.length - 1} />}
           </div>
         ))}
         <button className="tab" onClick={() => setShow('save')}>+ Agregar vista</button>
@@ -568,7 +608,9 @@ function ShareSelect({ value, onChange }: { value: string; onChange: (v: string)
 
 // Menú de la vista abierta (como ⚙ «Ver configuración» de HubSpot): renombrar, compartir, copiar el link,
 // abrirla por defecto y borrarla. Cambiar o borrar una vista ajena solo puede un administrador.
-function ViewMenu({ type, view, onChanged, onDeleted }: { type: ObjectType; view: SavedView; onChanged: () => void; onDeleted: () => void }) {
+function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, puedeDer }: {
+  type: ObjectType; view: SavedView; onChanged: () => void; onDeleted: () => void; onMover?: (d: -1 | 1) => void; puedeIzq?: boolean; puedeDer?: boolean;
+}) {
   const { meta } = useMeta();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -602,6 +644,8 @@ function ViewMenu({ type, view, onChanged, onDeleted }: { type: ObjectType; view
           {mine && <div className="opt" onClick={() => { setEdit(true); setOpen(false); }}>Renombrar o compartir…</div>}
           <div className="opt" onClick={() => { setOpen(false); (navigator.clipboard?.writeText(window.location.href) ?? Promise.reject()).then(() => toast('Link copiado'), () => toast('El navegador no dejó copiar: copiá el link de la barra de direcciones.', true)); }}>Copiar link</div>
           <div className="opt" onClick={() => { toggleDefault(); setOpen(false); }}>{isDefault ? '✓ Se abre por defecto' : 'Abrir por defecto'}</div>
+          {onMover && puedeIzq && <div className="opt" onClick={() => { onMover(-1); setOpen(false); }}>Mover a la izquierda</div>}
+          {onMover && puedeDer && <div className="opt" onClick={() => { onMover(1); setOpen(false); }}>Mover a la derecha</div>}
           {mine && <div className="opt danger-text" onClick={async () => {
             setOpen(false);
             if (!confirm(`¿Borrar la vista «${view.name}»? A quienes la ven compartida también les desaparece.`)) return;

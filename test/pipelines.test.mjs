@@ -300,3 +300,21 @@ test('«Acerca de» elegido por objeto', async () => {
   assert.deepEqual((await api('GET', '/meta')).data.key_props.company, ['domain', 'city']);
   await api('PUT', '/key-props/company', { props: [] });
 });
+
+test('cada uno ordena sus pestañas de vistas sin cambiárselas a los demás', async () => {
+  asUser = null;
+  const cfg = { groups: [], columns: [], sort: 'createdate', dir: 'desc' };
+  const a = (await api('POST', '/views/contact', { name: `A ${RUN}`, shared: true, config: cfg })).data;
+  const b = (await api('POST', '/views/contact', { name: `B ${RUN}`, shared: true, config: cfg })).data;
+  const c = (await api('POST', '/views/contact', { name: `C ${RUN}`, shared: true, config: cfg })).data;
+  const mias = async () => (await api('GET', '/views/contact')).data.map((v) => v.id).filter((id) => [a.id, b.id, c.id].includes(id));
+  assert.deepEqual(await mias(), [a.id, b.id, c.id], 'sin orden propio: en el que se crearon');
+  assert.equal((await api('PUT', '/views/contact/orden', { ids: 'x' })).status, 400);
+  assert.equal((await api('PUT', '/views/contact/orden', { ids: [c.id, a.id, b.id] })).status, 200);
+  assert.deepEqual(await mias(), [c.id, a.id, b.id]);
+  // Otro usuario las sigue viendo en el orden de siempre.
+  await api('POST', '/users', { email: `orden.${RUN}@formas.ar`, name: `Orden ${RUN}`, role: 'member', team_id: 57132078 });
+  asUser = `orden.${RUN}@formas.ar`;
+  assert.deepEqual(await mias(), [a.id, b.id, c.id]);
+  asUser = null;
+});

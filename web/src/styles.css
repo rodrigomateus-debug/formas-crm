@@ -665,3 +665,10 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .board.cargando, .table-wrap.cargando { opacity: .45; pointer-events: none; transition: opacity var(--dur) var(--ease) 150ms; }
 /* Las tarjetas que quedan fuera de la pantalla no se dibujan hasta que se llega a ellas (tableros con cientos). */
 .col-body .card { content-visibility: auto; contain-intrinsic-size: auto 150px; }
+
+/* Pestañas de vistas: se ordenan arrastrándolas; una raya marca dónde va a quedar. */
+.tab-wrap { position: relative; }
+.tab-wrap.arrastrando { opacity: .4; }
+.tab-wrap.marca-antes::before, .tab-wrap.marca-despues::after { content: ''; position: absolute; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent-ink); }
+.tab-wrap.marca-antes::before { left: -11px; }
+.tab-wrap.marca-despues::after { right: -11px; }

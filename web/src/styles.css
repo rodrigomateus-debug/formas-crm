@@ -389,6 +389,17 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .preview-sum { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; }
 .preview-sum .input.select-like { height: 30px; font-size: 13px; width: auto; max-width: 100%; display: inline-flex; }
+/* «Chat en Darwin» (components.tsx): el ícono en el verde de WhatsApp, para que se entienda adónde lleva. */
+.chat-darwin svg { color: #1a9e4f; flex: none; }
+[data-theme="dark"] .chat-darwin svg { color: #3ccf75; }
+/* Valor del negocio con su lápiz (ValorEditable): en la vista previa y debajo del nombre en la ficha. */
+.valor { display: inline-flex; align-items: center; gap: 4px; }
+.valor-lapiz { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-control); background: transparent;
+  color: var(--ui-ink-3); cursor: pointer; }
+.valor-lapiz:hover, .valor-lapiz:focus-visible { background: var(--ui-surface-sunken); color: var(--accent-ink); }
+.valor-edit { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.valor-edit .input { width: 150px; }
+.rec-valor { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 13px; }
 .act-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--ui-ink-2); background: none; border: 0; cursor: pointer; width: 56px; padding: 0; white-space: nowrap; }
 .act-btn span.ic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--ui-line-strong); display: grid; place-items: center; background: var(--ui-surface); color: var(--accent-ink);
   transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }

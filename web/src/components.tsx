@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
-  userOf, userName, type User,
+  userOf, userName, type User, safeUrl, fmtMoney,
 } from './lib';
 import { Select } from './Select';
 
@@ -44,6 +44,55 @@ export function UserChip({ id, name, empty = 'Sin asignar', size = 'sm' }: { id:
 // Contenido de un <option> de usuario en los desplegables (Select): la foto y el nombre. Va como fragmento para que el
 // buscador del desplegable siga encontrando por nombre.
 export const userOption = (u: User, extra = '') => <><Avatar name={u.name} photo={u.photo_url} size="xs" />{u.name}{extra}</>;
+
+// «Chat en Darwin»: va directo a la conversación de WhatsApp del negocio en Darwin (su «Link a Darwin»). Con el ícono de
+// WhatsApp para que se entienda adónde lleva; es lo único que se muestra del link (no se repite como texto).
+export function ChatDarwin({ url, className = 'btn sm', label = 'Chat en Darwin' }: { url: unknown; className?: string; label?: string }) {
+  const href = safeUrl(url);
+  if (!href) return null;
+  return (
+    <a className={`${className} chat-darwin`} href={href} target="_blank" rel="noreferrer" title="Chat en Darwin: abrir la conversación de WhatsApp"
+      onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}><Icon name="whatsapp" size={14} />{label}</a>
+  );
+}
+
+// Valor del negocio con el lápiz al lado (vista previa y ficha): se cambia ahí mismo, con Enter o Guardar.
+export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved: () => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const [edit, setEdit] = useState(false);
+  const [v, setV] = useState('');
+  const [saving, setSaving] = useState(false);
+  const shown = fmtMoney(record.props.amount, record.props.deal_currency_code);
+  if (edit) {
+    return (
+      <form className="valor-edit" onClick={(e) => e.stopPropagation()} onSubmit={async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        try {
+          await http('PATCH', `/records/deal/${record.id}`, { props: { amount: v === '' ? null : Number(v) } });
+          toast('Valor guardado');
+          setEdit(false);
+          onSaved();
+        } catch (err) { toast((err as Error).message, true); } finally { setSaving(false); }
+      }}>
+        <input className="input sm num" type="number" min="0" step="any" autoFocus value={v} aria-label="Valor del negocio" placeholder="Valor"
+          onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEdit(false); } }} />
+        <button className="btn sm primary" disabled={saving}>Guardar</button>
+        <button type="button" className="btn sm" onClick={() => setEdit(false)}>Cancelar</button>
+      </form>
+    );
+  }
+  return (
+    <span className="valor">
+      {shown || <span className="muted">Sin valor</span>}
+      {meta.me.role !== 'viewer' && (
+        <button type="button" className="valor-lapiz" title="Cambiar el valor" aria-label="Cambiar el valor del negocio"
+          onClick={(e) => { e.stopPropagation(); setV(record.props.amount == null ? '' : String(record.props.amount)); setEdit(true); }}><Icon name="edit" size={14} /></button>
+      )}
+    </span>
+  );
+}
 
 // La vista previa no deja ver la página de atrás bloqueada: la rueda del mouse fuera del panel desplaza lo que está debajo.
 function scrollBehind(e: React.WheelEvent<HTMLDivElement>) {

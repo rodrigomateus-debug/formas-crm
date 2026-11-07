@@ -126,8 +126,10 @@ export function canSeePipeline(u: User, p: Pipeline) {
   return teams.some((t) => mine.has(Number(t)));
 }
 // Lo que falta completar para pasar un negocio a una etapa.
+// Un dato obligatorio falta si está vacío; el valor del negocio, también si es $0 (la misma regla que el servidor).
+export const faltaDato = (k: string, v: unknown) => v == null || v === '' || (k === 'amount' && !(Number(v) > 0));
 export function missingFor(stage: Stage, props: Record<string, unknown>) {
-  return (stage.config?.required_props ?? []).filter((k) => props[k] == null || props[k] === '');
+  return (stage.config?.required_props ?? []).filter((k) => faltaDato(k, props[k]));
 }
 export const userOf = (meta: Meta, id: unknown) => (id == null || id === '' ? undefined : meta.users.find((u) => u.id === Number(id)));
 export const userName = (meta: Meta, id: unknown) => userOf(meta, id)?.name ?? (id ? `Usuario ${id}` : 'Sin asignar');

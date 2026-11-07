@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
 } from '../lib';
-import { Avatar, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput, UserChip, userOption } from '../components';
+import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable } from '../components';
 import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
@@ -146,14 +146,20 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
   };
   const quick = (t: Activity['type']) => window.dispatchEvent(new CustomEvent('crm:compose', { detail: t }));
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record.props.pipeline)?.config.key_props : undefined;
-  const keyProps = (pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[];
+  // El «Link a Darwin» no se repite como texto: está el botón «Chat en Darwin» (sigue en la lista completa, por si hay que corregirlo).
+  const keyProps = ((pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
+    .filter((p) => !(type === 'deal' && p.name === 'link_a_darwin'));
   const [cfgKeys, setCfgKeys] = useState(false);
   return (
     <>
       <div className="rec-head">
         <div className="crumb"><Link to={`/${OBJECTS[type].path}`}>← {OBJECTS[type].plural}</Link></div>
         <div className="title"><Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
-          <div className="grow"><h1>{record.name}</h1><div className="muted small">{subtitle(meta, type, record)}</div><TagChips meta={meta} ids={record.tags} /></div></div>
+          <div className="grow"><h1>{record.name}</h1>
+            {type === 'deal'
+              ? <div className="muted small rec-valor"><ValorEditable record={record} onSaved={onChange} />{stageOf(meta, record.props.dealstage) ? ` · ${stageOf(meta, record.props.dealstage)!.stage.label}` : ''}</div>
+              : <div className="muted small">{subtitle(meta, type, record)}</div>}
+            <TagChips meta={meta} ids={record.tags} /></div></div>
         <div className="rec-actions">
           {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
             <button key={t} className="act-btn" onClick={() => quick(t)}><span className="ic"><Icon name={t} /></span>{ACTIVITY_LABEL[t]}</button>
@@ -162,7 +168,7 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
         <div className="row wrap">
           {type === 'contact' && record.props.mobilephone && <a className="btn sm" href={`https://wa.me/${String(record.props.mobilephone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
-          {type === 'deal' && safeUrl(record.props.link_a_darwin) && <a className="btn sm" href={safeUrl(record.props.link_a_darwin)} target="_blank" rel="noreferrer">Chat en Darwin</a>}
+          {type === 'deal' && <ChatDarwin url={record.props.link_a_darwin} />}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
           {type !== 'order' && (
             <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas CRM para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
@@ -803,7 +809,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
   const keyProps = ((pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
-    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans', 'hs_pipeline_stage'].includes(p.name)));
+    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage', 'link_a_darwin'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans', 'hs_pipeline_stage'].includes(p.name)));
   // Cambiar la etapa desde la vista previa; si la etapa pide datos (motivo de pérdida…), se piden antes.
   const moveTo = async (stageId: string, extra: Record<string, unknown> = {}) => {
     const st = stageOf(meta, stageId)?.stage;
@@ -829,7 +835,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   };
   const next = record?.props.notes_next_activity_date;
   const summary: Array<[string, ReactNode]> = !record ? [] : type === 'deal' ? [
-    ['Valor', fmtMoney(record.props.amount, record.props.deal_currency_code) || '—'],
+    ['Valor', <ValorEditable key="valor" record={record} onSaved={changed} />],
     ['Fecha de cierre', record.props.closedate ? fmtDate(record.props.closedate) : '—'],
     ['Pipeline', meta.pipelines.find((p) => p.id === record.props.pipeline)?.label ?? '—'],
     ['Etapa', <StageSelect key="st" value={record.props.dealstage} pipelineId={record.props.pipeline} onChange={(v) => moveTo(v)} />],
@@ -869,6 +875,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
             <div className="preview-sum">
               {summary.map(([k, v]) => <div key={k}><span className="muted">{k}:</span> {v}</div>)}
             </div>
+            {type === 'deal' && <div style={{ marginTop: 8 }}><ChatDarwin url={record.props.link_a_darwin} /></div>}
           </div>
         </div>
         <div className="rec-actions">

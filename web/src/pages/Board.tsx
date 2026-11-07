@@ -1,10 +1,10 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
+  http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
-import { Modal, PropertyInput, UserAvatar } from '../components';
+import { ChatDarwin, Modal, PropertyInput, UserAvatar } from '../components';
 import { Select } from '../Select';
 
 // Lo que el servidor agrega a cada tarjeta: contacto y empresa asociados y la próxima actividad.
@@ -239,7 +239,7 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${d.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Escribir un mail" aria-label={`Mail en ${d.name}`} onClick={(e) => act(e, 'email')}><Icon name="email" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${d.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
-        {darwin && <a className="btn ghost sm" href={darwin} target="_blank" rel="noreferrer" title="Abrir el chat en Darwin" onClick={(e) => e.stopPropagation()}>Darwin</a>}
+        {darwin && <ChatDarwin url={darwin} className="btn ghost sm" label="Chat" />}
         <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={stale ? 'Inactivo hace más de 14 días' : 'Última actividad'}>
           {stale && <Icon name="timer" size={12} />} {d.props.notes_last_updated ? fmtRelative(d.props.notes_last_updated) : 'Sin actividad'}
         </span>
@@ -252,10 +252,10 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
 export function StageProps({ deal, stage, missing, onClose, onSave }: { deal: CrmRecord; stage: Stage; missing: string[]; onClose: () => void; onSave: (extra: Record<string, unknown>) => void }) {
   const { meta } = useMeta();
   const props = missing.map((m) => propOf(meta, 'deal', m)).filter(Boolean) as Property[];
-  const lost = stage.is_closed && !stage.is_won;
+  const lost = !!stage.is_closed && !stage.is_won;   // is_closed es 0/1: sin el !! se veía un «0» suelto en la ventana
   const detail = propOf(meta, 'deal', 'closed_lost_reason');
   const [vals, setVals] = useState<Record<string, unknown>>({});
-  const ready = props.every((p) => vals[p.name] != null && vals[p.name] !== '');
+  const ready = props.every((p) => !faltaDato(p.name, vals[p.name]));
   return (
     <Modal title={`${stage.label}: ${deal.name}`} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Cancelar</button>

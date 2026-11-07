@@ -180,6 +180,57 @@ test('Darwin manda su evento nativo (session.forwarded) sin Pipedream', async ()
   state.darwinDeal = first.data.deal.id;
 });
 
+test('Darwin: contacto con WhatsApp, nombre y mail, y la empresa con su dominio asociada a todo', async () => {
+  const h = { authorization: `Bearer ${state.token}` };
+  const phone = `549261${String(Date.now()).slice(-7)}`;
+  const dom = `optica${RUN}.com.ar`;
+  // Como lo manda Darwin al asignar la conversación a una vendedora (session.forwarded.qualified), con su mail de otro
+  // dominio de Formas y el «nolastname» que pone cuando no sabe el apellido.
+  const event = { data: {
+    phoneNumber: phone, conversationId: `15552-${phone}`, conversationThreadId: phone, conversationTitle: 'Optica Del Valle',
+    channelName: 'Formas Publicitarias', channelFamily: 'wa', channelType: 'wa-cloud', forwardType: 'qualified',
+    forwardedToName: 'Rodrigo Mateus', forwardedToEmail: 'rodrigo.mateus@formas.ar', summary: 'Quiere 100 abanicos',
+    smartFields: { name: `Laura ${RUN}`, last_name: 'nolastname', apellido: 'nolastname', email: `Laura@${dom}`, company: `Óptica ${RUN}`, producto: 'Abanicos', cantidad: '100' },
+    source: { utmSource: 'META_ADS', utmCampaign: '1202', utmMedium: 'WHATSAPP' },
+  } };
+  const r = await call('POST', '/hooks/darwin', event, h);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.company.created, true);
+  const deal = (await api('GET', `/records/deal/${r.data.deal.id}`)).data;
+  assert.equal(deal.record.props.dealname, `Laura ${RUN} - Abanicos - 100 - Darwin`);
+  const me = (await api('GET', '/me')).data;
+  assert.equal(deal.record.props.owner_id, me.id, 'la vendedora aunque en Darwin tenga el mail de formas.ar');
+  const contact = (await api('GET', `/records/contact/${r.data.contact.id}`)).data;
+  assert.equal([contact.record.props.firstname, contact.record.props.lastname].filter(Boolean).join(' '), `Laura ${RUN}`, 'sin «nolastname»');
+  assert.equal(contact.record.props.email, `laura@${dom}`);
+  assert.equal(contact.record.props.mobilephone, phone, 'el WhatsApp');
+  const company = (await api('GET', `/records/company/${r.data.company.id}`)).data;
+  assert.equal(company.record.props.name, `Óptica ${RUN}`);
+  assert.equal(company.record.props.domain, dom, 'el dominio del mail corporativo');
+  assert.deepEqual([deal.associations.contact?.map((x) => x.id), deal.associations.company?.map((x) => x.id)], [[r.data.contact.id], [r.data.company.id]]);
+  assert.ok(contact.associations.company?.some((x) => x.id === r.data.company.id), 'contacto ↔ empresa');
+  const tl = (await api('GET', `/records/company/${r.data.company.id}/timeline?rollup=0`)).data;
+  assert.ok(tl.activities.some((a) => a.type === 'note' && /100 abanicos/.test(a.body)), 'la nota también en la empresa');
+});
+
+test('Darwin: con mail solo alcanza; sin WhatsApp ni mail no se crea nada', async () => {
+  const h = { authorization: `Bearer ${state.token}` };
+  // Instagram: el id del hilo no es un teléfono.
+  const ig = { data: { conversationId: `2026-1784${RUN}`, conversationThreadId: `1784${String(Date.now()).slice(-9)}`, channelFamily: 'ig', channelType: 'ig',
+    channelName: 'Formas Publicitarias SA', forwardedToEmail: 'rodrigo.mateus@formaspublicitarias.com', conversationTitle: `Insta ${RUN}`,
+    smartFields: { name: `Insta ${RUN}`, email: '', producto: 'Gorras', cantidad: '30' } } };
+  const sin = await call('POST', '/hooks/darwin', ig, h);
+  assert.equal(sin.status, 200, JSON.stringify(sin.data));
+  assert.match(sin.data.omitido, /WhatsApp ni mail/);
+  assert.equal((await api('GET', `/records/deal?q=${encodeURIComponent(`Insta ${RUN}`)}`)).data.total, 0, 'no creó el negocio');
+  const conMail = await call('POST', '/hooks/darwin', { data: { ...ig.data, smartFields: { ...ig.data.smartFields, email: `insta.${RUN}@gmail.com` } } }, h);
+  assert.equal(conMail.status, 200, JSON.stringify(conMail.data));
+  assert.equal(conMail.data.company, undefined, 'mail personal y sin empresa: sin empresa');
+  const contact = (await api('GET', `/records/contact/${conMail.data.contact.id}`)).data.record.props;
+  assert.deepEqual([contact.email, contact.mobilephone ?? null], [`insta.${RUN}@gmail.com`, null], 'el id de Instagram no es un WhatsApp');
+  assert.equal(conMail.data.deal.created, true);
+});
+
 test('avisa por webhook cuando se gana un negocio (para Darwin)', async () => {
   const received = [];
   const server = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { received.push({ body: JSON.parse(b), sig: req.headers['x-formas-crm-signature'] }); res.end('ok'); }); });

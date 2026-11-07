@@ -24,11 +24,27 @@ de HubSpot (crear o actualizar contacto, crear negocio, asociar). Problemas que 
    - body `json` con un solo campo: `data` = `{{data}}` (el evento completo; un campo que es un único placeholder conserva su tipo)
 3. Se borran los 6 pasos de código y los 3 de HubSpot.
 
-El CRM: busca el contacto por teléfono (sin mail inventado), elige el propietario por `forwardedToEmail` (y si no, por
-nombre), arma el nombre igual que hoy (descarta «Maru» y los nombres del equipo), calcula origen y campaña con la misma
-regla (anuncio prellenado sin utm → `META_ADS` / «Anuncio sin referral - …»; si no, `Orgánico` / `Directo`), crea el
-negocio «Nombre - Producto - Cantidad - Darwin» en Formas Shop (Inbound) / Lead calificado con los campos de origen
-completos, y si ya hay un negocio abierto de ese contacto lo reutiliza. El resumen de la conversación queda como nota.
+El CRM, cada vez que la IA le pasa una conversación a una vendedora:
+
+- **Contacto** con su WhatsApp (el número de la conversación, solo en canales de WhatsApp: en Instagram y el webchat el id
+  del hilo no es un teléfono), su nombre y su mail (los campos inteligentes `name`, `last_name` y `email`; nunca un mail
+  inventado, y sin el «nolastname» que pone Darwin cuando no sabe el apellido). Con WhatsApp o mail alcanza; si no trae
+  ninguno de los dos no se crea nada y queda anotado en Configuración → Registro de entradas. Si el contacto ya existe
+  (mismo mail o mismo teléfono), se completa lo que le falte.
+- **Empresa**, si la IA juntó el campo `company` o el mail es corporativo: se crea (o se encuentra) con su dominio, el del
+  mail, y queda asociada al contacto, al negocio y a la nota. Con un mail personal (gmail, hotmail…) y sin empresa, no se
+  crea ninguna.
+- **Negocio** «Nombre - Producto - Cantidad - Darwin» en Formas Shop (Inbound) / Lead calificado, asociado al contacto y a
+  la empresa, con origen y campaña con la misma regla de hoy (anuncio prellenado sin utm → `META_ADS` / «Anuncio sin
+  referral - …»; si no, `Orgánico` / `Directo`) y el link a la conversación. Si el contacto ya tiene un negocio abierto
+  en ese pipeline, se reutiliza (calificada y después escalada: un solo negocio).
+- **Propietario**: la vendedora a la que se asignó, por `forwardedToEmail` (aunque en Darwin tenga el mail de formas.ar y
+  en el CRM el de formaspublicitarias.com, o al revés) y, si no, por nombre. El nombre del contacto descarta «Maru» y los
+  nombres del equipo, como hoy.
+- El resumen de la conversación queda como **nota** en el contacto, el negocio y la empresa.
+
+Mientras convivan los dos workflows (el de HubSpot y el del CRM), la sincronización nocturna desde HubSpot trae también el
+negocio que creó HubSpot y quedan dos: el día que se prende el del CRM se apaga el de HubSpot.
 
 Si el CRM no está en Cloudflare Access para `/hooks/*` (ver README), no hace falta permitir IPs; si se quiere,
 Darwin sale desde 32.192.137.35, 32.192.62.181 y 18.235.132.229.

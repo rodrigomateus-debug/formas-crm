@@ -3,7 +3,7 @@ import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
-import { normLinkedin, splitName } from './records';
+import { emailDomain, normDomain, normLinkedin, normPhone, splitName } from './records';
 import { clickupStatus, limpiarRemitos, remitosPendientes, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
 import { gmailConfig, syncAll } from './gmail';
@@ -41,6 +41,10 @@ async function readBody(req: Request): Promise<Record<string, any>> {
   return Object.fromEntries([...form.entries()].map(([k, v]) => [k, typeof v === 'string' ? v : v.name]));
 }
 
+// Lo que llegó bien pero no alcanza para crear nada (por ejemplo, una conversación de Darwin sin WhatsApp ni mail):
+// queda en el registro de entradas y se contesta 200, así la integración no lo cuenta como falla.
+class Omitir extends Error {}
+
 async function run(env: Env, req: Request, source: string, build: (body: Record<string, any>, ctx: Ctx) => Promise<Bundle>) {
   let body: Record<string, any> = {};
   try {
@@ -56,6 +60,10 @@ async function run(env: Env, req: Request, source: string, build: (body: Record<
     await log(env, source, body, result, true);
     return Response.json({ ok: true, ...result });
   } catch (e) {
+    if (e instanceof Omitir) {
+      await log(env, source, body, { omitido: e.message }, true).catch(() => {});
+      return Response.json({ ok: true, omitido: e.message });
+    }
     const status = e instanceof HttpError ? e.status : 500;
     await log(env, source, body, { error: (e as Error).message }, false).catch(() => {});
     return Response.json({ ok: false, error: (e as Error).message }, { status });
@@ -65,13 +73,35 @@ async function run(env: Env, req: Request, source: string, build: (body: Record<
 // Genérico: { contact, company, deal, note, task, owner_id | owner_email }.
 hooks.post('/bundle', (c) => run(c.env, c.req.raw, 'api', async (b) => ({ ...b, owner_id: await ownerFrom(c.env, b) } as Bundle)));
 
-// Darwin (WhatsApp con IA). Reemplaza al workflow «Formas Publicitarias - Hubspot» de Darwin: ese workflow pasa a
-// tener un solo paso `http-request` que manda el evento `session.forwarded` entero ({ data: {{data}} }) acá.
-// Se arma igual que hoy: negocio "Nombre - Producto - Cantidad - Darwin" en Formas Shop (Inbound) / Lead calificado,
-// pero sin el mail inventado (el contacto se busca por teléfono), con propietario por mail y sin negocios repetidos
-// cuando la misma conversación se califica y después se escala. También acepta campos planos (name, phone, …).
+// Darwin (WhatsApp con IA). Reemplaza al workflow «Formas Publicitarias - Hubspot» de Darwin: cuando la IA le pasa la
+// conversación a una vendedora (evento `session.forwarded`), un paso `http-request` manda el evento entero
+// ({ data: {{data}} }) acá. Se arma igual que en HubSpot: negocio "Nombre - Producto - Cantidad - Darwin" en Formas Shop
+// (Inbound) / Lead calificado, pero:
+// - el contacto lleva su WhatsApp, nombre y mail (el que juntó la IA, nunca uno inventado); con WhatsApp o mail alcanza,
+//   y sin ninguno de los dos no se crea nada (queda en el registro de entradas);
+// - si la IA juntó la empresa (o el mail es corporativo), se crea la empresa con su dominio y queda asociada al contacto,
+//   al negocio y a la nota;
+// - propietario: la vendedora a la que se asignó (por mail, aunque en Darwin esté con otro dominio de Formas, o por nombre);
+// - sin negocios repetidos cuando la misma conversación se califica y después se escala.
+// También acepta campos planos (name, phone, email, company, …).
 const DARWIN_INTERNAL = ['maru', 'eli', 'elizabeth', 'jorgelina', 'lucia', 'lucía', 'ciro', 'rodrigo', 'facundo', 'tomas', 'tomás'];
 const MEDIUM: Record<string, string> = { instagram: 'Instagram DM', webchat: 'WebChat', messenger: 'Facebook Messenger', facebook: 'Facebook Messenger' };
+
+// Darwin pone «nolastname» (y parecidos) cuando no sabe un dato: eso no es un dato.
+const SIN_DATO = /^(no ?last ?name|no ?name|sin (apellido|nombre|empresa)|n\/?a|none|null|undefined|unknown|desconocid[oa]|-+|\.+)$/i;
+const dato = (v: unknown) => { const s = String(v ?? '').trim(); return s && !SIN_DATO.test(s) ? s : ''; };
+const mail = (v: unknown) => { const s = dato(v).toLowerCase(); return /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/.test(s) ? s : ''; };
+// «acme.com.ar» → «Acme» (como el alta automática de empresas por el mail).
+const nombreDeDominio = (d: string) => d.charAt(0).toUpperCase() + d.split('.')[0].slice(1);
+
+// La misma persona puede estar con otro dominio de Formas (lucia.senini@formas.ar en Darwin, @formaspublicitarias.com en el CRM).
+async function ownerByEmailUser(env: Env, email?: unknown) {
+  const local = String(email ?? '').toLowerCase().split('@')[0];
+  if (!local || !String(email).includes('@')) return undefined;
+  const u = await env.DB.prepare("SELECT id FROM users WHERE active = 1 AND lower(substr(email, 1, instr(email, '@'))) = ? ORDER BY id LIMIT 1")
+    .bind(`${local}@`).first<{ id: number }>();
+  return u?.id;
+}
 
 async function ownerByName(env: Env, name?: string) {
   if (!name) return undefined;
@@ -85,14 +115,27 @@ hooks.post('/darwin', (c) => run(c.env, c.req.raw, 'darwin', async (raw) => {
   const sf: Record<string, any> = d.smartFields ?? d.smart_fields ?? {};
   const src: Record<string, any> = d.source ?? {};
   const conversationId = d.conversationId ?? raw.conversation_id;
-  const phone = d.phoneNumber ?? raw.phone ?? raw.telefono ?? (conversationId ? String(conversationId).split('-').pop() : undefined);
+  // WhatsApp: el número de la conversación, solo si es de WhatsApp (en Instagram o el webchat el id del hilo no es un teléfono).
+  const familia = String(d.channelFamily ?? d.channelType ?? '').toLowerCase();
+  const esWhatsApp = !familia || familia.startsWith('wa');
+  const phoneRaw = raw.phone ?? raw.telefono ?? raw.whatsapp ?? (esWhatsApp ? d.phoneNumber ?? (conversationId ? String(conversationId).split('-').pop() : undefined) : undefined);
+  const phone = normPhone(phoneRaw) ? String(phoneRaw).replace(/[^\d+]/g, '') : undefined;
+  const email = mail(raw.email ?? sf.email ?? sf.mail);
+  if (!phone && !email) throw new Omitir('La conversación no trae WhatsApp ni mail: no se creó el contacto ni el negocio.');
   const assignee = d.forwardedToName ?? raw.owner_name;
-  const owner = (await ownerFrom(c.env, { owner_id: raw.owner_id, owner_email: d.forwardedToEmail ?? raw.owner_email })) ?? (await ownerByName(c.env, assignee));
+  const assigneeEmail = d.forwardedToEmail ?? raw.owner_email;
+  const owner = (await ownerFrom(c.env, { owner_id: raw.owner_id, owner_email: assigneeEmail }))
+    ?? (await ownerByEmailUser(c.env, assigneeEmail)) ?? (await ownerByName(c.env, assignee));
   // Nombre: el que juntó la IA, salvo que sea el de alguien de Formas; si no, el título de la conversación.
   const internal = (n: string) => !n || DARWIN_INTERNAL.includes(n.toLowerCase().split(/\s+/)[0]) || (assignee && n.toLowerCase() === String(assignee).toLowerCase());
-  const candidates = [sf.name, raw.name, raw.nombre, d.conversationTitle].map((x) => String(x ?? '').trim());
+  const candidates = [sf.name, raw.name, raw.nombre, d.conversationTitle].map(dato);
   const name = candidates.find((n) => n && !internal(n) && !/^\+?\d[\d\s-]+$/.test(n)) ?? '';
-  const parts = sf.last_name ? splitName(name, sf.last_name) : splitName(undefined, undefined, name);
+  const apellido = dato(raw.lastname ?? sf.last_name ?? sf.apellido);
+  const parts = apellido ? splitName(name, apellido) : splitName(undefined, undefined, name);
+  // Empresa: la que juntó la IA y, de dominio, el del mail si es corporativo (o el que venga).
+  const empresa = dato(raw.company ?? raw.empresa ?? sf.company ?? sf.empresa);
+  const dominioDado = normDomain(dato(raw.company_domain ?? raw.dominio ?? sf.website ?? sf.dominio));
+  const dominio = (dominioDado?.includes('.') ? dominioDado : null) ?? emailDomain(email);
   const producto = sf.producto ?? raw.producto ?? raw.product ?? '';
   const cantidad = sf.cantidad ?? raw.cantidad ?? raw.quantity ?? '';
   const prellenado = sf.anuncio_prellenado;
@@ -104,12 +147,12 @@ hooks.post('/darwin', (c) => run(c.env, c.req.raw, 'darwin', async (raw) => {
   return {
     owner_id: owner,
     contact: {
-      ...parts, mobilephone: phone, email: raw.email ?? sf.email, company: raw.company ?? raw.empresa ?? sf.empresa,
+      ...parts, mobilephone: phone, email: email || undefined, company: empresa || undefined,
       origen_del_contacto: canal, origen_de_la_conversacion: 'Darwin', prospect_source: utmSource, campaign_name: utmCampaign,
     },
-    company: raw.company_domain ? { name: raw.company ?? raw.empresa, domain: raw.company_domain } : undefined,
+    company: empresa || dominio ? { name: empresa || nombreDeDominio(dominio!), domain: dominio ?? undefined } : undefined,
     deal: {
-      dealname: raw.dealname ?? [name || phone, producto, cantidad === '' ? '0' : cantidad, 'Darwin'].join(' - '),
+      dealname: raw.dealname ?? [name || phone || email, producto, cantidad === '' ? '0' : cantidad, 'Darwin'].join(' - '),
       pipeline: raw.pipeline ?? 'default',
       dealstage: raw.dealstage ?? 'appointmentscheduled',
       estado_del_negocio: 'Nuevo',

@@ -203,9 +203,9 @@ export function remitosPendientes(filasPorEmpresa) {
   }
   return out;
 }
-// Solo cuentan los remitos de Corporate que se facturan desde el remito: en Formas Shop (y si un pedido Corporate se
-// facturó directo) el remito es de la entrega y nunca se factura.
-export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map(), facturadosDirecto = new Set()) {
+// Solo cuentan los remitos de Corporate: en Formas Shop el remito es de la entrega y nunca se factura. Si un pedido
+// Corporate se facturó directo y su remito quedó sin facturar, lo corrige el otro cálculo (neto menos lo facturado).
+export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map()) {
   const soloFp = new Map([...resumen].filter(([k]) => /^PEDVTAFP/.test(k)));
   const deNumero = porNumeroDe(soloFp);
   const out = new Map(), sinPedido = [];
@@ -213,13 +213,11 @@ export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map(),
     if (!(r.pendiente > 0)) continue;
     const p = (r.pdv != null ? deNumero(r.pdv, false) : null) ?? (r.pdv == null ? remitoAPedido.get(r.doc) : null) ?? null;
     if (!p) { sinPedido.push(r); continue; }
-    if (facturadosDirecto.has(p)) continue;
     out.set(p, (out.get(p) ?? 0) + r.pendiente);
   }
   return { porPedido: out, sinPedido };
 }
-// Pedidos con alguna factura que sale directo de ellos (informe de facturas).
-export const facturadosDirecto = (origenes) => new Set([...origenes.values()].map((o) => o.pedido).filter(Boolean));
+
 
 // Anticipo facturado que la factura final todavía no descontó, por pedido.
 export function anticiposDe(docs, asignadas) {
@@ -338,8 +336,7 @@ async function main() {
   for (const emp of EMPRESAS) despachos.push({ emp, filas: await porTramos(tok, 'analisisDespachoVenta', { PARAMWEBREPORT_Empresa: emp }, desde, hoy) });
   const remitos = remitosPendientes(despachos);
   let asignadas = asignarFacturas(docs, orig, resumen);
-  const directos = facturadosDirecto(orig);
-  let pend = pendientePorRemitos(remitos, resumen, new Map(), directos);
+  let pend = pendientePorRemitos(remitos, resumen);
   // Remitos con algo sin facturar que no dicen el PDV: se buscan los remitos de los pedidos Corporate recientes que ya
   // remitieron todo y no tienen factura (los 150 de número más alto; son pocos y siempre recientes).
   const conFactura = new Set(asignadas.values());
@@ -348,7 +345,7 @@ async function main() {
     .map(([k]) => k).sort((a, b) => Number(b.split(' - ')[1]) - Number(a.split(' - ')[1])).slice(0, 150) : [];
   const remitoAPedido = await remitosDe(tok, candidatos);
   asignadas = asignarFacturas(docs, orig, resumen, remitoAPedido);
-  pend = pendientePorRemitos(remitos, resumen, remitoAPedido, directos);
+  pend = pendientePorRemitos(remitos, resumen, remitoAPedido);
   const porFacturar = porFacturarDe(resumen, pend.porPedido, anticiposDe(docs, asignadas), netoFacturado(docs, asignadas));
   const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' },

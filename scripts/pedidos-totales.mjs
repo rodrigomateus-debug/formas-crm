@@ -71,6 +71,76 @@ async function filasDe(tok, emp, desde, hasta) {
   return filas;
 }
 
+// Lo que falta facturar de cada pedido, con IVA. Un pedido está facturado si la factura sale de él (Finnegans lo dice en
+// el informe de facturas), o de un remito suyo: el remito trae el PDV en la descripción («pdv 31089») o, si no, se buscan
+// los remitos del pedido. Sin factura, todo está por facturar (el total con IVA). Facturado, queda lo que todavía no pasó
+// al remito o a la factura (el pendiente del pedido, llevado a IVA con la proporción del total). Los objetivos de venta y
+// los de Mercado Libre no van.
+export function resumenPedidos(filasPorEmpresa) {
+  const out = new Map();
+  for (const filas of filasPorEmpresa) {
+    const vistos = new Map();
+    for (const r of filas) {
+      const k = clavePedido(r.DOCNROINT);
+      if (!k || !/^PEDVTA/.test(k) || /anulad/i.test(r.ESTADO ?? '') || out.has(k)) continue;
+      const o = vistos.get(k) ?? { total: Number(r.TOTAL ?? 0), neto: 0, pendiente: 0 };
+      o.neto += Number(r.IMPORTEMONPRINCIPAL ?? 0);
+      o.pendiente += Number(r.IMPORTEPENDIENTEDESTINO ?? 0);
+      vistos.set(k, o);
+    }
+    for (const [k, v] of vistos) out.set(k, v);
+  }
+  return out;
+}
+export function facturadosDe(filasFacturas) {
+  const pedidos = new Set(), pdvs = new Set(), remitos = new Set();
+  for (const x of filasFacturas) {
+    const t = String(x.TRANSACCIONSUBTIPOCODIGO ?? '');
+    const k = clavePedido(x.IDENTIFICACIONEXTERNA);
+    if (/^PEDVTA/.test(t)) { if (k) pedidos.add(k); continue; }
+    if (k) remitos.add(k);
+    const n = String(x.DESCRIPCION ?? '').match(/pdv\s*:?\s*(\d+)/i)?.[1];
+    if (n) pdvs.add(Number(n));
+  }
+  return { pedidos, pdvs, remitos };
+}
+export const estaFacturado = (k, fact) => fact.pedidos.has(k) || fact.pdvs.has(Number(k.split(' - ')[1]));
+export function porFacturarDe(resumen, fact, otrosFacturados = new Set()) {
+  const out = {};
+  for (const [k, o] of resumen) {
+    const facturado = estaFacturado(k, fact) || otrosFacturados.has(k);
+    const conIva = o.neto > 0 && o.total > 0 ? o.total / o.neto : 1;
+    const v = !facturado ? o.total : o.pendiente > 0.5 ? o.pendiente * conIva : 0;
+    out[k] = Math.round(Math.max(0, v) * 100) / 100;
+  }
+  return out;
+}
+async function facturas(tok, desde, hasta) {
+  const filas = [];
+  for (const emp of EMPRESAS) {
+    for (let d = desde; d <= hasta; d = masDias(d, 31)) {
+      const h = masDias(d, 30) < hasta ? masDias(d, 30) : hasta;
+      const r = await getJson(`${FIN}/reports/ApiFacturasDeVenta?${new URLSearchParams({
+        PARAMWEBREPORT_FechaDesde: d, PARAMWEBREPORT_FechaHasta: h, PARAMWEBREPORT_EmpresaCodigo: emp, ACCESS_TOKEN: tok })}`);
+      if (Array.isArray(r)) filas.push(...r);
+    }
+  }
+  return filas;
+}
+// Los pedidos que no aparecen facturados por el informe ni por el PDV del remito: se miran sus remitos uno por uno.
+async function facturadosPorRemito(tok, claves, fact) {
+  const out = new Set();
+  for (const k of claves) {
+    const [tipo, n] = k.split(' - ');
+    const r = await getJson(`${FIN}/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals?${new URLSearchParams({
+      PARAMWEBREPORT_IdentificacionExternaOrigen: `${tipo} - ${String(n).padStart(8, '0')}`, ACCESS_TOKEN: tok })}`).catch(() => []);
+    const remitos = (Array.isArray(r) ? r : []).filter((x) => /^FPREMVTA/.test(String(x.TIPODOCUMENTO ?? '')))
+      .map((x) => clavePedido(x.DESTINOIDENTIFICACIONEXTERNA ?? x.DESTINONOMBRE));
+    if (remitos.some((x) => x && fact.remitos.has(x))) out.add(k);
+  }
+  return out;
+}
+
 // Saldo pendiente de cada pedido: el informe de composición de saldos (las dos empresas juntas, con la coma y los
 // corchetes sin escapar; si no, vuelve vacío). Solo los deudores en cuenta corriente: cada fila es un comprobante con lo
 // que falta cobrar, con IVA. El CRM la cruza con su pedido (/hooks/pedidos/saldos). Del cliente no se manda nada más.
@@ -101,13 +171,18 @@ async function main() {
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
   console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados.`);
-  // Si el informe de saldos falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
+  // Si un informe falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
   const filasSaldo = await saldos(tok, hoy);
+  const resumen = resumenPedidos(filas);
+  const fact = facturadosDe(await facturas(tok, desde, hoy));
+  const dudosos = [...resumen.keys()].filter((k) => /^PEDVTAFP/.test(k) && !estaFacturado(k, fact));
+  const porFacturar = porFacturarDe(resumen, fact, await facturadosPorRemito(tok, dudosos, fact));
   const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
-    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ filas: filasSaldo, completo: true }) });
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ filas: filasSaldo, porFacturar, completo: true }) });
   if (!rs.ok) throw new Error(`CRM /hooks/pedidos/saldos: HTTP ${rs.status}`);
   const s = await rs.json();
-  console.log(`Saldos: ${s.filas} comprobantes con saldo, ${s.cruzadas} cruzan con un pedido; ${s.pedidos_con_saldo} pedidos con saldo, ${s.actualizados} actualizados.`);
+  const sinFacturar = Object.values(porFacturar).filter((v) => v > 0).length;
+  console.log(`Saldos: ${s.filas} comprobantes con saldo, ${s.cruzadas} cruzan con un pedido; ${sinFacturar} pedidos con algo por facturar; ${s.pedidos_con_saldo} pedidos con saldo, ${s.actualizados} actualizados.`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch((e) => { console.error(e.message); process.exit(1); });

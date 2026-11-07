@@ -135,14 +135,15 @@ export function docsDeFacturas(filasPorEmpresa) {
   return out;
 }
 
-// Informe de facturas: de qué pedido o remito sale cada factura (por su identificación).
-export function origenesDe(filasFacturas) {
+// Informe de facturas: de qué pedido o remito sale cada factura (por empresa e identificación: Formas y FP DEMO usan la
+// misma numeración).
+export function origenesDe(filasPorEmpresa) {
   const out = new Map();
-  for (const x of filasFacturas) {
+  for (const { emp, filas } of filasPorEmpresa) for (const x of filas) {
     const ie = normIe(x.IDENTIFICACIONEXTERNAFACT);
     if (!ie) continue;
     const dePedido = /^PEDVTA/.test(String(x.TRANSACCIONSUBTIPOCODIGO ?? ''));
-    out.set(ie, { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
+    out.set(`${emp}|${ie}`, { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
       pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null });
   }
   return out;
@@ -163,7 +164,7 @@ export function asignarFacturas(docs, origenes, resumen, remitoAPedido = new Map
   const deNumero = porNumeroDe(resumen);
   const out = new Map();
   for (const [k, d] of docs) {
-    const o = origenes.get(d.ie);
+    const o = origenes.get(`${d.emp}|${d.ie}`);
     const ped = d.ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
     const p = pdvDeDescripcion(d.desc);
     // Primero lo que el documento dice (de qué pedido sale, el PDV escrito); la búsqueda de remitos, al final.
@@ -330,7 +331,7 @@ async function main() {
   for (const emp of EMPRESAS) lineas.push({ emp, filas: await porTramos(tok, 'analisisFacturaVenta', { PARAMWEBREPORT_Empresa: emp }, desde, hoy) });
   const docs = docsDeFacturas(lineas);
   const origenes = [];
-  for (const emp of EMPRESAS) origenes.push(...await porTramos(tok, 'ApiFacturasDeVenta', { PARAMWEBREPORT_EmpresaCodigo: emp }, desde, hoy));
+  for (const emp of EMPRESAS) origenes.push({ emp, filas: await porTramos(tok, 'ApiFacturasDeVenta', { PARAMWEBREPORT_EmpresaCodigo: emp }, desde, hoy) });
   const orig = origenesDe(origenes);
   const despachos = [];
   for (const emp of EMPRESAS) despachos.push({ emp, filas: await porTramos(tok, 'analisisDespachoVenta', { PARAMWEBREPORT_Empresa: emp }, desde, hoy) });

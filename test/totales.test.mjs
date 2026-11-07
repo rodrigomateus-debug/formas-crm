@@ -85,10 +85,13 @@ test('por facturar, sin IVA y al centavo: lo pendiente en Finnegans, los remitos
     fac('FCVTAELECT - 12', 3080, 3727, '2419 / OC: 1180/2026'),
   ] }]);
   assert.equal(docs.get('EMPRE01|FACTVENANTMASIVO - 3').anticipo, 2000);
-  const orig = T.origenesDe([
+  const orig = T.origenesDe([{ emp: 'EMPRE01', filas: [
     { TRANSACCIONSUBTIPOCODIGO: 'PEDVTASTP', IDENTIFICACIONEXTERNA: 'PEDVTASTP - 00031277', IDENTIFICACIONEXTERNAFACT: 'FC PEDVTASTP-00031277 1' },
     { TRANSACCIONSUBTIPOCODIGO: 'FPREMVTA', IDENTIFICACIONEXTERNA: 'FPREMVTA - 1979', IDENTIFICACIONEXTERNAFACT: 'FC FPREMVTA-1979 1', DESCRIPCION: '' },
-  ]);
+  ] }, { emp: '7', filas: [
+    // FP DEMO numera igual: su FCVTAELECT - 5 sale de otro pedido y no tiene que pisar a la de Formas.
+    { TRANSACCIONSUBTIPOCODIGO: 'PEDVTAFP', IDENTIFICACIONEXTERNA: 'PEDVTAFP - 00000099', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 5' },
+  ] }]);
   // El remito facturado no dice el PDV: se encontró buscando los remitos del pedido.
   const asignadas = T.asignarFacturas(docs, orig, resumen, new Map([['FPREMVTA - 1979', 'PEDVTAFP - 2414']]));
   assert.deepEqual(Object.fromEntries([...asignadas].map(([k, v]) => [k.split('|')[1], v])), {

@@ -232,6 +232,21 @@ test('Darwin: con mail solo alcanza; sin WhatsApp ni mail no se crea nada', asyn
   assert.equal(conMail.data.deal.created, true);
 });
 
+test('pasar a «Envío de cotización» pide el valor del negocio (y $0 no cuenta)', async () => {
+  const deal = (await api('POST', '/records/deal', { props: { dealname: `Cotizar ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled' } })).data;
+  assert.ok(deal.id, JSON.stringify(deal));
+  const sinValor = await api('PATCH', `/records/deal/${deal.id}`, { props: { dealstage: 'presentationscheduled' } });
+  assert.equal(sinValor.status, 400);
+  assert.deepEqual(sinValor.data.missing, ['amount']);
+  assert.match(sinValor.data.error, /Envío de cotización/);
+  assert.equal((await api('PATCH', `/records/deal/${deal.id}`, { props: { dealstage: 'presentationscheduled', amount: 0 } })).status, 400, 'en $0 no pasa');
+  const ok = await api('PATCH', `/records/deal/${deal.id}`, { props: { dealstage: 'presentationscheduled', amount: 750000 } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.equal(ok.data.props.amount, 750000);
+  const stage = (await api('GET', '/meta')).data.pipelines.find((p) => p.id === 'default').stages.find((s) => s.id === 'presentationscheduled');
+  assert.deepEqual(stage.config.required_props, ['amount'], 'la etapa lo pide (la pantalla abre la ventana para cargarlo)');
+});
+
 test('avisa por webhook cuando se gana un negocio (para Darwin)', async () => {
   const received = [];
   const server = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { received.push({ body: JSON.parse(b), sig: req.headers['x-formas-crm-signature'] }); res.end('ok'); }); });
@@ -239,7 +254,7 @@ test('avisa por webhook cuando se gana un negocio (para Darwin)', async () => {
   try {
     const put = await api('PUT', '/webhooks', [{ event: 'deal.won', url: 'http://localhost:8797/darwin', secret: 's3cr3t', name: 'Darwin' }]);
     assert.equal(put.status, 200, JSON.stringify(put.data));
-    await api('PATCH', `/records/deal/${state.darwinDeal}`, { props: { dealstage: 'presentationscheduled' } });
+    await api('PATCH', `/records/deal/${state.darwinDeal}`, { props: { dealstage: 'presentationscheduled', amount: 500000 } });
     assert.equal(received.length, 0, 'cambio de etapa común: no avisa (solo está suscripto a deal.won)');
     await api('PATCH', `/records/deal/${state.darwinDeal}`, { props: { dealstage: 'closedwon', amount: 900000 } });
     assert.equal(received.length, 1);

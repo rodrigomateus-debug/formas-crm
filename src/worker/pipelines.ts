@@ -18,7 +18,8 @@ export class StageError extends HttpError {
 }
 
 export async function checkRequired(meta: Meta, stage: Stage, props: Props) {
-  const missing = (stage.config.required_props ?? []).filter((p) => props[p] == null || props[p] === '');
+  // Vacío, o el valor del negocio en $0: un negocio no pasa a «Envío de cotización» sin un valor de verdad.
+  const missing = (stage.config.required_props ?? []).filter((p) => props[p] == null || props[p] === '' || (p === 'amount' && !(Number(props[p]) > 0)));
   if (!missing.length) return;
   const labels = await Promise.all(missing.map(async (m) => (await meta.property('deal', m))?.label ?? m));
   throw new StageError(`Para pasar a «${stage.label}» falta completar: ${labels.join(', ')}.`, missing);

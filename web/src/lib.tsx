@@ -126,8 +126,10 @@ export function canSeePipeline(u: User, p: Pipeline) {
   return teams.some((t) => mine.has(Number(t)));
 }
 // Lo que falta completar para pasar un negocio a una etapa.
+// Un dato obligatorio falta si está vacío; el valor del negocio, también si es $0 (la misma regla que el servidor).
+export const faltaDato = (k: string, v: unknown) => v == null || v === '' || (k === 'amount' && !(Number(v) > 0));
 export function missingFor(stage: Stage, props: Record<string, unknown>) {
-  return (stage.config?.required_props ?? []).filter((k) => props[k] == null || props[k] === '');
+  return (stage.config?.required_props ?? []).filter((k) => faltaDato(k, props[k]));
 }
 export const userOf = (meta: Meta, id: unknown) => (id == null || id === '' ? undefined : meta.users.find((u) => u.id === Number(id)));
 export const userName = (meta: Meta, id: unknown) => userOf(meta, id)?.name ?? (id ? `Usuario ${id}` : 'Sin asignar');
@@ -157,12 +159,13 @@ export function fmtDate(v: unknown, withTime = false) {
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}) });
 }
-export function fmtRelative(v: unknown) {
+// `corto` («hace 27 min», «hace 3 h», «hace 6 d»): para las tarjetas del tablero, donde no entra el texto largo.
+export function fmtRelative(v: unknown, corto = false) {
   if (!v) return '';
   const d = new Date(String(v));
   const diff = (Date.now() - d.getTime()) / 1000;
   const abs = Math.abs(diff);
-  const rtf = new Intl.RelativeTimeFormat('es', { numeric: 'auto' });
+  const rtf = new Intl.RelativeTimeFormat('es', { numeric: 'auto', style: corto ? 'short' : 'long' });
   if (abs < 3600) return rtf.format(-Math.round(diff / 60), 'minute');
   if (abs < 86400) return rtf.format(-Math.round(diff / 3600), 'hour');
   if (abs < 86400 * 30) return rtf.format(-Math.round(diff / 86400), 'day');

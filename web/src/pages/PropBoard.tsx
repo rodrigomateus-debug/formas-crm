@@ -116,8 +116,8 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
         {type === 'order' && <Adjuntos r={r} />}
-        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title="Última actividad">
-          {r.props.notes_last_updated ? fmtRelative(r.props.notes_last_updated) : 'Sin actividad'}
+        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={`Última actividad${r.props.notes_last_updated ? `: ${fmtRelative(r.props.notes_last_updated)}` : ''}`}>
+          {r.props.notes_last_updated ? fmtRelative(r.props.notes_last_updated, true) : 'Sin actividad'}
         </span>
       </div>
     </div>

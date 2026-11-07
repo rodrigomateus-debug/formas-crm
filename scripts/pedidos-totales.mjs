@@ -166,8 +166,10 @@ export function asignarFacturas(docs, origenes, resumen, remitoAPedido = new Map
     const o = origenes.get(d.ie);
     const ped = d.ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
     const p = pdvDeDescripcion(d.desc);
-    out.set(k, o?.pedido ?? (o?.remito ? remitoAPedido.get(o.remito) : null) ?? (o?.pdv != null ? deNumero(o.pdv, false) : null)
-      ?? (ped ? `${ped[1]} - ${Number(ped[2])}` : null) ?? (p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null));
+    // Primero lo que el documento dice (de qué pedido sale, el PDV escrito); la búsqueda de remitos, al final.
+    out.set(k, o?.pedido ?? (o?.pdv != null ? deNumero(o.pdv, false) : null)
+      ?? (ped ? `${ped[1]} - ${Number(ped[2])}` : null) ?? (p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null)
+      ?? (o?.remito ? remitoAPedido.get(o.remito) ?? null : null));
   }
   // Las notas (y las facturas o débitos que anulan una nota) van con el comprobante que corrigen.
   for (const [k, d] of docs) {
@@ -209,7 +211,7 @@ export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map(),
   const out = new Map(), sinPedido = [];
   for (const [, r] of remitos) {
     if (!(r.pendiente > 0)) continue;
-    const p = remitoAPedido.get(r.doc) ?? (r.pdv != null ? deNumero(r.pdv, false) : null);
+    const p = (r.pdv != null ? deNumero(r.pdv, false) : null) ?? (r.pdv == null ? remitoAPedido.get(r.doc) : null) ?? null;
     if (!p) { sinPedido.push(r); continue; }
     if (facturadosDirecto.has(p)) continue;
     out.set(p, (out.get(p) ?? 0) + r.pendiente);
@@ -338,11 +340,12 @@ async function main() {
   let asignadas = asignarFacturas(docs, orig, resumen);
   const directos = facturadosDirecto(orig);
   let pend = pendientePorRemitos(remitos, resumen, new Map(), directos);
-  // Remitos facturados o con algo sin facturar que no dicen el PDV: se buscan los remitos de los pedidos Corporate que
-  // ya remitieron todo y no tienen factura.
+  // Remitos con algo sin facturar que no dicen el PDV: se buscan los remitos de los pedidos Corporate recientes que ya
+  // remitieron todo y no tienen factura (los 150 de número más alto; son pocos y siempre recientes).
   const conFactura = new Set(asignadas.values());
-  const faltan = pend.sinPedido.length || [...docs].some(([k]) => !asignadas.get(k) && orig.get(docs.get(k).ie)?.remito);
-  const candidatos = faltan ? [...resumen].filter(([k, o]) => /^PEDVTAFP/.test(k) && !o.anulado && o.pendiente < 0.01 && !conFactura.has(k) && !pend.porPedido.has(k)).map(([k]) => k) : [];
+  const faltan = pend.sinPedido.some((r) => r.pdv == null);
+  const candidatos = faltan ? [...resumen].filter(([k, o]) => /^PEDVTAFP/.test(k) && !o.anulado && o.pendiente < 0.01 && !conFactura.has(k) && !pend.porPedido.has(k))
+    .map(([k]) => k).sort((a, b) => Number(b.split(' - ')[1]) - Number(a.split(' - ')[1])).slice(0, 150) : [];
   const remitoAPedido = await remitosDe(tok, candidatos);
   asignadas = asignarFacturas(docs, orig, resumen, remitoAPedido);
   pend = pendientePorRemitos(remitos, resumen, remitoAPedido, directos);

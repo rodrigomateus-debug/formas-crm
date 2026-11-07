@@ -24,7 +24,7 @@ jobs:
   totales:
     runs-on: ubuntu-latest
     if: vars.CRM_URL != ''
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

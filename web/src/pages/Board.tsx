@@ -240,8 +240,9 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
         <button className="btn ghost sm icon" title="Escribir un mail" aria-label={`Mail en ${d.name}`} onClick={(e) => act(e, 'email')}><Icon name="email" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${d.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
         {darwin && <ChatDarwin url={darwin} className="btn ghost sm" label="Chat" />}
-        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={stale ? 'Inactivo hace más de 14 días' : 'Última actividad'}>
-          {stale && <Icon name="timer" size={12} />} {d.props.notes_last_updated ? fmtRelative(d.props.notes_last_updated) : 'Sin actividad'}
+        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }}
+          title={`${stale ? 'Inactivo hace más de 14 días' : 'Última actividad'}${d.props.notes_last_updated ? `: ${fmtRelative(d.props.notes_last_updated)}` : ''}`}>
+          {stale && <Icon name="timer" size={12} />} {d.props.notes_last_updated ? fmtRelative(d.props.notes_last_updated, true) : 'Sin actividad'}
         </span>
       </div>
     </div>

@@ -392,6 +392,13 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 /* «Chat en Darwin» (components.tsx): el ícono en el verde de WhatsApp, para que se entienda adónde lleva. */
 .chat-darwin svg { color: #1a9e4f; flex: none; }
 [data-theme="dark"] .chat-darwin svg { color: #3ccf75; }
+/* En la tarjeta del tablero resalta entre los íconos grises: pastilla verde suave, como las etiquetas «ok». */
+.card .card-actions .chat-darwin { background: var(--ui-positive-soft); color: var(--ui-positive-ink); border: 1px solid color-mix(in srgb, var(--ui-positive) 35%, transparent);
+  border-radius: var(--r-pill); padding: 0 8px 0 6px; font-weight: 600; gap: 3px; flex: none; }
+/* La última actividad, en un solo renglón aunque la tarjeta sea angosta. */
+.card .card-actions > .grow.small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.card .card-actions .chat-darwin svg { color: currentColor; }
+.card .card-actions .chat-darwin:hover, .card .card-actions .chat-darwin:focus-visible { background: color-mix(in srgb, var(--ui-positive) 22%, var(--ui-surface)); color: var(--ui-positive-ink); }
 /* Valor del negocio con su lápiz (ValorEditable): en la vista previa y debajo del nombre en la ficha. */
 .valor { display: inline-flex; align-items: center; gap: 4px; }
 .valor-lapiz { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-control); background: transparent;

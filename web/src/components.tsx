@@ -77,6 +77,7 @@ export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved:
         } catch (err) { toast((err as Error).message, true); } finally { setSaving(false); }
       }}>
         <input className="input sm num" type="number" min="0" step="any" autoFocus value={v} aria-label="Valor del negocio" placeholder="Valor"
+          onFocus={(e) => e.target.select()}
           onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEdit(false); } }} />
         <button className="btn sm primary" disabled={saving}>Guardar</button>
         <button type="button" className="btn sm" onClick={() => setEdit(false)}>Cancelar</button>

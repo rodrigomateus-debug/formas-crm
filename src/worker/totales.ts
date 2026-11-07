@@ -53,19 +53,19 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
 
 // ---------- Saldo pendiente de cada pedido ----------
 // Del informe de composición de saldos de Finnegans (scripts/pedidos-totales.mjs): una fila por comprobante con saldo
-// (facturas, notas de crédito, cobranzas sin aplicar), con lo que falta cobrar, con IVA; acá se pasa a sin IVA con la
-// proporción total/neto de su pedido (`factores`; si no está, 1,21), porque se trabaja sin IVA. Cada factura se cruza con su
+// (facturas, notas de crédito, cobranzas sin aplicar), con lo que falta cobrar, con IVA; acá se pasa a sin IVA con el
+// total/neto exacto de esa factura (`facturas`), o el de su pedido (`factores`), o 1,21, porque se trabaja sin IVA. Cada factura se cruza con su
 // pedido: por la factura que el CRM ya tiene enganchada al pedido; si no, por su identificación («FC PEDVTASTP-00031277 1»)
 // o por el número de PDV con que empieza la descripción («31089», «2407 / OC N°…», «PDV:36 NOESTRES»), que también lo
 // tienen las facturas que salen de un remito. Las notas de crédito restan en el pedido de la factura que corrigen. Al
 // saldo de las facturas se le suma lo que falta facturar (`porFacturar`). Facturado y cobrado queda en 0; sin dato, vacío.
 
-export interface FilaSaldo { ie?: string | null; doc?: string | null; desc?: string | null; importe: number; vto?: string | null }
+export interface FilaSaldo { emp?: string | null; ie?: string | null; doc?: string | null; desc?: string | null; importe: number; vto?: string | null }
 export interface SaldosEstado { filas: number; cruzadas: number; sin_cruce: number; pedidos_con_saldo: number; total: number; actualizados: number; at: string }
 
 const norm = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toUpperCase();
 // «FCVTAELECT - 0002583», «FCVTAELECT-2583» → «FCVTAELECT - 2583».
-const claveDoc = (s: unknown) => { const m = String(s ?? '').match(/([A-Za-z]+)\s*-\s*0*(\d+)/); return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null; };
+const claveDoc = (s: unknown) => { const m = String(s ?? '').match(/([A-Za-z_]+)\s*-\s*0*(\d+)/); return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null; };
 const esNota = (f: FilaSaldo) => /^NC/i.test(String(f.doc ?? '')) || /^NC\s/i.test(String(f.ie ?? ''));
 
 const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
@@ -73,8 +73,12 @@ const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
 // `porFacturar` ({"PEDVTAFP - 2413": 1234.5}): lo que falta facturar de cada pedido, sin IVA (scripts/pedidos-totales.mjs);
 // queda en el pedido («Por facturar») y se suma al saldo. Los pedidos que no vienen conservan el último que llegó.
 // `factores` ({"PEDVTAFP - 2413": 1.21}): total con IVA / neto de cada pedido.
+// `facturas` ({"EMPRE01|FCVTAELECT - 2583": {pedido: "PEDVTAFP - 2413", factor: 1.2345}}): de qué pedido es cada comprobante
+// y su total/neto exacto, del análisis de facturas (scripts/pedidos-totales.mjs). Manda sobre las otras formas de cruzarlo.
 const IVA = 1.21;
-export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFacturar?: Record<string, number>; factores?: Record<string, number>; completo?: boolean }): Promise<SaldosEstado> {
+type FacturaCrm = { pedido?: string | null; factor?: number | null };
+export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFacturar?: Record<string, number>; factores?: Record<string, number>;
+  facturas?: Record<string, FacturaCrm>; completo?: boolean }): Promise<SaldosEstado> {
   if (!Array.isArray(body?.filas)) throw new HttpError(400, 'Falta filas: [{ie, doc, desc, importe}, …].');
   const filas = (body.filas as FilaSaldo[]).filter((f) => f && Number.isFinite(Number(f.importe)));
   const db = env.DB;
@@ -110,9 +114,17 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     const id = porPedido.get(clavePedido(k));
     if (id !== undefined && Number(v) >= 1 && Number(v) < 2) factorDe.set(id, Number(v));
   }
-  const sinIva = (id: number, importe: number) => importe / (factorDe.get(id) ?? IVA);
+  const facturasCrm = body.facturas && typeof body.facturas === 'object' ? body.facturas : {};
+  const deFactura = (f: FilaSaldo): FacturaCrm | undefined => {
+    const d = claveDoc(f.doc);
+    return d ? facturasCrm[`${f.emp || 'EMPRE01'}|${d}`] : undefined;
+  };
+  const factorOk = (v: unknown) => (Number(v) >= 1 && Number(v) < 2 ? Number(v) : undefined);
+  const sinIva = (id: number, importe: number, f?: FilaSaldo) => importe / (factorOk(f && deFactura(f)?.factor) ?? factorDe.get(id) ?? IVA);
 
   const pedidoDe = (f: FilaSaldo): number | undefined => {
+    const fx = deFactura(f)?.pedido;
+    if (fx && porPedido.has(clavePedido(fx))) return porPedido.get(clavePedido(fx));
     const ie = norm(f.ie);
     if (porIe.has(ie)) return porIe.get(ie);
     const d = claveDoc(f.doc);
@@ -137,7 +149,7 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     const id = pedidoDe(f);
     if (id === undefined) continue;
     cruzadas++;
-    saldo.set(id, (saldo.get(id) ?? 0) + sinIva(id, Number(f.importe)));
+    saldo.set(id, (saldo.get(id) ?? 0) + sinIva(id, Number(f.importe), f));
     const d = claveDoc(f.doc);
     if (d) pedidoDeDoc.set(d, id);
   }
@@ -145,12 +157,13 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     const ref = String(f.ie ?? '').match(/^NC\s+([A-Za-z]+)-0*(\d+)/i);
     const refDoc = ref ? `${ref[1].toUpperCase()} - ${Number(ref[2])}` : null;
     const anula = Number(String(f.desc ?? '').match(/ANULA\s+FC\s*0*(\d+)/i)?.[1]);
-    let id = (refDoc && (pedidoDeDoc.get(refDoc) ?? porDoc.get(refDoc))) || undefined;
+    const fx = deFactura(f)?.pedido;
+    let id = (fx && porPedido.get(clavePedido(fx))) || (refDoc && (pedidoDeDoc.get(refDoc) ?? porDoc.get(refDoc))) || undefined;
     if (id === undefined && anula) id = [...pedidoDeDoc].find(([k]) => Number(k.split(' - ')[1]) === anula)?.[1];
     id ??= pedidoDe(f);
     if (id === undefined) continue;
     cruzadas++;
-    saldo.set(id, (saldo.get(id) ?? 0) + sinIva(id, Number(f.importe)));
+    saldo.set(id, (saldo.get(id) ?? 0) + sinIva(id, Number(f.importe), f));
   }
 
   const sys = await db.prepare("SELECT id FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<{ id: number }>();

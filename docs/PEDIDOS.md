@@ -85,18 +85,37 @@ sabe). El CRM cruza cada fila con su pedido (`aplicarSaldos` en `totales.ts`):
 
 Las notas de crédito restan en el pedido de la factura que corrigen; las cobranzas sin aplicar no son de ningún pedido.
 
-**Lo que falta facturar también es saldo** (Rodrigo, 7/11/2026: «si están sin facturar, el 100% es saldo pendiente»). El
-script mira en el informe de facturas (`ApiFacturasDeVenta`) qué pedidos están facturados: porque la factura sale del
-pedido, o de un remito suyo (el remito dice «pdv 31089» en la descripción; si no lo dice, se buscan los remitos del pedido
-con `ApiGetDocumentosDestinoByIdentificacionExternaDeals`). Sin factura, todo el pedido está por facturar (su neto).
-Facturado, queda lo que todavía no pasó al remito o a la factura (el pendiente del pedido, que ya es neto). Eso va en
-«Por facturar» (`importe_por_facturar`) y se suma al saldo:
+**Lo que falta facturar también es saldo** (Rodrigo, 7/11/2026: «si están sin facturar, el 100% es saldo pendiente»;
+«saber exactamente cuánto falta que nos paguen, casi al centavo»). Va en «Por facturar» (`importe_por_facturar`) y se
+suma: **saldo pendiente = lo facturado que falta cobrar + lo que falta facturar**, todo sin IVA.
 
-**saldo pendiente = lo facturado que falta cobrar + lo que falta facturar.**
+Por facturar es el menor de dos cálculos, porque cada uno corrige el error del otro:
 
-Los anulados no tienen saldo. Facturado y cobrado queda en 0 («Cobrado» en la vista previa). Los objetivos de venta y los
-pedidos de Mercado Libre no cuentan. Lo que no se ve: un anticipo cobrado antes de facturar (Finnegans lo deja como cobranza
-sin aplicar del cliente, no del pedido). Si un informe falla, no se manda nada. Es solo lectura: en Finnegans no se escribe.
+1. **Lo pendiente según Finnegans.** En Formas Shop y No Estrés el pedido pasa directo a la factura: su pendiente es lo
+   que falta facturar. En Corporate pasa al remito y el remito a la factura: falta lo que el pedido no remitió más lo que
+   sus remitos no facturaron (análisis de remitos, `analisisDespachoVenta`, que trae solo los que tienen algo sin
+   facturar; el remito dice «pdv 31089»). Los remitos de Formas Shop son de la entrega y nunca se facturan: no cuentan.
+   Menos los **anticipos**: la factura de anticipo («ANTICIPO FINANCIERO», con el PDV en la descripción) no sale del
+   pedido, y la factura final lo descuenta con un renglón en negativo; lo anticipado que todavía no se descontó ya está
+   facturado.
+2. **El neto del pedido menos todo lo que se le facturó** (análisis de facturas, `analisisFacturaVenta`): facturas,
+   anticipos, la final que los descuenta y notas de crédito y débito.
+
+El (1) no ve una factura que se hizo sin enlazarla al pedido o al remito; el (2) toma como pendiente un descuento por
+nota de crédito o un precio que se ajustó al facturar. En los pedidos de los últimos 4 meses (7/11/2026) los dos
+coincidían salvo en 5.
+
+Cada factura se engancha a su pedido: por el pedido o remito del que sale (informe de facturas, `ApiFacturasDeVenta`),
+por su identificación («FC PEDVTASTP-00031277 1»), por el PDV de la descripción («31089», «PDV:36 NOESTRES», «PDV N° 31512
+/ OC…»), por los remitos del pedido si el remito no dice el PDV, y una nota que anula otra («NC ANULA FC 2583») va con
+esa. **Lo facturado que falta cobrar** sale del informe de saldos, factura por factura, y se pasa a sin IVA con el
+neto/total exacto de esa factura (cambia de 1,21 a 1,27 según las percepciones); si la factura es anterior a lo leído,
+con el de su pedido, y si no, 1,21.
+
+Los anulados no tienen saldo. Facturado y cobrado queda en 0 («Cobrado» en la vista previa). Los objetivos de venta y
+Mercado Libre no cuentan. Cada hora se recalculan los pedidos de los últimos 120 días; a las 7, todos desde 2023. Las
+cobranzas sin aplicar (un pago que todavía no se imputó a ninguna factura) son del cliente, no de un pedido. Si un
+informe falla, no se manda nada. Es solo lectura: en Finnegans no se escribe.
 
 ## Miniaturas de los productos en la tarjeta
 

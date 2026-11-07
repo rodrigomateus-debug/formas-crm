@@ -170,9 +170,7 @@ export async function cargarProductosPendientes(env: Env, limit = 25) {
 
 // ---------- Fotos del registro de cotizaciones del STP ----------
 // La que eligió la vendedora al cotizar, por pedido de Finnegans y SKU, y la de cada SKU para los demás pedidos (tabla
-// stp_imagenes, la carga scripts/stp-imagenes.mjs). Para cada producto del pedido manda la de su cotización; si no hay,
-// la de Finnegans; si tampoco, la del SKU en otras cotizaciones.
-const FOTO = 'COALESCE(so.image_url, p.image_url, sk.image_url)';
+// stp_imagenes, la carga scripts/stp-imagenes.mjs). Qué foto va en cada producto lo decide fotosDeRenglones.
 const FOTO_STP = (pedido: string) => `LEFT JOIN stp_imagenes so ON so.pedido = ${pedido} AND so.sku = UPPER(TRIM(li.code))
     LEFT JOIN stp_imagenes sk ON sk.pedido = '' AND sk.sku = UPPER(TRIM(li.code))
       AND UPPER(TRIM(li.code)) NOT LIKE '%!_GE!_%' ESCAPE '!' AND UPPER(TRIM(li.code)) NOT LIKE '%!_GE' ESCAPE '!'`;
@@ -337,21 +335,29 @@ export async function aplicarImagenes(env: Env, body: { filas?: unknown; product
 }
 
 // Las dos consultas de las miniaturas, para los pedidos que devuelve `ids` (una subconsulta con sus parámetros): así el
-// tablero las pide en el mismo viaje a la base que las tarjetas. Primero las fotos de sus productos; después, las de su
-// cotización en el STP (sirven también si los productos todavía no se leyeron o sus códigos no coinciden).
+// tablero las pide en el mismo viaje a la base que las tarjetas. La segunda trae los renglones de cada pedido ('li'), los
+// productos de su cotización en el STP ('it') y las fotos de la cotización por SKU ('so'); armarFotos les pone foto con
+// fotosDeRenglones, igual que el panel de productos (aviso de Rodrigo del 7/11/2026: la tarjeta mostraba también las
+// opciones cotizadas que el cliente no pidió).
 export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
-  const conIds = `WITH ids(id) AS (${ids})`;   // usada dos veces, SQLite la calcula una sola
+  const conIds = `WITH ids(id) AS (${ids})`;   // usada varias veces, SQLite la calcula una sola
   return [
     db.prepare(`${conIds} SELECT * FROM (SELECT r.id AS record_id, (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS n,
-        (SELECT COUNT(*) FROM stp_imagenes s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_stp
-      FROM records r WHERE r.id IN (SELECT id FROM ids)) WHERE n > 0 OR n_stp > 0`).bind(...binds),
-    db.prepare(`${conIds} SELECT record_id, image_url FROM (
-        SELECT li.record_id, ${FOTO} AS image_url, 0 AS o, li.position AS pos
+        (SELECT COUNT(*) FROM stp_imagenes s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_stp,
+        (SELECT COUNT(*) FROM stp_items s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_items
+      FROM records r WHERE r.id IN (SELECT id FROM ids)) WHERE n > 0 OR n_stp > 0 OR n_items > 0`).bind(...binds),
+    db.prepare(`${conIds}
+        SELECT 'li' AS k, li.record_id, li.position AS pos, li.code, li.description, li.quantity, li.name AS li_name, p.name,
+          so.image_url AS foto_cot, p.image_url AS foto_fin, sk.image_url AS foto_sku, NULL AS cantidades
           FROM line_items li JOIN records r ON r.id = li.record_id LEFT JOIN products p ON p.code = li.code ${FOTO_STP(PEDIDO_DE_R)}
           WHERE li.record_id IN (SELECT id FROM ids)
         UNION ALL
-        SELECT r.id, s.image_url, 1, 0 FROM records r JOIN stp_imagenes s ON s.pedido = ${PEDIDO_DE_R} WHERE r.id IN (SELECT id FROM ids)
-      ) WHERE image_url IS NOT NULL ORDER BY record_id, o, pos`).bind(...binds),
+        SELECT 'it', r.id, s.pos, s.sku, NULL, NULL, NULL, s.nombre, s.image_url, NULL, NULL, s.cantidades
+          FROM records r JOIN stp_items s ON s.pedido = ${PEDIDO_DE_R} WHERE r.id IN (SELECT id FROM ids)
+        UNION ALL
+        SELECT 'so', r.id, 0, s.sku, NULL, NULL, NULL, NULL, s.image_url, NULL, NULL, NULL
+          FROM records r JOIN stp_imagenes s ON s.pedido = ${PEDIDO_DE_R} WHERE r.id IN (SELECT id FROM ids)
+        ORDER BY 2, 1, 3`).bind(...binds),
   ];
 }
 // Lo adjunto de cada pedido, para los iconitos de abajo de la tarjeta: facturas, remitos y bocetos (cuántos de sus
@@ -379,12 +385,26 @@ export async function extrasDePedidos(db: D1Database, ids: number[]) {
   return { fotos: armarFotos(cuantos.results, fotos.results), adjuntos: armarAdjuntos(adj.results) };
 }
 
-export function armarFotos(cuantos: unknown[], fotos: unknown[]) {
+// Hasta 3 fotos por pedido: las de sus productos, como en el panel (fotosDeRenglones); si a alguno le falta foto, también las
+// de su cotización que no quedaron en ningún producto; sin productos leídos, las de la cotización.
+export function armarFotos(cuantos: unknown[], filas: unknown[]) {
+  type Fila = { k: 'li' | 'it' | 'so'; record_id: number; code: string | null; description: string | null; quantity: number | null; li_name: string | null;
+    name: string | null; foto_cot: string | null; foto_fin: string | null; foto_sku: string | null; cantidades: string | null };
+  const de = new Map<number, Fila[]>();
+  for (const f of filas as Fila[]) { const l = de.get(f.record_id) ?? []; l.push(f); de.set(f.record_id, l); }
   const out = new Map<number, { fotos: string[]; productos: number }>();
-  for (const r of cuantos as Array<{ record_id: number; n: number; n_stp: number }>) out.set(r.record_id, { fotos: [], productos: r.n || r.n_stp });
-  for (const r of fotos as Array<{ record_id: number; image_url: string }>) {
-    const o = out.get(r.record_id);
-    if (o && o.fotos.length < 3 && !o.fotos.includes(r.image_url)) o.fotos.push(r.image_url);
+  for (const c of cuantos as Array<{ record_id: number; n: number; n_stp: number; n_items: number }>) {
+    const fs = de.get(c.record_id) ?? [];
+    const lineas = fs.filter((f) => f.k === 'li');
+    const items: StpItem[] = fs.filter((f) => f.k === 'it').map((f) => ({ sku: f.code ?? '', nombre: f.name ?? '', cantidades: f.cantidades ?? '[]', image_url: f.foto_cot ?? '' }));
+    const cotizacion = items.length ? items.map((i) => i.image_url) : fs.filter((f) => f.k === 'so').map((f) => f.foto_cot ?? '');
+    let lista: Array<string | null>;
+    if (lineas.length) {
+      const { fotos, sueltas } = fotosDeRenglones(lineas, items);
+      lista = fotos.some((f) => !f) ? [...fotos, ...(items.length ? sueltas : cotizacion)] : fotos;
+    } else lista = cotizacion;
+    const fotos = [...new Set(lista.filter((u): u is string => !!u))].slice(0, 3);
+    out.set(c.record_id, { fotos, productos: c.n || c.n_items || c.n_stp });
   }
   return out;
 }

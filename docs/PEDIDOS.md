@@ -165,8 +165,11 @@ del producto de la cotización con el mismo nombre (las palabras de la descripci
 si no, la del único producto de la cotización con su misma cantidad; si no, la del SKU en otras cotizaciones (nunca para los
 genéricos, que en cada cotización son otra cosa). Cada producto de la cotización se usa una sola vez; las fotos que no
 quedaron en ningún renglón se muestran abajo en el panel, como «fotos de la cotización», si a algún producto le falta foto.
-En la tarjeta, después de las fotos de los productos van las otras de su cotización (sirven aunque los productos todavía no
-se hayan leído o sus códigos no coincidan con los SKU). Los pedidos de NoEstres no pasan por el STP. Una fila sin foto
+La tarjeta muestra las mismas fotos que el panel (`armarFotos`, con la misma `fotosDeRenglones`): las de sus productos y,
+solo si a alguno le falta foto, las de la cotización que no quedaron en ningún producto; si los productos todavía no se
+leyeron, las de la cotización. Antes sumaba siempre todas las de la cotización, y en los pedidos donde se cotizaron varias
+opciones (aviso de Rodrigo del 7/11/2026: un cuaderno negro y uno gris, y el cliente pidió uno) la tarjeta mostraba más
+fotos que productos. Los pedidos de NoEstres no pasan por el STP. Una fila sin foto
 borra la que había; `GET /hooks/productos/imagenes` dice qué llegó la última vez.
 
 ## Bocetos de producción

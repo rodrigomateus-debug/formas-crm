@@ -143,8 +143,10 @@ export function origenesDe(filasPorEmpresa) {
     const ie = normIe(x.IDENTIFICACIONEXTERNAFACT);
     if (!ie) continue;
     const dePedido = /^PEDVTA/.test(String(x.TRANSACCIONSUBTIPOCODIGO ?? ''));
-    out.set(`${emp}|${ie}`, { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
-      pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null });
+    // Una factura puede salir de varios documentos (un pedido y un remito, o varios remitos): se guardan todos.
+    const k = `${emp}|${ie}`;
+    out.set(k, [...(out.get(k) ?? []), { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
+      pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null }]);
   }
   return out;
 }
@@ -164,13 +166,20 @@ export function asignarFacturas(docs, origenes, resumen, remitoAPedido = new Map
   const deNumero = porNumeroDe(resumen);
   const out = new Map();
   for (const [k, d] of docs) {
-    const o = origenes.get(`${d.emp}|${d.ie}`);
+    const os = origenes.get(`${d.emp}|${d.ie}`) ?? [];
     const ped = d.ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
     const p = pdvDeDescripcion(d.desc);
-    // Primero lo que el documento dice (de qué pedido sale, el PDV escrito); la búsqueda de remitos, al final.
-    out.set(k, o?.pedido ?? (o?.pdv != null ? deNumero(o.pdv, false) : null)
-      ?? (ped ? `${ped[1]} - ${Number(ped[2])}` : null) ?? (p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null)
-      ?? (o?.remito ? remitoAPedido.get(o.remito) ?? null : null));
+    const escrito = p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null;
+    // De qué pedidos sale según Finnegans: el pedido, o el PDV que dice su remito.
+    const desdeOrigen = [...new Set(os.map((o) => o.pedido ?? (o.pdv != null ? deNumero(o.pdv, false) : null)).filter(Boolean))];
+    // Si sale de varios, el que coincide con el PDV escrito en la factura; si sale de uno, ese; si no, lo escrito; la
+    // búsqueda de remitos, al final.
+    const elegido = (ped ? `${ped[1]} - ${Number(ped[2])}` : null)
+      ?? (escrito && desdeOrigen.includes(escrito) ? escrito : null)
+      ?? (desdeOrigen.length === 1 ? desdeOrigen[0] : null)
+      ?? escrito ?? desdeOrigen[0]
+      ?? os.map((o) => (o.remito ? remitoAPedido.get(o.remito) : null)).find(Boolean) ?? null;
+    out.set(k, elegido);
   }
   // Las notas (y las facturas o débitos que anulan una nota) van con el comprobante que corrigen.
   for (const [k, d] of docs) {

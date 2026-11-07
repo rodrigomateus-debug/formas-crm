@@ -91,6 +91,10 @@ test('por facturar, sin IVA y al centavo: lo pendiente en Finnegans, los remitos
   ] }, { emp: '7', filas: [
     // FP DEMO numera igual: su FCVTAELECT - 5 sale de otro pedido y no tiene que pisar a la de Formas.
     { TRANSACCIONSUBTIPOCODIGO: 'PEDVTAFP', IDENTIFICACIONEXTERNA: 'PEDVTAFP - 00000099', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 5' },
+  ] }, { emp: 'EMPRE01', filas: [
+    // La FCVTAELECT - 9 sale de dos documentos: un pedido ajeno y un remito del 2416, que es lo que dice la factura.
+    { TRANSACCIONSUBTIPOCODIGO: 'FPREMVTA', IDENTIFICACIONEXTERNA: 'FPREMVTA - 1990', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 9', DESCRIPCION: 'pdv 2416' },
+    { TRANSACCIONSUBTIPOCODIGO: 'PEDVTAFP', IDENTIFICACIONEXTERNA: 'PEDVTAFP - 00002413', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 9' },
   ] }]);
   // El remito facturado no dice el PDV: se encontró buscando los remitos del pedido.
   const asignadas = T.asignarFacturas(docs, orig, resumen, new Map([['FPREMVTA - 1979', 'PEDVTAFP - 2414']]));

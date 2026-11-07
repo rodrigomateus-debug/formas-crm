@@ -854,10 +854,8 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
     ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],
     ['Comprador', [record.props.hs_billing_address_firstname, record.props.hs_billing_address_lastname].filter(Boolean).join(' ') || associations?.contact?.[0]?.name || '—'],
-    // De Finnegans: lo que falta cobrar de sus facturas, con IVA (vacío si todavía no se facturó).
-    ['Saldo pendiente', record.props.saldo_pendiente_de_pago_mxn != null && record.props.saldo_pendiente_de_pago_mxn !== ''
-      ? (Number(record.props.saldo_pendiente_de_pago_mxn) > 0 ? fmtMoney(record.props.saldo_pendiente_de_pago_mxn) : 'Cobrado')
-      : record.props.factura_numero ? '—' : 'Sin facturar'],
+    // De Finnegans, con IVA: lo facturado que falta cobrar más lo que falta facturar.
+    ['Saldo pendiente', saldoPedido(record.props)],
   ];
   return (
     <Drawer clear title={`Vista previa · ${OBJECTS[type].single}`} onClose={onClose}
@@ -907,3 +905,14 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     </Drawer>
   );
 }
+
+// El saldo pendiente del pedido (Finnegans, con IVA) y, si una parte todavía no se facturó, cuánto.
+function saldoPedido(p: Record<string, any>) {
+  const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
+  const saldo = num(p.saldo_pendiente_de_pago_mxn), pf = num(p.importe_por_facturar);
+  if (saldo == null) return '—';
+  if (saldo <= 0) return 'Cobrado';
+  if (!pf) return fmtMoney(saldo);
+  return `${fmtMoney(saldo)} · ${pf >= saldo - 1 ? 'sin facturar' : `${fmtMoney(pf)} sin facturar`}`;
+}
+

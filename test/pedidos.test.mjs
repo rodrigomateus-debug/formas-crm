@@ -297,23 +297,28 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   assert.equal(cardB.fotos, undefined, 'sin fotos, sin miniaturas');
   // Saldo pendiente desde Finnegans (informe de composición de saldos): la factura de A por su identificación; una de B por
   // el PDV con que empieza la descripción (como las que salen de un remito), con una nota de crédito que la corrige; una
-  // cobranza sin aplicar no es de ningún pedido.
-  const saldoDe = async (rec) => (await api('GET', `/records/order/${rec.id}`)).data.record.props.saldo_pendiente_de_pago_mxn;
+  // cobranza sin aplicar no es de ningún pedido. Todo sin IVA: el saldo de las facturas (con IVA) se divide por el total/neto
+  // de su pedido. Más lo que falta facturar de cada pedido (B: 5000, ya sin IVA).
+  const props = async (rec) => (await api('GET', `/records/order/${rec.id}`)).data.record.props;
   assert.equal((await api('POST', '/hooks/pedidos/saldos', { filas: [] })).status, 401, 'sin token no');
   assert.equal((await api('POST', '/hooks/pedidos/saldos', { nada: 1 }, H)).status, 400);
-  let sal = (await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [
+  let sal = (await api('POST', '/hooks/pedidos/saldos', { completo: true, porFacturar: { [a.props.pedido_finnegans]: 0, [b.props.pedido_finnegans]: 5000 },
+    factores: { [a.props.pedido_finnegans]: 1.21, [b.props.pedido_finnegans]: 1.25 }, filas: [
     { ie: `FC PEDVTASTP-${PDV.padStart(8, '0')} 1`, doc: 'FCVTAELECT - 9999', desc: PDV, importe: 60500 },
     { ie: 'FC FPREMVTA-1979 1', doc: 'FCVTAELECT - 9001', desc: `${b.props.pdv_finnegans} / OC N°: 4400197895`, importe: 1000 },
     { ie: 'NC FCVTAELECT-9001 1', doc: 'NCVEE - 5', desc: 'NC ANULA FC 9001', importe: -300 },
     { ie: 'COBRANZAFORMAS - 1', doc: 'COBRANZAFORMAS - 1', desc: '', importe: -50 },
   ] }, H)).data;
   assert.deepEqual([sal.cruzadas, sal.sin_cruce], [3, 1], JSON.stringify(sal));
-  assert.equal(await saldoDe(a), 60500);
-  assert.equal(await saldoDe(b), 700, 'la factura menos la nota de crédito');
-  // Cuando se cobra, deja de aparecer: A (facturado) queda en 0; B (sin factura en el CRM) queda vacío.
+  assert.equal((await props(a)).saldo_pendiente_de_pago_mxn, 50000, '60.500 con IVA');
+  assert.deepEqual([(await props(b)).saldo_pendiente_de_pago_mxn, (await props(b)).importe_por_facturar], [5560, 5000], '(1.000 − 300) / 1,25 + lo que falta facturar');
+  // Cuando se cobran las facturas, dejan de aparecer: A queda en 0; B, en lo que falta facturar (el último que llegó).
   sal = (await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [] }, H)).data;
-  assert.equal(await saldoDe(a), 0);
-  assert.equal(await saldoDe(b), undefined);
+  assert.equal((await props(a)).saldo_pendiente_de_pago_mxn, 0);
+  assert.equal((await props(b)).saldo_pendiente_de_pago_mxn, 5000);
+  // Ya facturado todo y cobrado: 0.
+  await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [], porFacturar: { [b.props.pedido_finnegans]: 0 } }, H);
+  assert.deepEqual([(await props(b)).saldo_pendiente_de_pago_mxn, (await props(b)).importe_por_facturar], [0, 0]);
   assert.equal((await api('GET', '/hooks/pedidos/saldos', undefined, H)).data.filas, 0, 'lo último que llegó');
   // Carga en tandas de los productos de los pedidos que no se leyeron.
   const tanda = (await api('POST', '/hooks/productos/pendientes?limit=5', {}, H)).data;

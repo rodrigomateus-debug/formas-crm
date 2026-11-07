@@ -1,5 +1,6 @@
 import type { Env } from './env';
 import { HttpError } from './env';
+import { montosDesdePedidos, type MontosEstado } from './montos';
 
 // Total sin IVA de cada pedido, desde Finnegans (scripts/pedidos-totales.mjs, solo lectura): el neto del pedido de venta,
 // en pesos, sumado renglón por renglón. Con eso el tablero de pedidos suma cada columna, como el de negocios.
@@ -12,7 +13,7 @@ export const clavePedido = (p: unknown) => {
   return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null;
 };
 
-export interface TotalesEstado { recibidos: number; pedidos: number; cruzados: number; actualizados: number; at: string }
+export interface TotalesEstado { recibidos: number; pedidos: number; cruzados: number; actualizados: number; at: string; negocios?: MontosEstado }
 
 export async function aplicarTotales(env: Env, body: { totales?: Record<string, number> }): Promise<TotalesEstado> {
   const tot = body?.totales;
@@ -31,6 +32,7 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
   const ts = new Date().toISOString();
   const stmts: D1PreparedStatement[] = [];
   let cruzados = 0, actualizados = 0;
+  const cambiados: number[] = [];
   for (const r of results) {
     const k = clavePedido(r.pedido);
     if (!k || !porPedido.has(k)) continue;
@@ -38,6 +40,7 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
     const v = porPedido.get(k)!;
     if (r.total != null && r.total !== '' && Math.abs(Number(r.total) - v) < 0.01) continue;
     actualizados++;
+    cambiados.push(r.id);
     stmts.push(
       db.prepare(`UPDATE records SET props = json_set(props, '$.hs_total_price', ?, '$.hs_currency_code', COALESCE(json_extract(props, '$.hs_currency_code'), 'ARS')),
         amount = ? WHERE id = ?`).bind(v, v, r.id),
@@ -46,7 +49,9 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
     );
   }
   for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
-  const out = { recibidos: porPedido.size, pedidos: results.length, cruzados, actualizados, at: ts };
+  // Los negocios de los pedidos cuyo total cambió pasan a tener la suma de sus pedidos (montos.ts).
+  const negocios = await montosDesdePedidos(db, cambiados);
+  const out = { recibidos: porPedido.size, pedidos: results.length, cruzados, actualizados, at: ts, negocios };
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totales_pedidos', ?)").bind(JSON.stringify(out)).run();
   return out;
 }

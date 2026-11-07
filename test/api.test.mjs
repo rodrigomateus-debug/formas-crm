@@ -247,6 +247,50 @@ test('pasar a «Envío de cotización» pide el valor del negocio (y $0 no cuent
   assert.deepEqual(stage.config.required_props, ['amount'], 'la etapa lo pide (la pantalla abre la ventana para cargarlo)');
 });
 
+test('el monto del negocio sigue al total de sus pedidos (y los casos raros)', async () => {
+  const monto = async (id) => (await api('GET', `/records/deal/${id}`)).data.record.props;
+  const asociar = (a, b) => api('POST', '/associations', { from_id: a, to_id: b });
+  const deal = (await api('POST', '/records/deal', { props: { dealname: `Kits ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 1000000 } })).data;
+  const o1 = (await api('POST', '/records/order', { props: { hs_order_name: `Kits ${RUN} 1`, hs_total_price: 400000 } })).data;
+  const o2 = (await api('POST', '/records/order', { props: { hs_order_name: `Kits ${RUN} 2` } })).data;
+  assert.ok(deal.id && o1.id && o2.id);
+
+  // Se asocia el pedido: el estimado pasa a ser el total del pedido, y queda en el historial (fuente «pedidos»).
+  await asociar(deal.id, o1.id);
+  assert.equal((await monto(deal.id)).amount, 400000);
+  const hist = (await api('GET', `/records/deal/${deal.id}/history?prop=amount`)).data;
+  assert.ok(hist.some((c) => c.source === 'pedidos' && Number(c.new_value) === 400000), JSON.stringify(hist));
+  // Un segundo pedido (se dividió en dos) todavía sin total: espera, no queda un monto a medias.
+  await asociar(o2.id, deal.id);
+  assert.equal((await monto(deal.id)).amount, 400000);
+  // Llega su total: la suma de los dos.
+  await api('PATCH', `/records/order/${o2.id}`, { props: { hs_total_price: 250000.5 } });
+  assert.equal((await monto(deal.id)).amount, 650000.5);
+  // Se anula un pedido: deja de contar.
+  assert.equal((await api('PATCH', `/records/order/${o2.id}`, { props: { hs_pipeline_stage: '3c85a297-e9ce-400b-b42e-9f16853d69d6' } })).status, 200);
+  assert.equal((await monto(deal.id)).amount, 400000);
+
+  // Un pedido en dos negocios: no se sabe cuánto es de cada uno, así que no se toca ninguno.
+  const otro = (await api('POST', '/records/deal', { props: { dealname: `Otro ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 90000 } })).data;
+  await asociar(otro.id, o1.id);
+  await api('PATCH', `/records/order/${o1.id}`, { props: { hs_total_price: 410000 } });
+  assert.deepEqual([(await monto(deal.id)).amount, (await monto(otro.id)).amount], [400000, 90000]);
+  // Se le quita al otro: vuelve a seguir al pedido.
+  await api('DELETE', '/associations', { from_id: otro.id, to_id: o1.id });
+  assert.equal((await monto(deal.id)).amount, 410000);
+
+  // Cambiarlo a mano lo deja «Monto a mano»: los pedidos ya no lo pisan, hasta que se desmarca.
+  const mano = (await api('PATCH', `/records/deal/${deal.id}`, { props: { amount: 500000 } })).data;
+  assert.deepEqual([mano.props.amount, mano.props.monto_a_mano], [500000, 'true']);
+  await api('PATCH', `/records/order/${o1.id}`, { props: { hs_total_price: 420000 } });
+  assert.equal((await monto(deal.id)).amount, 500000);
+  // Al desmarcarlo vuelve enseguida al total del pedido.
+  const vuelve = (await api('PATCH', `/records/deal/${deal.id}`, { props: { monto_a_mano: false } })).data;
+  assert.deepEqual([vuelve.props.monto_a_mano, vuelve.props.amount], ['false', 420000]);
+  // Un negocio sin pedidos se cambia a mano sin marcar nada.
+  assert.equal((await api('PATCH', `/records/deal/${otro.id}`, { props: { amount: 95000 } })).data.props.monto_a_mano, undefined);
+});
+
 test('avisa por webhook cuando se gana un negocio (para Darwin)', async () => {
   const received = [];
   const server = http.createServer((req, res) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => { received.push({ body: JSON.parse(b), sig: req.headers['x-formas-crm-signature'] }); res.end('ok'); }); });

@@ -6,6 +6,7 @@ import { finnegansPedido, finnegansToken } from './finnegans';
 import { Budget, OutOfBudget } from './budget';
 import { bajarArchivo } from './drive';
 import { tareaPostEntrega } from './postentrega';
+import { montosDesdePedidos } from './montos';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
@@ -349,6 +350,8 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     owner = (change.owner_id ?? cur.owner_id ?? null) as number | null;
     entregadoAhora = change.hs_pipeline_stage === STAGE.entregado;
     if (Object.keys(change).length) { await updateRecord(db, ctx, 'order', id, change, { system: true, strict: false }); result = 'actualizado'; }
+    // Anulado (o desanulado) en ClickUp: el monto de su negocio se vuelve a sumar sin este pedido (montos.ts).
+    if ('hs_pipeline_stage' in change && (change.hs_pipeline_stage === STAGE.anulado || cur.hs_pipeline_stage === STAGE.anulado)) await montosDesdePedidos(db, [id], ctx);
     // Cambió el pedido de Finnegans: los productos se vuelven a leer al abrir el pedido.
     if ('pedido_finnegans' in change) await db.prepare('DELETE FROM line_item_sync WHERE record_id = ?').bind(id).run();
     // Sin empresa (por ejemplo, entró antes de que la empresa estuviera en el CRM): se vuelve a buscar.

@@ -70,8 +70,10 @@ export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved:
         e.preventDefault();
         setSaving(true);
         try {
-          await http('PATCH', `/records/deal/${record.id}`, { props: { amount: v === '' ? null : Number(v) } });
-          toast('Valor guardado');
+          const r = await http<CrmRecord>('PATCH', `/records/deal/${record.id}`, { props: { amount: v === '' ? null : Number(v) } });
+          // Con pedidos, el monto sigue su total; cambiarlo a mano lo deja fijo (el servidor marca «Monto a mano»).
+          toast(r.props.monto_a_mano === 'true' && record.props.monto_a_mano !== 'true'
+            ? 'Valor guardado. Queda «Monto a mano»: el total de los pedidos ya no lo cambia.' : 'Valor guardado');
           setEdit(false);
           onSaved();
         } catch (err) { toast((err as Error).message, true); } finally { setSaving(false); }

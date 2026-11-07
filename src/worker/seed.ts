@@ -201,6 +201,8 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['dealstage', 'Etapa', 'string', 'Información del negocio', [], { ...CORE, ...FORM, required: true }],
     ['amount', 'Monto', 'currency', 'Información del negocio', [], { ...CORE, ...FORM }],
     ['deal_currency_code', 'Moneda', 'enum', 'Información del negocio', ['ARS', 'USD'], CORE],
+    // El monto sigue al total de los pedidos (montos.ts) salvo que esté marcado (migración 0025).
+    ['monto_a_mano', 'Monto a mano', 'bool', 'Información del negocio', [], { ...CORE, description: 'Si está marcado, el monto no se actualiza con el total de los pedidos del negocio.' }],
     ['closedate', 'Fecha de cierre', 'date', 'Información del negocio', [], { ...CORE, ...FORM }],
     ['owner_id', 'Propietario', 'owner', 'Información del negocio', [], { ...CORE, ...FORM }],
     ['dealtype', 'Tipo de negocio', 'enum', 'Información del negocio', [['newbusiness', 'Cliente nuevo'], ['existingbusiness', 'Cliente existente']], CORE],

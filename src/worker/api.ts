@@ -19,6 +19,7 @@ import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoce
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
+import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -199,7 +200,15 @@ api.patch('/records/:type/:id', async (c) => {
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown> }>();
   if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, Number(c.req.param('id')), type)).pipeline_id);
-  const row = await updateRecord(c.env.DB, ctx, type, Number(c.req.param('id')), body.props ?? {});
+  // Quien cambia a mano el monto de un negocio con pedidos lo deja «Monto a mano»: los pedidos ya no lo pisan (montos.ts).
+  if (type === 'deal' && body.props && 'amount' in body.props && !('monto_a_mano' in body.props) && await tienePedidos(c.env.DB, Number(c.req.param('id')))) {
+    body.props.monto_a_mano = true;
+  }
+  let row = await updateRecord(c.env.DB, ctx, type, Number(c.req.param('id')), body.props ?? {});
+  // El total o el estado (anulado) de un pedido cambian el monto de su negocio (montos.ts); desmarcar «Monto a mano»
+  // vuelve el negocio al total de sus pedidos.
+  if (type === 'order' && ('hs_total_price' in (body.props ?? {}) || 'hs_pipeline_stage' in (body.props ?? {}))) await montosDesdePedidos(c.env.DB, [row.id], ctx);
+  if (type === 'deal' && 'monto_a_mano' in (body.props ?? {}) && (await montosDesdePedidos(c.env.DB, [row.id], ctx)).actualizados) row = await getRow(c.env.DB, row.id, type);
   // Si el pedido pasó a «Listo para producción», el cambio en ClickUp sale enseguida (sin demorar la respuesta).
   if (type === 'order' && 'hs_pipeline_stage' in (body.props ?? {})) c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
   return c.json(rowToRecord(row));
@@ -336,6 +345,8 @@ api.post('/associations', async (c) => {
   canWrite(ctx);
   const b = await c.req.json<{ from_id: number; to_id: number; label?: string; primary?: boolean }>();
   await associate(c.env.DB, ctx, Number(b.from_id), Number(b.to_id), { label: b.label, primary: b.primary });
+  // Un pedido que se suma a un negocio le pone su total al monto (montos.ts).
+  await montosDesdePedidos(c.env.DB, [Number(b.from_id), Number(b.to_id)], ctx);
   return c.json({ ok: true });
 });
 
@@ -344,6 +355,7 @@ api.delete('/associations', async (c) => {
   canWrite(ctx);
   const b = await c.req.json<{ from_id: number; to_id: number }>();
   await dissociate(c.env.DB, ctx, Number(b.from_id), Number(b.to_id));
+  await montosDesdePedidos(c.env.DB, [Number(b.from_id), Number(b.to_id)], ctx);
   return c.json({ ok: true });
 });
 

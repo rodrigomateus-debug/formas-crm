@@ -71,11 +71,11 @@ async function filasDe(tok, emp, desde, hasta) {
   return filas;
 }
 
-// Lo que falta facturar de cada pedido, con IVA. Un pedido está facturado si la factura sale de él (Finnegans lo dice en
-// el informe de facturas), o de un remito suyo: el remito trae el PDV en la descripción («pdv 31089») o, si no, se buscan
-// los remitos del pedido. Sin factura, todo está por facturar (el total con IVA). Facturado, queda lo que todavía no pasó
-// al remito o a la factura (el pendiente del pedido, llevado a IVA con la proporción del total). Los objetivos de venta y
-// los de Mercado Libre no van.
+// Lo que falta facturar de cada pedido, sin IVA (Rodrigo, 7/11/2026: «trabajamos con números sin IVA»). Un pedido está
+// facturado si la factura sale de él (Finnegans lo dice en el informe de facturas), o de un remito suyo: el remito trae el
+// PDV en la descripción («pdv 31089») o, si no, se buscan los remitos del pedido. Sin factura, todo está por facturar (el
+// neto del pedido). Facturado, queda lo que todavía no pasó al remito o a la factura (el pendiente del pedido, que ya es
+// neto). Los objetivos de venta y los de Mercado Libre no van.
 export function resumenPedidos(filasPorEmpresa) {
   const out = new Map();
   for (const filas of filasPorEmpresa) {
@@ -109,10 +109,16 @@ export function porFacturarDe(resumen, fact, otrosFacturados = new Set()) {
   const out = {};
   for (const [k, o] of resumen) {
     const facturado = estaFacturado(k, fact) || otrosFacturados.has(k);
-    const conIva = o.neto > 0 && o.total > 0 ? o.total / o.neto : 1;
-    const v = !facturado ? o.total : o.pendiente > 0.5 ? o.pendiente * conIva : 0;
+    const v = !facturado ? o.neto : o.pendiente > 0.5 ? o.pendiente : 0;
     out[k] = Math.round(Math.max(0, v) * 100) / 100;
   }
+  return out;
+}
+// Total con IVA / neto de cada pedido: el CRM lo usa para pasar a sin IVA el saldo de sus facturas (que Finnegans da con
+// IVA y percepciones).
+export function factoresDe(resumen) {
+  const out = {};
+  for (const [k, o] of resumen) if (o.neto > 0 && o.total >= o.neto) out[k] = Math.round((o.total / o.neto) * 10000) / 10000;
   return out;
 }
 async function facturas(tok, desde, hasta) {
@@ -143,7 +149,7 @@ async function facturadosPorRemito(tok, claves, fact) {
 
 // Saldo pendiente de cada pedido: el informe de composición de saldos (las dos empresas juntas, con la coma y los
 // corchetes sin escapar; si no, vuelve vacío). Solo los deudores en cuenta corriente: cada fila es un comprobante con lo
-// que falta cobrar, con IVA. El CRM la cruza con su pedido (/hooks/pedidos/saldos). Del cliente no se manda nada más.
+// que falta cobrar, con IVA (el CRM lo pasa a sin IVA). El CRM la cruza con su pedido (/hooks/pedidos/saldos). Del cliente no se manda nada más.
 export function filasDeSaldo(reporte) {
   return (Array.isArray(reporte) ? reporte : []).filter((x) => x.CUENTA === 'Deudores en Cta. Cte.').map((x) => ({
     ie: x.IDENTIFICACIONEXTERNA ?? null, doc: x.DOCUMENTO ?? null, desc: x.DESCRIPCION ?? null, importe: Number(x.IMPORTEMONPPAL ?? 0), vto: x.FECHAVTO ?? null,
@@ -178,7 +184,7 @@ async function main() {
   const dudosos = [...resumen.keys()].filter((k) => /^PEDVTAFP/.test(k) && !estaFacturado(k, fact));
   const porFacturar = porFacturarDe(resumen, fact, await facturadosPorRemito(tok, dudosos, fact));
   const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
-    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ filas: filasSaldo, porFacturar, completo: true }) });
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ filas: filasSaldo, porFacturar, factores: factoresDe(resumen), completo: true }) });
   if (!rs.ok) throw new Error(`CRM /hooks/pedidos/saldos: HTTP ${rs.status}`);
   const s = await rs.json();
   const sinFacturar = Object.values(porFacturar).filter((v) => v > 0).length;

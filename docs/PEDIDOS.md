@@ -74,7 +74,9 @@ reordena). Los anulados no están en el informe y quedan sin monto; el pie de la
 Pedido de Rodrigo del 6/11/2026: el «Saldo pendiente de pago» del pedido sale de Finnegans, ya no de HubSpot ni a mano.
 `scripts/pedidos-totales.mjs`, cada hora, baja el informe de composición de saldos (`COMPOSICIONSALDOSCLIENTES`, las
 dos empresas; el mismo que usa el saldo de cada empresa) y manda a `POST /hooks/pedidos/saldos` una fila por comprobante
-con saldo: lo que falta cobrar, con IVA. El CRM la cruza con su pedido (`aplicarSaldos` en `totales.ts`):
+con saldo: lo que falta cobrar, que Finnegans da con IVA. Todo se muestra **sin IVA** (Rodrigo, 7/11/2026: «trabajamos con
+números sin IVA»): el saldo de cada factura se divide por la proporción total/neto de su pedido (o por 1,21 si no se
+sabe). El CRM cruza cada fila con su pedido (`aplicarSaldos` en `totales.ts`):
 
 1. Por la factura que el CRM ya tiene enganchada al pedido (tabla `files`).
 2. Si no, por la identificación de la factura («FC PEDVTASTP-00031277 1»).
@@ -86,9 +88,9 @@ Las notas de crédito restan en el pedido de la factura que corrigen; las cobran
 **Lo que falta facturar también es saldo** (Rodrigo, 7/11/2026: «si están sin facturar, el 100% es saldo pendiente»). El
 script mira en el informe de facturas (`ApiFacturasDeVenta`) qué pedidos están facturados: porque la factura sale del
 pedido, o de un remito suyo (el remito dice «pdv 31089» en la descripción; si no lo dice, se buscan los remitos del pedido
-con `ApiGetDocumentosDestinoByIdentificacionExternaDeals`). Sin factura, todo el pedido está por facturar (su total con
-IVA). Facturado, queda lo que todavía no pasó al remito o a la factura (el pendiente del pedido, llevado a IVA con la
-proporción de su total). Eso va en «Por facturar» (`importe_por_facturar`) y se suma al saldo:
+con `ApiGetDocumentosDestinoByIdentificacionExternaDeals`). Sin factura, todo el pedido está por facturar (su neto).
+Facturado, queda lo que todavía no pasó al remito o a la factura (el pendiente del pedido, que ya es neto). Eso va en
+«Por facturar» (`importe_por_facturar`) y se suma al saldo:
 
 **saldo pendiente = lo facturado que falta cobrar + lo que falta facturar.**
 

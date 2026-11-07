@@ -250,11 +250,26 @@ function IndexFor({ type }: { type: ObjectType }) {
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   const resize = useColumnResize(cfg.widths, (widths) => setCfg((c) => ({ ...c, widths })));
+  // Pedidos sin negocio, para control (un pedido va en un solo negocio): es un filtro común sobre «Negocios asociados», así
+  // que se ve como los demás filtros y queda en las vistas guardadas.
+  const esSinNegocio = (f: Filter) => f.prop === 'num_associated_deals' && f.op === 'eq' && Number(f.value) === 0;
+  const sinNegocio = type === 'order' && cfg.groups.some((g) => g.some(esSinNegocio));
+  const toggleSinNegocio = () => setCfg((c) => {
+    if (sinNegocio) return { ...c, groups: c.groups.map((g) => g.filter((f) => !esSinNegocio(f))).filter((g) => g.length) };
+    const f: Filter = { prop: 'num_associated_deals', op: 'eq', value: 0 };
+    return { ...c, groups: c.groups.length ? c.groups.map((g) => [...g, f]) : [[f]] };
+  });
   const quickBar = (
+    <>
+    {type === 'order' && (
+      <div className="qf"><button className={`btn qf-btn${sinNegocio ? ' on' : ''}`} aria-pressed={sinNegocio} onClick={toggleSinNegocio}
+        title="Pedidos que no están en ningún negocio (para control)">Sin negocio</button></div>
+    )}
     <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
       onUnidades={(unidades) => setCfg((c) => ({ ...c, unidades }))}
       onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [] }))} />
+    </>
   );
   const filterButton = <button className={`btn${mode === 'board' ? ' sm' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
   const filterChips = (

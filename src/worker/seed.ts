@@ -335,6 +335,8 @@ export const COMPUTED: Record<string, PropDef[]> = {
   order: [
     ['createdate', 'Fecha de creación', 'datetime', 'Actividad', [], RO],
     ['source', 'Origen del registro', 'string', 'Actividad', [], RO],
+    // Para controlar los pedidos sin negocio (filtro «Sin negocio» de la lista de pedidos; migración 0026).
+    ['num_associated_deals', 'Negocios asociados', 'number', 'Actividad', [], { ...RO, description: 'Un pedido va en un solo negocio: 0 es un pedido sin negocio.' }],
   ],
 };
 

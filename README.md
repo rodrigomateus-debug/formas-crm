@@ -158,8 +158,10 @@ Al cerrar un negocio el monto es un estimado; el número final es el del pedido.
 asociado a un negocio (el total sin IVA de Finnegans, cada hora, o editado a mano), o se le asocia, se le quita o se anula
 un pedido, el negocio pasa a tener la suma de sus pedidos (`src/worker/montos.ts`), y queda en el historial del monto.
 Solo hacia adelante: no reescribe de golpe los montos de negocios viejos. Casos raros: varios pedidos suman; los anulados
-no cuentan; si a un pedido todavía no le llegó el total, el negocio espera; un pedido asociado a dos negocios no toca
-ninguno; los negocios perdidos o en otra moneda no se tocan. Quien cambia a mano el monto de un negocio con pedidos lo deja
+no cuentan; si a un pedido todavía no le llegó el total, el negocio espera; los negocios perdidos o en otra moneda no se
+tocan. Un pedido va en un solo negocio (un negocio sí puede tener varios pedidos): el CRM no deja sumarlo a un segundo. Para
+controlar los pedidos que no están en ningún negocio, la lista de pedidos tiene el filtro «Sin negocio» (propiedad «Negocios
+asociados» = 0). Quien cambia a mano el monto de un negocio con pedidos lo deja
 «Monto a mano» (y los pedidos ya no lo cambian); al desmarcarlo vuelve al total de los pedidos.
 
 ## Fotos de los usuarios

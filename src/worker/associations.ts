@@ -10,6 +10,15 @@ export async function associate(db: D1Database, ctx: Ctx, aId: number, bId: numb
   if (a.object_type === b.object_type && a.object_type !== 'company') {
     throw new HttpError(400, `No se asocian dos registros de tipo ${a.object_type}.`);
   }
+  // Un pedido va en un solo negocio (un negocio sí puede tener varios pedidos): así el monto del negocio es la suma de sus
+  // pedidos sin repartir ninguno (montos.ts). Pedido de Rodrigo del 07/11/2026.
+  const pedido = a.object_type === 'order' && b.object_type === 'deal' ? a : b.object_type === 'order' && a.object_type === 'deal' ? b : null;
+  if (pedido) {
+    const negocio = pedido === a ? b : a;
+    const otro = await db.prepare(`SELECT d.id, d.name FROM associations x JOIN records d ON d.id = x.to_id AND d.archived = 0
+      WHERE x.from_id = ? AND x.to_type = 'deal' AND d.id != ? LIMIT 1`).bind(pedido.id, negocio.id).first<{ id: number; name: string }>();
+    if (otro) throw new HttpError(409, `El pedido «${pedido.name}» ya está en el negocio «${otro.name}». Un pedido va en un solo negocio: quitalo de ese para sumarlo a este.`);
+  }
   // Empresa principal del contacto o del negocio: la primera que se asocia, o la que se marca.
   let primary = !!opts.primary;
   const contactish = (x: RecordRow, y: RecordRow) => x.object_type !== 'company' && y.object_type === 'company';

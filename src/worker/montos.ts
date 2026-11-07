@@ -8,7 +8,8 @@ import type { Ctx } from './env';
 // - varios pedidos en un negocio (se dividió en dos, una reposición): la suma de todos;
 // - pedidos anulados: no cuentan; si están todos anulados (o se le quitaron todos), el negocio queda como estaba;
 // - si a alguno de sus pedidos todavía no le llegó el total, el negocio espera: nunca queda un monto a medias;
-// - un pedido asociado a más de un negocio: no se sabe cuánto es de cada uno, así que esos negocios no se tocan;
+// - un pedido va en un solo negocio (associations.ts no deja sumarlo a un segundo); si alguno quedó en dos (de HubSpot),
+//   no se sabe cuánto es de cada uno, así que esos negocios no se tocan;
 // - negocios perdidos, en otra moneda que los pedidos, o con «Monto a mano» marcado: no se tocan.
 // El cambio queda en el historial del monto, con fuente «pedidos». Se escribe en tanda (pocas consultas aunque sean muchos
 // negocios) y sin tocar la fecha de modificación del negocio, así el tablero no se reordena (como los totales de los pedidos).

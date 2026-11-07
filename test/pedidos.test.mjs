@@ -269,7 +269,9 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   const pad = (p) => p.replace(/(\d+)$/, (n) => n.padStart(8, '0'));
   // Un negocio con el pedido A: cuando llega el total de Finnegans, el monto del negocio pasa a ser el del pedido (montos.ts).
   const deal = (await api('POST', '/records/deal', { props: { dealname: `Negocio del PDV ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 5000 } })).data;
-  await api('POST', '/associations', { from_id: deal.id, to_id: a.id });
+  // Un pedido va en un solo negocio: si quedó en el de una corrida anterior, se lo saca de ahí.
+  for (const d of (await api('GET', `/records/order/${a.id}`)).data.associations?.deal ?? []) await api('DELETE', '/associations', { from_id: d.id, to_id: a.id });
+  assert.equal((await api('POST', '/associations', { from_id: deal.id, to_id: a.id })).status, 200);
   const body = { totales: { [pad(a.props.pedido_finnegans)]: 1000.5, [b.props.pedido_finnegans]: 2000 } };
   const r = (await api('POST', '/hooks/pedidos/totales', body, H)).data;
   assert.ok(r.cruzados >= 2 && r.actualizados >= 2, JSON.stringify(r));

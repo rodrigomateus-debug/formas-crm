@@ -270,14 +270,20 @@ test('el monto del negocio sigue al total de sus pedidos (y los casos raros)', a
   assert.equal((await api('PATCH', `/records/order/${o2.id}`, { props: { hs_pipeline_stage: '3c85a297-e9ce-400b-b42e-9f16853d69d6' } })).status, 200);
   assert.equal((await monto(deal.id)).amount, 400000);
 
-  // Un pedido en dos negocios: no se sabe cuánto es de cada uno, así que no se toca ninguno.
+  // Un pedido va en un solo negocio (un negocio sí puede tener varios): sumarlo a otro no se puede.
   const otro = (await api('POST', '/records/deal', { props: { dealname: `Otro ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 90000 } })).data;
-  await asociar(otro.id, o1.id);
+  const doble = await asociar(otro.id, o1.id);
+  assert.equal(doble.status, 409);
+  assert.match(doble.data.error, /un solo negocio/);
+  assert.equal((await api('POST', '/associations', { from_id: o1.id, to_id: otro.id })).status, 409, 'desde el pedido, tampoco');
   await api('PATCH', `/records/order/${o1.id}`, { props: { hs_total_price: 410000 } });
-  assert.deepEqual([(await monto(deal.id)).amount, (await monto(otro.id)).amount], [400000, 90000]);
-  // Se le quita al otro: vuelve a seguir al pedido.
-  await api('DELETE', '/associations', { from_id: otro.id, to_id: o1.id });
-  assert.equal((await monto(deal.id)).amount, 410000);
+  assert.deepEqual([(await monto(deal.id)).amount, (await monto(otro.id)).amount], [410000, 90000]);
+
+  // Pedidos sin negocio, para control: «Negocios asociados» = 0.
+  const o3 = (await api('POST', '/records/order', { props: { hs_order_name: `Kits ${RUN} 3`, hs_total_price: 1000 } })).data;
+  const filtro = encodeURIComponent(JSON.stringify([{ prop: 'num_associated_deals', op: 'eq', value: 0 }]));
+  const sinNegocio = (await api('GET', `/records/order?q=${encodeURIComponent(`Kits ${RUN}`)}&filters=${filtro}`)).data.results.map((r) => r.id);
+  assert.deepEqual(sinNegocio, [o3.id]);
 
   // Cambiarlo a mano lo deja «Monto a mano»: los pedidos ya no lo pisan, hasta que se desmarca.
   const mano = (await api('PATCH', `/records/deal/${deal.id}`, { props: { amount: 500000 } })).data;

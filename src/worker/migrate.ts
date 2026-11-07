@@ -41,7 +41,9 @@ function convert(p: Property | undefined, v: unknown, owners: Map<string, number
 const CLICKUP_PROPS = ['hs_pipeline_stage', 'unidad_de_negocio', 'cliente_clickup', 'pedido_finnegans', 'url_clickup', 'detalle_produccion', 'entregado_el', 'factura_numero'];
 const clickupOrders: Array<{ id: number; pdv: string }> = [];
 // Contactos y empresas que el CRM ya creó solo (Gmail, Darwin, formularios) antes de migrar: se combinan en el de HubSpot.
-const sameKey: Array<{ id: number; type: 'contact' | 'company'; key: string }> = [];
+// Lo que ya puede estar en el CRM creado por otra vía (Gmail, Darwin): contacto por mail o teléfono, empresa por dominio y
+// negocio por el link a la conversación de Darwin.
+const sameKey: Array<{ id: number; type: 'contact' | 'company' | 'deal'; by: 'email' | 'phone' | 'domain' | 'darwin'; key: string }> = [];
 
 migrate.post('/', async (c) => {
   const db = c.env.DB;
@@ -128,8 +130,12 @@ migrate.post('/', async (c) => {
         // El workflow de Darwin inventaba mails (incompleto<teléfono>@gmail.com) para no duplicar: acá el contacto se busca por teléfono.
         if (type === 'contact' && /^incompleto[^@]*@gmail\.com$/i.test(String(props.email ?? ''))) delete props.email;
         const id = Number(r.hs_id);
-        if (!r.archived && type === 'contact' && props.email) sameKey.push({ id, type, key: String(props.email).trim().toLowerCase() });
-        if (!r.archived && type === 'company' && normDomain(props.domain || props.website)) sameKey.push({ id, type, key: normDomain(props.domain || props.website)! });
+        if (!r.archived && type === 'contact' && props.email) sameKey.push({ id, type, by: 'email', key: String(props.email).trim().toLowerCase() });
+        const tel = type === 'contact' ? normPhone(props.phone || props.mobilephone) : null;
+        if (!r.archived && tel) sameKey.push({ id, type: 'contact', by: 'phone', key: tel });
+        if (!r.archived && type === 'company' && normDomain(props.domain || props.website)) sameKey.push({ id, type, by: 'domain', key: normDomain(props.domain || props.website)! });
+        // Mientras convivan los dos workflows de Darwin (HubSpot y CRM), el mismo cliente entra por los dos.
+        if (!r.archived && type === 'deal' && props.link_a_darwin) sameKey.push({ id, type, by: 'darwin', key: String(props.link_a_darwin).trim() });
         const created = r.created_at ?? now();
         const updated = r.updated_at ?? created;
         const stageEntered = r.stage_entered_at ?? null;
@@ -219,11 +225,12 @@ migrate.post('/', async (c) => {
   // que sabe ClickUp (estado, detalle, factura, remito) y el creado por ClickUp se combina en él.
   let merged = 0;
   const ctx = { user: (await db.prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id LIMIT 1").first<User>())!, source: 'hubspot' };
-  // Contactos (por mail) y empresas (por dominio) creados en el CRM antes de migrar: queda el de HubSpot, con sus
-  // asociaciones y actividades más las del creado acá.
+  // Contactos (por mail o teléfono), empresas (por dominio) y negocios de Darwin (por el link a la conversación) creados en
+  // el CRM antes de migrar: queda el de HubSpot, con sus asociaciones y actividades más las del creado acá.
   if (body.kind === 'records') {
+    const COL = { email: 'lower(email)', phone: 'phone', domain: 'domain', darwin: "CAST(json_extract(props, '$.link_a_darwin') AS TEXT)" };
     for (const k of sameKey) {
-      const dup = await db.prepare(`SELECT id FROM records WHERE object_type = ? AND archived = 0 AND id >= ? AND id != ? AND ${k.type === 'contact' ? 'lower(email)' : 'domain'} = ?`)
+      const dup = await db.prepare(`SELECT id FROM records WHERE object_type = ? AND archived = 0 AND id >= ? AND id != ? AND ${COL[k.by]} = ?`)
         .bind(k.type, NATIVE_ID_START, k.id, k.key).first<{ id: number }>();
       if (!dup) continue;
       await mergeRecords(db, ctx, k.type, k.id, dup.id);

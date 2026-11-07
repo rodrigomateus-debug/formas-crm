@@ -43,8 +43,9 @@ El CRM, cada vez que la IA le pasa una conversación a una vendedora:
   nombres del equipo, como hoy.
 - El resumen de la conversación queda como **nota** en el contacto, el negocio y la empresa.
 
-Mientras convivan los dos workflows (el de HubSpot y el del CRM), la sincronización nocturna desde HubSpot trae también el
-negocio que creó HubSpot y quedan dos: el día que se prende el del CRM se apaga el de HubSpot.
+Mientras convivan los dos workflows (el de HubSpot y el del CRM), el mismo cliente entra por los dos. La sincronización
+nocturna desde HubSpot los une: el contacto por teléfono (o mail) y el negocio por el link a la conversación de Darwin, y
+queda el de HubSpot con lo que había sumado el del CRM (empresa, nota, actividad). El día del corte se apaga el de HubSpot.
 
 Si el CRM no está en Cloudflare Access para `/hooks/*` (ver README), no hace falta permitir IPs; si se quiere,
 Darwin sale desde 32.192.137.35, 32.192.62.181 y 18.235.132.229.

@@ -22,11 +22,15 @@ const CONTACT = { id: id(2), properties: { firstname: 'Marta', lastname: `Migrad
   associations: { companies: { results: [{ id: id(1), type: 'contact_to_company' }] } } };
 const DEAL = { id: id(3), properties: { dealname: `Remeras migradas ${seed}`, pipeline: '674405796', dealstage: '989921333', amount: '1500000', closedate: '2026-02-01T00:00:00Z', hubspot_owner_id: OWNERS[1].id, motivo_de_cierre_perdido: '', createdate: '2025-12-01T10:00:00Z', hs_lastmodifieddate: '2026-01-15T10:00:00Z', hs_v2_date_entered_989921330: '2025-12-01T10:00:00Z', hs_v2_date_entered_989921333: '2026-01-10T10:00:00Z', hs_object_source_label: 'INTEGRATION', hs_object_source_detail_1: 'Pipedream' },
   associations: { contacts: { results: [{ id: id(2), type: 'deal_to_contact' }] }, companies: { results: [{ id: id(1), type: 'deal_to_company' }] } } };
+// El mismo cliente que Darwin ya mandó al CRM (workflow nuevo) y a HubSpot (workflow viejo), con el mismo link a la conversación.
+const DARWIN_LINK = `https://app.getdarwin.ai/agent/1986/conversations/all/15552-549351${seed}`;
+const DARWIN_DEAL = { id: id(8), properties: { dealname: `Juan Pérez - Gorras - 30 - Darwin`, pipeline: '674405796', dealstage: '989921330', link_a_darwin: DARWIN_LINK, createdate: '2026-10-01T10:00:00Z', hs_lastmodifieddate: '2026-10-01T10:00:00Z' },
+  associations: { contacts: { results: [{ id: id(7), type: 'deal_to_contact' }] } } };
 const NOTE = { id: id(4), properties: { hs_timestamp: '2026-01-11T12:00:00Z', hs_note_body: '<p>Pidió <b>muestras</b></p>', hubspot_owner_id: OWNERS[1].id }, associations: { contacts: { results: [{ id: id(2) }] }, deals: { results: [{ id: id(3) }] } } };
 const EMAIL = { id: id(5), properties: { hs_timestamp: '2026-01-12T12:00:00Z', hs_email_subject: 'Cotización', hs_email_text: 'Te paso la cotización', hs_email_direction: 'EMAIL', hs_email_from_email: OWNERS[1].email, hs_email_to_email: CONTACT.properties.email, hubspot_owner_id: OWNERS[1].id }, associations: { contacts: { results: [{ id: id(2) }] }, companies: { results: [{ id: id(1) }] } } };
 const TASK = { id: id(6), properties: { hs_timestamp: new Date(Date.now() + 86400000).toISOString(), hs_task_subject: `Prospectar Migrada ${seed}`, hs_task_body: 'Persona objetivo: Marta', hs_task_status: 'NOT_STARTED', hs_task_priority: 'HIGH', hs_task_type: 'TODO', hubspot_owner_id: OWNERS[1].id }, associations: { companies: { results: [{ id: id(1) }] } } };
 
-const OBJECTS = { companies: [COMPANY], contacts: [CONTACT, DARWIN_CONTACT], deals: [DEAL], orders: [], notes: [NOTE], emails: [EMAIL], tasks: [TASK], calls: [], meetings: [], communications: [] };
+const OBJECTS = { companies: [COMPANY], contacts: [CONTACT, DARWIN_CONTACT], deals: [DEAL, DARWIN_DEAL], orders: [], notes: [NOTE], emails: [EMAIL], tasks: [TASK], calls: [], meetings: [], communications: [] };
 const PROPS = {
   companies: [{ name: 'name', label: 'Name', type: 'string', hubspotDefined: true }, { name: 'campo_nuevo_hs', label: 'Campo nuevo', type: 'string', fieldType: 'text' },
     { name: 'tipo_de_empresa_cotizacion', label: 'Tipo', type: 'enumeration', fieldType: 'select', options: [{ value: 'a_cotizacion_mensual', label: 'A' }, { value: 'd_anual', label: 'D - anual' }] }],
@@ -72,6 +76,10 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   const nativoEmp = (await api(`/records/contact/${nativo.id}`)).associations.company[0];
   assert.ok(nativoEmp, 'empresa creada sola por el dominio');
   await api('/activities', { method: 'POST', headers: json, body: JSON.stringify({ type: 'note', body: `Nota de Gmail ${seed}`, links: [nativo.id] }) });
+  // Y Darwin ya había mandado al CRM el mismo cliente que mandó a HubSpot.
+  const desdeDarwin = await (await fetch(`${CRM}/hooks/darwin`, { method: 'POST', headers: { ...json, authorization: `Bearer ${tok.token}` },
+    body: JSON.stringify({ name: 'Juan Pérez', phone: `549351${seed}`, producto: 'Gorras', cantidad: 30, conversation_id: `15552-549351${seed}` }) })).json();
+  assert.equal(desdeDarwin.deal.created, true, JSON.stringify(desdeDarwin));
   const env = { ...process.env, HUBSPOT_TOKEN: 'fake', CRM_URL: CRM, CRM_TOKEN: tok.token };
   const out = await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });
   assert.match(out.stdout, /Listo/);
@@ -126,6 +134,11 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   const darwin = await api(`/records/contact/${id(7)}`);
   assert.equal(darwin.record.props.email, undefined, 'sin el mail inventado por Darwin');
   assert.equal(darwin.record.props.firstname, 'Juan', 'sin el apellido repetido');
+  assert.equal((await api(`/records/contact/${desdeDarwin.contact.id}`)).redirect, Number(id(7)), 'el contacto que mandó Darwin al CRM se combinó por teléfono');
+  assert.equal((await api(`/records/deal/${desdeDarwin.deal.id}`)).redirect, Number(id(8)), 'y su negocio, por el link a la conversación');
+  const dDeal = await api(`/records/deal/${id(8)}`);
+  assert.equal(dDeal.record.props.link_a_darwin, DARWIN_LINK);
+  assert.deepEqual(dDeal.associations.contact.map((x) => x.id), [Number(id(7))], 'un solo contacto');
 
   // Repetir la migración no duplica nada.
   await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });

@@ -198,6 +198,7 @@ test('Darwin: contacto con WhatsApp, nombre y mail, y la empresa con su dominio 
   assert.equal(r.data.company.created, true);
   const deal = (await api('GET', `/records/deal/${r.data.deal.id}`)).data;
   assert.equal(deal.record.props.dealname, `Laura ${RUN} - Abanicos - 100 - Darwin`);
+  assert.equal(deal.record.props.link_a_darwin, `https://app.getdarwin.ai/agent/1986/conversations/all/15552-${phone}`, 'el link para ir directo a la conversación');
   const me = (await api('GET', '/me')).data;
   assert.equal(deal.record.props.owner_id, me.id, 'la vendedora aunque en Darwin tenga el mail de formas.ar');
   const contact = (await api('GET', `/records/contact/${r.data.contact.id}`)).data;

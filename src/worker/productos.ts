@@ -103,19 +103,27 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
       await db.prepare('INSERT OR REPLACE INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, ?, ?)').bind(recordId, sync.fetched_at, error, source).run();
     }
   }
-  const { results } = await db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
-      li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description, ${FOTO} AS image_url
-    FROM line_items li LEFT JOIN products p ON p.code = li.code ${FOTO_STP('?')} WHERE li.record_id = ? ORDER BY li.position`)
-    .bind(clavePedido(props.pedido_finnegans), recordId)
-    .all<{ code: string | null; description: string | null; quantity: number | null; unit_price: number | null; discount: number; tax_included: number; currency: string | null;
-      li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null; image_url: string | null }>();
-  const items = results.map((r) => ({
-    code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: r.image_url, status: r.status, clickup_task: r.clickup_task,
+  const clave = clavePedido(props.pedido_finnegans);
+  const [renglones, cot] = await db.batch([
+    db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
+        li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description,
+        so.image_url AS foto_cot, p.image_url AS foto_fin, sk.image_url AS foto_sku
+      FROM line_items li LEFT JOIN products p ON p.code = li.code ${FOTO_STP('?')} WHERE li.record_id = ? ORDER BY li.position`).bind(clave, recordId),
+    db.prepare('SELECT sku, nombre, cantidades, image_url FROM stp_items WHERE pedido = ? ORDER BY pos').bind(clave ?? ''),
+  ]);
+  const results = renglones.results as Array<{ code: string | null; description: string | null; quantity: number | null; unit_price: number | null; discount: number; tax_included: number; currency: string | null;
+    li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null;
+    foto_cot: string | null; foto_fin: string | null; foto_sku: string | null }>;
+  const { fotos, sueltas } = fotosDeRenglones(results, cot.results as StpItem[]);
+  const items = results.map((r, i) => ({
+    code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], status: r.status, clickup_task: r.clickup_task,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,
   }));
   return {
     pedido, configured, clickup: !!taskId, source: sync?.source ?? null, fetched_at: sync?.fetched_at ?? null, error: sync?.error ?? null, items,
+    // Las fotos de la cotización que no quedaron en ningún producto (solo si a alguno le falta foto).
+    cotizacion_fotos: items.length && items.every((i) => i.image_url) ? [] : sueltas,
     total: items.reduce((t, i) => t + (i.subtotal ?? 0), 0), currency: items[0]?.currency ?? 'ARS', tax_included: items.some((i) => i.tax_included),
   };
 }
@@ -166,24 +174,125 @@ export async function cargarProductosPendientes(env: Env, limit = 25) {
 // la de Finnegans; si tampoco, la del SKU en otras cotizaciones.
 const FOTO = 'COALESCE(so.image_url, p.image_url, sk.image_url)';
 const FOTO_STP = (pedido: string) => `LEFT JOIN stp_imagenes so ON so.pedido = ${pedido} AND so.sku = UPPER(TRIM(li.code))
-    LEFT JOIN stp_imagenes sk ON sk.pedido = '' AND sk.sku = UPPER(TRIM(li.code))`;
+    LEFT JOIN stp_imagenes sk ON sk.pedido = '' AND sk.sku = UPPER(TRIM(li.code))
+      AND UPPER(TRIM(li.code)) NOT LIKE '%!_GE!_%' ESCAPE '!' AND UPPER(TRIM(li.code)) NOT LIKE '%!_GE' ESCAPE '!'`;
 const PEDIDO_DE_R = "NULLIF(UPPER(TRIM(json_extract(r.props, '$.pedido_finnegans'))), '')";
+
+// Los productos manuales comparten un SKU genérico («PICPS_GE_6000», «PS_GE_2000»): un mismo código es vasos, naipes y
+// paletas en el mismo pedido, así que ni la foto de ese SKU en la cotización ni la de otras cotizaciones sirven.
+const esGenerico = (code: string | null) => /_GE(_|$)/i.test(code ?? '');
+// Las palabras que nombran el producto: sin acentos, en singular, sin códigos de modelo, colores ni las palabras del nombre
+// de los genéricos («Vasos» → {VASO}; «Vaso Térmico Negro 500ML» → {VASO, TERMICO}). La misma idea que _palabras del tablero.
+const PAL_NO = new Set(['NEGRO', 'NEGRA', 'BLANCO', 'BLANCA', 'AZUL', 'ROJO', 'ROJA', 'VERDE', 'GRIS', 'AMARILLO', 'NARANJA', 'VIOLETA',
+  'ROSA', 'MARRON', 'BEIGE', 'CELESTE', 'NATURAL', 'COLOR', 'COLORE', 'ALGODON', 'POLIESTER', 'ACERO', 'INOXIDABLE', 'PLASTICO', 'METAL',
+  'METALICO', 'ALUMINIO', 'CUERO', 'MADERA', 'VIDRIO', 'TELA', 'PARA', 'LOGO', 'PERSONALIZADO', 'PERSONALIZADA', 'ESTAMPADO', 'BORDADO',
+  'IMPRESION', 'SERVICIO', 'PRODUCTO', 'MODELO', 'TALLE', 'COMBINADO', 'COMBINADA', 'UNIDAD', 'PACK', 'MARINO', 'CLARO', 'OSCURO',
+  'PRODUCCION', 'SIMPLE', 'HOGAR', 'TIEMPO', 'LIBRE', 'GENERICO', 'GENERICA', 'CON', 'SIN', 'DESDE', 'HASTA']);
+export function palabras(...textos: Array<string | null | undefined>) {
+  const out = new Set<string>();
+  for (const t of textos) {
+    for (let w of String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().split(/[^A-Z0-9]+/)) {
+      if (w.length < 4 || !/^[A-Z]+$/.test(w)) continue;
+      if (w.endsWith('S') && w.length > 4) w = w.slice(0, -1);
+      if (!PAL_NO.has(w)) out.add(w);
+    }
+  }
+  return out;
+}
+
+export interface StpItem { sku: string; nombre: string; cantidades: string; image_url: string }
+interface RenglonFoto { code: string | null; description: string | null; quantity: number | null; li_name: string | null; name: string | null;
+  foto_cot: string | null; foto_fin: string | null; foto_sku: string | null }
+// La foto de cada renglón del pedido, en este orden:
+//   1. la de su SKU en la cotización del pedido (si el SKU es genérico, solo si la cotización tiene un único producto con él);
+//   2. la de su ficha en Finnegans, si el código no es genérico;
+//   3. la del producto de la cotización con el mismo nombre (las palabras de la descripción del renglón, o de su nombre si
+//      el código no es genérico); si empatan, el de la cantidad más parecida;
+//   4. la del producto de la cotización con la misma cantidad, si es uno solo;
+//   5. la de su SKU en otras cotizaciones (nunca para los genéricos).
+// Cada producto de la cotización se usa una sola vez. `sueltas`: las fotos de la cotización que no quedaron en ningún renglón.
+export function fotosDeRenglones(renglones: RenglonFoto[], cot: StpItem[]) {
+  const libres = cot.map((c, i) => ({ i, sku: c.sku.toUpperCase(), pal: palabras(c.nombre), cant: cantidadesDe(c.cantidades), url: c.image_url }));
+  const usados = new Set<number>();
+  const tomar = (k: number) => { usados.add(k); return libres[k].url; };
+  const porSku = (code: string | null) => libres.filter((c) => c.sku === (code ?? '').trim().toUpperCase());
+  const fotos: Array<string | null> = renglones.map(() => null);
+  // 1. Por SKU en la cotización del pedido.
+  renglones.forEach((r, i) => {
+    if (!r.foto_cot) return;
+    const mismos = porSku(r.code);
+    if (esGenerico(r.code) && mismos.length > 1) return;
+    fotos[i] = r.foto_cot;
+    const c = mismos.find((x) => !usados.has(x.i) && x.url === r.foto_cot) ?? mismos.find((x) => !usados.has(x.i));
+    if (c) usados.add(c.i);
+  });
+  // 2. La ficha de Finnegans (la de un genérico, si tiene, va después del cruce por nombre).
+  renglones.forEach((r, i) => { if (!fotos[i] && r.foto_fin && !esGenerico(r.code)) fotos[i] = r.foto_fin; });
+  const dif = (q: number | null, cant: number[]) => (q == null || !cant.length ? Infinity : Math.min(...cant.map((c) => Math.abs(c - q) / Math.max(c, q, 1))));
+  // 3. Por nombre: primero los renglones con más palabras en común (el cruce más seguro).
+  const candidatos: Array<{ i: number; k: number; comunes: number; d: number }> = [];
+  renglones.forEach((r, i) => {
+    if (fotos[i]) return;
+    const pal = palabras(r.description, r.li_name, esGenerico(r.code) ? null : r.name);
+    for (const c of libres) {
+      const comunes = [...c.pal].filter((w) => pal.has(w)).length;
+      if (comunes) candidatos.push({ i, k: c.i, comunes, d: dif(r.quantity, c.cant) });
+    }
+  });
+  candidatos.sort((a, b) => b.comunes - a.comunes || a.d - b.d);
+  for (const c of candidatos) if (!fotos[c.i] && !usados.has(c.k)) fotos[c.i] = tomar(c.k);
+  renglones.forEach((r, i) => { if (!fotos[i] && r.foto_fin) fotos[i] = r.foto_fin; });
+  // 4. Por cantidad: solo si un único producto libre de la cotización tiene esa cantidad.
+  renglones.forEach((r, i) => {
+    if (fotos[i] || r.quantity == null) return;
+    const iguales = libres.filter((c) => !usados.has(c.i) && c.cant.includes(r.quantity!));
+    if (iguales.length === 1) fotos[i] = tomar(iguales[0].i);
+  });
+  // 5. La del SKU en otras cotizaciones.
+  renglones.forEach((r, i) => { if (!fotos[i] && r.foto_sku && !esGenerico(r.code)) fotos[i] = r.foto_sku; });
+  const puestas = new Set(fotos);
+  const sueltas = [...new Set(libres.filter((c) => !usados.has(c.i) && !puestas.has(c.url)).map((c) => c.url))];
+  return { fotos, sueltas };
+}
+function cantidadesDe(s: string) {
+  try { const a = JSON.parse(s); return Array.isArray(a) ? a.map(Number).filter((n) => Number.isFinite(n) && n > 0) : []; } catch { return []; }
+}
 const URL_OK = /^https?:\/\/[^\s"'<>]{4,600}$/;
 
-export interface ImagenesEstado { recibidas: number; guardadas: number; borradas: number; pedidos: number; skus: number; at: string }
+export interface ImagenesEstado { recibidas: number; guardadas: number; borradas: number; pedidos: number; skus: number;
+  productos?: { recibidos: number; pedidos: number; total: number }; at: string }
 
 // {filas: [["PEDVTASTP - 31277", "SKU", "https://…"], ["", "SKU", "https://…"], …]}: pedido vacío es la foto del SKU; una
 // fila sin foto borra la que había.
-export async function aplicarImagenes(env: Env, body: { filas?: unknown }): Promise<ImagenesEstado> {
-  if (!Array.isArray(body?.filas)) throw new HttpError(400, 'Falta filas: [["PEDVTASTP - 31277", "SKU", "https://…"], …].');
+// {productos: [["PEDVTASTP - 31277", "SKU", "Nombre del producto", [100, 250], "https://…"], …]}: los productos de la cotización
+// de cada pedido (tabla stp_items); los de cada pedido que llega reemplazan a los que tenía. ["PEDVTASTP - 31277"] solo, los borra.
+// Los productos de un pedido tienen que venir en el mismo envío. Puede venir uno solo de los dos.
+export async function aplicarImagenes(env: Env, body: { filas?: unknown; productos?: unknown }): Promise<ImagenesEstado> {
+  if (!Array.isArray(body?.filas) && !Array.isArray(body?.productos)) {
+    throw new HttpError(400, 'Falta filas: [["PEDVTASTP - 31277", "SKU", "https://…"], …] o productos: [["PEDVTASTP - 31277", "SKU", "Nombre", [100], "https://…"], …].');
+  }
   const filas = new Map<string, [string, string, string]>();
-  for (const f of body.filas as unknown[]) {
+  for (const f of (Array.isArray(body.filas) ? body.filas : []) as unknown[]) {
     if (!Array.isArray(f)) continue;
     const pedido = f[0] ? clavePedido(f[0]) : '';
     const sku = String(f[1] ?? '').trim().toUpperCase();
     const url = String(f[2] ?? '').trim();
     if (pedido === null || !sku || sku.length > 120 || (url && !URL_OK.test(url))) continue;
     filas.set(`${pedido}|${sku}`, [pedido, sku, url]);
+  }
+  // Los productos, agrupados por pedido (en el orden en que llegan).
+  const productos = new Map<string, Array<[string, number, string, string, string, string]>>();
+  for (const f of (Array.isArray(body.productos) ? body.productos : []) as unknown[]) {
+    if (!Array.isArray(f)) continue;
+    const pedido = clavePedido(f[0]);
+    if (!pedido) continue;
+    const lista = productos.get(pedido) ?? [];
+    productos.set(pedido, lista);
+    const sku = String(f[1] ?? '').trim().toUpperCase();
+    const url = String(f[4] ?? '').trim();
+    if (!sku || sku.length > 120 || !URL_OK.test(url)) continue;
+    const cant = (Array.isArray(f[3]) ? f[3] : [f[3]]).map(Number).filter((n) => Number.isFinite(n) && n > 0).slice(0, 20);
+    lista.push([pedido, lista.length, sku, String(f[2] ?? '').trim().slice(0, 200), JSON.stringify(cant), url]);
   }
   const db = env.DB;
   const guardar = [...filas.values()].filter((f) => f[2]);
@@ -198,10 +307,32 @@ export async function aplicarImagenes(env: Env, body: { filas?: unknown }): Prom
     tandas.push(db.prepare(`DELETE FROM stp_imagenes WHERE (pedido, sku) IN (SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?))`)
       .bind(JSON.stringify(borrar)));
   }
+  const pedidos = [...productos.keys()];
+  for (let i = 0; i < pedidos.length; i += 1000) {
+    tandas.push(db.prepare('DELETE FROM stp_items WHERE pedido IN (SELECT value FROM json_each(?))').bind(JSON.stringify(pedidos.slice(i, i + 1000))));
+  }
+  const items = [...productos.values()].flat();
+  for (let i = 0; i < items.length; i += 1000) {
+    tandas.push(db.prepare(`INSERT INTO stp_items (pedido, pos, sku, nombre, cantidades, image_url)
+      SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'),
+        json_extract(value, '$[5]') FROM json_each(?)`).bind(JSON.stringify(items.slice(i, i + 1000))));
+  }
   if (tandas.length) await db.batch(tandas);
-  const n = await db.prepare("SELECT COALESCE(SUM(pedido != ''), 0) AS pedidos, COALESCE(SUM(pedido = ''), 0) AS skus FROM stp_imagenes").first<{ pedidos: number; skus: number }>();
-  const estado = { recibidas: (body.filas as unknown[]).length, guardadas: guardar.length, borradas: borrar.length, pedidos: n?.pedidos ?? 0, skus: n?.skus ?? 0, at: new Date().toISOString() };
-  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('imagenes_stp', ?)").bind(JSON.stringify(estado)).run();
+  const [n, m] = await db.batch([
+    db.prepare("SELECT COALESCE(SUM(pedido != ''), 0) AS pedidos, COALESCE(SUM(pedido = ''), 0) AS skus FROM stp_imagenes"),
+    db.prepare('SELECT COUNT(*) AS total FROM stp_items'),
+  ]);
+  const nn = n.results[0] as { pedidos: number; skus: number } | undefined;
+  const estado: ImagenesEstado = { recibidas: Array.isArray(body.filas) ? body.filas.length : 0, guardadas: guardar.length, borradas: borrar.length,
+    pedidos: nn?.pedidos ?? 0, skus: nn?.skus ?? 0, at: new Date().toISOString() };
+  if (Array.isArray(body.productos)) {
+    estado.productos = { recibidos: items.length, pedidos: pedidos.length, total: (m.results[0] as { total: number } | undefined)?.total ?? 0 };
+  }
+  // El estado de los productos se guarda aparte, para que un envío de solo filas no lo pise.
+  await db.batch([
+    ...(Array.isArray(body.filas) ? [db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('imagenes_stp', ?)").bind(JSON.stringify({ ...estado, productos: undefined }))] : []),
+    ...(estado.productos ? [db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('imagenes_stp_productos', ?)").bind(JSON.stringify({ ...estado.productos, at: estado.at }))] : []),
+  ]);
   return estado;
 }
 

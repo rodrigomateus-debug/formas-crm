@@ -46,6 +46,11 @@ const filas = csv(texto.replace(/^﻿/, ''));
 const h = (filas[0] ?? []).map((x) => x.trim().toUpperCase());
 const col = (n) => h.indexOf(n);
 const [cPdv, cSku, cImg, cFecha] = [col('PDV FINNEGANS'), col('SKU'), col('IMAGEN'), col('FECHA')];
+const [cNombre, cCant] = [col('NOMBRE DEL PRODUCTO'), col('CANTIDAD')];
+// El separador decimal de CANTIDAD, para toda la columna (como formato_columna del tablero): «,» si algún valor trae coma
+// o puntos de miles encadenados («1.234.567»); «.» si no (los exports de octubre de 2026 traen «492.765» con punto decimal).
+const conComa = cCant >= 0 && filas.slice(1).some((r) => /,|\d\.\d{3}\.\d/.test(String(r[cCant] ?? '')));
+const numero = (v) => { const t = String(v ?? '').replace(/[^\d.,-]/g, ''); return Number(conComa ? t.replace(/\./g, '').replace(',', '.') : t); };
 if ([cPdv, cSku, cImg].some((c) => c < 0)) { console.error('El registro de cotizaciones no trae las columnas PDV FINNEGANS, SKU e IMAGEN.'); process.exit(1); }
 
 const clave = (p) => { const m = String(p ?? '').match(/^\s*([A-Za-z]+)\s*-\s*(\d+)\s*$/); return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null; };
@@ -53,14 +58,28 @@ const clave = (p) => { const m = String(p ?? '').match(/^\s*([A-Za-z]+)\s*-\s*(\
 const personalizada = (u) => /user-images|zakeke/i.test(u);
 
 const datos = filas.slice(1)
-  .map((r) => ({ pdv: clave(r[cPdv]), sku: String(r[cSku] ?? '').trim().toUpperCase(), img: String(r[cImg] ?? '').trim(), fecha: cFecha >= 0 ? String(r[cFecha] ?? '') : '' }))
+  .map((r) => ({ pdv: clave(r[cPdv]), sku: String(r[cSku] ?? '').trim().toUpperCase(), img: String(r[cImg] ?? '').trim(), fecha: cFecha >= 0 ? String(r[cFecha] ?? '') : '',
+    nombre: cNombre >= 0 ? String(r[cNombre] ?? '').trim() : '', cant: cCant >= 0 ? numero(r[cCant]) : NaN }))
   .filter((r) => r.sku && /^https?:\/\/\S+$/.test(r.img) && r.img.length <= 600)
   .sort((a, b) => a.fecha.localeCompare(b.fecha));   // la más nueva pisa a la anterior
 
 const porPedido = new Map();   // "PDV|SKU" → foto
 const porSku = new Map();      // SKU → Map(foto → [veces, orden])
+// Los productos de la cotización de cada pedido, con su nombre y sus cantidades: así el CRM le pone foto a los renglones de
+// Finnegans con un código genérico («PICPS_GE_6000», con el producto en la descripción), que no coinciden por SKU. Un
+// producto es SKU + nombre (los manuales comparten el SKU genérico); la foto, la de la cotización más nueva.
+const productos = new Map();   // PDV → Map("SKU|nombre" → {sku, nombre, cants, img})
 datos.forEach((r, i) => {
   if (r.pdv) porPedido.set(`${r.pdv}|${r.sku}`, [r.pdv, r.sku, r.img]);
+  if (r.pdv) {
+    const m = productos.get(r.pdv) ?? new Map();
+    productos.set(r.pdv, m);
+    const k = `${r.sku}|${r.nombre.toUpperCase()}`;
+    const p = m.get(k) ?? { sku: r.sku, nombre: r.nombre, cants: new Set(), img: r.img };
+    p.img = r.img;
+    if (r.cant > 0) p.cants.add(r.cant);
+    m.set(k, p);
+  }
   if (personalizada(r.img)) return;
   const m = porSku.get(r.sku) ?? new Map();
   const [n] = m.get(r.img) ?? [0];
@@ -73,19 +92,31 @@ for (const [sku, m] of porSku) {
   envio.push(['', sku, img]);
 }
 
-let guardadas = 0, estado = null;
-for (let i = 0; i < envio.length; i += 2500) {
+async function enviar(body) {
   let res;
   for (let k = 0; ; k++) {
     res = await fetch(`${base}/hooks/productos/imagenes`, { method: 'POST', redirect: 'manual',
-      headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ filas: envio.slice(i, i + 2500) }) });
+      headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (res.ok || k >= 2) break;
     await new Promise((r) => setTimeout(r, 5000));
   }
   if (!res.ok) { console.error(`CRM /hooks/productos/imagenes: HTTP ${res.status}`); process.exit(1); }
-  estado = await res.json();
+  return res.json();
+}
+let guardadas = 0, estado = null;
+for (let i = 0; i < envio.length; i += 2500) {
+  estado = await enviar({ filas: envio.slice(i, i + 2500) });
   guardadas += estado.guardadas;
 }
+// Los productos van por pedido entero en cada envío (el CRM reemplaza los de cada pedido que llega).
+let tanda = [], prodEstado = null, nProductos = 0;
+for (const [pdv, m] of productos) {
+  for (const p of m.values()) tanda.push([pdv, p.sku, p.nombre, [...p.cants], p.img]);
+  nProductos += m.size;
+  if (tanda.length >= 2500) { prodEstado = (await enviar({ productos: tanda })).productos; tanda = []; }
+}
+if (tanda.length) prodEstado = (await enviar({ productos: tanda })).productos;
 const pedidos = new Set([...porPedido.values()].map(([p]) => p)).size;
 console.log(`STP: ${filas.length - 1} renglones de cotizaciones, ${datos.length} con foto. Fotos por pedido: ${porPedido.size} (${pedidos} pedidos); por SKU: ${porSku.size}.`);
 console.log(`CRM: ${guardadas} guardadas; en total ${estado?.pedidos ?? '?'} por pedido y ${estado?.skus ?? '?'} por SKU.`);
+console.log(`Productos de las cotizaciones: ${nProductos} de ${productos.size} pedidos${cNombre < 0 ? ' (el registro no trae NOMBRE DEL PRODUCTO)' : ''}; en el CRM, ${prodEstado?.total ?? '?'}.`);

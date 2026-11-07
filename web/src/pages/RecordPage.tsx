@@ -532,7 +532,7 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
 interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null }
-interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean }
+interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[] }
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
 // los artículos del PDV de ClickUp (producto, cantidad, código y estado de producción, sin precio).
 // En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
@@ -593,6 +593,16 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
           {it.subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>}
         </div>
       ))}
+      {(d?.cotizacion_fotos?.length ?? 0) > 0 && (
+        <div className="assoc-item" style={{ flexDirection: 'column', gap: 6 }}>
+          <div className="small muted">{items.length ? 'Fotos de la cotización del STP que no se pudieron atribuir a un producto' : 'Fotos de la cotización del STP'}</div>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            {d!.cotizacion_fotos!.map((u) => (
+              <a key={u} href={u} target="_blank" rel="noreferrer" className="product-img" title="Ver la foto"><img src={u} alt="" loading="lazy" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).classList.add('broken'); }} /></a>
+            ))}
+          </div>
+        </div>
+      )}
       {items.length > max && (
         <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)} aria-expanded={all}>{all ? 'Ver menos' : `Ver más (${items.length - max})`}</button></div>
       )}

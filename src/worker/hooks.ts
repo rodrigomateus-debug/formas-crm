@@ -257,15 +257,18 @@ hooks.post('/pedidos/remitos/limpiar', async (c) => {
 });
 
 // Fotos de los productos desde el registro de cotizaciones del STP (scripts/stp-imagenes.mjs):
-// {filas: [["PEDVTASTP - 31277", "SKU", "https://…"], ["", "SKU", "https://…"], …]}.
+// {filas: [["PEDVTASTP - 31277", "SKU", "https://…"], ["", "SKU", "https://…"], …]} y los productos de cada cotización,
+// {productos: [["PEDVTASTP - 31277", "SKU", "Nombre", [100], "https://…"], …]} (ver aplicarImagenes en productos.ts).
 hooks.post('/productos/imagenes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await aplicarImagenes(c.env, await c.req.json()));
 });
 hooks.get('/productos/imagenes', async (c) => {
   await adminToken(c.env, c.req.raw);
-  const r = await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'imagenes_stp'").first<{ value: string }>();
-  return c.json(r ? JSON.parse(r.value) : null);
+  const { results } = await c.env.DB.prepare("SELECT key, value FROM settings WHERE key IN ('imagenes_stp', 'imagenes_stp_productos')").all<{ key: string; value: string }>();
+  const de = (k: string) => { const r = results.find((x) => x.key === k); return r ? JSON.parse(r.value) : null; };
+  const filas = de('imagenes_stp'), productos = de('imagenes_stp_productos');
+  return c.json(filas || productos ? { ...filas, productos } : null);
 });
 
 // Bocetos en Drive: dónde se guardan (lo mismo que Configuración → Integraciones) y probar el acceso.

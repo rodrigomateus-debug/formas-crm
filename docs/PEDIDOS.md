@@ -106,8 +106,17 @@ manda a `POST /hooks/productos/imagenes` (tabla `stp_imagenes`):
 - **Por pedido**: el PDV de Finnegans de la cotización y el SKU → la foto de ese pedido (la variante que se cotizó).
 - **Por SKU**: la foto que más se repite en todas las cotizaciones, sin las personalizadas con el logo de un cliente
   (Zecat y Zakeke), para los pedidos que no tienen cotización en el STP.
+- **Los productos de la cotización de cada pedido** (`NOMBRE DEL PRODUCTO`, sus `CANTIDAD` y la foto; tabla `stp_items`).
+  Aviso de Rodrigo del 7/11/2026: en la tarjeta se veían las fotos y en el panel de la derecha no, porque muchos pedidos
+  se cargan en Finnegans con un código genérico («PICPS_GE_6000», con «Vasos», «Naipes»… en la descripción) que no es el
+  SKU de la cotización.
 
-Para cada producto del pedido manda la de su cotización; si no hay, la de su ficha en Finnegans; si tampoco, la del SKU.
+Para cada producto del pedido (`fotosDeRenglones` en `productos.ts`): la de su SKU en la cotización (si el SKU es genérico,
+solo si la cotización tiene un único producto con él); si no, la de su ficha en Finnegans (no para los genéricos); si no, la
+del producto de la cotización con el mismo nombre (las palabras de la descripción, sin colores ni materiales, en singular);
+si no, la del único producto de la cotización con su misma cantidad; si no, la del SKU en otras cotizaciones (nunca para los
+genéricos, que en cada cotización son otra cosa). Cada producto de la cotización se usa una sola vez; las fotos que no
+quedaron en ningún renglón se muestran abajo en el panel, como «fotos de la cotización», si a algún producto le falta foto.
 En la tarjeta, después de las fotos de los productos van las otras de su cotización (sirven aunque los productos todavía no
 se hayan leído o sus códigos no coincidan con los SKU). Los pedidos de NoEstres no pasan por el STP. Una fila sin foto
 borra la que había; `GET /hooks/productos/imagenes` dice qué llegó la última vez.

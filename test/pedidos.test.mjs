@@ -82,7 +82,7 @@ before(async () => {
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV.padStart(8, '0')}`) {
       return send({ Cliente: 'C-PRUEBA', MonedaCodigo: 'PES', Items: [
         { ProductoCodigo: 'IMP_P18.030.03', Cantidad: 300, Precio: 8339.6, Descuento1: 0, Descuento2: 0, Descripcion: '', IncluyeImpuesto: false },
-        { ProductoCodigo: 'OTRO-1', Cantidad: 10, Precio: 100, Descuento1: 10, Descuento2: 0, Descripcion: 'Con logo a 1 color', IncluyeImpuesto: false },
+        { ProductoCodigo: 'OTRO-1', Cantidad: 10, Precio: 100, Descuento1: 10, Descuento2: 0, Descripcion: 'Gorras con logo a 1 color', IncluyeImpuesto: false },
       ] });
     }
     if (p === '/fin/producto/IMP_P18.030.03') return send({ Nombre: 'Bolsa Shopper Colors Azul Marino', Descripcion: 'Bolsa de lona con base de yute.', ProductoImagen: 'https://www.promoproductos.com/upload/bolsa.jpg' });
@@ -215,7 +215,7 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.equal(pr.items.length, 2);
   assert.deepEqual([pr.items[0].name, pr.items[0].quantity, pr.items[0].unit_price, pr.items[0].subtotal, pr.items[0].image_url, pr.items[0].description],
     ['Bolsa Shopper Colors Azul Marino', 300, 8339.6, 2501880, 'https://www.promoproductos.com/upload/bolsa.jpg', 'Bolsa de lona con base de yute.']);
-  assert.deepEqual([pr.items[1].name, pr.items[1].discount, pr.items[1].subtotal, pr.items[1].description], ['OTRO-1', 10, 900, 'Con logo a 1 color'], 'sin ficha: el código; con su descuento');
+  assert.deepEqual([pr.items[1].name, pr.items[1].discount, pr.items[1].subtotal, pr.items[1].description], ['OTRO-1', 10, 900, 'Gorras con logo a 1 color'], 'sin ficha: el código; con su descuento');
   assert.equal(pr.total, 2502780);
   hits = 0;
   await api('GET', `/records/order/${o.id}/products`);
@@ -338,6 +338,31 @@ test('fotos del STP: la de la cotización del pedido; si no, la de Finnegans; si
   assert.deepEqual(await fotos(), [BOLSA, null]);
   assert.deepEqual((await tarjeta()).fotos, [BOLSA]);
   assert.equal((await api('GET', '/hooks/productos/imagenes', undefined, H)).data.borradas, 4, 'lo último que llegó');
+
+  // Los productos de la cotización: el renglón cuyo SKU no está en el STP se cruza por nombre («Gorras con logo…» con la
+  // «Gorra trucker»), aunque otro producto tenga su misma cantidad; el que tiene foto en Finnegans la conserva.
+  const productos = async (lista) => (await api('POST', '/hooks/productos/imagenes', { productos: lista }, H)).data;
+  const panel = async () => (await api('GET', `/records/order/${a.id}/products`)).data;
+  const P = a.props.pedido_finnegans;
+  r = await productos([[P, 'PS_GE_2000', 'Gorra trucker bordada', [25, 50], 'https://img.test/gorra.jpg'],
+    [P, 'PS_GE_2000', 'Lapicera', [10], 'https://img.test/lapicera.jpg'], [P, 'X', 'Mal', [1], 'ftp://no']]);
+  assert.deepEqual([r.productos.recibidos, r.productos.pedidos], [2, 1], 'sin la foto rara');
+  let pn = await panel();
+  assert.deepEqual(pn.items.map((i) => i.image_url), [BOLSA, 'https://img.test/gorra.jpg']);
+  assert.deepEqual(pn.cotizacion_fotos, [], 'todos tienen foto: no hace falta la tira');
+  // Sin el nombre, por la cantidad (si es un solo producto con esa cantidad); y lo que sobra va a la tira del panel.
+  await productos([[P, 'PS_GE_2000', 'Taza', [10], 'https://img.test/taza.jpg'], [P, 'PS_GE_2000', 'Mate', [99], 'https://img.test/mate.jpg']]);
+  pn = await panel();
+  assert.deepEqual(pn.items.map((i) => i.image_url), [BOLSA, 'https://img.test/taza.jpg'], 'reemplaza los del pedido');
+  await productos([[P, 'PS_GE_2000', 'Mate', [99], 'https://img.test/mate.jpg']]);
+  pn = await panel();
+  assert.deepEqual(pn.items.map((i) => i.image_url), [BOLSA, null]);
+  assert.deepEqual(pn.cotizacion_fotos, ['https://img.test/mate.jpg']);
+  assert.equal((await api('GET', '/hooks/productos/imagenes', undefined, H)).data.productos.pedidos, 1);
+  // El pedido solo, sin productos, los borra.
+  await productos([[P]]);
+  pn = await panel();
+  assert.deepEqual([pn.items.map((i) => i.image_url), pn.cotizacion_fotos], [[BOLSA, null], []]);
 });
 
 test('bocetos: el aprobado se adjunta en ClickUp a la subtarea de su artículo, y cada producto trae su estado', async (t) => {

@@ -1,4 +1,5 @@
 // Contrato con el servidor (/hooks/chofer/api) y el link personal del chofer.
+import { instalada } from './instalar';
 
 export type RemitoChofer = {
   id: number;
@@ -35,20 +36,37 @@ export function tokenDeTexto(texto: string): string | null {
   return suelto ? suelto[0] : null;
 }
 
-/** Al abrir: si el link trae #t=…, lo guarda y lo saca de la barra de direcciones. */
+/** Al abrir: toma el token del link (#t=…) o, si no viene, el que quedó guardado en este celular. */
 export function tomarTokenDelLink(): void {
-  const hash = window.location.hash;
-  if (hash.includes('t=')) {
-    const t = tokenDeTexto(hash);
-    if (t) usarToken(t);
-    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* da igual */ }
+  const delLink = window.location.hash.includes('t=') ? tokenDeTexto(window.location.hash) : null;
+  if (delLink) {
+    tokenEnMemoria = delLink;
+    guardar(CLAVE_TOKEN, delLink);
+  } else {
+    tokenEnMemoria = leer(CLAVE_TOKEN);
   }
-  if (!tokenEnMemoria) tokenEnMemoria = leer(CLAVE_TOKEN);
+  reflejarToken();
+}
+
+/** Deja el token donde lo necesita «Agregar a la pantalla de inicio».
+    - El manifest se pide con ?t=…: el servidor lo devuelve con el link personal como dirección de arranque. Así la app
+      instalada abre ya con el token (en iPhone la app de inicio no comparte lo guardado con Safari).
+    - En el navegador, #t=… queda en la dirección (iOS a veces guarda la dirección actual). Instalada, se saca. */
+function reflejarToken(): void {
+  const t = tokenEnMemoria;
+  try {
+    const enlace = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+    if (enlace) enlace.href = `${import.meta.env.BASE_URL}manifest.webmanifest${t ? `?t=${encodeURIComponent(t)}` : ''}`;
+    const base = window.location.pathname + window.location.search;
+    const quiero = t && !instalada() ? `#t=${encodeURIComponent(t)}` : '';
+    if (window.location.hash !== quiero) history.replaceState(history.state, '', base + quiero);
+  } catch { /* da igual */ }
 }
 
 export function usarToken(t: string): void {
   tokenEnMemoria = t;
   guardar(CLAVE_TOKEN, t);
+  reflejarToken();
 }
 export function token(): string | null { return tokenEnMemoria; }
 

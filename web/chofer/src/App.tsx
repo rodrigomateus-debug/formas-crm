@@ -5,7 +5,8 @@ import {
 import { envios, type Envio } from './envios';
 import { achicarFoto } from './imagen';
 import { conTope, ubicacion, type Punto } from './ubicacion';
-import { Icono } from './iconos';
+import { Icono, Marca } from './iconos';
+import { instalacion, instalada, telefono } from './instalar';
 
 // ---------- Utilidades ----------
 
@@ -95,10 +96,15 @@ function useEnLinea(): boolean {
 
 // ---------- App ----------
 
-type Previa =
+/** De dónde viene la foto: recién sacada con la cámara o elegida entre las guardadas en el celular. */
+type Origen = 'camara' | 'guardada';
+/** Dónde va la vista previa cuando se eligieron varias fotos guardadas a la vez: «foto n de total». */
+type Tanda = { origen: Origen; n: number; total: number };
+type Previa = Tanda & (
   | { paso: 'preparando' }
   | { paso: 'lista'; blob: Blob; url: string; tomada_el: string }
-  | { paso: 'error' };
+  | { paso: 'error' }
+);
 
 export default function App() {
   const estado = useSyncExternalStore(envios.suscribir, envios.leer);
@@ -112,6 +118,9 @@ export default function App() {
   const [anuncio, setAnuncio] = useState('');
 
   const entrada = useRef<HTMLInputElement>(null);
+  const entradaGuardadas = useRef<HTMLInputElement>(null);
+  /** Las fotos elegidas (una de la cámara, o una o varias guardadas) y por cuál va la vista previa. */
+  const tanda = useRef<{ archivos: File[]; i: number; origen: Origen }>({ archivos: [], i: 0, origen: 'camara' });
   const reemplaza = useRef<string | undefined>(undefined);
   const punto = useRef<Promise<Punto | null> | null>(null);
   const arriba = useRef<HTMLHeadingElement>(null);
@@ -203,21 +212,49 @@ export default function App() {
     reemplaza.current = reemplazaA;
     entrada.current?.click();
   }
+  function abrirGuardadas(reemplazaA?: string) {
+    reemplaza.current = reemplazaA;
+    entradaGuardadas.current?.click();
+  }
 
-  async function alElegirFoto(archivo: File | undefined) {
-    if (!archivo) return;
+  function alElegir(lista: FileList | null, origen: Origen) {
+    const archivos = Array.from(lista ?? []);
+    if (!archivos.length) return;
+    tanda.current = { archivos, i: 0, origen };
+    void preparar();
+  }
+
+  /** Achica la foto que toca de la tanda y la muestra en la vista previa. */
+  async function preparar() {
+    const { archivos, i, origen } = tanda.current;
+    const archivo = archivos[i];
+    const donde: Tanda = { origen, n: i + 1, total: archivos.length };
     const tomada = archivo.lastModified > 0 && archivo.lastModified <= Date.now() ? archivo.lastModified : Date.now();
     setPrevia((p) => {
       if (p?.paso === 'lista') URL.revokeObjectURL(p.url);
-      return { paso: 'preparando' };
+      return { ...donde, paso: 'preparando' };
     });
     if (!enPrevia()) { try { history.pushState({ previa: true }, ''); } catch { /* da igual */ } }
-    if (!punto.current) punto.current = ubicacion();
+    // La ubicación solo sirve si la foto se está sacando ahora: una guardada pudo sacarse en cualquier lado.
+    punto.current = origen === 'camara' ? (punto.current ?? ubicacion()) : null;
     try {
       const blob = await achicarFoto(archivo);
-      setPrevia({ paso: 'lista', blob, url: URL.createObjectURL(blob), tomada_el: new Date(tomada).toISOString() });
+      setPrevia({ ...donde, paso: 'lista', blob, url: URL.createObjectURL(blob), tomada_el: new Date(tomada).toISOString() });
     } catch {
-      setPrevia({ paso: 'error' });
+      setPrevia({ ...donde, paso: 'error' });
+    }
+  }
+
+  /** Pasa a la foto siguiente de la tanda; si no quedan, cierra la vista previa. */
+  function seguir() {
+    const t = tanda.current;
+    if (t.i + 1 < t.archivos.length) {
+      t.i += 1;
+      void preparar();
+    } else {
+      cerrarPrevia();
+      window.scrollTo({ top: 0 });
+      arriba.current?.focus({ preventScroll: true });
     }
   }
 
@@ -226,10 +263,11 @@ export default function App() {
     const { blob, tomada_el } = previa;
     const reemplazaA = reemplaza.current;
     reemplaza.current = undefined;
-    cerrarPrevia();
-    setAnuncio('Mandando la foto.');
-    const lugar = punto.current ? await conTope(punto.current, 800) : null;
+    const esperaLugar = punto.current;
     punto.current = null;
+    seguir();
+    setAnuncio('Mandando la foto.');
+    const lugar = esperaLugar ? await conTope(esperaLugar, 800) : null;
     if (reemplazaA) {
       setReemplazadas((antes) => {
         const lista = [...antes.filter((c) => c !== reemplazaA), reemplazaA].slice(-60);
@@ -238,8 +276,6 @@ export default function App() {
       });
     }
     await envios.agregar({ clave: claveNueva(), blob, tomada_el, lat: lugar?.lat, lng: lugar?.lng, reemplaza: reemplazaA });
-    window.scrollTo({ top: 0 });
-    arriba.current?.focus({ preventScroll: true });
   }
 
   // ----- Qué se muestra -----
@@ -295,7 +331,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="barra">
-        <img src={`${import.meta.env.BASE_URL}icono.svg`} alt="" width="32" height="32" />
+        <Marca tamano={30} />
         <span className="marca">Remitos <span>Formas</span></span>
         {!enLinea && (
           <span className="chip-senal"><Icono nombre="sinSenal" tamano={18} /> Sin señal</span>
@@ -328,6 +364,8 @@ export default function App() {
             {enLinea && <button type="button" className="boton chico" onClick={() => envios.empujar()}>Probar ahora</button>}
           </section>
         )}
+
+        {!foco && <TarjetaInstalar />}
 
         {!foco && <Consejos />}
 
@@ -368,24 +406,49 @@ export default function App() {
           <Icono nombre={focoPideOtra ? 'repetir' : 'camara'} tamano={32} />
           {focoPideOtra ? 'Sacar otra foto' : 'Sacar foto del remito'}
         </button>
+        <button
+          type="button"
+          className="boton guardada"
+          onClick={() => abrirGuardadas(focoPideOtra ? claveFoco ?? undefined : undefined)}
+        >
+          <Icono nombre="galeria" tamano={24} />
+          Subir una foto guardada
+        </button>
       </div>
 
+      {/* Dos entradas: la de la cámara (capture) abre directo la cámara; la otra deja elegir fotos ya guardadas. */}
       <input
         ref={entrada}
+        id="foto-camara"
         className="solo-lector"
         type="file"
         accept="image/*"
         capture="environment"
         tabIndex={-1}
         aria-hidden="true"
-        onChange={(e) => { const a = e.target.files?.[0]; e.target.value = ''; void alElegirFoto(a); }}
+        onChange={(e) => { const l = e.target.files; alElegir(l, 'camara'); e.target.value = ''; }}
+      />
+      <input
+        ref={entradaGuardadas}
+        id="foto-guardada"
+        className="solo-lector"
+        type="file"
+        accept="image/*"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(e) => { const l = e.target.files; alElegir(l, 'guardada'); e.target.value = ''; }}
       />
 
       {previa && (
         <VistaPrevia
           previa={previa}
           alMandar={() => void mandar()}
-          alSacarOtra={() => abrirCamara(reemplaza.current)}
+          alOtra={() => {
+            if (previa.total > 1) seguir(); // varias guardadas: se saltea esta
+            else if (previa.origen === 'guardada') abrirGuardadas(reemplaza.current);
+            else abrirCamara(reemplaza.current);
+          }}
           alCancelar={() => { reemplaza.current = undefined; cerrarPrevia(); }}
         />
       )}
@@ -394,6 +457,39 @@ export default function App() {
 }
 
 // ---------- Piezas ----------
+
+/** Invitación a agregarla a la pantalla de inicio: solo en el navegador, chica y se puede cerrar para siempre. */
+function TarjetaInstalar() {
+  const { conBoton, hecha } = useSyncExternalStore(instalacion.suscribir, instalacion.leer);
+  const [cerrada, setCerrada] = useState(() => {
+    try { return localStorage.getItem('chofer-instalar-cerrada') === '1'; } catch { return false; }
+  });
+  const tel = useMemo(telefono, []);
+  if (cerrada || hecha || instalada()) return null;
+  if (tel === 'otro' && !conBoton) return null; // en una computadora sin instalación no hay nada que ofrecer
+  const cerrar = () => {
+    setCerrada(true);
+    try { localStorage.setItem('chofer-instalar-cerrada', '1'); } catch { /* se vuelve a mostrar la próxima vez */ }
+  };
+  return (
+    <section className="instalar" aria-labelledby="titulo-instalar">
+      <img src={`${import.meta.env.BASE_URL}icono.svg`} alt="" width="44" height="44" />
+      <div>
+        <h2 id="titulo-instalar">Para tenerla a mano, agregala a la pantalla de inicio</h2>
+        {conBoton ? (
+          <button type="button" className="boton chico" onClick={() => void instalacion.pedir()}>Agregar a inicio</button>
+        ) : tel === 'iphone' ? (
+          <p>Tocá <span className="tecla"><Icono nombre="compartir" tamano={20} /> Compartir</span> y después <strong>«Agregar a inicio»</strong>.</p>
+        ) : (
+          <p>Tocá los tres puntitos <span className="tecla" aria-hidden="true">⋮</span> del navegador y después <strong>«Agregar a la pantalla principal»</strong>.</p>
+        )}
+      </div>
+      <button type="button" className="cerrar-tarjeta" onClick={cerrar} aria-label="Cerrar este aviso">
+        <Icono nombre="cruz" tamano={22} />
+      </button>
+    </section>
+  );
+}
 
 function Consejos() {
   return (
@@ -553,12 +649,14 @@ function FilaRemito({ remito, yaRepetida, alRepetir }: { remito: RemitoChofer; y
   );
 }
 
-function VistaPrevia({ previa, alMandar, alSacarOtra, alCancelar }: {
-  previa: Previa; alMandar: () => void; alSacarOtra: () => void; alCancelar: () => void;
+function VistaPrevia({ previa, alMandar, alOtra, alCancelar }: {
+  previa: Previa; alMandar: () => void; alOtra: () => void; alCancelar: () => void;
 }) {
   const principal = useRef<HTMLButtonElement>(null);
   const lista = previa.paso === 'lista';
-  useEffect(() => { principal.current?.focus(); }, [previa.paso]);
+  const varias = previa.total > 1;
+  const otra = varias ? 'Saltear esta' : previa.origen === 'guardada' ? 'Elegir otra' : 'Sacar otra';
+  useEffect(() => { principal.current?.focus(); }, [previa.paso, previa.n]);
   useEffect(() => {
     const antes = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -569,6 +667,7 @@ function VistaPrevia({ previa, alMandar, alSacarOtra, alCancelar }: {
       onKeyDown={(e) => { if (e.key === 'Escape') alCancelar(); }}>
       <div className="previa-arriba">
         <h2 id="titulo-previa">
+          {varias && <span className="cuantas">Foto {previa.n} de {previa.total}</span>}
           {previa.paso === 'preparando' ? 'Preparando la foto…' : lista ? '¿Se lee todo el remito?' : 'No se pudo abrir la foto'}
         </h2>
         <button type="button" className="cerrar" onClick={alCancelar} aria-label="Cancelar y volver">
@@ -578,11 +677,11 @@ function VistaPrevia({ previa, alMandar, alSacarOtra, alCancelar }: {
       <div className="previa-foto">
         {lista && <img src={previa.url} alt="La foto que sacaste del remito" />}
         {previa.paso === 'preparando' && <span className="girando grande" role="status" aria-label="Preparando la foto" />}
-        {previa.paso === 'error' && <p>Probá sacarla de nuevo.</p>}
+        {previa.paso === 'error' && <p>{previa.origen === 'guardada' ? 'Probá con otra foto.' : 'Probá sacarla de nuevo.'}</p>}
       </div>
       <div className="previa-abajo">
-        <button type="button" className="boton fantasma" ref={lista ? undefined : principal} onClick={alSacarOtra}>
-          <Icono nombre="repetir" tamano={24} /> Sacar otra
+        <button type="button" className="boton fantasma" ref={lista ? undefined : principal} onClick={alOtra}>
+          {!varias && <Icono nombre={previa.origen === 'guardada' ? 'galeria' : 'repetir'} tamano={24} />} {otra}
         </button>
         {lista && (
           <button type="button" className="boton verde" ref={principal} onClick={alMandar}>

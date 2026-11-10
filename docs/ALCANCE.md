@@ -29,7 +29,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función de HubSpot | Estado | Dónde |
 |---|---|---|
 | Listas de contactos, empresas, negocios, pedidos | ✅ | `/contacts`, `/companies`, `/deals`, `/orders` |
-| Pedidos desde ClickUp (lista PEC): cada PDV crea su pedido y su estado general se mueve solo según los artículos; la vendedora solo pasa de «Pedido confirmado» a «Listo para producción» | 🔧 | `docs/PEDIDOS.md`; falta cargar los secretos de ClickUp y Finnegans |
+| Pedidos desde ClickUp (lista PEC): cada PDV crea su pedido y su estado general se mueve solo según los artículos; antes de producción lo mueven las vendedoras y el backoffice («Pedido confirmado», «$ Pendiente de Anticipo», «Pendiente Boceto Digital», «Listo para producción») | 🔧 | `docs/PEDIDOS.md`; falta cargar los secretos de ClickUp y Finnegans |
 | Factura de Finnegans (cuando tiene CAE, con su PDF) y remito de ClickUp (al entregar), adjuntos solos en el pedido | 🔧 | Tarjeta «Factura y remito»; mismo pendiente |
 | Búsqueda por nombre, mail, dominio, teléfono, id | ✅ | Lupa de arriba (Ctrl+K) y cada lista |
 | Filtros avanzados (Y / O), por propietario, fechas relativas, por etiqueta y por datos del asociado («Empresa · Ciudad», «Contacto · Origen») | ✅ | «Filtros» |

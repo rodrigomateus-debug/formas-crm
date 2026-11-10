@@ -51,6 +51,23 @@ test('valida opciones de enums y tipos', async () => {
   assert.equal(byLabel.data.props.objetivo_economico_anual, 1500000);
 });
 
+test('opciones de una propiedad: sin valores repetidos ni vacíos, y en el orden que se mandan', async () => {
+  const label = `Opc ${RUN}`;
+  const made = await api('POST', '/properties/deal', { label, type: 'enum', options: [{ value: 'Uno', label: 'Uno' }] });
+  assert.equal(made.status, 201, JSON.stringify(made.data));
+  const path = `/properties/deal/${made.data.name}`;
+  // Una opción nueva con su nombre completo (antes quedaba solo la primera letra) y la de antes arriba de todo.
+  assert.equal((await api('PATCH', path, { options: [{ value: 'Facturado', label: 'Facturado' }, { value: 'Uno', label: 'Uno renombrada' }] })).status, 200);
+  const prop = (await api('GET', '/meta')).data.properties.find((p) => p.object_type === 'deal' && p.name === made.data.name);
+  assert.deepEqual(prop.options, [{ value: 'Facturado', label: 'Facturado' }, { value: 'Uno', label: 'Uno renombrada' }]);
+  const rep = await api('PATCH', path, { options: [{ value: 'F', label: 'Facturado' }, { value: 'F', label: 'Fábrica' }] });
+  assert.equal(rep.status, 400);
+  assert.match(rep.data.error, /repetida/);
+  assert.equal((await api('PATCH', path, { options: [{ value: ' ', label: 'Sin valor' }] })).status, 400);
+  assert.equal((await api('POST', '/properties/deal', { label: `${label} b`, type: 'enum', options: [{ value: 'a', label: 'A' }, { value: 'a', label: 'Otra A' }] })).status, 400);
+  await api('PATCH', path, { archived: true });
+});
+
 test('negocio: etapa por defecto, mover de etapa, historial y cierre', async () => {
   const deal = await api('POST', '/records/deal', { props: { dealname: `Remeras ${RUN}`, pipeline: '674405796', amount: 250000 }, associations: [state.contact, state.company] });
   assert.equal(deal.status, 201, JSON.stringify(deal.data));
@@ -448,8 +465,20 @@ test('filtro de varios propietarios con «Sin asignar»', async () => {
 test('pedidos: estados generales y tablero por estado', async () => {
   const stage = (await api('GET', '/meta')).data.properties.find((p) => p.object_type === 'order' && p.name === 'hs_pipeline_stage');
   assert.equal(stage?.type, 'enum');
-  assert.deepEqual(stage.options.map((o) => o.label), ['Pedido confirmado', 'Listo para producción', 'Esperando boceto o confirmación', 'En producción', 'Listo para entregar', 'Entregado parcial', 'Entregado', 'Anulado']);
+  assert.deepEqual(stage.options.map((o) => o.label), ['Pedido confirmado', '$ Pendiente de Anticipo', 'Pendiente Boceto Digital', 'Listo para producción',
+    'Esperando boceto o confirmación', 'En producción', 'Listo para entregar', 'Entregado parcial', 'Entregado', 'Anulado']);
   const tag = `Ped ${Date.now().toString(36)}`;
+  // «$ Pendiente de Anticipo» es solo para Formas Shop y No Estrés (también para un administrador); el boceto, para todos.
+  const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
+  const corp = (await api('POST', '/records/order', { props: { hs_order_name: `${tag} corp`, unidad_de_negocio: 'CORPORATE' } })).data;
+  const no = await api('PATCH', `/records/order/${corp.id}`, { props: { hs_pipeline_stage: ANTICIPO } });
+  assert.equal(no.status, 400);
+  assert.match(no.data.error, /solo para Formas Shop y No Estrés/);
+  assert.equal((await api('PATCH', `/records/order/${corp.id}`, { props: { hs_pipeline_stage: 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9' } })).status, 200);
+  assert.equal((await api('POST', '/records/order', { props: { hs_order_name: `${tag} corp2`, unidad_de_negocio: 'CORPORATE', hs_pipeline_stage: ANTICIPO } })).status, 400);
+  const ne = await api('POST', '/records/order', { props: { hs_order_name: `${tag} ne`, unidad_de_negocio: 'NO ESTRÉS', hs_pipeline_stage: ANTICIPO } });
+  assert.equal(ne.status, 201, JSON.stringify(ne.data));
+  await api('POST', '/records/order/batch', { ids: [corp.id, ne.data.id], archive: true });
   await api('POST', '/records/order', { props: { hs_order_name: tag, hs_pipeline_stage: '1237498994', hs_total_price: 5000 } });
   const b = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(tag)}`)).data;
   assert.equal(b.columns.find((c) => c.value === '1237498994').records[0].name, tag);

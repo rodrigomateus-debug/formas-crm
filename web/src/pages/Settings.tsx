@@ -185,11 +185,21 @@ function Properties() {
 function PropertyEditor({ type, prop, onClose, onSaved }: { type: ObjectType; prop: Property | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const [f, setF] = useState({ label: prop?.label ?? '', type: prop?.type ?? 'string', group_name: prop?.group_name ?? 'Información', description: prop?.description ?? '', in_create_form: !!prop?.in_create_form, required: !!prop?.required });
-  const [opts, setOpts] = useState<Option[]>(prop?.options ?? []);
+  // Las opciones que ya existían conservan su valor interno aunque se les cambie la etiqueta (los registros lo tienen
+  // guardado); las nuevas toman como valor la etiqueta completa mientras se escribe.
+  const [opts, setOpts] = useState<Array<Option & { nueva?: boolean }>>(prop?.options ?? []);
+  const setLabel = (i: number, label: string) => setOpts(opts.map((x, j) => (j === i ? { ...x, label, value: x.nueva || !prop ? label.trim() : x.value } : x)));
+  const moveOpt = (i: number, d: number) => setOpts((os) => { const n = [...os]; [n[i], n[i + d]] = [n[i + d], n[i]]; return n; });
   const save = async (archived = false) => {
+    const options = opts.map(({ value, label }) => ({ value, label: label.trim() }));
+    if (['enum', 'multienum'].includes(f.type) && !archived) {
+      if (options.some((o) => !o.value || !o.label)) { toast('Hay una opción sin etiqueta.', true); return; }
+      const rep = options.find((o, i) => options.findIndex((x) => x.value === o.value) !== i);
+      if (rep) { toast(`La opción «${rep.label}» está repetida.`, true); return; }
+    }
     try {
-      if (prop) await http('PATCH', `/properties/${type}/${prop.name}`, { ...f, options: opts, archived });
-      else await http('POST', `/properties/${type}`, { ...f, options: opts });
+      if (prop) await http('PATCH', `/properties/${type}/${prop.name}`, { ...f, options, archived });
+      else await http('POST', `/properties/${type}`, { ...f, options });
       toast(archived ? 'Propiedad archivada' : 'Propiedad guardada');
       onSaved();
     } catch (e) { toast((e as Error).message, true); }
@@ -210,12 +220,15 @@ function PropertyEditor({ type, prop, onClose, onSaved }: { type: ObjectType; pr
           <b className="small">Opciones</b>
           {opts.map((o, i) => (
             <div key={i} className="row">
-              <input className="input" placeholder="Etiqueta" value={o.label} onChange={(e) => setOpts(opts.map((x, j) => j === i ? { label: e.target.value, value: prop && x.value ? x.value : e.target.value } : x))} />
-              <span className="small muted" style={{ width: 160 }} title="Valor interno">{o.value}</span>
-              <button className="btn ghost sm" onClick={() => setOpts(opts.filter((_, j) => j !== i))}>×</button>
+              <input className="input" placeholder="Etiqueta" value={o.label} onChange={(e) => setLabel(i, e.target.value)} />
+              <span className="small muted ellipsis" style={{ width: 160 }} title={`Valor interno: ${o.value}`}>{o.value}</span>
+              <button className="btn ghost sm" disabled={i === 0} title="Subir" aria-label={`Subir ${o.label}`} onClick={() => moveOpt(i, -1)}>↑</button>
+              <button className="btn ghost sm" disabled={i === opts.length - 1} title="Bajar" aria-label={`Bajar ${o.label}`} onClick={() => moveOpt(i, 1)}>↓</button>
+              <button className="btn ghost sm" title="Quitar" aria-label={`Quitar ${o.label}`} onClick={() => setOpts(opts.filter((_, j) => j !== i))}>×</button>
             </div>
           ))}
-          <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setOpts([...opts, { value: '', label: '' }])}>+ Opción</button>
+          <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setOpts([...opts, { value: '', label: '', nueva: true }])}>+ Opción</button>
+          <span className="small muted">El orden de las opciones es el de las columnas del tablero. Quitar una opción no cambia los registros que ya la tienen.</span>
         </div>
       )}
     </Modal>
@@ -390,7 +403,7 @@ function Pedidos() {
   const when = (s?: SyncState) => (s?.at ? fmtDate(s.at, true) : 'nunca');
   return (
     <div className="panel"><div className="panel-head"><h2>Pedidos: ClickUp y Finnegans</h2></div><div className="panel-body stack small">
-      <p style={{ margin: 0 }}>Los pedidos salen de la lista PEC de ClickUp: cada PDV nuevo crea su pedido y su estado se mueve solo según los artículos. La vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción». Cuando la factura de Finnegans tiene CAE se adjunta sola. Los remitos llegan de ClickUp (cuando los suben al entregar), de la app del chofer y de la ficha del pedido; Claude los lee y el pedido sabe qué falta entregar. ClickUp y Finnegans solo se leen.</p>
+      <p style={{ margin: 0 }}>Los pedidos salen de la lista PEC de ClickUp: cada PDV nuevo crea su pedido y su estado se mueve solo según los artículos. Antes de producción lo mueven las vendedoras y el backoffice: «Pedido confirmado», «$ Pendiente de Anticipo» (Formas Shop y No Estrés), «Pendiente Boceto Digital» y «Listo para producción». Cuando la factura de Finnegans tiene CAE se adjunta sola. Los remitos llegan de ClickUp (cuando los suben al entregar), de la app del chofer y de la ficha del pedido; Claude los lee y el pedido sabe qué falta entregar. ClickUp y Finnegans solo se leen.</p>
       <div className="row wrap">
         <b style={{ width: 90 }}>ClickUp</b>
         {c?.configured ? <span className="grow">Última vez: {when(c)}{c.at ? ` · ${c.creados ?? 0} creados, ${c.actualizados ?? 0} actualizados${c.pendientes ? `, ${c.pendientes} PDV para las próximas corridas` : ''}${c.leyendo_lista ? ' · todavía leyendo la lista' : ''}` : ''}{c.error ? <span className="danger-text"> · {c.error}</span> : null}</span>

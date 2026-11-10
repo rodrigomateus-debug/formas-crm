@@ -348,4 +348,12 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.equal((await fetch(`${BASE}${js}`)).status, 200);
   assert.equal((await fetch(`${BASE}/hooks/chofer/no-existe.js`)).status, 404);
   assert.equal((await fetch(`${BASE}/hooks/chofer`, { redirect: 'manual' })).status, 301);
+  // El manifest con el link del chofer: guardada en la pantalla de inicio (iPhone), abre ya con su link.
+  const man = async (q) => { const r = await fetch(`${BASE}/hooks/chofer/manifest.webmanifest${q}`); return { tipo: r.headers.get('content-type'), cache: r.headers.get('cache-control'), m: await r.json() }; };
+  const conLink = await man(`?t=${ch.token}`);
+  assert.equal(conLink.m.start_url, `/hooks/chofer/#t=${ch.token}`);
+  assert.deepEqual([conLink.m.id, conLink.m.scope, conLink.cache], ['/hooks/chofer/', '/hooks/chofer/', 'no-store']);
+  assert.match(conLink.tipo, /manifest\+json/);
+  assert.equal((await man('')).m.start_url, '/hooks/chofer/');
+  assert.equal((await man('?t=<script>')).m.start_url, '/hooks/chofer/', 'solo se copia algo con forma de token');
 });

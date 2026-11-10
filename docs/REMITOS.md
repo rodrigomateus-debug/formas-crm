@@ -81,8 +81,9 @@ guardadas en el celular y se mandan solas cuando vuelve; reintentar nunca duplic
    administradores reciben los faltantes y pueden finalizar entregas y crear los links de los choferes.
 3. **Choferes:** crear el link de cada uno en Entregas → Choferes (con el nombre del chofer) y mandárselo por WhatsApp.
    Es la misma app para todos; el link es la llave personal de cada uno: dice quién mandó cada remito y se puede dar de
-   baja sin tocar a los demás. En iPhone, si la agregan a la pantalla de inicio, la primera vez piden pegar el link otra
-   vez (el iPhone no comparte lo guardado entre Safari y la app de inicio).
+   baja sin tocar a los demás. La app misma les muestra cómo agregarla a la pantalla de inicio; guardada ahí, abre ya
+   con su link (el manifest lleva el link de cada chofer, porque el iPhone no comparte lo guardado entre Safari y la app
+   de inicio). Si igual abre sin el link, pide pegarlo una vez.
 
 ## Costo
 

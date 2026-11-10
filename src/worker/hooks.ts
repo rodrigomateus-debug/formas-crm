@@ -359,6 +359,18 @@ hooks.post('/chofer/api/remitos', async (c) => {
   const r = nuevo || ya.estado === 'sin_leer' ? await leerRemito(c.env, id, { ctx }) : ya;
   return c.json(paraChofer(r, (await itemsDe(c.env.DB, [id])).get(id) ?? [], await pedidoNombre(c.env.DB, r.record_id)), nuevo ? 201 : 200);
 });
+// El manifest de la app con el link del chofer adentro (?t=<token>): así, al guardarla en la pantalla de inicio, abre ya
+// con su link. Hace falta en iPhone, donde la app de inicio no comparte lo guardado con Safari. El token solo se copia
+// si tiene la forma de uno; sin token, el manifest de siempre. Nunca queda en caché.
+hooks.get('/chofer/manifest.webmanifest', async (c) => {
+  const url = new URL(c.req.url);
+  const res = await c.env.ASSETS.fetch(new Request(new URL('/chofer/manifest.webmanifest', url.origin)));
+  if (!res.ok) return c.text('No existe.', 404);
+  const m = await res.json<Record<string, unknown>>();
+  const t = url.searchParams.get('t') ?? '';
+  if (/^fcrm_[0-9a-f]{48}$/.test(t)) Object.assign(m, { id: '/hooks/chofer/', start_url: `/hooks/chofer/#t=${t}` });
+  return new Response(JSON.stringify(m), { headers: { 'content-type': 'application/manifest+json; charset=utf-8', 'cache-control': 'no-store' } });
+});
 // La app: index.html y sus archivos, desde dist/chofer.
 hooks.get('/chofer', (c) => c.redirect('/hooks/chofer/', 301));
 hooks.get('/chofer/*', async (c) => {

@@ -34,6 +34,13 @@ PDV en ClickUp) alcanza con que el PDV coincida (o, sin PDV, el CUIT). Todo lo d
 pedidos posibles: nunca se adjunta a uno «parecido». Si la foto no deja leer los datos clave, al chofer se le pide otra
 en el momento, mientras todavía está con el cliente.
 
+**El PDV que escribe el chofer.** No se confirma en cada remito (a la larga se toca «OK» sin mirar): la app se lo pide
+solo cuando hace falta (el remito no deja leerlo, no coincide en los dos lugares o no hay pedido con ese número), y
+después de «Listo» tiene «¿No es este pedido? Corregilo». Lo que escribe no se toma a ciegas: se cruza con lo ya leído
+(sin volver a leer la foto) y tiene que cerrar con el CUIT o el remito en Finnegans, como el leído. Si contradice un
+PDV que el remito dice bien en los dos lugares, solo vale si Finnegans tiene el remito en el pedido que dice el chofer;
+si no, deja de contar y lo revisa Logística con los dos pedidos posibles.
+
 Lo que se lee de ClickUp se lee de fondo (cada 10 minutos, unos pocos por vez), solo de los últimos 60 días; los más
 viejos se leen cuando alguien abre el pedido. Cada remito se intenta hasta 3 veces.
 

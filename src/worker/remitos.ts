@@ -336,6 +336,17 @@ export function emparejar(items: Array<{ code: string | null; description: strin
 // Cuántos productos de esta foto no están en las otras fotos del mismo número de remito en el pedido (por código o
 // descripción). 0: es una foto repetida; más: es otra hoja.
 const claveItem = (it: { code: string | null; description: string | null }) => normCodigo(it.code) || norm(it.description);
+// La clave de un renglón de remito para la entrega y las asignaciones a mano: número de remito, producto y cuál de los
+// iguales en la misma foto (n); sin número o sin producto, el remito y la posición.
+const claveRenglon = (numero: string | null, remitoId: number, position: number, c: string, n: number) => (numero && c ? `${numero}|${c}|${n}` : `r${remitoId}|p${position}`);
+export function clavesDeRemito(remitoId: number, numero: string | null, items: Array<{ position: number; code: string | null; description: string | null }>) {
+  const vez = new Map<string, number>();
+  return items.map((it) => {
+    const c = claveItem(it);
+    vez.set(c, (vez.get(c) ?? 0) + 1);
+    return claveRenglon(numero, remitoId, it.position, c, vez.get(c)!);
+  });
+}
 async function productosNuevos(db: D1Database, pedidoId: number, numero: string, remitoId: number, items: Array<{ code: string | null; description: string | null }>) {
   const { results } = await db.prepare(`SELECT i.code, i.description FROM remito_items i JOIN remitos r ON r.id = i.remito_id
     WHERE r.record_id = ? AND r.numero = ? AND r.id != ? AND r.estado IN ('ok', 'revisar', 'sin_leer') AND r.duplicado_de IS NULL`)
@@ -649,7 +660,7 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
   for (const { position, ...it } of its.results as Array<Omit<ItemEntrega, 'clave'> & { position: number }>) {
     const enFoto = `${it.remito_id}|${claveItem(it)}`;
     vez.set(enFoto, (vez.get(enFoto) ?? 0) + 1);
-    const k = it.numero && claveItem(it) ? `${it.numero}|${claveItem(it)}|${vez.get(enFoto)}` : `r${it.remito_id}|p${position}`;
+    const k = claveRenglon(it.numero, it.remito_id, position, claveItem(it), vez.get(enFoto)!);
     const ya = porClave.get(k);
     if (!ya || Number(it.quantity ?? 0) > Number(ya.quantity ?? 0)) porClave.set(k, { clave: k, ...it });
   }
@@ -794,7 +805,31 @@ export async function finalizarEntrega(env: Env, ctx: Ctx, orderId: number, moti
 
 // ---------- Revisión (Logística) ----------
 
-export async function revisarRemito(env: Env, ctx: Ctx, id: number, body: { accion: 'asignar' | 'confirmar' | 'descartar' | 'releer'; pedido?: number | null; motivo?: string | null }) {
+// Al confirmar un remito en un pedido se puede decir, para cada producto del remito, cuál es su par en el pedido (cuando
+// el remito los nombra distinto y no se reconocieron): queda como asignación a mano, con toda la cantidad del renglón.
+// position: el renglón del remito; i: el producto del pedido (su lugar en la lista de productos del pedido).
+async function guardarPares(env: Env, ctx: Ctx, pedidoId: number, r: RemitoRow, pares: Array<{ position: number; i: number }>) {
+  const db = env.DB;
+  const its = (await db.prepare('SELECT position, code, description, quantity FROM remito_items WHERE remito_id = ? ORDER BY position').bind(r.id)
+    .all<{ position: number; code: string | null; description: string | null; quantity: number | null }>()).results;
+  const claves = clavesDeRemito(r.id, r.numero, its);
+  const lineas = await renglones(env, await pedido(db, pedidoId), Budget.of(env));
+  const vistos = new Set<number>();
+  const stmts = pares.map((p) => {
+    const k = its.findIndex((x) => x.position === Number(p.position));
+    const it = its[k];
+    const l = lineas[Number(p.i)];
+    if (!it || !l || vistos.has(k)) throw new HttpError(400, 'Elegí, para cada producto del remito, uno del pedido.');
+    if (it.quantity == null) throw new HttpError(400, `El remito no dice cuántos «${it.description ?? it.code ?? 'productos'}»: confirmalo y asignalo desde la ficha del pedido.`);
+    vistos.add(k);
+    return db.prepare(`INSERT INTO remito_asignaciones (record_id, clave, descripcion, lineas, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (record_id, clave) DO UPDATE SET descripcion = excluded.descripcion, lineas = excluded.lineas, user_id = excluded.user_id, created_at = excluded.created_at`)
+      .bind(pedidoId, claves[k], it.description ?? it.code ?? null, JSON.stringify([{ i: Number(p.i), code: l.code, name: l.name, cantidad: Number(it.quantity) }]), ctx.user.id, now());
+  });
+  if (stmts.length) await db.batch(stmts);
+}
+
+export async function revisarRemito(env: Env, ctx: Ctx, id: number, body: { accion: 'asignar' | 'confirmar' | 'descartar' | 'releer'; pedido?: number | null; motivo?: string | null; productos?: Array<{ position: number; i: number }> }) {
   const db = env.DB;
   const r = await remitoPorId(db, id);
   const antes = r.record_id;
@@ -810,6 +845,7 @@ export async function revisarRemito(env: Env, ctx: Ctx, id: number, body: { acci
     const pid = body.pedido ? Number(body.pedido) : r.record_id;
     if (!pid) throw new HttpError(400, 'Elegí el pedido del remito.');
     await getRow(db, pid, 'order');
+    if (body.accion === 'confirmar' && Array.isArray(body.productos) && body.productos.length) await guardarPares(env, ctx, pid, r, body.productos);
     // Asignar a un pedido lo deja en ese pedido; confirmar además lo da por bueno (cuenta para la entrega). Si el pedido ya
     // tiene ese mismo número de remito contado, este queda como repetido (no se cuenta dos veces).
     const igual = r.numero ? await db.prepare("SELECT id FROM remitos WHERE record_id = ? AND numero = ? AND estado = 'ok' AND id != ? AND duplicado_de IS NULL LIMIT 1")
@@ -868,6 +904,32 @@ export async function remitosParaRevisar(db: D1Database, limit = 100) {
     ORDER BY m.created_at DESC LIMIT ?`).bind(limit).all<RemitoRow & { pedido_nombre: string | null }>();
   const items = await itemsDe(db, results.map((r) => r.id));
   return results.map((r) => ({ ...remitoPublico(r, items.get(r.id)), pedido_nombre: r.pedido_nombre }));
+}
+
+// Los remitos que ya revisó una persona (confirmados, asignados, descartados), el más reciente primero: para ver qué se
+// hizo y corregirlo. Con quién lo revisó y, si se dijo a qué producto del pedido va cada renglón, esos pares.
+export async function remitosRevisados(db: D1Database, limit = 100) {
+  const { results } = await db.prepare(`SELECT ${SIN_DATA.split(',').map((c) => `m.${c.trim()}`).join(', ')}, o.name AS pedido_nombre, u.name AS revisor FROM remitos m
+    LEFT JOIN records o ON o.id = m.record_id LEFT JOIN users u ON u.id = m.revisado_por
+    WHERE m.revisado_at IS NOT NULL ORDER BY m.revisado_at DESC LIMIT ?`).bind(limit).all<RemitoRow & { pedido_nombre: string | null; revisor: string | null }>();
+  const items = await itemsDe(db, results.map((r) => r.id));
+  const ids = [...new Set(results.map((r) => r.record_id).filter((x): x is number => x != null))];
+  const [conPos, asig] = ids.length ? await db.batch([
+    db.prepare('SELECT remito_id, position, code, description FROM remito_items WHERE remito_id IN (SELECT value FROM json_each(?)) ORDER BY remito_id, position').bind(JSON.stringify(results.map((r) => r.id))),
+    db.prepare('SELECT record_id, clave, lineas FROM remito_asignaciones WHERE record_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)),
+  ]) : [{ results: [] }, { results: [] }];
+  const asignada = new Map((asig.results as Array<{ record_id: number; clave: string; lineas: string }>).map((a) => [`${a.record_id}|${a.clave}`, a.lineas]));
+  return results.map((r) => {
+    const its = (conPos.results as Array<{ remito_id: number; position: number; code: string | null; description: string | null }>).filter((x) => x.remito_id === r.id);
+    const claves = clavesDeRemito(r.id, r.numero, its);
+    const pares = r.record_id == null ? [] : its.flatMap((it, k) => {
+      const l = asignada.get(`${r.record_id}|${claves[k]}`);
+      if (!l) return [];
+      try { return (JSON.parse(l) as Array<{ i: number; name: string; cantidad: number }>).map((d) => ({ position: it.position, i: d.i, name: d.name, cantidad: d.cantidad })); }
+      catch { return []; }
+    });
+    return { ...remitoPublico(r, items.get(r.id)), pedido_nombre: r.pedido_nombre, revisor: r.revisor, pares };
+  });
 }
 
 // Por qué se le pide el PDV al chofer, en sus palabras (de los controles del cruce).

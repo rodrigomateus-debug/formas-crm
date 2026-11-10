@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, useToast, userName, Icon, type CrmRecord } from '../lib';
 import { EstadoEntrega, Modal } from '../components';
 import { BotonArchivos } from './Bocetos';
+import { Select } from '../Select';
 
 // Remitos de entrega (src/worker/remitos.ts): la tarjeta de la ficha del pedido (qué se entregó, qué falta y los
 // remitos, vengan de ClickUp, del CRM o de la app del chofer) y la bandeja de Logística (lo que hay que revisar y los
@@ -19,6 +20,9 @@ export interface Remito {
   items: Array<{ code: string | null; description: string | null; quantity: number | null }>;
   pdv_chofer: string | null;   // el PDV que escribió el chofer en la app
   pedido_nombre?: string | null;   // en la bandeja: el nombre del pedido donde está
+  revisado_por?: number | null; revisado_at?: string | null;
+  revisor?: string | null;   // en «Revisados»: quién lo revisó
+  pares?: Array<{ position: number; i: number; name: string; cantidad: number }>;   // en «Revisados»: a qué producto del pedido va cada renglón
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
 // Un renglón de los remitos (clave: cuál es, para asignarlo a mano a productos del pedido).
@@ -311,16 +315,17 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
 
 export default function RemitosPage() {
   const { meta } = useMeta();
-  const [tab, setTab] = useState<'revisar' | 'choferes'>('revisar');
+  const [tab, setTab] = useState<'revisar' | 'revisados' | 'choferes'>('revisar');
   const puede = meta.me.role === 'admin' || meta.me.profile === 'logistica';
   return (
     <div className="content">
       <div className="page-head"><h1>Entregas</h1></div>
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'revisar'} className={`tab${tab === 'revisar' ? ' on' : ''}`} onClick={() => setTab('revisar')}>Remitos para revisar</button>
+        <button role="tab" aria-selected={tab === 'revisados'} className={`tab${tab === 'revisados' ? ' on' : ''}`} onClick={() => setTab('revisados')}>Revisados</button>
         {puede && <button role="tab" aria-selected={tab === 'choferes'} className={`tab${tab === 'choferes' ? ' on' : ''}`} onClick={() => setTab('choferes')}>Choferes</button>}
       </div>
-      {tab === 'revisar' ? <Bandeja /> : <Choferes />}
+      {tab === 'revisar' ? <Bandeja /> : tab === 'revisados' ? <Revisados /> : <Choferes />}
     </div>
   );
 }
@@ -338,7 +343,70 @@ function Bandeja() {
   );
 }
 
-function RevisionCard({ r, onCambio }: { r: Remito; onCambio: () => void }) {
+// Lo que ya se revisó (confirmado, asignado, descartado), el más reciente primero: qué se hizo, quién y cuándo, y los
+// mismos botones para corregirlo (otro pedido, otros productos, descartarlo o leerlo de nuevo).
+function Revisados() {
+  const res = useAsync(() => http<{ remitos: Remito[] }>('GET', '/remitos/revisados'), []);
+  const lista = res.data?.remitos ?? [];
+  return (
+    <div className="stack" style={{ gap: 12, marginTop: 12 }}>
+      <p className="small muted" style={{ margin: 0 }}>Los remitos que ya revisó alguien: a qué pedido se confirmaron (y a qué producto va cada renglón) o por qué se descartaron. Si algo quedó mal, corregilo desde acá.</p>
+      {lista.map((r) => <RevisionCard key={r.id} r={r} revisado onCambio={() => res.reload()} />)}
+      {!lista.length && <div className="empty plain">{res.loading ? 'Cargando…' : 'Todavía no se revisó ningún remito.'}</div>}
+    </div>
+  );
+}
+
+// Lo que se decidió en la revisión, en palabras.
+function resultado(r: Remito) {
+  const pedido = r.pedido_nombre ? `«${r.pedido_nombre}»` : 'el pedido';
+  if (r.estado === 'ok') return `Confirmado en ${pedido}`;
+  if (r.estado === 'descartado') return `Descartado${r.motivo ? `: ${r.motivo}` : ''}`;
+  if (r.estado === 'duplicado') return `Repetido${r.motivo ? `: ${r.motivo}` : ''}`;
+  if (r.estado === 'revisar') return `Asignado a ${pedido}, falta confirmarlo`;
+  return 'Se volvió a leer';
+}
+
+// Para cada producto del remito, su par en el pedido (cuando el remito los nombra distinto y no se reconocieron). Los
+// productos del pedido, con lo que falta entregar de cada uno; «Que lo busque solo» deja que el CRM lo empareje.
+interface LineaPedido { name: string; vendido: number | null; falta: number }
+function ParesProductos({ r, orderId, pares, onChange }: { r: Remito; orderId: number; pares: Record<number, string>; onChange: (p: Record<number, string>) => void }) {
+  const [lineas, setLineas] = useState<LineaPedido[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        // Primero los productos (si el pedido todavía no los tiene, los trae de Finnegans); después, cuánto falta de cada uno.
+        await http('GET', `/records/order/${orderId}/products`);
+        const d = await http<{ entrega: { lineas: LineaPedido[] } }>('GET', `/records/order/${orderId}/remitos`);
+        if (vivo) setLineas(d.entrega.lineas);
+      } catch (err) { if (vivo) setError((err as Error).message); }
+    })();
+    return () => { vivo = false; };
+  }, [orderId]);
+  if (error) return <div className="small warn-text">No se pudieron traer los productos del pedido: {error}</div>;
+  if (!lineas) return <div className="small muted">Cargando los productos del pedido…</div>;
+  if (!lineas.length) return <div className="small muted">El pedido todavía no tiene productos cargados: confirmalo y asigná los productos desde la ficha del pedido.</div>;
+  return (
+    <div className="pares-productos">
+      <div className="small"><b>¿A qué producto del pedido corresponde cada uno?</b></div>
+      {r.items.map((it, k) => (
+        <div key={k} className="par-producto">
+          <span className="small par-remito">{`${cant(it.quantity)} ${it.description ?? it.code ?? ''}`.trim()}</span>
+          <span className="small muted" aria-hidden="true">→</span>
+          <Select className="input sm" value={pares[k] ?? ''} aria-label={`Producto del pedido para ${it.description ?? it.code ?? 'este renglón'}`}
+            onChange={(ev) => { const n = { ...pares }; if (ev.target.value === '') delete n[k]; else n[k] = ev.target.value; onChange(n); }}>
+            <option value="">Que lo busque solo</option>
+            {lineas.map((l, i) => <option key={i} value={String(i)}>{l.name}{l.vendido != null ? ` · faltan ${cant(l.falta)} de ${cant(l.vendido)}` : ''}</option>)}
+          </Select>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => void; revisado?: boolean }) {
   const toast = useToast();
   const [q, setQ] = useState(r.pdv ? `PDV ${r.pdv}` : '');
   const [buscar, setBuscar] = useState(false);
@@ -350,7 +418,16 @@ function RevisionCard({ r, onCambio }: { r: Remito; onCambio: () => void }) {
     catch (err) { toast((err as Error).message, true); } finally { setOcupado(false); }
   };
   const esImagen = (r.mime ?? '').startsWith('image/');
-  const candidatos = r.candidatos.length ? r.candidatos : r.record_id ? [{ id: r.record_id, nombre: r.pedido_nombre ?? 'el pedido donde está', pdv: null }] : [];
+  // Revisado: el pedido donde quedó va primero (volver a confirmarlo sirve para cambiar los productos).
+  const enPedido = r.record_id ? [{ id: r.record_id, nombre: r.pedido_nombre ?? 'el pedido donde está', pdv: null }] : [];
+  const candidatos = revisado ? [...enPedido, ...r.candidatos.filter((c) => c.id !== r.record_id)] : r.candidatos.length ? r.candidatos : enPedido;
+  // Si el pedido está identificado pero sus productos no coinciden con los del remito, se elige el par de cada uno.
+  const destino = candidatos.length === 1 ? candidatos[0].id : revisado && r.record_id ? r.record_id : null;
+  const productosNoCierran = r.controles.some((c) => c.dato === 'Productos' && c.ok !== true) || (r.pares?.length ?? 0) > 0;
+  const [pares, setPares] = useState<Record<number, string>>(() => Object.fromEntries((r.pares ?? []).map((p) => [p.position, String(p.i)])));
+  const [elegir, setElegir] = useState(!revisado);
+  const conPares = (pedido: number) => ({ accion: 'confirmar', pedido, ...(pedido === destino && Object.keys(pares).length
+    ? { productos: Object.entries(pares).map(([position, i]) => ({ position: Number(position), i: Number(i) })) } : {}) });
   return (
     <div className="panel revision">
       <a className="revision-foto" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer" title="Ver el remito entero">
@@ -362,7 +439,9 @@ function RevisionCard({ r, onCambio }: { r: Remito; onCambio: () => void }) {
           <b>{titulo(r)}</b>
           <span className="small muted">{[origenDe(r), fmtDate(r.created_at, true)].join(' · ')}</span>
         </div>
-        {r.motivo && <div className="aviso warn small">{r.motivo}</div>}
+        {revisado ? (
+          <div className="aviso info small">{resultado(r)}{r.revisado_at ? ` · ${r.revisor ?? 'alguien'}, ${fmtDate(r.revisado_at, true)}` : ''}</div>
+        ) : r.motivo && <div className="aviso warn small">{r.motivo}</div>}
         <dl className="revision-dl small">
           {r.pdv && <><dt>PDV</dt><dd>{r.pdv}{r.pdv_chofer ? ' (lo escribió el chofer)' : ''}</dd></>}
           {r.cliente && <><dt>Cliente</dt><dd>{r.cliente}{r.cuit ? ` · CUIT ${r.cuit}` : ''}</dd></>}
@@ -372,14 +451,26 @@ function RevisionCard({ r, onCambio }: { r: Remito; onCambio: () => void }) {
         </dl>
         {r.controles.length > 0 && <ul className="controles small">{r.controles.map((c, i) => <li key={i} className={c.ok === true ? 'ok' : c.ok === false ? 'bad' : ''}>{c.ok === true ? '✓' : c.ok === false ? '✗' : '•'} {c.detalle}</li>)}</ul>}
         {r.otros_remitos_en_foto && <div className="small warn-text">En la foto se ve otro remito: se leyó solo el de adelante.</div>}
+        {revisado && (r.pares?.length ?? 0) > 0 && (
+          <div className="small">Productos: {r.pares!.map((p) => `${cant(r.items[p.position]?.quantity)} ${r.items[p.position]?.description ?? r.items[p.position]?.code ?? ''} → ${p.name}`).join(' · ')}</div>
+        )}
+        {destino && productosNoCierran && r.items.length > 0 && (elegir
+          ? <ParesProductos r={r} orderId={destino} pares={pares} onChange={setPares} />
+          : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setElegir(true)}>Cambiar a qué producto va cada uno</button>)}
         <div className="row wrap" style={{ gap: 6 }}>
-          {candidatos.map((c) => (
-            <button key={c.id} className="btn sm primary" disabled={ocupado} onClick={() => accion({ accion: 'confirmar', pedido: c.id }, 'Remito confirmado en el pedido')}>Es de «{c.nombre}»</button>
-          ))}
+          {candidatos.map((c) => {
+            // Ya confirmado en ese pedido: solo hace falta el botón para guardar los productos si se están cambiando.
+            const yaEsta = revisado && c.id === r.record_id && r.estado === 'ok';
+            if (yaEsta && !elegir) return null;
+            return (
+              <button key={c.id} className="btn sm primary" disabled={ocupado} onClick={() => accion(conPares(c.id), yaEsta ? 'Productos guardados' : 'Remito confirmado en el pedido')}>
+                {yaEsta ? 'Guardar los productos' : `Es de «${c.nombre}»`}</button>
+            );
+          })}
           {r.record_id && <Link className="btn sm ghost" to={recordUrl('order', r.record_id)}>Abrir el pedido</Link>}
           <button className="btn sm ghost" disabled={ocupado} onClick={() => setBuscar(!buscar)}>Otro pedido…</button>
           <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'releer' }, 'Remito leído de nuevo')}>{ocupado ? 'Un momento…' : 'Leer de nuevo'}</button>
-          <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'descartar' }, 'Remito descartado')}>Descartar</button>
+          {r.estado !== 'descartado' && <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'descartar' }, 'Remito descartado')}>Descartar</button>}
         </div>
         {buscar && (
           <div className="stack" style={{ gap: 4 }}>

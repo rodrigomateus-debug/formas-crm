@@ -39,10 +39,10 @@ export default function App() {
         <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
         <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>
-        {meta.me.role === 'admin' && <>
-          <div className="nav-group">Cuenta</div>
-          <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>
-        </>}
+        {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
+        <div className="nav-bottom">
+          {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
+        </div>
         <UserMenu name={meta.me.name} email={meta.me.email} photo={meta.me.photo_url} />
       </nav>
       <div className="main">

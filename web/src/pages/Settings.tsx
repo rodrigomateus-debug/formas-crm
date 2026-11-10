@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams, PROFILE_LABEL, ROLE_LABEL } from '../lib';
-import { Avatar, FilterRow, Modal, MultiPick, UserChip, describeFilter, filterableProps, opsFor } from '../components';
+import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon } from '../lib';
+import { Avatar, FilterRow, Modal, MultiPick, UserChip, describeFilter, filterableProps, opsFor, userOption } from '../components';
 import { Select } from '../Select';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['tags', 'Etiquetas'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
@@ -26,8 +26,9 @@ export default function Settings() {
 function Users() {
   const { meta, reload } = useMeta();
   const toast = useToast();
-  const users = useAsync(() => http<Array<{ id: number; email: string; name: string; role: string; profile: string; team_id: number | null; active: number; hs_owner_id: string | null; photo_url: string | null }>>('GET', '/users'), []);
+  const users = useAsync(() => http<Array<UsuarioFila>>('GET', '/users'), []);
   const [add, setAdd] = useState(false);
+  const [borrar, setBorrar] = useState<UsuarioFila | null>(null);
   // Fotos: las de la cuenta de Google de cada uno (src/worker/fotos.ts). Se actualizan solas una vez por semana; el botón las trae ya.
   const fotos = useAsync(() => http<{ cuenta_de_servicio: boolean; error?: string | null }>('GET', '/users/fotos'), []);
   const [trayendo, setTrayendo] = useState(false);
@@ -48,7 +49,11 @@ function Users() {
     if (!sees.length) return 'Ninguno';
     return hidden.length <= sees.length ? `Todos menos: ${hidden.map((p) => p.label).join(', ')}` : sees.map((p) => p.label).join(', ');
   };
-  const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', team_id: '' });
+  const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', teams: [] as string[] });
+  // Equipos: una sola lista. El primero es el principal (Negocios arranca en su pipeline); al sumar uno va al final.
+  const teamsPick = (values: string[], onChange: (v: string[]) => void, small = true) => (
+    <MultiPick small={small} options={meta.teams.map((t) => ({ value: String(t.id), label: t.name }))} values={values} onChange={onChange} />
+  );
   const profileSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
     <Select className={cls} style={{ minWidth: 116 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
       {Object.entries(PROFILE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
@@ -62,40 +67,90 @@ function Users() {
   };
   return (
     <>
-      <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas (login de Cloudflare Access). Para dar acceso, agregalo; para sacarlo, desactivalo.</span>
+      <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas (login de Cloudflare Access). Para dar acceso, agregalo; para sacarlo, desactivalo o eliminalo.</span>
         <button className="btn" disabled={trayendo || !fotos.data?.cuenta_de_servicio} onClick={traerFotos}
           title={fotos.data && !fotos.data.cuenta_de_servicio ? 'Falta la cuenta de servicio de Google (GOOGLE_SA_JSON).' : 'Trae la foto de la cuenta de Google de cada usuario (también se actualizan solas una vez por semana).'}>
           {trayendo ? 'Trayendo fotos…' : 'Traer fotos de Google'}</button>
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       {fotos.data?.error && <p className="small danger-text" style={{ marginTop: 0 }}>Fotos de Google: {fotos.data.error}</p>}
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort">Equipo</th><th className="nosort">Otros equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th></tr></thead>
+        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
             <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
             <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }))}</td>
             <td>{u.role === 'admin' ? <span className="small muted">Todo</span> : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
-            <td><Select className="input sm" style={{ minWidth: 150, maxWidth: 170 }} value={u.team_id ?? ''} onChange={(e) => patch(u.id, { team_id: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></td>
-            <td style={{ minWidth: 140, maxWidth: 160, overflow: 'visible' }}><MultiPick small options={meta.teams.filter((t) => t.id !== u.team_id).map((t) => ({ value: String(t.id), label: t.name }))}
-              values={[...userTeams(u)].filter((t) => t !== u.team_id).map(String)} onChange={(v) => patch(u.id, { extra_teams: v.map(Number) })} /></td>
+            <td style={{ minWidth: 190, maxWidth: 240, overflow: 'visible' }}>{teamsPick(teamsOf(u).map(String), (v) => patch(u.id, { teams: v.map(Number) }))}</td>
             <td className="small" style={{ maxWidth: 150, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
+            <td>{u.id !== meta.me.id && <button className="btn sm ghost icon danger" title={`Eliminar a ${u.name}`} aria-label={`Eliminar a ${u.name}`} onClick={() => setBorrar(u)}><Icon name="trash" size={14} /></button>}</td>
           </tr>
         ))}</tbody>
       </table></div>
       <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial, Producción y Logística por ahora también ven todo; más adelante cada perfil va a ver lo suyo.
         Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.</p>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
-        try { await http('POST', '/users', { ...f, team_id: f.team_id ? Number(f.team_id) : null }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
+        try { await http('POST', '/users', { ...f, teams: f.teams.map(Number) }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
       }}>Agregar</button>}>
         <label className="field">Nombre<input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label className="field">Email<input className="input" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
         <label className="field">Perfil{profileSelect(f.profile, (v) => setF({ ...f, profile: v }), 'input')}</label>
         {f.profile !== 'admin' && <label className="field">Permisos{roleSelect(f.role, (v) => setF({ ...f, role: v }), 'input')}</label>}
-        <label className="field">Equipo<Select className="input" value={f.team_id} onChange={(e) => setF({ ...f, team_id: e.target.value })}><option value="">—</option>{meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></label>
+        <label className="field">Equipos{teamsPick(f.teams, (v) => setF({ ...f, teams: v }), false)}</label>
       </Modal>}
+      {borrar && <EliminarUsuario u={borrar} onClose={() => setBorrar(null)} onDone={() => { setBorrar(null); users.reload(); reload(); }} />}
     </>
+  );
+}
+
+type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; hs_owner_id: string | null; photo_url: string | null };
+type Uso = { registros: Record<ObjectType, number>; tareas_abiertas: number; tokens: number; choferes: number };
+
+// Eliminar un usuario: antes dice qué tiene a su nombre y a quién se le pasa (src/worker/api.ts, DELETE /users/:id).
+function EliminarUsuario({ u, onClose, onDone }: { u: UsuarioFila; onClose: () => void; onDone: () => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const uso = useAsync(() => http<Uso>('GET', `/users/${u.id}/uso`), [u.id]);
+  const [a, setA] = useState('');   // '' sin elegir, 'nadie' sin propietario, o el id
+  const [yendo, setYendo] = useState(false);
+  const cuenta = (n: number, uno: string, varios: string) => `${n.toLocaleString('es-AR')} ${n === 1 ? uno : varios}`;
+  const partes = uso.data ? [
+    ...(Object.keys(OBJECTS) as ObjectType[]).filter((t) => uso.data!.registros[t]).map((t) => cuenta(uso.data!.registros[t], OBJECTS[t].single.toLowerCase(), OBJECTS[t].plural.toLowerCase())),
+    ...(uso.data.tareas_abiertas ? [cuenta(uso.data.tareas_abiertas, 'tarea abierta', 'tareas abiertas')] : []),
+  ] : [];
+  const tiene = partes.length > 0;
+  const listo = !!uso.data && (!tiene || a !== '');
+  const receptor = a && a !== 'nadie' ? meta.users.find((x) => x.id === Number(a))?.name : null;
+  const eliminar = async () => {
+    setYendo(true);
+    try {
+      await http('DELETE', `/users/${u.id}`, { reasignar_a: a && a !== 'nadie' ? Number(a) : null });
+      toast(tiene ? `${u.name} eliminado. Sus registros y tareas ${receptor ? `pasaron a ${receptor}` : 'quedaron sin propietario'}.` : `${u.name} eliminado.`);
+      onDone();
+    } catch (e) { toast((e as Error).message, true); setYendo(false); }
+  };
+  return (
+    <Modal title={`Eliminar a ${u.name}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn danger" disabled={!listo || yendo} onClick={eliminar}>{yendo ? 'Eliminando…' : 'Eliminar'}</button>
+    </>}>
+      <p style={{ margin: 0 }}>{u.email} deja de entrar al CRM y sale de esta lista y de los desplegables. En el historial, las notas, los mails y las tareas
+        hechas sigue figurando su nombre. Si más adelante lo agregás de nuevo con el mismo mail, vuelve.</p>
+      {uso.loading && <p className="muted small" style={{ margin: 0 }}>Viendo qué tiene a su nombre…</p>}
+      {uso.error && <p className="small danger-text" style={{ margin: 0 }}>{String(uso.error)}</p>}
+      {uso.data && (tiene ? <>
+        <p style={{ margin: 0 }}>Tiene a su nombre {partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}` : partes[0]}.</p>
+        <label className="field">¿A quién se los pasamos?
+          <Select className="input" value={a} onChange={(e) => setA(e.target.value)}>
+            <option value="">Elegir…</option>
+            {meta.users.filter((x) => x.active && !x.deleted_at && x.id !== u.id).map((x) => <option key={x.id} value={x.id}>{userOption(x)}</option>)}
+            <option value="nadie">Nadie (quedan sin propietario)</option>
+          </Select></label>
+      </> : <p className="muted" style={{ margin: 0 }}>No tiene registros ni tareas abiertas a su nombre.</p>)}
+      {!!uso.data?.tokens && <p className="small muted" style={{ margin: 0 }}>También se revocan sus {cuenta(uso.data.tokens, 'token', 'tokens')} de integraciones (Claude, API…).</p>}
+      {!!uso.data?.choferes && <p className="small muted" style={{ margin: 0 }}>{cuenta(uso.data.choferes, 'link de chofer creado por', 'links de choferes creados por')} {u.name} {uso.data.choferes === 1 ? 'sigue' : 'siguen'} andando:
+        {' '}{uso.data.choferes === 1 ? 'pasa' : 'pasan'} a {receptor ?? 'vos'}.</p>}
+    </Modal>
   );
 }
 

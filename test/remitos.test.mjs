@@ -9,6 +9,7 @@ const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
 const PDV = String(50000 + Math.floor(Math.random() * 9000));
 const PDV_B = String(Number(PDV) + 1);
+const PDV_C = String(Number(PDV) + 2);   // un remito de dos hojas
 const NRO = (n) => `R-0001-${String(n).padStart(8, '0')}`;
 const BASE_NRO = 20000 + Math.floor(Math.random() * 70000);
 
@@ -68,6 +69,11 @@ const LECTURAS = {
   OTROCUIT: { ...base, numero_remito: NRO(BASE_NRO + 8), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `OTRA EMPRESA ${RUN} SA`, cuit_cliente: CUIT_OTRO, items: [item('GOR-1', 'Gorra', 50)] },
   B1: { ...base, numero_remito: NRO(BASE_NRO + 10), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra bordada', 50)] },
   CRM1: { ...base, numero_remito: NRO(BASE_NRO + 11), pdv_pedido_web: PDV_B, pdv_observaciones: null, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: null, items: [item('GOR-1', 'Gorra bordada', 10)] },
+  // Un remito largo de dos hojas (mismo número): cada hoja trae sus productos y las dos suman; otra foto de la segunda hoja
+  // no suma nada nuevo y queda repetida.
+  HOJA1: { ...base, numero_remito: NRO(BASE_NRO + 40), pdv_pedido_web: PDV_C, pdv_observaciones: PDV_C, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('SIM10001273', 'Llavero corto', 100)] },
+  HOJA2: { ...base, numero_remito: NRO(BASE_NRO + 40), pdv_pedido_web: PDV_C, pdv_observaciones: PDV_C, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra bordada', 50)] },
+  HOJA2B: { ...base, numero_remito: NRO(BASE_NRO + 40), pdv_pedido_web: PDV_C, pdv_observaciones: null, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra bordada', 50)] },
   SINPDV: { ...base, numero_remito: NRO(BASE_NRO + 12), pdv_pedido_web: null, pdv_observaciones: null, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra', 5)] },
 };
 let lecturas = 0;
@@ -82,7 +88,8 @@ const pdvTask = (id, npdv, cliente, status) => ({
   subtasks: [{ id: `${id}-0`, name: 'Artículo - Proveedor', parent: id, date_updated: String(Date.now()), status: { status }, text_content: `PDV - ${npdv}\nProducto: Artículo`, custom_fields: [] }],
   attachments: [],
 });
-const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor')];
+const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor'),
+  pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor')];
 // Gmail simulado (puerto 8799, el de GOOGLE_TOKEN_URL y GMAIL_API_URL de .dev.vars): los mails de faltantes.
 const mails = [];
 let gmail;
@@ -131,6 +138,11 @@ before(async () => {
     const t = TAREAS().find((x) => p === `/clickup/task/${x.id}`);
     if (t) return send(t);
     if (p === '/fin/oauth/token') return res.end('"token-de-prueba"');
+    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_C.padStart(8, '0')}`) {
+      return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: 'SIM10001273', Cantidad: 100, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Llavero corto', IncluyeImpuesto: false },
+        { ProductoCodigo: 'GOR-1', Cantidad: 50, Precio: 900, Descuento1: 0, Descuento2: 0, Descripcion: 'Gorra bordada', IncluyeImpuesto: false }] });
+    }
     for (const [n, cli] of [[PDV, 'C-REM-A'], [PDV_B, 'C-REM-B']]) {
       if (p === `/fin/pedidoVenta/PEDVTASTP - ${n.padStart(8, '0')}`) {
         return send({ Cliente: cli, MonedaCodigo: 'PES', Items: n === PDV
@@ -297,6 +309,20 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   asUser = logi.email;
   assert.equal((await api('POST', `/remitos/${sinpdv.data.id}/revisar`, { accion: 'confirmar', pedido: B.id })).data.estado, 'ok');
   asUser = null;
+
+  // 6b. Un remito de dos hojas: la segunda hoja (mismo número, otros productos) suma; otra foto de esa hoja, no.
+  const C = await pedidoDe(PDV_C);
+  assert.equal((await api('GET', `/records/order/${C.id}/products`)).data.items.length, 2);
+  assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('HOJA1'), H)).data.estado, 'ok');
+  assert.deepEqual((await remitosDe(C.id)).entrega.lineas.map((l) => l.falta), [0, 50]);
+  const h2 = await api('POST', '/hooks/chofer/api/remitos', form('HOJA2'), H);
+  assert.equal(h2.data.estado, 'ok', h2.data.mensaje);
+  let rC = await remitosDe(C.id);
+  assert.equal(rC.entrega.estado, 'completa');
+  assert.ok(rC.remitos.find((x) => x.id === h2.data.id).controles.some((c) => c.dato === 'Hoja' && c.ok === true));
+  assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('HOJA2B'), H)).data.estado, 'duplicado');
+  rC = await remitosDe(C.id);
+  assert.deepEqual(rC.entrega.lineas.map((l) => [l.entregado, l.falta, l.excede]), [[100, 0, 0], [50, 0, 0]], 'cada hoja una vez');
 
   // 7. Pedido B: una entrega parcial y un remito subido en el CRM (elegido por una persona: alcanza con el PDV).
   assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('B1'), H)).data.estado, 'ok');

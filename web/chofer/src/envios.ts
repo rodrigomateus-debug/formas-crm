@@ -10,6 +10,8 @@ export type Envio = {
   clave: string;
   tomada_el: string;
   reemplaza?: string;
+  /** Las fotos mandadas juntas comparten lote. */
+  lote?: string;
   /** espera: guardada en el celular, todavía no salió. */
   fase: 'espera' | 'mandando' | 'leyendo' | 'listo' | 'fallo';
   /** 0..1, cuánto de la foto ya subió (solo en «mandando»). */
@@ -63,7 +65,7 @@ export const envios = {
   async agregar(foto: FotoEnCola): Promise<void> {
     fotos.set(foto.clave, foto);
     const nuevo: Envio = {
-      clave: foto.clave, tomada_el: foto.tomada_el, reemplaza: foto.reemplaza,
+      clave: foto.clave, tomada_el: foto.tomada_el, reemplaza: foto.reemplaza, lote: foto.lote,
       fase: 'espera', subido: 0, reintento: false, mini: URL.createObjectURL(foto.blob),
     };
     publicar({ envios: [...estado.envios, nuevo], foco: foto.clave });
@@ -80,7 +82,7 @@ export const envios = {
       if (fotos.has(f.clave)) continue;
       fotos.set(f.clave, f);
       nuevos.push({
-        clave: f.clave, tomada_el: f.tomada_el, reemplaza: f.reemplaza,
+        clave: f.clave, tomada_el: f.tomada_el, reemplaza: f.reemplaza, lote: f.lote,
         fase: 'espera', subido: 0, reintento: true, mini: URL.createObjectURL(f.blob),
       });
     }

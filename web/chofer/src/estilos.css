@@ -191,6 +191,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .foco.curso h2 { font-size: 22px; line-height: 1.2; font-weight: 700; letter-spacing: -.01em; color: var(--tinta); }
 .foco.curso p { color: var(--tinta-2); font-size: 16px; }
 .foco.curso .boton { align-self: flex-start; }
+.foco.curso.lote { padding: 20px; }
 .barra-avance { height: 10px; border-radius: 999px; background: var(--hundido); overflow: hidden; }
 .barra-avance span { display: block; height: 100%; border-radius: inherit; background: var(--tinta-acento); transition: width 200ms linear; }
 .barra-avance.sin-fin span { width: 38%; animation: ir-y-venir 1.4s ease-in-out infinite alternate; }
@@ -245,7 +246,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 
 /* ---------- Vista previa de la foto ---------- */
 .previa {
-  position: fixed; inset: 0; z-index: 10; display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
+  position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
   background: #05061a; color: #fff; color-scheme: dark; animation: aparecer 200ms var(--suave);
 }
 .previa :focus-visible { outline-color: #fff; }
@@ -254,17 +255,41 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
   padding: calc(10px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(20px, env(safe-area-inset-left));
 }
 .previa-arriba h2 { flex: 1; color: #fff; font-size: 20px; font-weight: 600; }
-.cuantas { display: block; font-size: 15px; font-weight: 500; opacity: .8; }
 .cerrar { flex: none; display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #fff; cursor: pointer; }
-.previa-foto { display: grid; place-items: center; min-height: 0; padding: 0 12px; }
+.previa-foto { flex: 1; display: grid; place-items: center; min-height: 0; padding: 0 12px; }
 .previa-foto img { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; border-radius: 8px; background: #fff; }
-.previa-foto p { font-size: 19px; }
-.previa-abajo {
-  display: flex; gap: 12px;
-  padding: 14px max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+/* La tira con todas las fotos de la tanda: tocar una la muestra grande; la X la saca. */
+.tira { display: flex; gap: 10px; padding: 14px 16px 2px; overflow-x: auto; scrollbar-width: none; }
+.tira::-webkit-scrollbar { display: none; }
+.tira li { position: relative; flex: none; width: 62px; height: 82px; }
+.tira .ver { display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: #1c1f3a; cursor: pointer; opacity: .7; }
+.tira .ver img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tira .elegida .ver { opacity: 1; box-shadow: 0 0 0 3px #05061a, 0 0 0 6px var(--verde); }
+.tira .sacar {
+  position: absolute; top: -12px; right: -12px; display: grid; place-items: center; width: 44px; height: 44px; padding: 0;
+  border: 0; background: none; color: #05061a; cursor: pointer;
 }
-.previa-abajo .boton { min-height: 68px; border-radius: 18px; flex: 1 1 0; padding: 0 14px; }
-.previa-abajo .boton.verde { flex: 1.5 1 0; font-size: 21px; }
+.tira .sacar span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #05061a; }
+.tira .llegando { display: grid; place-items: center; border-radius: 10px; border: 2px dashed rgba(255, 255, 255, .4); color: #fff; }
+.previa-nota { padding: 12px 20px 0; font-size: 15px; line-height: 1.35; color: rgba(255, 255, 255, .82); }
+.previa-nota.aviso { color: #ffd479; font-weight: 600; }
+.previa-abajo {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px max(16px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+.previa-abajo .sumar { display: flex; gap: 10px; }
+.previa-abajo .sumar .boton { flex: 1 1 0; min-height: 54px; padding: 0 10px; border-radius: 14px; font-size: 16px; gap: 8px; }
+.previa-abajo .boton.verde { min-height: 68px; border-radius: 18px; font-size: 21px; }
+
+/* ---------- Fotos sin mandar (la tanda quedó a medio armar) ---------- */
+.sin-mandar { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 18px; border-radius: 22px; background: var(--aviso-suave); color: var(--tinta); }
+.sin-mandar h2 { font-size: 21px; line-height: 1.2; font-weight: 700; color: var(--tinta); }
+.sin-mandar .minis { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none; cursor: pointer; align-self: flex-start; border-radius: 10px; }
+.sin-mandar .minis img { display: block; width: 46px; height: 60px; object-fit: cover; border-radius: 8px; background: var(--hundido); }
+.sin-mandar .minis span { font-weight: 600; font-size: 16px; padding: 0 4px; }
+.sin-mandar .acciones { display: flex; align-items: center; gap: 20px; }
+.sin-mandar .boton.principal { flex: 1; min-height: 60px; font-size: 19px; }
+.sin-mandar .enlace { align-self: center; }
 
 /* ---------- Link que no funciona ---------- */
 .link-roto {

@@ -291,6 +291,17 @@ export function emparejar(items: Array<{ code: string | null; description: strin
   });
 }
 
+// Cuántos productos de esta foto no están en las otras fotos del mismo número de remito en el pedido (por código o
+// descripción). 0: es una foto repetida; más: es otra hoja.
+const claveItem = (it: { code: string | null; description: string | null }) => normCodigo(it.code) || norm(it.description);
+async function productosNuevos(db: D1Database, pedidoId: number, numero: string, remitoId: number, items: Array<{ code: string | null; description: string | null }>) {
+  const { results } = await db.prepare(`SELECT i.code, i.description FROM remito_items i JOIN remitos r ON r.id = i.remito_id
+    WHERE r.record_id = ? AND r.numero = ? AND r.id != ? AND r.estado IN ('ok', 'revisar', 'sin_leer') AND r.duplicado_de IS NULL`)
+    .bind(pedidoId, numero, remitoId).all<{ code: string | null; description: string | null }>();
+  const ya = new Set(results.map(claveItem));
+  return items.filter((it) => claveItem(it) && !ya.has(claveItem(it))).length;
+}
+
 interface Cruce { recordId: number | null; estado: EstadoRemito; motivo: string | null; repetir: boolean; controles: Control[]; candidatos: Candidato[]; duplicadoDe: number | null; pidePdv: boolean }
 
 async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cruce> {
@@ -414,14 +425,19 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
     else add('Productos', fuera ? null : true, fuera ? `${fuera} de ${items.length} productos no están en el pedido.` : 'Los productos son del pedido.');
   }
 
-  // El mismo remito ya estaba (otra foto, o por la app y por ClickUp).
+  // El mismo remito ya estaba (otra foto, o por la app y por ClickUp). Si trae productos que las otras fotos de ese
+  // número no tienen, es otra hoja del mismo remito (los remitos largos tienen varias) y suma; si no, es repetido.
   if (numero) {
     const otro = await db.prepare(`SELECT id, record_id FROM remitos WHERE numero = ? AND id != ? AND estado IN ('ok', 'revisar', 'sin_leer')
       AND duplicado_de IS NULL ORDER BY (record_id = ?) DESC, id LIMIT 1`).bind(numero, r.id, p.id).first<{ id: number; record_id: number | null }>();
-    if (otro && otro.record_id === p.id) return fin(p.id, 'duplicado', `Es el mismo remito ${numero} que ya estaba.`, { duplicadoDe: otro.id });
-    if (otro && otro.record_id) { contra ??= `El remito ${numero} ya está en otro pedido.`; add('Duplicado', false, contra); }
+    if (otro && otro.record_id === p.id) {
+      const nuevos = await productosNuevos(db, p.id, numero, r.id, items);
+      if (!nuevos) return fin(p.id, 'duplicado', `Es el mismo remito ${numero} que ya estaba.`, { duplicadoDe: otro.id });
+      add('Hoja', true, `Otra hoja del remito ${numero}: suma ${nuevos} producto${nuevos > 1 ? 's' : ''} que las otras fotos no tienen.`);
+    }
+    else if (otro && otro.record_id) { contra ??= `El remito ${numero} ya está en otro pedido.`; add('Duplicado', false, contra); }
     // El mismo remito está para revisar sin pedido: este también, así no se cuenta dos veces cuando se resuelvan.
-    if (otro && !otro.record_id) { contra ??= `El mismo remito ${numero} ya está para revisar.`; add('Duplicado', null, contra); }
+    else if (otro && !otro.record_id) { contra ??= `El mismo remito ${numero} ya está para revisar.`; add('Duplicado', null, contra); }
   }
 
   // Elegido por una persona: alcanza con que el PDV coincida (o, sin PDV, el CUIT). Desde la app: PDV y otro dato fuerte.
@@ -565,7 +581,15 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
       SUM(estado = 'ok' AND duplicado_de IS NULL AND reservas = 1) AS reservas FROM remitos WHERE record_id = ?`).bind(orderId),
   ]);
   const lineas = (lin.results as Renglon[]);
-  const items = its.results as Array<{ code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>;
+  // Cada producto de un mismo número de remito cuenta una vez (con la cantidad más alta de sus fotos): las hojas
+  // distintas suman y una foto repetida no.
+  const porClave = new Map<string, { code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>();
+  for (const it of its.results as Array<{ code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>) {
+    const k = it.numero && claveItem(it) ? `${it.numero}|${claveItem(it)}` : `r${it.remito_id}|${porClave.size}`;
+    const ya = porClave.get(k);
+    if (!ya || Number(it.quantity ?? 0) > Number(ya.quantity ?? 0)) porClave.set(k, it);
+  }
+  const items = [...porClave.values()];
   const c = (cuenta.results[0] ?? {}) as { ok: number | null; pendientes: number | null; reservas: number | null };
   const stage = String(props.hs_pipeline_stage ?? '');
   const clickupEntregado = stage === ENTREGADO || stage === PARCIAL;
@@ -665,7 +689,8 @@ export async function revisarRemito(env: Env, ctx: Ctx, id: number, body: { acci
     // tiene ese mismo número de remito contado, este queda como repetido (no se cuenta dos veces).
     const igual = r.numero ? await db.prepare("SELECT id FROM remitos WHERE record_id = ? AND numero = ? AND estado = 'ok' AND id != ? AND duplicado_de IS NULL LIMIT 1")
       .bind(pid, r.numero, id).first<{ id: number }>() : null;
-    if (igual && body.accion === 'confirmar') {
+    const itemsR = (await itemsDe(db, [id])).get(id) ?? [];
+    if (igual && body.accion === 'confirmar' && !(await productosNuevos(db, pid, r.numero!, id, itemsR))) {
       await db.prepare("UPDATE remitos SET record_id = ?, estado = 'duplicado', duplicado_de = ?, motivo = ?, revisado_por = ?, revisado_at = ?, updated_at = ? WHERE id = ?")
         .bind(pid, igual.id, `Es el mismo remito ${r.numero} que ya estaba en el pedido.`, ctx.user.id, ts, ts, id).run();
       for (const x of new Set([antes, pid].filter(Boolean) as number[])) await recalcularEntrega(env, x, { ctx });

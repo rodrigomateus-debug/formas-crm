@@ -10,21 +10,41 @@ export type FotoEnCola = {
   reemplaza?: string;
   /** Ya se probó achicarla más después de un «muy pesada». */
   achicada?: boolean;
+  /** Las fotos que se mandaron juntas comparten este identificador (solo para mostrar el avance «2 de 3»). */
+  lote?: string;
+};
+
+/** Una foto de la tanda que el chofer está armando (ya achicada) y todavía no mandó. */
+export type FotoDeTanda = {
+  clave: string;
+  blob: Blob;
+  tomada_el: string;
+  origen: 'camara' | 'guardada';
+  reemplaza?: string;
+  /** Para mostrarlas en el orden en que se sumaron. */
+  orden: number;
 };
 
 const BASE = 'chofer';
 const ALMACEN = 'cola';
+const TANDA = 'tanda';
 
 let abierta: Promise<IDBDatabase> | null = null;
 
 function abrir(): Promise<IDBDatabase> {
   if (!abierta) {
     abierta = new Promise<IDBDatabase>((ok, mal) => {
-      const p = indexedDB.open(BASE, 1);
+      const p = indexedDB.open(BASE, 2);
       p.onupgradeneeded = () => {
-        if (!p.result.objectStoreNames.contains(ALMACEN)) p.result.createObjectStore(ALMACEN, { keyPath: 'clave' });
+        for (const almacen of [ALMACEN, TANDA]) {
+          if (!p.result.objectStoreNames.contains(almacen)) p.result.createObjectStore(almacen, { keyPath: 'clave' });
+        }
       };
-      p.onsuccess = () => ok(p.result);
+      p.onsuccess = () => {
+        // Si otra pestaña con una versión más nueva necesita actualizar la base, esta la suelta.
+        p.result.onversionchange = () => { p.result.close(); abierta = null; };
+        ok(p.result);
+      };
       p.onerror = () => mal(p.error);
       p.onblocked = () => mal(new Error('bloqueada'));
     });
@@ -33,10 +53,10 @@ function abrir(): Promise<IDBDatabase> {
   return abierta;
 }
 
-function operar<T>(modo: IDBTransactionMode, hacer: (a: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+function operar<T>(modo: IDBTransactionMode, hacer: (a: IDBObjectStore) => IDBRequest<T>, almacen = ALMACEN): Promise<T> {
   return abrir().then((db) => new Promise<T>((ok, mal) => {
-    const t = db.transaction(ALMACEN, modo);
-    const p = hacer(t.objectStore(ALMACEN));
+    const t = db.transaction(almacen, modo);
+    const p = hacer(t.objectStore(almacen));
     t.oncomplete = () => ok(p.result);
     t.onerror = () => mal(t.error);
     t.onabort = () => mal(t.error);
@@ -52,4 +72,19 @@ export function sacarDeCola(clave: string): Promise<unknown> {
 export async function leerCola(): Promise<FotoEnCola[]> {
   const todas = await operar<FotoEnCola[]>('readonly', (a) => a.getAll());
   return todas.sort((x, y) => x.tomada_el.localeCompare(y.tomada_el));
+}
+
+// La tanda a medio armar: si el chofer cierra la app antes de mandar, las fotos siguen acá al volver.
+export function guardarEnTanda(f: FotoDeTanda): Promise<unknown> {
+  return operar('readwrite', (a) => a.put(f), TANDA);
+}
+export function sacarDeTanda(clave: string): Promise<unknown> {
+  return operar('readwrite', (a) => a.delete(clave), TANDA);
+}
+export function vaciarTanda(): Promise<unknown> {
+  return operar('readwrite', (a) => a.clear(), TANDA);
+}
+export async function leerTanda(): Promise<FotoDeTanda[]> {
+  const todas = await operar<FotoDeTanda[]>('readonly', (a) => a.getAll(), TANDA);
+  return todas.sort((x, y) => x.orden - y.orden);
 }

@@ -135,15 +135,18 @@ export function docsDeFacturas(filasPorEmpresa) {
   return out;
 }
 
-// Informe de facturas: de qué pedido o remito sale cada factura (por su identificación).
-export function origenesDe(filasFacturas) {
+// Informe de facturas: de qué pedido o remito sale cada factura (por empresa e identificación: Formas y FP DEMO usan la
+// misma numeración).
+export function origenesDe(filasPorEmpresa) {
   const out = new Map();
-  for (const x of filasFacturas) {
+  for (const { emp, filas } of filasPorEmpresa) for (const x of filas) {
     const ie = normIe(x.IDENTIFICACIONEXTERNAFACT);
     if (!ie) continue;
     const dePedido = /^PEDVTA/.test(String(x.TRANSACCIONSUBTIPOCODIGO ?? ''));
-    out.set(ie, { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
-      pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null });
+    // Una factura puede salir de varios documentos (un pedido y un remito, o varios remitos): se guardan todos.
+    const k = `${emp}|${ie}`;
+    out.set(k, [...(out.get(k) ?? []), { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
+      pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null }]);
   }
   return out;
 }
@@ -163,11 +166,20 @@ export function asignarFacturas(docs, origenes, resumen, remitoAPedido = new Map
   const deNumero = porNumeroDe(resumen);
   const out = new Map();
   for (const [k, d] of docs) {
-    const o = origenes.get(d.ie);
+    const os = origenes.get(`${d.emp}|${d.ie}`) ?? [];
     const ped = d.ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
     const p = pdvDeDescripcion(d.desc);
-    out.set(k, o?.pedido ?? (o?.remito ? remitoAPedido.get(o.remito) : null) ?? (o?.pdv != null ? deNumero(o.pdv, false) : null)
-      ?? (ped ? `${ped[1]} - ${Number(ped[2])}` : null) ?? (p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null));
+    const escrito = p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null;
+    // De qué pedidos sale según Finnegans: el pedido, o el PDV que dice su remito.
+    const desdeOrigen = [...new Set(os.map((o) => o.pedido ?? (o.pdv != null ? deNumero(o.pdv, false) : null)).filter(Boolean))];
+    // Si sale de varios, el que coincide con el PDV escrito en la factura; si sale de uno, ese; si no, lo escrito; la
+    // búsqueda de remitos, al final.
+    const elegido = (ped ? `${ped[1]} - ${Number(ped[2])}` : null)
+      ?? (escrito && desdeOrigen.includes(escrito) ? escrito : null)
+      ?? (desdeOrigen.length === 1 ? desdeOrigen[0] : null)
+      ?? escrito ?? desdeOrigen[0]
+      ?? os.map((o) => (o.remito ? remitoAPedido.get(o.remito) : null)).find(Boolean) ?? null;
+    out.set(k, elegido);
   }
   // Las notas (y las facturas o débitos que anulan una nota) van con el comprobante que corrigen.
   for (const [k, d] of docs) {
@@ -201,23 +213,21 @@ export function remitosPendientes(filasPorEmpresa) {
   }
   return out;
 }
-// Solo cuentan los remitos de Corporate que se facturan desde el remito: en Formas Shop (y si un pedido Corporate se
-// facturó directo) el remito es de la entrega y nunca se factura.
-export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map(), facturadosDirecto = new Set()) {
+// Solo cuentan los remitos de Corporate: en Formas Shop el remito es de la entrega y nunca se factura. Si un pedido
+// Corporate se facturó directo y su remito quedó sin facturar, lo corrige el otro cálculo (neto menos lo facturado).
+export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map()) {
   const soloFp = new Map([...resumen].filter(([k]) => /^PEDVTAFP/.test(k)));
   const deNumero = porNumeroDe(soloFp);
   const out = new Map(), sinPedido = [];
   for (const [, r] of remitos) {
     if (!(r.pendiente > 0)) continue;
-    const p = remitoAPedido.get(r.doc) ?? (r.pdv != null ? deNumero(r.pdv, false) : null);
+    const p = (r.pdv != null ? deNumero(r.pdv, false) : null) ?? (r.pdv == null ? remitoAPedido.get(r.doc) : null) ?? null;
     if (!p) { sinPedido.push(r); continue; }
-    if (facturadosDirecto.has(p)) continue;
     out.set(p, (out.get(p) ?? 0) + r.pendiente);
   }
   return { porPedido: out, sinPedido };
 }
-// Pedidos con alguna factura que sale directo de ellos (informe de facturas).
-export const facturadosDirecto = (origenes) => new Set([...origenes.values()].map((o) => o.pedido).filter(Boolean));
+
 
 // Anticipo facturado que la factura final todavía no descontó, por pedido.
 export function anticiposDe(docs, asignadas) {
@@ -330,22 +340,22 @@ async function main() {
   for (const emp of EMPRESAS) lineas.push({ emp, filas: await porTramos(tok, 'analisisFacturaVenta', { PARAMWEBREPORT_Empresa: emp }, desde, hoy) });
   const docs = docsDeFacturas(lineas);
   const origenes = [];
-  for (const emp of EMPRESAS) origenes.push(...await porTramos(tok, 'ApiFacturasDeVenta', { PARAMWEBREPORT_EmpresaCodigo: emp }, desde, hoy));
+  for (const emp of EMPRESAS) origenes.push({ emp, filas: await porTramos(tok, 'ApiFacturasDeVenta', { PARAMWEBREPORT_EmpresaCodigo: emp }, desde, hoy) });
   const orig = origenesDe(origenes);
   const despachos = [];
   for (const emp of EMPRESAS) despachos.push({ emp, filas: await porTramos(tok, 'analisisDespachoVenta', { PARAMWEBREPORT_Empresa: emp }, desde, hoy) });
   const remitos = remitosPendientes(despachos);
   let asignadas = asignarFacturas(docs, orig, resumen);
-  const directos = facturadosDirecto(orig);
-  let pend = pendientePorRemitos(remitos, resumen, new Map(), directos);
-  // Remitos facturados o con algo sin facturar que no dicen el PDV: se buscan los remitos de los pedidos Corporate que
-  // ya remitieron todo y no tienen factura.
+  let pend = pendientePorRemitos(remitos, resumen);
+  // Remitos con algo sin facturar que no dicen el PDV: se buscan los remitos de los pedidos Corporate recientes que ya
+  // remitieron todo y no tienen factura (los 150 de número más alto; son pocos y siempre recientes).
   const conFactura = new Set(asignadas.values());
-  const faltan = pend.sinPedido.length || [...docs].some(([k]) => !asignadas.get(k) && orig.get(docs.get(k).ie)?.remito);
-  const candidatos = faltan ? [...resumen].filter(([k, o]) => /^PEDVTAFP/.test(k) && !o.anulado && o.pendiente < 0.01 && !conFactura.has(k) && !pend.porPedido.has(k)).map(([k]) => k) : [];
+  const faltan = pend.sinPedido.some((r) => r.pdv == null);
+  const candidatos = faltan ? [...resumen].filter(([k, o]) => /^PEDVTAFP/.test(k) && !o.anulado && o.pendiente < 0.01 && !conFactura.has(k) && !pend.porPedido.has(k))
+    .map(([k]) => k).sort((a, b) => Number(b.split(' - ')[1]) - Number(a.split(' - ')[1])).slice(0, 150) : [];
   const remitoAPedido = await remitosDe(tok, candidatos);
   asignadas = asignarFacturas(docs, orig, resumen, remitoAPedido);
-  pend = pendientePorRemitos(remitos, resumen, remitoAPedido, directos);
+  pend = pendientePorRemitos(remitos, resumen, remitoAPedido);
   const porFacturar = porFacturarDe(resumen, pend.porPedido, anticiposDe(docs, asignadas), netoFacturado(docs, asignadas));
   const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' },

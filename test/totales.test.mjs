@@ -64,6 +64,7 @@ test('por facturar, sin IVA y al centavo: lo pendiente en Finnegans, los remitos
     ped('PEDVTAFP - 2416', 1000, 1000, 1210),         // Finnegans lo da pendiente, pero se facturó sin enlazar al pedido
     ped('PEDVTAFP - 2417', 1000, 0, 1210),            // facturado y después una nota de crédito por un descuento
     ped('PEDVTAFP - 2418', 1000, 1000, 1210, { ESTADO: 'Anulada' }),
+    ped('PEDVTAFP - 2419', 3600, 0, 4356),            // facturado directo, anulado con nota y refacturado; un remito sin facturar
     ped('PDVOBJETIVOS - 1', 9e9, 9e9, 9e9),
   ]]);
   assert.equal(resumen.get('PEDVTAFP - 2413').neto, 1200);
@@ -79,31 +80,43 @@ test('por facturar, sin IVA y al centavo: lo pendiente en Finnegans, los remitos
     fac('FCVTAELECT - 7', 300, 363, 'ROMI ML'),
     fac('NCVEE - 8', -1000, -1210, 'NC ANULA FC 4', { IDENTIFICACIONEXTERNA: 'NC FCVTAELECT-4 1' }),
     fac('FCVTAELECT - 9', 1000, 1210, '2416'),
+    fac('FCVTAELECT - 10', 3080, 3727, '2419 / OC: 1180/2026', { IDENTIFICACIONEXTERNA: 'FC PEDVTAFP-00002419 1' }),
+    fac('NCVEE - 11', -3080, -3727, '2419 / OC: 1180/2026'),
+    fac('FCVTAELECT - 12', 3080, 3727, '2419 / OC: 1180/2026'),
   ] }]);
   assert.equal(docs.get('EMPRE01|FACTVENANTMASIVO - 3').anticipo, 2000);
-  const orig = T.origenesDe([
+  const orig = T.origenesDe([{ emp: 'EMPRE01', filas: [
     { TRANSACCIONSUBTIPOCODIGO: 'PEDVTASTP', IDENTIFICACIONEXTERNA: 'PEDVTASTP - 00031277', IDENTIFICACIONEXTERNAFACT: 'FC PEDVTASTP-00031277 1' },
     { TRANSACCIONSUBTIPOCODIGO: 'FPREMVTA', IDENTIFICACIONEXTERNA: 'FPREMVTA - 1979', IDENTIFICACIONEXTERNAFACT: 'FC FPREMVTA-1979 1', DESCRIPCION: '' },
-  ]);
+  ] }, { emp: '7', filas: [
+    // FP DEMO numera igual: su FCVTAELECT - 5 sale de otro pedido y no tiene que pisar a la de Formas.
+    { TRANSACCIONSUBTIPOCODIGO: 'PEDVTAFP', IDENTIFICACIONEXTERNA: 'PEDVTAFP - 00000099', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 5' },
+  ] }, { emp: 'EMPRE01', filas: [
+    // La FCVTAELECT - 9 sale de dos documentos: un pedido ajeno y un remito del 2416, que es lo que dice la factura.
+    { TRANSACCIONSUBTIPOCODIGO: 'FPREMVTA', IDENTIFICACIONEXTERNA: 'FPREMVTA - 1990', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 9', DESCRIPCION: 'pdv 2416' },
+    { TRANSACCIONSUBTIPOCODIGO: 'PEDVTAFP', IDENTIFICACIONEXTERNA: 'PEDVTAFP - 00002413', IDENTIFICACIONEXTERNAFACT: 'FCVTAELECT - 9' },
+  ] }]);
   // El remito facturado no dice el PDV: se encontró buscando los remitos del pedido.
   const asignadas = T.asignarFacturas(docs, orig, resumen, new Map([['FPREMVTA - 1979', 'PEDVTAFP - 2414']]));
   assert.deepEqual(Object.fromEntries([...asignadas].map(([k, v]) => [k.split('|')[1], v])), {
     'FCVTAELECT - 1': 'PEDVTASTP - 31277', 'FCVTAELECT - 2': 'PEDVTAFP - 2414', 'FACTVENANTMASIVO - 3': 'PEDVTAFP - 2415', 'FCVTAELECT - 4': 'PEDVTAFP - 2416',
     'FCVTAELECT - 5': 'PEDVTAFP - 2417', 'NCVEE - 6': 'PEDVTAFP - 2417', 'FCVTAELECT - 7': null, 'NCVEE - 8': 'PEDVTAFP - 2416', 'FCVTAELECT - 9': 'PEDVTAFP - 2416',
+    'FCVTAELECT - 10': 'PEDVTAFP - 2419', 'NCVEE - 11': 'PEDVTAFP - 2419', 'FCVTAELECT - 12': 'PEDVTAFP - 2419',
   });
   const remitos = T.remitosPendientes([{ emp: 'EMPRE01', filas: [
     { DOCNROINT: 'FPREMVTA - 2001', IMPORTEPENDIENTEDESTINO: 1200, DESCRIPCION: 'pdv 2413', ESTADO: 'Activa' },
     { DOCNROINT: 'FPREMVTA - 2002', IMPORTEPENDIENTEDESTINO: 1000, DESCRIPCION: 'pdv 31277', ESTADO: 'Activa' },   // de Formas Shop: no cuenta
     { DOCNROINT: 'FPREMVTA - 2003', IMPORTEPENDIENTEDESTINO: 50, DESCRIPCION: '', ESTADO: 'Activa' },
+    { DOCNROINT: 'FPREMVTA - 2004', IMPORTEPENDIENTEDESTINO: 520, DESCRIPCION: 'pdv 2419', ESTADO: 'Activa' },
   ] }]);
-  const pend = T.pendientePorRemitos(remitos, resumen, new Map(), T.facturadosDirecto(orig));
-  assert.deepEqual([...pend.porPedido], [['PEDVTAFP - 2413', 1200]]);
+  const pend = T.pendientePorRemitos(remitos, resumen);
+  assert.deepEqual([...pend.porPedido], [['PEDVTAFP - 2413', 1200], ['PEDVTAFP - 2419', 520]]);
   assert.deepEqual(pend.sinPedido.map((r) => r.doc), ['FPREMVTA - 2002', 'FPREMVTA - 2003']);
   const anticipos = T.anticiposDe(docs, asignadas);
   assert.deepEqual([...anticipos], [['PEDVTAFP - 2415', 2000]]);
   assert.deepEqual(T.porFacturarDe(resumen, pend.porPedido, anticipos, T.netoFacturado(docs, asignadas)), {
     'PEDVTASTP - 31277': 0, 'PEDVTASTP - 31278': 1000, 'PEDVTAFP - 2413': 1200, 'PEDVTAFP - 2414': 400, 'PEDVTAFP - 2415': 3000,
-    'PEDVTAFP - 2416': 0, 'PEDVTAFP - 2417': 0, 'PEDVTAFP - 2418': 0,
+    'PEDVTAFP - 2416': 0, 'PEDVTAFP - 2417': 0, 'PEDVTAFP - 2418': 0, 'PEDVTAFP - 2419': 520,
   });
   // Para el CRM: cada comprobante con su pedido y su total/neto exacto.
   const crm = T.facturasParaCrm(docs, asignadas);

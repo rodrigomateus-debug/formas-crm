@@ -360,9 +360,10 @@ test('fotos del STP: la de la cotización del pedido; si no, la de Finnegans; si
     [a.props.pedido_finnegans, 'ESTAMPA', 'https://img.test/estampa.jpg']]);
   assert.equal(r.guardadas, 2);
   assert.deepEqual(await fotos(), ['https://img.test/bolsa-azul.jpg', 'https://img.test/otro.jpg']);
-  // En la tarjeta del tablero: las de sus productos y, después, las otras de su cotización (hasta 3).
+  // En la tarjeta del tablero, las mismas que en el panel: si todos sus productos tienen foto, no suma las otras de la
+  // cotización (opciones que el cliente no pidió; aviso de Rodrigo del 7/11/2026).
   const card = await tarjeta();
-  assert.deepEqual(card.fotos, ['https://img.test/bolsa-azul.jpg', 'https://img.test/otro.jpg', 'https://img.test/estampa.jpg']);
+  assert.deepEqual(card.fotos, ['https://img.test/bolsa-azul.jpg', 'https://img.test/otro.jpg']);
   assert.equal(card.productos, 2);
   // Los iconitos de abajo: factura y remito adjuntos, y de sus 2 productos ninguno con boceto.
   assert.ok(card.adjuntos.facturas >= 1 && card.adjuntos.remitos >= 1, JSON.stringify(card.adjuntos));
@@ -393,6 +394,7 @@ test('fotos del STP: la de la cotización del pedido; si no, la de Finnegans; si
   pn = await panel();
   assert.deepEqual(pn.items.map((i) => i.image_url), [BOLSA, null]);
   assert.deepEqual(pn.cotizacion_fotos, ['https://img.test/mate.jpg']);
+  assert.deepEqual((await tarjeta()).fotos, [BOLSA, 'https://img.test/mate.jpg'], 'a uno le falta foto: la tarjeta suma la de la cotización');
   assert.equal((await api('GET', '/hooks/productos/imagenes', undefined, H)).data.productos.pedidos, 1);
   // El pedido solo, sin productos, los borra.
   await productos([[P]]);

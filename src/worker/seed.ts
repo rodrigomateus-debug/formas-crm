@@ -243,7 +243,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
       'Ecommerce orgánico', ['Mercately', 'Darwin'], 'Ejecutivo de cuentas', 'Campaña', 'Networking', 'Cartera propia',
       'Contacto por email', 'Nueva base de datos', 'Contacto del cliente', 'Expo Rural', 'Expo Agro', 'Expo Red YPF', 'Otros',
       'Linkedin', 'Contacto de Formas', 'Facebook', 'HeyReach', 'Formulario MetaAds', 'Formulario LinkedInAds',
-    ]],
+    ], FORM],
     ['origen_del_negocio', 'Medio de origen', 'enum', 'Origen', CANAL],
     ['tipo_de_origen', 'Tipo de origen', 'enum', 'Origen', TIPO_ORIGEN],
     ['origen_del_prospecto', 'Origen del prospecto', 'string', 'Origen'],

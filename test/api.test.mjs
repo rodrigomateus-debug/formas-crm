@@ -418,6 +418,47 @@ test('crear con una asociación que no existe no deja el registro creado', async
   assert.equal((await api('GET', `/records/deal?q=${encodeURIComponent(name)}`)).data.total, 0);
 });
 
+test('al crear se asocia con lo que ya existe de los otros objetos (y el negocio pide el origen)', async () => {
+  const tag = `Alta ${Date.now().toString(36)}`;
+  const meta = (await api('GET', '/meta')).data;
+  const enAlta = meta.properties.filter((p) => p.object_type === 'deal' && p.in_create_form).map((p) => p.name);
+  assert.ok(enAlta.includes('origen'), `el origen va en el alta del negocio: ${enAlta}`);
+
+  const emp = (await api('POST', '/records/company', { props: { name: `${tag} SA` } })).data;
+  const con = (await api('POST', '/records/contact', { props: { firstname: 'Alta', lastname: tag }, associations: [emp.id] })).data;
+  const ped = (await api('POST', '/records/order', { props: { hs_order_name: `${tag} PDV`, hs_total_price: 1234 } })).data;
+  // Negocio con empresa, contacto y pedido: queda asociado a los tres y toma el monto del pedido.
+  const r = await api('POST', '/records/deal', { props: { dealname: `${tag} negocio`, pipeline: 'default', origen: 'Llamada entrante' }, associations: [emp.id, con.id, ped.id] });
+  assert.equal(r.status, 201, JSON.stringify(r.data));
+  assert.deepEqual([r.data.props.origen, r.data.props.amount], ['Llamada entrante', 1234]);
+  const a = (await api('GET', `/records/deal/${r.data.id}`)).data.associations;
+  assert.deepEqual([a.company.map((x) => x.id), a.contact.map((x) => x.id), a.order.map((x) => x.id)], [[emp.id], [con.id], [ped.id]]);
+
+  // Contacto con negocio y pedido; empresa con contactos, negocio y pedido; pedido con empresa, contacto y negocio.
+  const c2 = (await api('POST', '/records/contact', { props: { firstname: 'Otra', lastname: tag }, associations: [r.data.id, ped.id, emp.id] })).data;
+  const c2a = (await api('GET', `/records/contact/${c2.id}`)).data.associations;
+  assert.deepEqual([c2a.deal.map((x) => x.id), c2a.order.map((x) => x.id), c2a.company.map((x) => x.id)], [[r.data.id], [ped.id], [emp.id]]);
+  const e2 = (await api('POST', '/records/company', { props: { name: `${tag} Dos` }, associations: [con.id, r.data.id, ped.id] })).data;
+  const e2a = (await api('GET', `/records/company/${e2.id}`)).data.associations;
+  assert.deepEqual([e2a.contact.map((x) => x.id), e2a.deal.map((x) => x.id), e2a.order.map((x) => x.id)], [[con.id], [r.data.id], [ped.id]]);
+  const p2 = await api('POST', '/records/order', { props: { hs_order_name: `${tag} PDV 2`, hs_total_price: 100 }, associations: [emp.id, con.id, r.data.id] });
+  assert.equal(p2.status, 201, JSON.stringify(p2.data));
+  assert.equal((await api('GET', `/records/deal/${r.data.id}`)).data.record.props.amount, 1334, 'el pedido nuevo suma al monto de su negocio');
+
+  // Lo que no se puede se avisa antes de crear: no queda nada suelto.
+  const cuenta = async (t, q) => (await api('GET', `/records/${t}?q=${encodeURIComponent(q)}`)).data.total;
+  const ocupado = await api('POST', '/records/deal', { props: { dealname: `${tag} ocupado`, pipeline: 'default' }, associations: [ped.id] });
+  assert.equal(ocupado.status, 409);
+  assert.match(ocupado.data.error, /ya está en el negocio/);
+  const otroNeg = (await api('POST', '/records/deal', { props: { dealname: `${tag} libre`, pipeline: 'default' } })).data;
+  const dos = await api('POST', '/records/order', { props: { hs_order_name: `${tag} sobra` }, associations: [r.data.id, otroNeg.id] });
+  assert.equal(dos.status, 400);
+  assert.match(dos.data.error, /un solo negocio/);
+  const mismo = await api('POST', '/records/contact', { props: { firstname: 'Mismo', lastname: tag }, associations: [con.id] });
+  assert.equal(mismo.status, 400);
+  assert.deepEqual([await cuenta('deal', `${tag} ocupado`), await cuenta('order', `${tag} sobra`), await cuenta('contact', `Mismo ${tag}`)], [0, 0, 0]);
+});
+
 test('el tablero respeta los filtros de la vista (grupos)', async () => {
   const tag = `Vista ${Date.now().toString(36)}`;
   await api('POST', '/records/deal', { props: { dealname: `${tag} grande`, pipeline: '740095901', amount: 900000 } });

@@ -275,9 +275,18 @@ export function RecordPicker({ type, onPick, exclude = [], placeholder }: { type
   );
 }
 
-// Alta de registro: propiedades del formulario de creación y asociación opcional.
+// Al crear algo se lo puede asociar con registros que ya existen de los otros tres objetos (pedido de Rodrigo del 10/11/2026).
+const ASOCIABLES: Record<ObjectType, ObjectType[]> = {
+  deal: ['company', 'contact', 'order'],
+  contact: ['company', 'deal', 'order'],
+  company: ['contact', 'deal', 'order'],
+  order: ['company', 'contact', 'deal'],
+};
+
+// Alta de registro: propiedades del formulario de creación y asociaciones con lo que ya existe. `associateWith` es el
+// registro desde cuya ficha se crea: queda asociado siempre y no se puede quitar.
 export function CreateRecord({ type, onClose, onCreated, associateWith, defaults }: {
-  type: ObjectType; onClose: () => void; onCreated?: (r: CrmRecord) => void; associateWith?: number; defaults?: Record<string, any>;
+  type: ObjectType; onClose: () => void; onCreated?: (r: CrmRecord) => void; associateWith?: CrmRecord; defaults?: Record<string, any>;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -295,9 +304,14 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
     }
     return init;
   });
+  const [picked, setPicked] = useState<Record<ObjectType, CrmRecord[]>>({ contact: [], company: [], deal: [], order: [] });
+  const [picking, setPicking] = useState<ObjectType | null>(null);
+  const fijo = (t: ObjectType) => (associateWith?.type === t ? [associateWith] : []);
+  const elegidos = (t: ObjectType) => [...fijo(t), ...picked[t]];
   const pipeline = type === 'deal' ? meta.pipelines.find((p) => p.id === form.pipeline) : undefined;
   const stage = pipeline?.stages.find((s) => s.id === form.dealstage);
-  const needsCompany = !!pipeline?.config.rules?.require_company && !associateWith;
+  // Con contactos elegidos decide el servidor: cuenta la empresa principal de cada uno.
+  const needsCompany = !!pipeline?.config.rules?.require_company;
   // Campos del alta + los que pide la etapa elegida (propiedades condicionales).
   const fields = useMemo(() => {
     const base = propsOf(meta, type).filter((p) => p.in_create_form || p.required);
@@ -305,20 +319,32 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
     return [...base, ...extra];
   }, [meta, type, stage]);
   const [busy, setBusy] = useState(false);
-  const [company, setCompany] = useState<CrmRecord | null>(null);
-  const [pickCompany, setPickCompany] = useState(false);
   const set = (k: string, v: any) => setForm((f) => {
     const next = { ...f, [k]: v };
     if (k === 'pipeline') next.dealstage = firstStage(v);
     return next;
   });
+  // Un pedido va en un solo negocio: un pedido nuevo admite uno, y a un negocio nuevo no se le suma un pedido que ya está en otro.
+  const tope = (t: ObjectType) => (type === 'order' && t === 'deal' ? 1 : Infinity);
+  const elegir = async (t: ObjectType, r: CrmRecord) => {
+    if (type === 'deal' && t === 'order') {
+      const res = await http<{ associations: Record<ObjectType, CrmRecord[]> }>('GET', `/records/order/${r.id}`).catch(() => null);
+      const otro = res?.associations.deal[0];
+      if (otro) { toast(`El pedido «${r.name}» ya está en el negocio «${otro.name}». Un pedido va en un solo negocio.`, true); return; }
+    }
+    setPicked((p) => ({ ...p, [t]: [...p[t], r] }));
+    if (elegidos(t).length + 1 >= tope(t)) setPicking(null);
+  };
+  const quitar = (t: ObjectType, id: number) => setPicked((p) => ({ ...p, [t]: p[t].filter((x) => x.id !== id) }));
   const save = async (openAfter: boolean) => {
-    if (needsCompany && !company) { toast(`En «${pipeline!.label}» el negocio tiene que tener una empresa asociada.`, true); return; }
+    if (needsCompany && !elegidos('company').length && !elegidos('contact').length) {
+      toast(`En «${pipeline!.label}» el negocio tiene que tener una empresa asociada.`, true); return;
+    }
     const missing = stage ? missingFor(stage, form) : [];
     if (missing.length) { toast(`Para crear en «${stage!.label}» falta: ${missing.map((m) => propOf(meta, type, m)?.label ?? m).join(', ')}.`, true); return; }
     setBusy(true);
     try {
-      const assoc = [associateWith, company?.id].filter(Boolean) as number[];
+      const assoc = [associateWith?.id, ...ASOCIABLES[type].flatMap((t) => picked[t].map((r) => r.id))].filter(Boolean) as number[];
       const rec = await http<CrmRecord>('POST', `/records/${type}`, { props: form, associations: assoc });
       toast(`${OBJECTS[type].single} creado`);
       onCreated?.(rec);
@@ -343,15 +369,40 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
             : <PropertyInput prop={p} type={type} value={form[p.name]} onChange={(v) => set(p.name, v)} />}
         </label>
       ))}
-      {type !== 'company' && !associateWith && (
-        <div className="field">
-          <span className="small muted">Empresa asociada{needsCompany ? ' * (obligatoria en este pipeline)' : ''}</span>
-          {company
-            ? <div className="row"><Avatar name={company.name} type="company" domain={company.props?.domain} /><span className="grow">{company.name}</span><button className="btn sm ghost" onClick={() => setCompany(null)}>Quitar</button></div>
-            : pickCompany ? <RecordPicker type="company" onPick={(r) => { setCompany(r); setPickCompany(false); }} />
-              : <button className="btn sm" onClick={() => setPickCompany(true)}>Asociar empresa</button>}
-        </div>
-      )}
+      <div className="create-assoc">
+        <div className="create-assoc-title">Asociar con</div>
+        {ASOCIABLES[type].map((t) => {
+          const lista = elegidos(t);
+          const obligatoria = t === 'company' && needsCompany;
+          return (
+            <div key={t} className="create-assoc-group">
+              <div className="row">
+                <span className="grow">{OBJECTS[t].plural}{obligatoria ? ' *' : ''}
+                  {obligatoria && !lista.length && <span className="small muted"> · obligatoria en este pipeline (o un contacto con empresa)</span>}
+                  {tope(t) === 1 && <span className="small muted"> · uno solo</span>}</span>
+                {lista.length < tope(t) && (
+                  <button className="btn sm ghost" onClick={() => setPicking(picking === t ? null : t)}>
+                    {picking === t ? 'Cerrar' : <><Icon name="plus" size={14} /> Asociar</>}
+                  </button>
+                )}
+              </div>
+              {lista.map((r) => (
+                <div key={r.id} className="row create-assoc-item">
+                  <Avatar name={r.name} type={t} domain={r.props?.domain} email={r.props?.email} />
+                  <span className="grow ellipsis">{r.name}</span>
+                  {r.id === associateWith?.id
+                    ? <span className="small muted">Desde la ficha</span>
+                    : <button className="btn sm ghost" aria-label={`Quitar ${r.name}`} onClick={() => quitar(t, r.id)}>Quitar</button>}
+                </div>
+              ))}
+              {picking === t && (
+                <RecordPicker type={t} exclude={lista.map((r) => r.id)} onPick={(r) => elegir(t, r)}
+                  placeholder={`Buscar ${OBJECTS[t].plural.toLowerCase()} existentes…`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </Drawer>
   );
 }

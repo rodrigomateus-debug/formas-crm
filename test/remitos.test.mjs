@@ -10,6 +10,7 @@ const RUN = Date.now().toString(36);
 const PDV = String(50000 + Math.floor(Math.random() * 9000));
 const PDV_B = String(Number(PDV) + 1);
 const PDV_C = String(Number(PDV) + 2);   // un remito de dos hojas
+const PDV_D = String(Number(PDV) + 3);   // dos materas de colores y un remito sin códigos
 const NRO = (n) => `R-0001-${String(n).padStart(8, '0')}`;
 const BASE_NRO = 20000 + Math.floor(Math.random() * 70000);
 
@@ -75,6 +76,11 @@ const LECTURAS = {
   HOJA1: { ...base, numero_remito: NRO(BASE_NRO + 40), pdv_pedido_web: PDV_C, pdv_observaciones: PDV_C, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('SIM10001273', 'Llavero corto', 100)] },
   HOJA2: { ...base, numero_remito: NRO(BASE_NRO + 40), pdv_pedido_web: PDV_C, pdv_observaciones: PDV_C, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra bordada', 50)] },
   HOJA2B: { ...base, numero_remito: NRO(BASE_NRO + 40), pdv_pedido_web: PDV_C, pdv_observaciones: null, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra bordada', 50)] },
+  // Como el PDV 2402: el remito no trae códigos, dice «(equivale a 90 unidades)» y el PDV solo en «Observaciones»; el
+  // pedido tiene dos materas (negra y roja) de 1 cada una. Las dos cuentan, una en cada producto.
+  MATERAS: { ...base, numero_remito: NRO(BASE_NRO + 50), pdv_pedido_web: '', pdv_observaciones: PDV_D, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
+    items: [{ codigo: '', descripcion: 'Matera Engomada (equivale a 90 unidades)', cantidad: 1, cantidad_texto: '1' },
+      { codigo: '', descripcion: 'Matera Engomada (equivale a 90 unidades)', cantidad: 1, cantidad_texto: '1' }] },
   SINPDV: { ...base, numero_remito: NRO(BASE_NRO + 12), pdv_pedido_web: null, pdv_observaciones: null, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra', 5)] },
 };
 let lecturas = 0;
@@ -90,7 +96,7 @@ const pdvTask = (id, npdv, cliente, status) => ({
   attachments: [],
 });
 const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor'),
-  pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor')];
+  pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor'), pdvTask(`remD${RUN}`, PDV_D, `Cliente A ${RUN} S.A.`, 'en el impresor')];
 // Gmail simulado (puerto 8799, el de GOOGLE_TOKEN_URL y GMAIL_API_URL de .dev.vars): los mails de faltantes.
 const mails = [];
 let gmail;
@@ -147,6 +153,11 @@ before(async () => {
     const t = TAREAS().find((x) => p === `/clickup/task/${x.id}`);
     if (t) return send(t);
     if (p === '/fin/oauth/token') return res.end('"token-de-prueba"');
+    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_D.padStart(8, '0')}`) {
+      return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: 'MAT-N', Cantidad: 1, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '', IncluyeImpuesto: false },
+        { ProductoCodigo: 'MAT-R', Cantidad: 1, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '', IncluyeImpuesto: false }] });
+    }
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_C.padStart(8, '0')}`) {
       return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
         { ProductoCodigo: 'SIM10001273', Cantidad: 100, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Llavero corto', IncluyeImpuesto: false },
@@ -162,7 +173,10 @@ before(async () => {
     }
     if (p === '/fin/cliente/C-REM-A') return send({ IdentificacionTributariaNumero: CUIT_A, RazonSocial: `CLIENTE A ${RUN} SA` });
     if (p === '/fin/cliente/C-REM-B') return send({ IdentificacionTributariaNumero: CUIT_B, RazonSocial: `CLIENTE B ${RUN} SRL` });
-    if (p.startsWith('/fin/producto/')) return send({ Nombre: p.endsWith('GOR-1') ? 'Gorra bordada' : 'Llavero corto', Descripcion: '', ProductoImagen: '' });
+    if (p.startsWith('/fin/producto/')) {
+      const nombre = { 'GOR-1': 'Gorra bordada', 'MAT-N': 'Matera Engomada Negra', 'MAT-R': 'Matera Engomada Roja' }[p.split('/').pop()] ?? 'Llavero corto';
+      return send({ Nombre: nombre, Descripcion: '', ProductoImagen: '' });
+    }
     if (p === '/fin/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals') {
       // Finnegans tiene los remitos del pedido A (el número es la confirmación independiente del PDV).
       const origen = url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen');
@@ -332,6 +346,16 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('HOJA2B'), H)).data.estado, 'duplicado');
   rC = await remitosDe(C.id);
   assert.deepEqual(rC.entrega.lineas.map((l) => [l.entregado, l.falta, l.excede]), [[100, 0, 0], [50, 0, 0]], 'cada hoja una vez');
+
+  // 6c. Renglones sin código y dos productos parecidos (dos materas): se emparejan por las palabras y se reparten, uno a
+  // cada producto. Antes daba «falta» en uno y «de más» en el otro.
+  const D = await pedidoDe(PDV_D);
+  assert.equal((await api('GET', `/records/order/${D.id}/products`)).data.items.length, 2);
+  const mat = await api('POST', '/hooks/chofer/api/remitos', form('MATERAS'), H);
+  assert.equal(mat.data.estado, 'ok', mat.data.mensaje);
+  const rD = await remitosDe(D.id);
+  assert.equal(rD.entrega.estado, 'completa');
+  assert.deepEqual(rD.entrega.lineas.map((l) => [l.entregado, l.falta, l.excede]), [[1, 0, 0], [1, 0, 0]]);
 
   // 7. Pedido B: una entrega parcial y un remito subido en el CRM (elegido por una persona: alcanza con el PDV).
   assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('B1'), H)).data.estado, 'ok');

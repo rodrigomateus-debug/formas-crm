@@ -21,7 +21,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
-import { archivoDeRemito, calcularEntrega, finalizarEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, revisarRemito } from './remitos';
+import { archivoDeRemito, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -803,7 +803,9 @@ api.get('/records/order/:id/remitos', async (c) => {
   if (sinLeer.length && c.env.ANTHROPIC_API_KEY) {
     c.executionCtx.waitUntil((async () => { const b = Budget.of(c.env); for (const r of sinLeer) await leerRemito(c.env, r.id, { budget: b }).catch((e) => console.error('remito', r.id, (e as Error).message)); })());
   }
-  return c.json({ remitos, entrega: await calcularEntrega(c.env.DB, id), puede_finalizar: puedeFinalizar(c.get('ctx')), lector: !!c.env.ANTHROPIC_API_KEY });
+  // Se recalcula (y se guarda si cambió): así el estado del pedido, que usan el filtro «Faltan entregas» y las tarjetas,
+  // se pone al día cuando cambia cómo se cuenta, sin esperar un remito nuevo.
+  return c.json({ remitos, entrega: await recalcularEntrega(c.env, id), puede_finalizar: puedeFinalizar(c.get('ctx')), lector: !!c.env.ANTHROPIC_API_KEY });
 });
 // Subir un remito al pedido (foto o PDF, formulario con «archivo»): se guarda y se lee en el momento.
 api.post('/records/order/:id/remitos', async (c) => {

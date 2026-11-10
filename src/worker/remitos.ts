@@ -284,9 +284,9 @@ async function empresaDelPedido(db: D1Database, id: number) {
     WHERE (a.from_id = ?1 AND a.to_type = 'company') OR (a.to_id = ?1 AND a.from_type = 'company') ORDER BY a.is_primary DESC LIMIT 1`)
     .bind(id).first<{ id: number; name: string; cuit: string | null }>();
 }
-interface Renglon { code: string | null; name: string; quantity: number | null }
+interface Renglon { code: string | null; name: string; quantity: number | null; detalle?: string | null }
 async function renglones(env: Env, p: Pedido, b?: Budget): Promise<Renglon[]> {
-  const leer = async () => (await env.DB.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code) AS name, li.quantity
+  const leer = async () => (await env.DB.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code) AS name, li.quantity, li.description AS detalle
     FROM line_items li LEFT JOIN products pr ON pr.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(p.id).all<Renglon>()).results;
   let rs = await leer();
   if (!rs.length && b && b.left() > 6) {
@@ -296,16 +296,39 @@ async function renglones(env: Env, p: Pedido, b?: Budget): Promise<Renglon[]> {
   return rs;
 }
 
-// Cada renglón del remito con el producto del pedido que le corresponde: por código; si no, por nombre; si los dos tienen
-// un solo producto, ese.
-export function emparejar(items: Array<{ code: string | null; description: string | null }>, lineas: Renglon[]) {
+// Cada renglón del remito con el producto del pedido que le corresponde: por código; si no, por nombre (palabra por
+// palabra, sin números ni palabras de relleno: «Matera Engomada (equivale a 90 unidades)» es «Matera Engomada Negra»);
+// si los dos tienen un solo producto, ese. Si un renglón se parece igual a varios productos (dos materas de colores),
+// va al primero al que todavía le falta, así dos renglones iguales no caen en el mismo producto. Con 3 de 4 palabras
+// en común alcanza; «Bolsa Shopper Azul» y «Bolsa Shopper Roja» (2 de 3) no son el mismo producto.
+const RELLENO = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'con', 'sin', 'para', 'por', 'una', 'uno', 'unos', 'equivale', 'equivalen', 'unidad',
+  'unidades', 'uni', 'und', 'cant', 'cantidad', 'pack', 'caja', 'cajas', 'bulto', 'bultos', 'color', 'talle', 'modelo', 'merchandising']);
+const palabras = (s: unknown) => new Set(norm(s).split(' ').filter((w) => w.length >= 3 && !RELLENO.has(w) && !/^\d+$/.test(w)));
+function parecido(a: unknown, b: unknown) {
+  const A = palabras(a), B = palabras(b);
+  if (!A.size || !B.size) return 0;
+  let n = 0;
+  for (const w of A) if (B.has(w)) n++;
+  return n / Math.min(A.size, B.size);
+}
+export function emparejar(items: Array<{ code: string | null; description: string | null; quantity?: number | null }>, lineas: Renglon[]) {
+  const resto = lineas.map((l) => (l.quantity == null ? Infinity : Number(l.quantity)));
   return items.map((it) => {
     const c = normCodigo(it.code);
     const d = norm(it.description);
-    let i = c ? lineas.findIndex((l) => normCodigo(l.code) === c) : -1;
-    if (i < 0 && c) i = lineas.findIndex((l) => normCodigo(l.code) && (c.includes(normCodigo(l.code)) || normCodigo(l.code).includes(c)));
-    if (i < 0 && d) i = lineas.findIndex((l) => { const n = norm(l.name); return n.length > 3 && (d.includes(n) || n.includes(d)); });
-    if (i < 0 && items.length === 1 && lineas.length === 1) i = 0;
+    // Los candidatos, del más seguro al menos: el mismo código; un código dentro del otro; el nombre.
+    let cand: number[] = [];
+    if (c) cand = lineas.map((l, i) => (normCodigo(l.code) === c ? i : -1)).filter((i) => i >= 0);
+    if (!cand.length && c) cand = lineas.map((l, i) => (normCodigo(l.code) && (c.includes(normCodigo(l.code)) || normCodigo(l.code).includes(c)) ? i : -1)).filter((i) => i >= 0);
+    if (!cand.length && d) {
+      const puntos = lineas.map((l) => Math.max(parecido(d, l.name), parecido(d, l.detalle)));
+      const mejor = Math.max(0, ...puntos);
+      if (mejor >= 0.75) cand = puntos.map((p, i) => (p === mejor ? i : -1)).filter((i) => i >= 0);
+    }
+    if (!cand.length && items.length === 1 && lineas.length === 1) cand = [0];
+    if (!cand.length) return -1;
+    const i = cand.find((k) => resto[k] > 0) ?? cand[0];
+    resto[i] -= Number(it.quantity ?? 0);
     return i;
   });
 }
@@ -317,8 +340,14 @@ async function productosNuevos(db: D1Database, pedidoId: number, numero: string,
   const { results } = await db.prepare(`SELECT i.code, i.description FROM remito_items i JOIN remitos r ON r.id = i.remito_id
     WHERE r.record_id = ? AND r.numero = ? AND r.id != ? AND r.estado IN ('ok', 'revisar', 'sin_leer') AND r.duplicado_de IS NULL`)
     .bind(pedidoId, numero, remitoId).all<{ code: string | null; description: string | null }>();
-  const ya = new Set(results.map(claveItem));
-  return items.filter((it) => claveItem(it) && !ya.has(claveItem(it))).length;
+  // Por cantidad de renglones de cada producto: dos renglones iguales en esta foto contra uno en las otras es uno nuevo.
+  const ya = new Map<string, number>();
+  for (const it of results) ya.set(claveItem(it), (ya.get(claveItem(it)) ?? 0) + 1);
+  const aca = new Map<string, number>();
+  for (const it of items) if (claveItem(it)) aca.set(claveItem(it), (aca.get(claveItem(it)) ?? 0) + 1);
+  let nuevos = 0;
+  for (const [k, n] of aca) nuevos += Math.max(0, n - (ya.get(k) ?? 0));
+  return nuevos;
 }
 
 interface Cruce { recordId: number | null; estado: EstadoRemito; motivo: string | null; repetir: boolean; controles: Control[]; candidatos: Candidato[]; duplicadoDe: number | null; pidePdv: boolean }
@@ -595,7 +624,7 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
   const row = await getRow(db, orderId, 'order');
   const props = JSON.parse(row.props) as Record<string, unknown>;
   const [lin, its, cuenta] = await db.batch([
-    db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity
+    db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity, li.description AS detalle
       FROM line_items li LEFT JOIN products pr ON pr.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(orderId),
     db.prepare(`SELECT i.code, i.description, i.quantity, r.id AS remito_id, r.numero FROM remito_items i JOIN remitos r ON r.id = i.remito_id
       WHERE r.record_id = ? AND r.estado = 'ok' AND r.duplicado_de IS NULL ORDER BY r.id, i.position`).bind(orderId),
@@ -605,9 +634,13 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
   const lineas = (lin.results as Renglon[]);
   // Cada producto de un mismo número de remito cuenta una vez (con la cantidad más alta de sus fotos): las hojas
   // distintas suman y una foto repetida no.
+  // Dos renglones iguales en la misma foto (dos materas sin código) son dos: la clave lleva cuál de ellos es.
   const porClave = new Map<string, { code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>();
+  const vez = new Map<string, number>();
   for (const it of its.results as Array<{ code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>) {
-    const k = it.numero && claveItem(it) ? `${it.numero}|${claveItem(it)}` : `r${it.remito_id}|${porClave.size}`;
+    const enFoto = `${it.remito_id}|${claveItem(it)}`;
+    vez.set(enFoto, (vez.get(enFoto) ?? 0) + 1);
+    const k = it.numero && claveItem(it) ? `${it.numero}|${claveItem(it)}|${vez.get(enFoto)}` : `r${it.remito_id}|${porClave.size}`;
     const ya = porClave.get(k);
     if (!ya || Number(it.quantity ?? 0) > Number(ya.quantity ?? 0)) porClave.set(k, it);
   }

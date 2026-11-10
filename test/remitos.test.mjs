@@ -86,6 +86,9 @@ const LECTURAS = {
   // Como el PDV 30971: el remito dice «70 Jarro Bossa Waterdog» y el pedido, «Producción simple drinkware genérico» (100).
   JARROS: { ...base, numero_remito: NRO(BASE_NRO + 60), pdv_pedido_web: PDV_F, pdv_observaciones: PDV_F, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
     items: [item('GOR-1', 'Gorra bordada', 50), { codigo: '', descripcion: 'Jarro Bossa Waterdog', cantidad: 70, cantidad_texto: '70' }] },
+  // Como el remito del PDV 2402: el PDV y el CUIT son del pedido, pero ningún producto se reconoce: queda para revisar.
+  TAZAS: { ...base, numero_remito: NRO(BASE_NRO + 61), pdv_pedido_web: PDV_F, pdv_observaciones: PDV_F, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
+    items: [{ codigo: '', descripcion: 'Taza misteriosa', cantidad: 20, cantidad_texto: '20' }, { codigo: '', descripcion: 'Taza misteriosa roja', cantidad: 10, cantidad_texto: '10' }] },
   SINPDV: { ...base, numero_remito: NRO(BASE_NRO + 12), pdv_pedido_web: null, pdv_observaciones: null, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra', 5)] },
 };
 let lecturas = 0;
@@ -420,6 +423,22 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.equal((await api('POST', `/remitos/${jar.data.id}/revisar`, { accion: 'releer' })).status, 200);
   rF = (await remitosDe(F.id)).entrega;
   assert.deepEqual([rF.estado, ...porCodigo(rF)], ['parcial', [70, 30, 0], [50, 0, 0]], 'sigue asignado después de releer');
+
+  // 6e. En la revisión: el PDV y el CUIT son del pedido, pero ningún producto se reconoce, así que queda para revisar.
+  // Al confirmarlo se elige el par de cada producto en el pedido. Después queda en «Revisados», con quién y los pares.
+  const tz = await api('POST', '/hooks/chofer/api/remitos', form('TAZAS'), H);
+  assert.equal(tz.data.estado, 'revisar', tz.data.mensaje);
+  assert.equal((await api('POST', `/remitos/${tz.data.id}/revisar`, { accion: 'confirmar', pedido: F.id, productos: [{ position: 5, i: iDrk }] })).status, 400, 'un renglón que no existe');
+  assert.equal((await remitosDe(F.id)).remitos.find((x) => x.id === tz.data.id).estado, 'revisar', 'no cambió nada');
+  const conf = await api('POST', `/remitos/${tz.data.id}/revisar`, { accion: 'confirmar', pedido: F.id, productos: [{ position: 0, i: iDrk }, { position: 1, i: iDrk }] });
+  assert.equal(conf.status, 200, JSON.stringify(conf.data));
+  assert.equal(conf.data.estado, 'ok');
+  rF = (await remitosDe(F.id)).entrega;
+  assert.deepEqual([rF.estado, ...porCodigo(rF)], ['completa', [100, 0, 0], [50, 0, 0]], '70 del jarro + 20 + 10 de las tazas');
+  const rev = (await api('GET', '/remitos/revisados')).data.remitos.find((x) => x.id === tz.data.id);
+  assert.ok(rev?.revisado_por && rev.revisor, 'en «Revisados», con quién lo revisó');
+  assert.deepEqual(rev.pares.map((x) => [x.position, x.i, x.cantidad]), [[0, iDrk, 20], [1, iDrk, 10]]);
+  assert.ok(!(await api('GET', '/remitos/revisar')).data.remitos.some((x) => x.id === tz.data.id), 'ya no está para revisar');
 
   // 7. Pedido B: una entrega parcial y un remito subido en el CRM (elegido por una persona: alcanza con el PDV).
   assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('B1'), H)).data.estado, 'ok');

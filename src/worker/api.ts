@@ -21,7 +21,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
-import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, revisarRemito } from './remitos';
+import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -852,6 +852,8 @@ api.post('/remitos/:id/revisar', async (c) => {
 });
 // La bandeja de Logística: lo que no se pudo adjuntar solo o no se pudo leer.
 api.get('/remitos/revisar', async (c) => c.json({ remitos: await remitosParaRevisar(c.env.DB), lector: !!c.env.ANTHROPIC_API_KEY }));
+// Los que ya revisó una persona, para ver qué se hizo y corregirlo.
+api.get('/remitos/revisados', async (c) => c.json({ remitos: await remitosRevisados(c.env.DB) }));
 api.get('/remitos/revisar/cuantos', async (c) => {
   const r = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM remitos WHERE estado = 'revisar' OR (estado = 'sin_leer' AND intentos >= 1)").first<{ n: number }>();
   return c.json({ total: r?.n ?? 0 });

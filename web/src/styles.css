@@ -139,7 +139,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-ink); w
 .nav-link.active .count { color: #fff; }
 .nav-group { flex: none; padding: 14px 10px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255, 255, 255, .45); }
 [data-theme="contrast"] .nav-group, [data-theme="contrast"] .nav-link .count { color: #fff; }
-.sidebar .me-wrap { margin: auto -10px 0; padding: 10px; border-top: 1px solid var(--ui-line-on-navy); position: relative; flex: none; }
+.sidebar .nav-bottom { margin-top: auto; padding: 12px 0 8px; display: flex; flex-direction: column; gap: 2px; flex: none; }
+.sidebar .me-wrap { margin: 0 -10px; padding: 10px; border-top: 1px solid var(--ui-line-on-navy); position: relative; flex: none; }
 .sidebar .me { display: flex; gap: 10px; align-items: center; width: 100%; padding: 6px 8px; border: 0; border-radius: var(--r-control); background: none; cursor: pointer;
   text-align: left; font-size: 12px; color: var(--ui-ink-on-navy); transition: background var(--dur) var(--ease); }
 .sidebar .me:hover, .sidebar .me[aria-expanded="true"] { background: rgba(255, 255, 255, .06); }
@@ -783,6 +784,11 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .asignar-op .grow { display: flex; flex-direction: column; min-width: 0; }
 .asignar-nombre { font-weight: 500; overflow-wrap: anywhere; }
 .bad-text { color: var(--ui-negative-ink); }
+/* Revisión de remitos: el par en el pedido de cada producto del remito. */
+.pares-productos { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--ui-line); border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.par-producto { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr); align-items: center; gap: 6px 10px; }
+.par-producto .par-remito { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .par-producto { grid-template-columns: 1fr; } .par-producto > [aria-hidden] { display: none; } }
 .entrega-linea .tag { flex: none; }
 .remito-fila { flex-direction: column; align-items: stretch; gap: 6px; }
 .remito-cabeza { display: flex; align-items: center; gap: 8px; min-width: 0; }

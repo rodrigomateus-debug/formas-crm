@@ -37,6 +37,9 @@ function convert(p: Property | undefined, v: unknown, owners: Map<string, number
   }
 }
 
+// Desplegables cuyas opciones son las del CRM: la sincronización con HubSpot no les suma las suyas.
+const LISTAS_PROPIAS = new Set(['order:hs_pipeline_stage', 'deal:motivo_de_cierre_perdido']);
+
 // Lo que manda ClickUp en un pedido (ver clickup.ts): en un pedido migrado vale más que lo que traía HubSpot.
 const CLICKUP_PROPS = ['hs_pipeline_stage', 'unidad_de_negocio', 'cliente_clickup', 'pedido_finnegans', 'url_clickup', 'detalle_produccion', 'entregado_el', 'factura_numero'];
 const clickupOrders: Array<{ id: number; pdv: string }> = [];
@@ -100,8 +103,10 @@ migrate.post('/', async (c) => {
         const cur = existing.find((x) => x.object_type === type && x.name === name);
         const options = (p.options ?? []).map((o: { value: string; label: string }) => ({ value: o.value, label: o.label }));
         if (cur) {
-          // El estado del pedido tiene sus estados generales (los de HubSpot se traducen en ORDER_STAGE_ALIAS): no se suman.
-          if (type === 'order' && name === 'hs_pipeline_stage') continue;
+          // Listas que se definen en el CRM y no se suman las de HubSpot: el estado del pedido (sus estados generales; los de
+          // HubSpot se traducen en ORDER_STAGE_ALIAS) y el motivo de cierre perdido (solo los 7 motivos que eligió Rodrigo
+          // el 10/11/2026, migración 0035).
+          if (LISTAS_PROPIAS.has(`${type}:${name}`)) continue;
           if (['enum', 'multienum'].includes(cur.type) && options.length) {
             const merged = [...cur.options, ...options.filter((o: { value: string }) => !cur.options.some((x) => x.value === o.value))];
             if (merged.length !== cur.options.length) {

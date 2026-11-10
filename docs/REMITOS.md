@@ -84,6 +84,13 @@ producto ya no está en el pedido, la asignación no vale y el renglón se vuelv
 
 - **Remitos para revisar:** lo que no se pudo adjuntar solo o no se pudo leer, con la foto, lo leído y cómo se controló. Se
   confirma en el pedido sugerido, se busca otro pedido, se lee de nuevo o se descarta.
+  Si el pedido está identificado pero ningún producto (o alguno) del remito se reconoce, cada producto del remito tiene un
+  desplegable con los productos de ese pedido (con lo que falta de cada uno) para elegir su par; al confirmar queda como
+  asignación a mano con toda la cantidad del renglón (`productos: [{ position, i }]` en `POST /api/remitos/:id/revisar`).
+  «Que lo busque solo» deja que el CRM lo empareje (pedido de Rodrigo del 10/11/2026, PDV 2402).
+- **Revisados:** los que ya revisó una persona, el más reciente primero (`GET /api/remitos/revisados`): qué se decidió
+  (confirmado en tal pedido, descartado, repetido), quién y cuándo, y a qué producto va cada renglón. Desde acá se corrige
+  con los mismos botones: otro pedido, cambiar los productos, leer de nuevo o descartar.
 - **Choferes:** Logística y los administradores crean el link de cada chofer (con un botón para mandarlo por WhatsApp), lo
   vuelven a copiar con «Ver link» si el chofer lo pierde, y lo dan de baja si cambia de celular o quedó en manos de otro. El link es un token tipo «chofer» que solo sirve para la app de
   remitos: no abre el resto del CRM ni las otras entradas.

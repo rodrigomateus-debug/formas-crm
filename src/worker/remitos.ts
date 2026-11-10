@@ -47,11 +47,11 @@ export interface RemitoRow {
   numero: string | null; pdv: string | null; cuit: string | null; cliente: string | null; fecha: string | null; recibido_por: string | null;
   recibido_el: string | null; firmado: number | null; reservas: number; notas: string | null; lectura: string; controles: string; candidatos: string;
   duplicado_de: number | null; intentos: number; leido_at: string | null; revisado_por: number | null; revisado_at: string | null;
-  created_at: string; updated_at: string;
+  pdv_chofer: string | null; pide_pdv: number; created_at: string; updated_at: string;
 }
 const SIN_DATA = `id, record_id, origen, file_id, nombre, mime, size, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, estado, motivo,
   repetir, numero, pdv, cuit, cliente, fecha, recibido_por, recibido_el, firmado, reservas, notas, lectura, controles, candidatos, duplicado_de,
-  intentos, leido_at, revisado_por, revisado_at, created_at, updated_at`;
+  intentos, leido_at, revisado_por, revisado_at, pdv_chofer, pide_pdv, created_at, updated_at`;
 
 // ---------- Datos que se controlan solos ----------
 
@@ -288,7 +288,7 @@ export function emparejar(items: Array<{ code: string | null; description: strin
   });
 }
 
-interface Cruce { recordId: number | null; estado: EstadoRemito; motivo: string | null; repetir: boolean; controles: Control[]; candidatos: Candidato[]; duplicadoDe: number | null }
+interface Cruce { recordId: number | null; estado: EstadoRemito; motivo: string | null; repetir: boolean; controles: Control[]; candidatos: Candidato[]; duplicadoDe: number | null; pidePdv: boolean }
 
 async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cruce> {
   const db = env.DB;
@@ -296,14 +296,29 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
   const add = (dato: string, ok: boolean | null, detalle: string) => { controles.push({ dato, ok, detalle }); };
   const repetir = !!l.repetir_foto;
   const fin = (recordId: number | null, estado: EstadoRemito, motivo: string | null, extra: Partial<Cruce> = {}): Cruce =>
-    ({ recordId, estado, motivo, repetir: estado === 'revisar' && repetir, controles, candidatos: [], duplicadoDe: null, ...extra });
+    ({ recordId, estado, motivo, repetir: estado === 'revisar' && repetir, controles, candidatos: [], duplicadoDe: null, pidePdv: false, ...extra });
+  // El pedido que eligió una persona: subido en la ficha, adjunto al PDV en ClickUp o confirmado en la revisión. El que
+  // puso el CRM a un remito del chofer no cuenta (se vuelve a buscar por el PDV).
+  const elegidoPor = r.record_id && (r.origen !== 'chofer' || r.revisado_por) ? r.record_id : null;
 
-  if (!l.es_remito) return fin(r.record_id, 'revisar', 'No parece un remito de Formas.', { repetir: true });
+  if (!l.es_remito) return fin(elegidoPor, 'revisar', 'No parece un remito de Formas.', { repetir: true });
 
-  // El PDV, que aparece dos veces.
-  const pdvs = [...new Set([normPdv(l.pdv_pedido_web), normPdv(l.pdv_observaciones)].filter(Boolean) as string[])];
-  if (pdvs.length > 1) add('PDV', false, `El PDV no coincide: «Nº Pedido Web» dice ${normPdv(l.pdv_pedido_web)} y «Observaciones» ${normPdv(l.pdv_observaciones)}.`);
-  else if (pdvs.length === 1) add('PDV', true, normPdv(l.pdv_pedido_web) && normPdv(l.pdv_observaciones) ? `PDV ${pdvs[0]} (en «Nº Pedido Web» y en «Observaciones»).` : `PDV ${pdvs[0]}.`);
+  // El PDV, que aparece dos veces; y el que escribió el chofer, si lo escribió.
+  const leidos = [...new Set([normPdv(l.pdv_pedido_web), normPdv(l.pdv_observaciones)].filter(Boolean) as string[])];
+  const delChofer = normPdv(r.pdv_chofer);
+  let pdvs = leidos;
+  let porChofer = false;          // el PDV lo puso el chofer (no se leía, o no coincidía en el remito)
+  let contraLectura: string | null = null;   // el chofer escribió otro que el que dice el remito (bien leído)
+  if (delChofer && leidos.includes(delChofer)) {
+    pdvs = [delChofer];
+    add('PDV', true, leidos.length > 1 ? `PDV ${delChofer}: en el remito no coincidía en los dos lugares y el chofer confirmó este.` : `PDV ${delChofer} (lo confirmó el chofer).`);
+  } else if (delChofer) {
+    pdvs = [delChofer];
+    porChofer = true;
+    if (leidos.length === 1) { contraLectura = leidos[0]; add('PDV', null, `El remito dice PDV ${leidos[0]} y el chofer lo corrigió a ${delChofer}.`); }
+    else add('PDV', null, `PDV ${delChofer}, escrito por el chofer (en el remito ${leidos.length ? 'no coincidía' : 'no se leía'}).`);
+  } else if (leidos.length > 1) add('PDV', false, `El PDV no coincide: «Nº Pedido Web» dice ${normPdv(l.pdv_pedido_web)} y «Observaciones» ${normPdv(l.pdv_observaciones)}.`);
+  else if (leidos.length === 1) add('PDV', true, normPdv(l.pdv_pedido_web) && normPdv(l.pdv_observaciones) ? `PDV ${leidos[0]} (en «Nº Pedido Web» y en «Observaciones»).` : `PDV ${leidos[0]}.`);
   else add('PDV', null, 'No se lee el número de PDV.');
   const pdv = pdvs.length === 1 ? pdvs[0] : null;
 
@@ -315,31 +330,31 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
   if (l.cuit_cliente && !cuitLeido) add('CUIT', false, `El CUIT leído (${l.cuit_cliente}) no es válido: puede estar mal leído.`);
   const cuit = cuitLeido && !CUIT_FORMAS.includes(cuitLeido) ? cuitLeido : null;
 
-  if (!pdv && !numero && !l.items.length) return fin(r.record_id, 'revisar', l.motivo_repetir || 'No se leen los datos del remito.', { repetir: true });
+  if (!pdv && !numero && !l.items.length) return fin(elegidoPor, 'revisar', l.motivo_repetir || 'No se leen los datos del remito.', { repetir: true, pidePdv: true });
 
   // A qué pedido va: el que eligió una persona (subido en la ficha o adjunto en ClickUp) o el del PDV.
   let p: Pedido | null = null;
   let candidatos: Candidato[] = [];
   const cand = (x: Pedido): Candidato => ({ id: x.id, nombre: x.name, pdv: normPdv(x.props.pdv_finnegans) });
-  if (r.record_id) {
-    p = await pedido(db, r.record_id);
+  if (elegidoPor) {
+    p = await pedido(db, elegidoPor);
     const suyo = normPdv(p.props.pdv_finnegans);
     if (pdv && suyo && pdv !== suyo) {
       const otros = await pedidosConPdv(db, pdv);
       add('Pedido', false, `El remito dice PDV ${pdv} y está en el pedido del PDV ${suyo}.`);
-      return fin(r.record_id, 'revisar', `El remito es del PDV ${pdv}, no del ${suyo}.`, { candidatos: [cand(p), ...otros.map(cand)] });
+      return fin(elegidoPor, 'revisar', `El remito es del PDV ${pdv}, no del ${suyo}.`, { candidatos: [cand(p), ...otros.map(cand)] });
     }
     if (pdv && suyo) add('Pedido', true, `Coincide con el pedido (PDV ${suyo}).`);
   } else if (pdv) {
     const ps = (await pedidosConPdv(db, pdv)).filter((x) => x.props.hs_pipeline_stage !== ANULADO);
     candidatos = ps.map(cand);
     if (ps.length === 1) { p = ps[0]; add('Pedido', true, `El PDV ${pdv} es del pedido «${p.name}».`); }
-    else if (!ps.length) { add('Pedido', false, `No hay ningún pedido con el PDV ${pdv}.`); return fin(null, 'revisar', `No hay ningún pedido con el PDV ${pdv}.`); }
+    else if (!ps.length) { add('Pedido', false, `No hay ningún pedido con el PDV ${pdv}.`); return fin(null, 'revisar', `No hay ningún pedido con el PDV ${pdv}${porChofer ? ' (el que escribió el chofer)' : ''}.`, { pidePdv: true }); }
     else { add('Pedido', null, `Hay ${ps.length} pedidos con el PDV ${pdv}.`); return fin(null, 'revisar', `Hay ${ps.length} pedidos con el PDV ${pdv}: elegí cuál.`, { candidatos }); }
   } else if (pdvs.length > 1) {
     // El PDV dice una cosa en «Nº Pedido Web» y otra en «Observaciones»: no se adivina; los dos pedidos, para elegir.
     for (const n of pdvs) candidatos.push(...(await pedidosConPdv(db, n)).filter((x) => x.props.hs_pipeline_stage !== ANULADO).map(cand));
-    return fin(null, 'revisar', `El PDV no coincide en los dos lugares del remito (${pdvs.join(' y ')}): elegí el pedido.`, { candidatos });
+    return fin(null, 'revisar', `El PDV no coincide en los dos lugares del remito (${pdvs.join(' y ')}): elegí el pedido.`, { candidatos, pidePdv: true });
   } else {
     // Sin PDV no se adjunta solo: se buscan los pedidos posibles por el CUIT para que alguien elija.
     if (cuit) {
@@ -352,11 +367,12 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
     }
     // Otra foto sirve si la foto no deja leerlo; si el remito no lo dice, no.
     const otraFoto = !!l.repetir_foto || !l.legible;
-    return fin(null, 'revisar', otraFoto ? (l.motivo_repetir || 'No se lee el PDV.') : 'El remito no dice el PDV: elegí el pedido.', { candidatos, repetir: otraFoto });
+    return fin(null, 'revisar', otraFoto ? (l.motivo_repetir || 'No se lee el PDV.') : 'El remito no dice el PDV: elegí el pedido.', { candidatos, repetir: otraFoto, pidePdv: true });
   }
 
   // El pedido elegido: lo que lo confirma y lo que lo contradice.
   let fuerte = false;
+  let enFinnegans = false;   // Finnegans tiene este número de remito en este pedido
   let contra: string | null = null;
   const emp = await empresaDelPedido(db, p.id);
   let cuitPedido = cuitValido(emp?.cuit);
@@ -375,7 +391,7 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
   // El número de remito en Finnegans.
   if (numero && await fin_()) {
     const rems = await finnegansRemitos(env, token!, pedidoFin!, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
-    if (rems?.some((x) => x.numeros.includes(numeroDe(numero)!))) { fuerte = true; add('Remito en Finnegans', true, `Finnegans tiene el remito ${numero} en el pedido ${pedidoFin}.`); }
+    if (rems?.some((x) => x.numeros.includes(numeroDe(numero)!))) { fuerte = true; enFinnegans = true; add('Remito en Finnegans', true, `Finnegans tiene el remito ${numero} en el pedido ${pedidoFin}.`); }
     else if (rems?.length) add('Remito en Finnegans', null, `Finnegans no muestra el remito ${numero} en el pedido ${pedidoFin} (tiene ${rems.length}).`);
   }
 
@@ -404,12 +420,19 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
   }
 
   // Elegido por una persona: alcanza con que el PDV coincida (o, sin PDV, el CUIT). Desde la app: PDV y otro dato fuerte.
-  const elegido = !!r.record_id;
+  // Si el chofer corrigió un PDV que el remito dice bien en los dos lugares, solo vale si Finnegans tiene el remito en el
+  // pedido que dice el chofer; si no, lo revisa Logística (puede haberse equivocado al escribirlo).
+  const elegido = !!elegidoPor;
+  // Si el chofer corrigió el PDV, el pedido del PDV que dice el remito también es posible.
+  if (contraLectura) for (const x of await pedidosConPdv(db, contraLectura)) if (!candidatos.some((y) => y.id === x.id)) candidatos.push(cand(x));
   if (contra) return fin(p.id, 'revisar', contra, { candidatos });
   if (pdvs.length > 1) return fin(p.id, 'revisar', 'El PDV no coincide en los dos lugares del remito.', { candidatos });
+  if (contraLectura && !enFinnegans) {
+    return fin(null, 'revisar', `El chofer corrigió el PDV: el remito dice ${contraLectura} y él escribió ${pdv}. Elegí el pedido.`, { candidatos });
+  }
   if (elegido ? (pdv || fuerte) : (pdv && fuerte)) return fin(p.id, 'ok', null, { candidatos });
   return fin(elegido ? p.id : null, 'revisar', elegido ? 'No se pudo confirmar que el remito sea de este pedido (no se lee el PDV ni el CUIT).'
-    : 'El PDV lleva a un pedido, pero ningún otro dato lo confirma (CUIT o remito en Finnegans).', { candidatos: candidatos.length ? candidatos : [cand(p)] });
+    : `El PDV${porChofer ? ' que escribió el chofer' : ''} lleva a un pedido, pero ningún otro dato lo confirma (CUIT o remito en Finnegans).`, { candidatos: candidatos.length ? candidatos : [cand(p)] });
 }
 
 // ---------- Leer un remito ----------
@@ -440,27 +463,53 @@ export async function leerRemito(env: Env, id: number, opts: { budget?: Budget; 
     console.error('remito', id, (e as Error).message);
     return error(`No se pudo leer: ${(e as Error).message.slice(0, 200)}`);
   }
-  const l = leida.lectura;
+  return aplicarLectura(env, r, { ...leida.lectura, _modelo: leida.modelo }, b, opts.ctx ?? null, true);
+}
+
+// Cruza lo leído con los pedidos y lo deja guardado: el pedido, el estado, los controles, los renglones; después recalcula
+// la entrega de los pedidos que cambiaron. Sirve también para volver a cruzar sin volver a leer (el chofer corrigió el PDV).
+async function aplicarLectura(env: Env, r: RemitoRow, l: Lectura & { _modelo?: string }, b: Budget, ctx: Ctx | null, leida: boolean) {
+  const db = env.DB;
+  const id = r.id;
   const c = await cruzar(env, r, l, b);
   const items = l.items.filter((it) => it.descripcion || it.codigo);
   const ts = now();
   await db.batch([
     db.prepare(`UPDATE remitos SET record_id = ?, estado = ?, motivo = ?, repetir = ?, numero = ?, pdv = ?, cuit = ?, cliente = ?, fecha = ?,
         recibido_por = ?, recibido_el = ?, firmado = ?, reservas = ?, notas = ?, lectura = ?, controles = ?, candidatos = ?, duplicado_de = ?,
-        intentos = intentos + 1, leido_at = ?, updated_at = ? WHERE id = ?`)
-      .bind(c.recordId, c.estado, c.motivo, c.repetir ? 1 : 0, normNumero(l.numero_remito), normPdv(l.pdv_pedido_web) ?? normPdv(l.pdv_observaciones),
+        pide_pdv = ?, intentos = intentos + ?, leido_at = ?, updated_at = ? WHERE id = ?`)
+      .bind(c.recordId, c.estado, c.motivo, c.repetir ? 1 : 0, normNumero(l.numero_remito), normPdv(r.pdv_chofer) ?? normPdv(l.pdv_pedido_web) ?? normPdv(l.pdv_observaciones),
         cuitValido(l.cuit_cliente) ? fmtCuit(cuitValido(l.cuit_cliente)!) : l.cuit_cliente, l.cliente, /^\d{4}-\d{2}-\d{2}$/.test(l.fecha ?? '') ? l.fecha : null,
         [l.sello_recepcion, l.aclaracion_firma].filter(Boolean).join(' · ') || null, /^\d{4}-\d{2}-\d{2}$/.test(l.fecha_recepcion ?? '') ? l.fecha_recepcion : null,
-        l.firmado ? 1 : 0, l.recibido_con_reservas ? 1 : 0, l.notas, JSON.stringify({ ...l, _modelo: leida.modelo }), JSON.stringify(c.controles),
-        JSON.stringify(c.candidatos), c.duplicadoDe, ts, ts, id),
+        l.firmado ? 1 : 0, l.recibido_con_reservas ? 1 : 0, l.notas, JSON.stringify(l), JSON.stringify(c.controles),
+        JSON.stringify(c.candidatos), c.duplicadoDe, c.estado === 'revisar' && c.pidePdv ? 1 : 0, leida ? 1 : 0, leida ? ts : r.leido_at, ts, id),
     db.prepare('DELETE FROM remito_items WHERE remito_id = ?').bind(id),
     ...items.map((it, i) => db.prepare('INSERT INTO remito_items (remito_id, position, code, description, quantity) VALUES (?, ?, ?, ?, ?)')
       .bind(id, i, it.codigo, it.descripcion, it.cantidad)),
   ]);
   const pedidos = [...new Set([r.record_id, c.recordId].filter(Boolean) as number[])];
   const reciente = Date.now() - Date.parse(r.created_at) < AVISO_DIAS * 86_400_000;
-  for (const pid of pedidos) await recalcularEntrega(env, pid, { ctx: opts.ctx ?? null, avisar: reciente });
+  for (const pid of pedidos) await recalcularEntrega(env, pid, { ctx, avisar: reciente });
   return remitoPorId(db, id);
+}
+
+// El chofer escribe el PDV: porque no se leía, porque no coincidía en el remito o porque ve que se leyó mal. Se vuelve a
+// cruzar con lo ya leído (sin otra lectura) y vale como el leído: tiene que cerrar con el CUIT o el remito en Finnegans,
+// y si contradice un PDV bien leído, solo con el remito en Finnegans; si no, lo revisa Logística. Solo sus remitos.
+export async function corregirPdv(env: Env, ctx: Ctx, id: number, valor: unknown) {
+  const db = env.DB;
+  const r = await db.prepare(`SELECT ${SIN_DATA} FROM remitos WHERE id = ? AND token_id = ?`).bind(id, ctx.tokenId ?? -1).first<RemitoRow>();
+  if (!r) throw new HttpError(404, 'No existe ese remito.');
+  if (r.estado === 'descartado' || r.estado === 'duplicado') throw new HttpError(409, r.estado === 'duplicado' ? 'Ese remito ya estaba mandado.' : 'Logística descartó ese remito.');
+  const pdv = normPdv(valor);
+  if (!pdv || pdv.length > 7) throw new HttpError(400, 'Escribí el número de PDV (solo números).');
+  await db.prepare('UPDATE remitos SET pdv_chofer = ?, updated_at = ? WHERE id = ?').bind(pdv, now(), id).run();
+  const nuevo = { ...r, pdv_chofer: pdv };
+  if (!r.leido_at) return env.ANTHROPIC_API_KEY ? leerRemito(env, id, { ctx }) : remitoPorId(db, id);
+  let l: Lectura;
+  try { l = JSON.parse(r.lectura) as Lectura; } catch { return leerRemito(env, id, { ctx }); }
+  if (!Array.isArray(l.items)) return leerRemito(env, id, { ctx });
+  return aplicarLectura(env, nuevo, l, Budget.of(env), ctx, false);
 }
 
 // De fondo (cron): los remitos sin leer. Primero los del chofer y del CRM; los de ClickUp, si son de los últimos 60 días
@@ -628,6 +677,7 @@ export function remitoPublico(r: RemitoRow, items: Array<{ code: string | null; 
     controles: parse<Control[]>(r.controles, []), candidatos: parse<Candidato[]>(r.candidatos, []), duplicado_de: r.duplicado_de,
     otros_remitos_en_foto: !!parse<Partial<Lectura>>(r.lectura, {}).otros_remitos_en_foto, dudas: parse<Partial<Lectura>>(r.lectura, {}).dudas ?? [],
     leido_at: r.leido_at, revisado_por: r.revisado_por, revisado_at: r.revisado_at, created_at: r.created_at, tomada_el: r.tomada_el, items,
+    pdv_chofer: r.pdv_chofer,
   };
 }
 export async function itemsDe(db: D1Database, ids: number[]) {
@@ -654,6 +704,15 @@ export async function remitosParaRevisar(db: D1Database, limit = 100) {
   return results.map((r) => remitoPublico(r, items.get(r.id)));
 }
 
+// Por qué se le pide el PDV al chofer, en sus palabras (de los controles del cruce).
+function pedirPdv(r: Pick<RemitoRow, 'controles' | 'pdv' | 'pdv_chofer'>) {
+  let cs: Control[] = [];
+  try { cs = JSON.parse(r.controles || '[]') as Control[]; } catch { /* sin controles */ }
+  if (cs.some((c) => c.dato === 'Pedido' && c.ok === false && /^No hay ningún pedido/.test(c.detalle))) return `No hay ningún pedido con el PDV ${r.pdv_chofer ?? r.pdv ?? ''}. Fijate el número y escribilo.`;
+  if (cs.some((c) => c.dato === 'PDV' && c.ok === false)) return 'El número de PDV no coincide en los dos lugares del remito. Escribí cuál es, o sacá otra foto.';
+  return 'No se lee el número de PDV. Escribilo, o sacá otra foto.';
+}
+
 // Lo que ve el chofer en la app: el estado en una frase.
 export function paraChofer(r: RemitoRow, items: Array<{ description: string | null; quantity: number | null }>, pedidoNombre: string | null) {
   // La app ya muestra lo leído (PDV, cliente, productos): el mensaje dice solo lo que pasó.
@@ -661,10 +720,12 @@ export function paraChofer(r: RemitoRow, items: Array<{ description: string | nu
     : r.estado === 'duplicado' ? `Ese remito ya estaba mandado${r.pdv ? ` (PDV ${r.pdv})` : ''}. No hace falta mandarlo de nuevo.`
     : r.estado === 'descartado' ? `Logística lo descartó${r.motivo ? `: ${r.motivo}` : '.'}`
     : r.estado === 'revisar' ? (r.repetir ? (JSON.parse(r.lectura || '{}').motivo_repetir || 'No se lee bien. Sacá otra foto: el remito entero, de frente y sin sombra.')
+      : r.pide_pdv ? pedirPdv(r)
       : `Llegó. Logística lo revisa${r.motivo ? `: ${r.motivo}` : '.'}`)
     : 'Llegó. Se lee en unos minutos; no tenés que hacer nada.';
   return {
     id: r.id, clave: r.clave, creado: r.created_at, estado: r.estado, repetir: r.estado === 'revisar' && !!r.repetir, mensaje,
+    pide_pdv: r.estado === 'revisar' && !!r.pide_pdv, pdv_chofer: r.pdv_chofer,
     numero: r.numero, pdv: r.pdv, cliente: r.cliente, items: items.map((i) => ({ descripcion: i.description ?? '', cantidad: i.quantity })),
     pedido: r.record_id && pedidoNombre ? { id: r.record_id, nombre: pedidoNombre } : null,
   };

@@ -13,6 +13,7 @@ import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
+import { guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -303,6 +304,79 @@ hooks.post('/productos/pendientes', async (c) => {
 hooks.post('/pedidos/remitos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await remitosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 20, 1), 40)));
+});
+
+// Lee una tanda de remitos sin leer (lo mismo que hace el cron), con token de administrador.
+hooks.post('/remitos/leer', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await leerPendientes(c.env, undefined, Math.min(Math.max(Number(c.req.query('limit')) || 4, 1), 6)));
+});
+
+// ---------- App del chofer (web/chofer, remitos.ts) ----------
+// Va por /hooks porque esta ruta no pasa por el login de Cloudflare Access: cada chofer entra con su link personal
+// (/hooks/chofer/#t=fcrm_…, un token tipo «chofer» que solo sirve para esto). La app se compila aparte a dist/chofer.
+async function chofer(env: Env, req: Request) {
+  return authenticate(env, req, undefined, { chofer: true });
+}
+async function pedidoNombre(db: D1Database, id: number | null) {
+  return id ? (await db.prepare('SELECT name FROM records WHERE id = ?').bind(id).first<{ name: string }>())?.name ?? null : null;
+}
+hooks.get('/chofer/api/yo', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  return c.json({ nombre: ctx.sourceDetail ?? 'Chofer' });
+});
+hooks.get('/chofer/api/remitos', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  const { results } = await c.env.DB.prepare(`SELECT r.*, o.name AS pedido_nombre FROM (SELECT id, record_id, clave, created_at, estado, repetir, motivo,
+      numero, pdv, cliente, lectura FROM remitos WHERE token_id = ? ORDER BY created_at DESC LIMIT 30) r LEFT JOIN records o ON o.id = r.record_id`)
+    .bind(ctx.tokenId).all<RemitoRow & { pedido_nombre: string | null }>();
+  const items = await itemsDe(c.env.DB, results.map((r) => r.id));
+  return c.json({ remitos: results.map((r) => paraChofer(r, items.get(r.id) ?? [], r.pedido_nombre)) });
+});
+// Una foto: se guarda enseguida (la misma clave o la misma foto no duplican) y se lee en el momento, así el chofer sabe
+// si tiene que sacar otra mientras está con el cliente.
+hooks.post('/chofer/api/remitos', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  const form = await c.req.formData();
+  const archivo = form.get('archivo');
+  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta la foto del remito.');
+  const s = (k: string) => (typeof form.get(k) === 'string' ? String(form.get(k)) : null);
+  const tomada = s('tomada_el');
+  const { id, nuevo } = await guardarRemito(c.env, ctx, {
+    origen: 'chofer', bytes: await archivo.arrayBuffer(), mime: archivo.type || 'image/jpeg', nombre: archivo.name || 'remito.jpg',
+    clave: s('clave')?.slice(0, 80) || null, tokenId: ctx.tokenId ?? null, chofer: ctx.sourceDetail ?? null,
+    lat: s('lat') == null ? null : Number(s('lat')), lng: s('lng') == null ? null : Number(s('lng')),
+    tomadaEl: tomada && !Number.isNaN(Date.parse(tomada)) ? new Date(tomada).toISOString() : null,
+  });
+  // Otra foto porque la anterior no se leía (`reemplaza`: la clave de esa): la anterior se descarta, así no queda en la
+  // bandeja de Logística. Solo la del mismo chofer y si estaba para revisar.
+  const reemplaza = s('reemplaza');
+  if (nuevo && reemplaza) {
+    await c.env.DB.prepare(`UPDATE remitos SET estado = 'descartado', motivo = 'El chofer sacó otra foto.', updated_at = ?
+      WHERE clave = ? AND token_id = ? AND estado = 'revisar' AND id != ?`).bind(new Date().toISOString(), reemplaza, ctx.tokenId ?? -1, id).run();
+  }
+  const ya = await remitoPorId(c.env.DB, id);
+  const r = nuevo || ya.estado === 'sin_leer' ? await leerRemito(c.env, id, { ctx }) : ya;
+  return c.json(paraChofer(r, (await itemsDe(c.env.DB, [id])).get(id) ?? [], await pedidoNombre(c.env.DB, r.record_id)), nuevo ? 201 : 200);
+});
+// La app: index.html y sus archivos, desde dist/chofer.
+hooks.get('/chofer', (c) => c.redirect('/hooks/chofer/', 301));
+hooks.get('/chofer/*', async (c) => {
+  const url = new URL(c.req.url);
+  const resto = url.pathname.replace(/^\/hooks\/chofer\/?/, '');
+  const archivo = !resto || resto.startsWith('api/') ? 'index.html' : resto;
+  let res = await c.env.ASSETS.fetch(new Request(new URL(`/chofer/${archivo}`, url.origin)));
+  // El servidor de archivos manda /chofer/index.html a /chofer/: se sigue acá, sin cambiar la dirección del navegador.
+  if (res.status >= 300 && res.status < 400 && res.headers.get('location')) res = await c.env.ASSETS.fetch(new Request(new URL(res.headers.get('location')!, url.origin)));
+  // Si no existe, la app (que muestra su propia pantalla); nunca el CRM.
+  if (res.status === 404 || (archivo !== 'index.html' && (res.headers.get('content-type') ?? '').includes('text/html') && !archivo.endsWith('.html'))) {
+    if (/\.[a-z0-9]+$/i.test(archivo)) return c.text('No existe.', 404);
+    res = await c.env.ASSETS.fetch(new Request(new URL('/chofer/', url.origin)));
+  }
+  const h = new Headers(res.headers);
+  if (archivo === 'index.html' || archivo === 'sw.js') h.set('cache-control', 'no-cache');
+  if (archivo === 'sw.js') h.set('service-worker-allowed', '/hooks/chofer/');
+  return new Response(res.body, { status: res.status, headers: h });
 });
 
 // Borra del CRM los adjuntos de ClickUp guardados como remito que no lo son (fotos de producto, capturas, bocetos).

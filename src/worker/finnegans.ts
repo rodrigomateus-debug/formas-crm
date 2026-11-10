@@ -82,6 +82,17 @@ export async function facturasDelPedido(env: Env, token: string, pedido: string,
   return (rows ?? []).filter((r) => r.CATEGORIATIPODOCUMENTO === -8 && r.OBTUVOCAE === 'SI' && !/^(NC|ND)/.test(r.TIPODOCUMENTO));
 }
 
+// Remitos de un pedido según Finnegans (los documentos destino de tipo remito), con el número para comparar con el
+// impreso («R-0001-00027857» → 27857). Sirve para confirmar que una foto de remito es de ese pedido (remitos.ts).
+export async function finnegansRemitos(env: Env, token: string, pedido: string, b?: Budget) {
+  const rows = await fin<Destino[]>(env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: pedidoIds(pedido)[0] }, b);
+  return (rows ?? []).filter((r) => /REM/i.test(r.TIPODOCUMENTO ?? '')).map((r) => {
+    // Cualquiera de los números del nombre o de la identificación («FPREMVTA - 00027857 1» → 27857 y 1).
+    const numeros = [...new Set((`${r.DESTINONOMBRE ?? ''} ${r.DESTINOIDENTIFICACIONEXTERNA ?? ''}`.match(/\d{3,}/g) ?? []).map(Number))];
+    return { nombre: r.DESTINONOMBRE, numeros, fecha: r.DESTINOFECHA };
+  });
+}
+
 export interface FinnegansState { cursor?: number; at?: string; revisados?: number; facturas?: number; error?: string | null }
 
 export async function finnegansState(db: D1Database): Promise<FinnegansState> {

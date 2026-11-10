@@ -7,6 +7,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Qué cubre y qué falta para reemplazar el 90 % de HubSpot: [docs/ALCANCE.md](docs/ALCANCE.md).
 - Cómo pasar los tableros (formas-tablero, formas-shop-tablero) al CRM: [docs/CAMBIO-TABLEROS.md](docs/CAMBIO-TABLEROS.md).
 - Por qué Cloudflare, cuánto aguanta (prueba con el volumen de 5 años) y cuándo revisarlo: [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
+- Remitos (ClickUp, ficha del pedido y app del chofer), lectura con Claude y qué falta entregar: [docs/REMITOS.md](docs/REMITOS.md).
 
 ## Cómo está hecho
 
@@ -16,6 +17,8 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 |---|---|
 | `src/worker/` | API (Hono) sobre D1 (SQLite). Modelo genérico como HubSpot: `records` con propiedades en JSON, `associations`, `activities`, `changes` (historial). |
 | `web/` | Interfaz en React. Se compila a `dist/` y el Worker la sirve. Usa el Design System de Formas Shop 2026 (dirección «ledger»: tokens `ui-*` y capa semántica en `web/src/styles.css`), con tema claro, oscuro y alto contraste que cada uno elige en su usuario, abajo en el menú (`web/src/theme.ts`). Los desplegables son el `SelectField` del DS (`web/src/Select.tsx`), no la lista del navegador. |
+| `web/chofer/` | App del chofer para mandar la foto del remito firmado (PWA). Se compila aparte a `dist/chofer/` y se sirve en `/hooks/chofer/`, sin el login de Access: cada chofer entra con su link. |
+| `src/worker/remitos.ts` | Remitos: los lee Claude (`ANTHROPIC_API_KEY`), los cruza con el pedido y calcula qué falta entregar ([docs/REMITOS.md](docs/REMITOS.md)). |
 | `/mcp` | Servidor MCP para Claude y Cowork (`src/worker/mcp.ts`). |
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
@@ -66,7 +69,7 @@ La prueba de Gmail necesita las variables de `node test/gmail-dev-vars.mjs` (y r
 
 3. Cloudflare Access (Zero Trust → Access → Applications): una aplicación «Formas CRM» sobre el dominio del CRM con
    la misma política de mails que el tablero, y estas rutas **sin** Access (Bypass), porque entran con token propio:
-   `/mcp*`, `/hooks/*`, `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. El «Application Audience (AUD) Tag» va en
+   `/mcp*`, `/hooks/*` (también la app del chofer, `/hooks/chofer/`), `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. El «Application Audience (AUD) Tag» va en
    `ACCESS_AUD` dentro de `wrangler.jsonc` (no es secreto), junto con `ACCESS_TEAM_DOMAIN` (el equipo de Access que usa
    Formas Studio). Si se recrea la aplicación de Access, cambia el AUD y hay que actualizarlo ahí.
 4. Entrar con el mail de `ADMIN_EMAIL`: queda como administrador.

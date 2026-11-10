@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["src", "web/src"]
+  "include": ["src", "web/src", "web/chofer/src"]
 }

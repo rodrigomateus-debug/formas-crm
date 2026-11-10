@@ -7,6 +7,7 @@ import { Budget, OutOfBudget } from './budget';
 import { bajarArchivo } from './drive';
 import { tareaPostEntrega } from './postentrega';
 import { montosDesdePedidos } from './montos';
+import { recalcularEntrega } from './remitos';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
@@ -367,7 +368,12 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   }
   // El remito: lo que suben a la tarea del PDV cuando lo entregan (una foto del remito firmado). Si lo suben al artículo
   // (pasa seguido), se busca al abrir el pedido (clickupRemitos), para no gastar consultas en cada PDV entregado.
-  if ((pdv.stage === STAGE.entregado || pdv.stage === STAGE.parcial) && await saveRemitos(db, id, t, pdv.npdv) && result === 'igual') result = 'actualizado';
+  const remitosNuevos = (pdv.stage === STAGE.entregado || pdv.stage === STAGE.parcial) ? await saveRemitos(db, id, t, pdv.npdv) : 0;
+  if (remitosNuevos && result === 'igual') result = 'actualizado';
+  // El estado de entrega (remitos.ts): cambió la etapa o llegó un remito (ClickUp no se toca; el remito se lee aparte).
+  if (remitosNuevos || pdv.stage !== (existing ? JSON.parse(existing.props).hs_pipeline_stage : null)) {
+    await recalcularEntrega(env, id).catch((e) => console.error('entrega', pdv.npdv, (e as Error).message));
+  }
   return result;
 }
 
@@ -388,6 +394,12 @@ async function saveRemitos(db: D1Database, recordId: number, t: CuTask, npdv: st
       VALUES (?, 'remito', ?, ?, ?, 'clickup', ?, ?)`).bind(recordId, a.title || `Remito PDV ${npdv}`, a.mimetype ?? null, a.size ?? null, `${t.id}:${a.id}`,
       JSON.stringify({ task: t.id, attachment: a.id, date: a.date ? new Date(Number(a.date)).toISOString() : null })).run();
     added += r.meta.changes;
+    // También a la lista de remitos del pedido (remitos.ts), para leerlo y contarlo en la entrega.
+    if (r.meta.changes) {
+      await db.prepare(`INSERT OR IGNORE INTO remitos (record_id, origen, file_id, nombre, mime, size, created_at, updated_at)
+        SELECT record_id, 'clickup', id, name, mime, size, created_at, created_at FROM files WHERE source = 'clickup' AND source_ref = ? AND record_id = ?`)
+        .bind(`${t.id}:${a.id}`, recordId).run();
+    }
   }
   return added;
 }
@@ -429,7 +441,15 @@ export async function limpiarRemitos(db: D1Database) {
   const { results } = await db.prepare(`SELECT f.id, f.name, json_extract(r.props, '$.pdv_finnegans') AS pdv FROM files f JOIN records r ON r.id = f.record_id
     WHERE f.kind = 'remito' AND f.source = 'clickup'`).all<{ id: number; name: string; pdv: string | number | null }>();
   const malos = results.filter((f) => !esRemito(f.name, f.pdv == null ? null : String(f.pdv).match(/\d+/)?.[0])).map((f) => f.id);
-  if (malos.length) await db.prepare('DELETE FROM files WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(malos)).run();
+  if (malos.length) {
+    const lista = JSON.stringify(malos);
+    await db.batch([
+      db.prepare('DELETE FROM remito_items WHERE remito_id IN (SELECT id FROM remitos WHERE file_id IN (SELECT value FROM json_each(?)))').bind(lista),
+      db.prepare('UPDATE remitos SET duplicado_de = NULL WHERE duplicado_de IN (SELECT id FROM remitos WHERE file_id IN (SELECT value FROM json_each(?)))').bind(lista),
+      db.prepare('DELETE FROM remitos WHERE file_id IN (SELECT value FROM json_each(?))').bind(lista),
+      db.prepare('DELETE FROM files WHERE id IN (SELECT value FROM json_each(?))').bind(lista),
+    ]);
+  }
   return { revisados: results.length, borrados: malos.length };
 }
 

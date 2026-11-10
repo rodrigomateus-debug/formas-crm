@@ -39,6 +39,7 @@ jobs:
       CLICKUP_TOKEN: ${{ secrets.CLICKUP_TOKEN }}
       FINNEGANS_CLIENT_ID: ${{ secrets.FINNEGANS_CLIENT_ID || secrets.FIN_CLIENT_ID }}
       FINNEGANS_CLIENT_SECRET: ${{ secrets.FINNEGANS_CLIENT_SECRET || secrets.FIN_SECRET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -52,8 +53,8 @@ jobs:
       - name: Cuenta de servicio de Gmail (si está cargada en los secretos del repo)
         if: env.GOOGLE_SA_JSON != ''
         run: printf '%s' "$GOOGLE_SA_JSON" | npx wrangler secret put GOOGLE_SA_JSON
-      - name: ClickUp y Finnegans para los pedidos (si están cargados en los secretos del repo)
+      - name: ClickUp, Finnegans y Claude (remitos) para los pedidos (si están cargados en los secretos del repo)
         run: |
-          for k in CLICKUP_TOKEN FINNEGANS_CLIENT_ID FINNEGANS_CLIENT_SECRET; do
+          for k in CLICKUP_TOKEN FINNEGANS_CLIENT_ID FINNEGANS_CLIENT_SECRET ANTHROPIC_API_KEY; do
             if [ -n "${!k}" ]; then printf '%s' "${!k}" | npx wrangler secret put "$k"; fi
           done

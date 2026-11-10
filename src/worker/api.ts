@@ -1027,10 +1027,27 @@ api.delete('/tags/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// Opciones de un desplegable: cada una con valor y etiqueta, sin valores repetidos (el valor es lo que guardan los registros).
+function cleanOptions(options: unknown): Array<{ value: string; label: string }> | undefined {
+  if (options == null) return undefined;
+  if (!Array.isArray(options)) throw new HttpError(400, 'Las opciones tienen que ser una lista.');
+  const out = options.map((o) => {
+    const x = (o ?? {}) as { value?: unknown; label?: unknown };
+    const value = String(x.value ?? '').trim();
+    const label = String(x.label ?? '').trim() || value;
+    if (!value) throw new HttpError(400, 'Hay una opción sin valor.');
+    return { value, label };
+  });
+  const rep = out.find((o, i) => out.findIndex((x) => x.value === o.value) !== i);
+  if (rep) throw new HttpError(400, `La opción «${rep.label}» está repetida.`);
+  return out;
+}
+
 api.post('/properties/:type', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   const type = assertType(c.req.param('type'));
   const b = await c.req.json<{ name?: string; label: string; type: string; options?: { value: string; label: string }[]; group_name?: string; description?: string; in_create_form?: boolean }>();
+  b.options = cleanOptions(b.options);
   const name = (b.name || b.label).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   if (!name) throw new HttpError(400, 'Falta el nombre de la propiedad.');
   await c.env.DB.prepare(`INSERT INTO properties (object_type, name, label, type, options, group_name, description, in_create_form)
@@ -1045,6 +1062,7 @@ api.patch('/properties/:type/:name', async (c) => {
   const b = await c.req.json<{ label?: string; options?: unknown[]; group_name?: string; description?: string; in_create_form?: boolean; required?: boolean; archived?: boolean; display_order?: number }>();
   const p = await c.env.DB.prepare('SELECT * FROM properties WHERE object_type = ? AND name = ?').bind(type, c.req.param('name')).first<Record<string, unknown>>();
   if (!p) throw new HttpError(404, 'No existe la propiedad.');
+  b.options = cleanOptions(b.options);
   if (p.system && b.archived) throw new HttpError(400, 'Las propiedades del sistema no se pueden borrar.');
   await c.env.DB.prepare(`UPDATE properties SET label = ?, options = ?, group_name = ?, description = ?, in_create_form = ?, required = ?, archived = ?, display_order = ?
     WHERE object_type = ? AND name = ?`).bind(b.label ?? p.label, b.options ? JSON.stringify(b.options) : p.options, b.group_name ?? p.group_name,

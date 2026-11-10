@@ -264,10 +264,19 @@ async function systemCtx(env: Env): Promise<Ctx> {
 
 async function ownerFor(db: D1Database, vendedor: string, mail: string) {
   const users = (await db.prepare('SELECT id, name, email FROM users WHERE active = 1').all<{ id: number; name: string; email: string }>()).results;
-  const v = norm(vendedor);
+  return usuarioPorNombre(users, vendedor, mail);
+}
+
+// Un usuario por su nombre como lo escriben ClickUp o Finnegans: «Lucia Senini», «Luli» (apodo), «Senini Lucia» o
+// «SENINI, LUCIA» (el apellido primero), o por su mail.
+export function usuarioPorNombre(users: Array<{ id: number; name: string; email: string }>, nombre: string, mail = '') {
+  const v = norm(nombre ?? '').replace(/[,.;]/g, ' ').replace(/\s+/g, ' ').trim();
   const want = ALIAS[v] ?? v;
+  const palabras = (x: string) => x.split(' ').filter((w) => w.length > 1);
+  const mismasPalabras = (a: string, b: string) => { const A = palabras(a), B = palabras(b); return A.length >= 2 && A.length === B.length && A.every((w) => B.includes(w)); };
   return users.find((u) => norm(u.name) === want)?.id
     ?? users.find((u) => want && norm(u.name).startsWith(want))?.id
+    ?? users.find((u) => want && mismasPalabras(norm(u.name), want))?.id
     ?? users.find((u) => mail && u.email.toLowerCase() === mail.toLowerCase())?.id
     ?? null;
 }

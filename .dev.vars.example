@@ -10,3 +10,6 @@ FINNEGANS_CLIENT_SECRET=prueba
 FINNEGANS_API_URL=http://localhost:8797/fin
 # Prueba de datos para facturar (test/facturar.test.mjs): la lista de empresas grandes de ARCA, simulada.
 ARCA_FCE_URL=http://localhost:8796/fce
+# Lectura de remitos (test/remitos.test.mjs): Claude simulado en el mismo puerto.
+ANTHROPIC_API_KEY=prueba
+ANTHROPIC_BASE_URL=http://localhost:8797/anthropic

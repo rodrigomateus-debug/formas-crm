@@ -10,7 +10,7 @@ import Board from './Board';
 import PropBoard, { urlTableroProp } from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
-import { ColumnWidths, EstadoCliente, EtapaPedido, UnidadBadge, UserChip, WhatsAppLink, useColumnResize } from '../components';
+import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, UserChip, WhatsAppLink, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
 import { QuickFilterBar, quickFilters } from './QuickFilters';
 import { Select, useFloating } from '../Select';
@@ -360,11 +360,25 @@ function IndexFor({ type }: { type: ObjectType }) {
     const f: Filter = { prop: 'num_associated_deals', op: 'eq', value: 0 };
     return { ...c, groups: c.groups.length ? c.groups.map((g) => [...g, f]) : [[f]] };
   });
+  // Pedidos a los que les falta entregar algo según sus remitos (o que figuran entregados sin remito): también es un
+  // filtro común, sobre «Estado de entrega» (remitos.ts).
+  const FALTAN = ['parcial', 'diferencias', 'falta_remito'];
+  const esFaltan = (f: Filter) => f.prop === 'estado_entrega' && f.op === 'in';
+  const faltanEntregas = type === 'order' && cfg.groups.some((g) => g.some(esFaltan));
+  const toggleFaltan = () => setCfg((c) => {
+    if (faltanEntregas) return { ...c, groups: c.groups.map((g) => g.filter((f) => !esFaltan(f))).filter((g) => g.length) };
+    const f: Filter = { prop: 'estado_entrega', op: 'in', values: FALTAN };
+    return { ...c, groups: c.groups.length ? c.groups.map((g) => [...g, f]) : [[f]] };
+  });
   const quickBar = (
     <>
     {type === 'order' && (
       <div className="qf"><button className={`btn qf-btn${sinNegocio ? ' on' : ''}`} aria-pressed={sinNegocio} onClick={toggleSinNegocio}
         title="Pedidos que no están en ningún negocio (para control)">Sin negocio</button></div>
+    )}
+    {type === 'order' && (
+      <div className="qf"><button className={`btn qf-btn${faltanEntregas ? ' on' : ''}`} aria-pressed={faltanEntregas} onClick={toggleFaltan}
+        title="Pedidos a los que les falta entregar algo según sus remitos, con diferencias, o entregados sin remito">Faltan entregas</button></div>
     )}
     <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
@@ -556,6 +570,7 @@ function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: Cr
   const exact = prop?.type === 'currency' && record.props[col] != null && record.props[col] !== ''
     ? fmtMoneyExact(record.props[col], col.endsWith('_usd') ? 'USD' : record.props.deal_currency_code ?? record.props.hs_currency_code) : undefined;
   if (col === 'estado_cliente' && record.props[col]) return <td><EstadoCliente value={String(record.props[col])} /></td>;
+  if (col === 'estado_entrega' && record.props[col]) return <td title={record.props.falta_entregar ? `Falta: ${record.props.falta_entregar}` : undefined}><EstadoEntrega value={record.props[col]} /></td>;
   // Números y montos alineados a la derecha, como en la tabla del Design System.
   const numeric = !!prop && ['number', 'currency'].includes(prop.type);
   if (meta.me.role === 'viewer' || !prop || prop.read_only || col === 'pipeline') return <td title={exact} className={numeric ? 'numcell' : undefined}>{shown}</td>;

@@ -219,6 +219,27 @@ export function whatsappUrl(v: unknown) {
   return d.length >= 10 ? `https://wa.me/549${d.slice(-10)}` : undefined;
 }
 
+// Una foto achicada en el navegador antes de subirla (remitos): el lado mayor hasta `lado` píxeles, en JPEG, y que no pase
+// de `max` bytes (una fila de la base no puede pasar de 2 MB). Los PDF y las fotos chicas van como están.
+export async function achicarImagen(file: File, lado = 2000, max = 1_800_000): Promise<File> {
+  if (!file.type.startsWith('image/') || /heic|heif|gif/.test(file.type)) return file;
+  let bmp: ImageBitmap;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { return file; }
+  const escala = Math.min(1, lado / Math.max(bmp.width, bmp.height));
+  if (escala === 1 && file.size <= max) { bmp.close(); return file; }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * escala);
+  canvas.height = Math.round(bmp.height * escala);
+  canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close();
+  let blob: Blob | null = null;
+  for (const q of [0.85, 0.75, 0.6, 0.5]) {
+    blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/jpeg', q));
+    if (blob && blob.size <= max) break;
+  }
+  return blob ? new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' }) : file;
+}
+
 export function initials(name: string) {
   return name.split(/\s+/).filter((w) => /^[\p{L}\p{N}]/u.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '·';
 }

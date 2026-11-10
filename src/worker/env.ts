@@ -27,6 +27,9 @@ export interface Env {
   CLICKUP_API_URL?: string;
   SUBREQUESTS?: string;   // consultas a otros servicios por corrida (default 45; ver budget.ts)
   FINNEGANS_API_URL?: string;
+  // API de Claude (Anthropic): lee los remitos (remitos.ts). Sin la clave, los remitos se guardan igual y esperan.
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado
 }
 
 // Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; los demás, por ahora,
@@ -53,6 +56,7 @@ export interface Ctx {
   // De dónde viene el cambio: 'crm' (pantalla), 'mcp' (Claude), 'api', 'darwin', 'linkedin', 'gmail', 'form', 'import', 'hubspot'.
   source: string;
   sourceDetail?: string;
+  tokenId?: number;   // el token con que entró (integraciones y choferes)
 }
 
 export type ObjectType = 'contact' | 'company' | 'deal' | 'order';

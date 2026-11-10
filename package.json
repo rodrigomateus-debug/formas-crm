@@ -3,17 +3,19 @@
   "version": "1.0.0",
   "description": "CRM propio de Formas Publicitarias (reemplazo de HubSpot)",
   "scripts": {
-    "dev": "vite build && wrangler dev",
+    "dev": "npm run build && wrangler dev",
     "dev:web": "vite",
-    "build": "vite build",
+    "dev:chofer": "vite -c vite.chofer.config.ts",
+    "build": "vite build && vite build -c vite.chofer.config.ts",
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 migrations apply formas-crm --local",
     "db:remote": "wrangler d1 migrations apply formas-crm --remote",
-    "deploy": "vite build && wrangler d1 migrations apply formas-crm --remote && wrangler deploy",
+    "deploy": "npm run build && wrangler d1 migrations apply formas-crm --remote && wrangler deploy",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "migrate:hubspot": "node scripts/migrate-hubspot.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.7.0",
     "hono": "^4.13.14",
     "pdfjs-dist": "4.10.38",
     "react": "^18.3.1",

@@ -501,7 +501,7 @@ test('usuarios: los equipos van en una sola lista (el primero es el principal)',
 
 test('usuarios: eliminar pasa sus registros y tareas abiertas a otro, no entra más y puede volver', async () => {
   const email = `chau.${RUN}@formas.ar`;
-  const ida = (await api('POST', '/users', { email, name: `Chau ${RUN}`, teams: [57132078] })).data;
+  const ida = (await api('POST', '/users', { email, name: `Chau ${RUN}`, profile: 'logistica', teams: [57132078] })).data;
   const recibe = (await api('POST', '/users', { email: `recibe.${RUN}@formas.ar`, name: `Recibe ${RUN}` })).data;
   const contacto = (await api('POST', '/records/contact', { props: { firstname: 'Chau', lastname: RUN, email: `cliente.chau.${RUN}@ejemplo.com`, owner_id: ida.id } })).data;
   const negocio = (await api('POST', '/records/deal', { props: { dealname: `Negocio chau ${RUN}`, pipeline: 'default', owner_id: ida.id } })).data;
@@ -509,11 +509,15 @@ test('usuarios: eliminar pasa sus registros y tareas abiertas a otro, no entra m
   const hecha = (await api('POST', '/activities', { type: 'task', subject: `Hecha ${RUN}`, owner_id: ida.id, status: 'COMPLETED', links: [contacto.id] })).data;
   const nota = (await api('POST', '/activities', { type: 'note', body: `Nota ${RUN}`, owner_id: ida.id, links: [contacto.id] })).data;
   const token = (await api('POST', '/tokens', { name: `Token ${RUN}`, source: 'api', user_id: ida.id })).data;
+  // Un link de chofer creado por esta persona (Logística): no se tiene que cortar.
+  const chofer = (await call('POST', '/api/choferes', { name: `Chofer ${RUN}` }, { 'x-dev-user': email })).data;
+  assert.ok(chofer?.id, JSON.stringify(chofer));
 
   const uso = (await api('GET', `/users/${ida.id}/uso`)).data;
   assert.equal(uso.registros.contact, 1);
   assert.equal(uso.registros.deal, 1);
   assert.equal(uso.tareas_abiertas, 1);
+  assert.deepEqual([uso.tokens, uso.choferes], [1, 1]);
 
   assert.equal((await api('DELETE', `/users/${ida.id}`, { reasignar_a: ida.id })).status, 400, 'no se le pasan a sí mismo');
   const me = (await api('GET', '/me')).data;
@@ -536,6 +540,8 @@ test('usuarios: eliminar pasa sus registros y tareas abiertas a otro, no entra m
   assert.equal(entra.status, 403);
   assert.match(entra.data.error ?? JSON.stringify(entra.data), /no tiene usuario/);
   if (token?.token) assert.equal((await call('GET', '/api/me', undefined, { authorization: `Bearer ${token.token}` })).status, 401, 'su token queda revocado');
+  const link = (await api('GET', '/choferes')).data.find((t) => t.id === chofer.id);
+  assert.deepEqual([link.revoked, link.user_name], [0, recibe.name], 'el link del chofer sigue andando, a nombre de quien recibe');
   assert.equal((await api('PATCH', `/users/${ida.id}`, { name: 'X' })).status, 404);
   assert.equal((await api('DELETE', `/users/${ida.id}`, {})).status, 404, 'ya está eliminado');
 

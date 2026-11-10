@@ -136,30 +136,50 @@ async function resumenes(env: Env, cfg: AvisosConfig, b: Budget, now: Date, forc
 async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
   const db = env.DB;
   const { results } = await db.prepare(`SELECT v.id, v.user_id, v.kind, v.record_id, v.activity_id, v.created_at, u.email, u.name AS user_name,
-      p.name AS by_name, r.name AS rec_name, r.object_type AS rec_type, a.subject AS act_subject, a.due_at AS act_due
+      p.name AS by_name, r.name AS rec_name, r.object_type AS rec_type, a.subject AS act_subject, a.due_at AS act_due,
+      json_extract(r.props, '$.estado_entrega') AS entrega, json_extract(r.props, '$.falta_entregar') AS falta
     FROM avisos v JOIN users u ON u.id = v.user_id AND u.active = 1 LEFT JOIN users p ON p.id = v.by_user
     LEFT JOIN records r ON r.id = v.record_id LEFT JOIN activities a ON a.id = v.activity_id
     WHERE v.sent_at IS NULL ORDER BY v.user_id, v.id LIMIT 200`).all<{ id: number; user_id: number; kind: string; record_id: number | null; activity_id: number | null;
-      created_at: string; email: string; user_name: string; by_name: string | null; rec_name: string | null; rec_type: string | null; act_subject: string | null; act_due: string | null }>();
+      created_at: string; email: string; user_name: string; by_name: string | null; rec_name: string | null; rec_type: string | null; act_subject: string | null; act_due: string | null;
+      entrega: string | null; falta: string | null }>();
   const porPersona = new Map<number, typeof results>();
   for (const r of results) porPersona.set(r.user_id, [...(porPersona.get(r.user_id) ?? []), r]);
   const marcar = (ids: number[], error: string | null) => db.batch(ids.map((id) => db.prepare('UPDATE avisos SET sent_at = ?, error = ? WHERE id = ?').bind(new Date().toISOString(), error, id)));
   let n = 0;
-  for (const [, rows] of porPersona) {
+  for (const [, todas] of porPersona) {
+    // Faltantes de entrega (remitos.ts): si el pedido ya se completó o se finalizó, no se avisa.
+    const resueltas = todas.filter((r) => r.kind === 'entrega' && r.entrega !== 'parcial' && r.entrega !== 'diferencias').map((r) => r.id);
+    if (resueltas.length) await marcar(resueltas, 'ya no falta nada');
+    // Los faltantes de entrega les llegan siempre a Logística y a los administradores (no dependen de la lista `users`,
+    // que es para ir abriendo los otros avisos de a poco).
+    const fuera = todas.filter((r) => r.kind !== 'entrega' && !recibe(cfg, r.email)).map((r) => r.id);
+    if (fuera.length) await marcar(fuera, 'sin avisos por mail');
+    const rows = todas.filter((r) => !resueltas.includes(r.id) && !fuera.includes(r.id));
+    if (!rows.length) continue;
     const ids = rows.map((r) => r.id);
     const u = rows[0];
-    if (!recibe(cfg, u.email)) { await marcar(ids, 'sin avisos por mail'); continue; }
     // Lo que no pudo salir en 3 días no se manda más (por ejemplo, si falta el permiso de Google).
     const viejos = rows.filter((r) => Date.now() - Date.parse(r.created_at) > 3 * 86_400_000).map((r) => r.id);
     if (viejos.length === rows.length) { await marcar(ids, 'vencido'); continue; }
-    const lineas: Linea[] = rows.map((r) => r.kind === 'tarea'
+    const lineas: Linea[] = rows.map((r) => r.kind === 'entrega'
+      ? { titulo: r.rec_name || 'Pedido', detalle: r.entrega === 'diferencias' ? `con diferencias${r.falta ? ` · falta ${r.falta}` : ''}` : `falta ${r.falta ?? 'entregar'}`, url: `${APP_URL(env)}/orders/${r.record_id}` }
+      : r.kind === 'tarea'
       ? { titulo: r.act_subject || 'Tarea', detalle: [r.act_due && `vence el ${fecha(r.act_due)}`, r.by_name && `te la asignó ${r.by_name}`].filter(Boolean).join(' · '), url: `${APP_URL(env)}/tasks` }
       : { titulo: r.rec_name || 'Registro', detalle: r.by_name ? `te lo asignó ${r.by_name}` : '', url: r.record_id && r.rec_type ? `${APP_URL(env)}/${PATHS[r.rec_type]}/${r.record_id}` : APP_URL(env) });
     const quien = [...new Set(rows.map((r) => r.by_name).filter(Boolean))];
-    const subject = rows.length === 1
+    const entregas = rows.filter((r) => r.kind === 'entrega');
+    const subject = entregas.length === rows.length
+      ? (rows.length === 1 ? `Faltan entregas: ${rows[0].rec_name ?? 'un pedido'}` : `${rows.length} pedidos con faltantes de entrega`)
+      : rows.length === 1
       ? `${quien[0] ?? 'Alguien'} te asignó ${rows[0].kind === 'tarea' ? 'una tarea' : `«${rows[0].rec_name ?? 'un registro'}»`}`
       : `Te asignaron ${rows.length} cosas en el CRM`;
-    const { text, html } = cuerpo(env, `Hola ${u.user_name.split(' ')[0]}, te asignaron esto en el CRM:`, [['Asignado a vos', lineas]]);
+    const grupos: Array<[string, Linea[]]> = [
+      ['Pedidos con faltantes de entrega (según los remitos)', lineas.filter((_, i) => rows[i].kind === 'entrega')],
+      ['Asignado a vos', lineas.filter((_, i) => rows[i].kind !== 'entrega')],
+    ].filter(([, ls]) => ls.length) as Array<[string, Linea[]]>;
+    const { text, html } = cuerpo(env, entregas.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, a estos pedidos les falta entregar algo según sus remitos:`
+      : `Hola ${u.user_name.split(' ')[0]}, te asignaron esto en el CRM:`, grupos);
     try {
       await enviar(env, cfg, u.email, subject, text, html, b);
       await marcar(ids, null);

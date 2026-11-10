@@ -120,6 +120,11 @@ export const ORDER_STAGE_ALIAS: Record<string, string> = {
   '1237498997': '1237498996',
 };
 export const ORDER_PIPELINES: Array<[string, string]> = [['14a2e10e-5471-408a-906e-c51f3b04369e', 'Formas Shop - Pipeline de pedidos']];
+// Estado de entrega del pedido según sus remitos leídos (remitos.ts). Las mismas opciones que la migración 0027.
+export const ESTADOS_ENTREGA: Array<[string, string]> = [
+  ['completa', 'Completa'], ['parcial', 'Faltan entregas'], ['diferencias', 'Con diferencias'],
+  ['cerrada_con_faltante', 'Finalizada con faltante'], ['falta_remito', 'Falta el remito'], ['por_revisar', 'Remito por revisar'],
+];
 
 export const PROPERTIES: Record<string, PropDef[]> = {
   contact: [
@@ -337,6 +342,12 @@ export const COMPUTED: Record<string, PropDef[]> = {
     ['source', 'Origen del registro', 'string', 'Actividad', [], RO],
     // Para controlar los pedidos sin negocio (filtro «Sin negocio» de la lista de pedidos; migración 0026).
     ['num_associated_deals', 'Negocios asociados', 'number', 'Actividad', [], { ...RO, description: 'Un pedido va en un solo negocio: 0 es un pedido sin negocio.' }],
+    // Estado de entrega según los remitos leídos (remitos.ts; migración 0027).
+    ['estado_entrega', 'Estado de entrega', 'enum', 'Entrega', ESTADOS_ENTREGA, { ...RO, description: 'Lo calcula el CRM con los remitos leídos de este pedido: lo vendido contra lo entregado, producto por producto.' }],
+    ['falta_entregar', 'Falta entregar', 'text', 'Entrega', [], { ...RO, description: 'Lo que todavía no figura en ningún remito leído.' }],
+    ['entrega_cerrada_el', 'Entrega finalizada el', 'datetime', 'Entrega', [], { ...RO, description: 'Cuándo se finalizó la entrega con faltante.' }],
+    ['entrega_cerrada_por', 'Entrega finalizada por', 'owner', 'Entrega', [], { ...RO, description: 'Quién finalizó la entrega con faltante.' }],
+    ['entrega_cerrada_motivo', 'Motivo del faltante', 'text', 'Entrega', [], { ...RO, description: 'Por qué se finalizó la entrega con lo que falta.' }],
   ],
 };
 

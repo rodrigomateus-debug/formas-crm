@@ -16,7 +16,7 @@ export function newToken() {
   return 'fcrm_' + [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function userFromToken(env: Env, token: string): Promise<{ user: User; source: string; name: string } | null> {
+export async function userFromToken(env: Env, token: string): Promise<{ user: User; source: string; name: string; tokenId: number } | null> {
   if (!token.startsWith('fcrm_')) return null;
   const hash = await sha256(token);
   const row = await env.DB.prepare(
@@ -25,8 +25,8 @@ export async function userFromToken(env: Env, token: string): Promise<{ user: Us
   ).bind(hash).first<User & { token_id: number; source: string; token_name: string }>();
   if (!row) return null;
   await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').bind(new Date().toISOString(), row.token_id).run();
-  const { token_id: _t, source, token_name, ...user } = row;
-  return { user: user as User, source, name: token_name };
+  const { token_id, source, token_name, ...user } = row;
+  return { user: user as User, source, name: token_name, tokenId: token_id };
 }
 
 let jwksCache: { at: number; keys: JsonWebKey[] } | null = null;
@@ -84,14 +84,18 @@ async function userByEmail(env: Env, email: string): Promise<User> {
     .bind(email, nameFromEmail(email)).first<User>())!;
 }
 
-export async function authenticate(env: Env, req: Request, pathToken?: string): Promise<Ctx> {
+// Los links de los choferes (tokens tipo «chofer») solo sirven para la app de remitos (/hooks/chofer/api): si uno se
+// filtra, no abre el resto del CRM.
+export async function authenticate(env: Env, req: Request, pathToken?: string, opts: { chofer?: boolean } = {}): Promise<Ctx> {
   const auth = req.headers.get('authorization');
   const bearer = pathToken ?? (auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null) ?? new URL(req.url).searchParams.get('token');
   if (bearer) {
     const t = await userFromToken(env, bearer);
     if (!t) throw new HttpError(401, 'Token inválido o revocado.');
-    return { user: t.user, source: t.source, sourceDetail: t.name };
+    if ((t.source === 'chofer') !== !!opts.chofer) throw new HttpError(t.source === 'chofer' ? 403 : 401, t.source === 'chofer' ? 'El link del chofer solo sirve para mandar remitos.' : 'Este token no es de un chofer.');
+    return { user: t.user, source: t.source, sourceDetail: t.name, tokenId: t.tokenId };
   }
+  if (opts.chofer) throw new HttpError(401, 'Falta el link del chofer.');
   const jwt = req.headers.get('cf-access-jwt-assertion');
   if (jwt && env.ACCESS_AUD && env.ACCESS_TEAM_DOMAIN) {
     const email = await verifyAccessJwt(env, jwt);

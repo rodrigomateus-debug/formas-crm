@@ -1,0 +1,20 @@
+{
+  "name": "Remitos Formas",
+  "short_name": "Remitos",
+  "description": "Sacale una foto al remito firmado y mandalo a Formas.",
+  "lang": "es-AR",
+  "dir": "ltr",
+  "id": "/hooks/chofer/",
+  "start_url": "/hooks/chofer/",
+  "scope": "/hooks/chofer/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f5f9",
+  "theme_color": "#000085",
+  "icons": [
+    { "src": "icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icono-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

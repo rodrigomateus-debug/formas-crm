@@ -45,6 +45,13 @@ const clickupOrders: Array<{ id: number; pdv: string }> = [];
 // negocio por el link a la conversación de Darwin.
 const sameKey: Array<{ id: number; type: 'contact' | 'company' | 'deal'; by: 'email' | 'phone' | 'domain' | 'darwin'; key: string }> = [];
 
+// Propiedades que el CRM ya conoce: el script trae de HubSpot solo esas. Va acá y no en /api/meta porque /api pide el
+// login de Cloudflare Access y el script entra por /hooks/migrate.
+migrate.get('/properties', async (c) => {
+  const props = await new Meta(c.env.DB).properties();
+  return c.json({ properties: props.map((p) => ({ object_type: p.object_type, name: p.name })) });
+});
+
 migrate.post('/', async (c) => {
   const db = c.env.DB;
   const body = await c.req.json<{ kind: string; items?: any[]; offset?: number; limit?: number }>();

@@ -68,8 +68,10 @@ function nameFromEmail(email: string) {
 }
 
 async function userByEmail(env: Env, email: string): Promise<User> {
+  const sinUsuario = () => new HttpError(403, `Tu mail (${email}) no tiene usuario en el CRM. Pedile a un administrador que te agregue en Configuración → Usuarios.`);
   const found = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<User>();
   if (found) {
+    if (found.deleted_at) throw sinUsuario();
     if (!found.active) throw new HttpError(403, 'Tu usuario está desactivado en el CRM.');
     return found;
   }
@@ -77,7 +79,7 @@ async function userByEmail(env: Env, email: string): Promise<User> {
   // Las únicas altas automáticas son el primer usuario y ADMIN_EMAIL, para que el CRM nunca quede sin administrador.
   const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>();
   const isAdmin = (count?.n ?? 0) === 0 || (env.ADMIN_EMAIL && env.ADMIN_EMAIL.toLowerCase() === email.toLowerCase());
-  if (!isAdmin) throw new HttpError(403, `Tu mail (${email}) no tiene usuario en el CRM. Pedile a un administrador que te agregue en Configuración → Usuarios.`);
+  if (!isAdmin) throw sinUsuario();
   return (await env.DB.prepare("INSERT INTO users (email, name, role, profile) VALUES (?, ?, 'admin', 'admin') RETURNING *")
     .bind(email, nameFromEmail(email)).first<User>())!;
 }

@@ -481,3 +481,72 @@ test('perfiles: admin, comercial, producción y logística; el perfil admin es e
   assert.equal((await api('PATCH', `/users/${u.data.id}`, { profile: 'jefe' })).status, 400);
   assert.equal((await api('POST', '/users', { email: `x.${RUN}@formas.ar`, name: 'X', role: 'dueño' })).status, 400);
 });
+
+test('usuarios: los equipos van en una sola lista (el primero es el principal)', async () => {
+  const u = (await api('POST', '/users', { email: `equipos.${RUN}@formas.ar`, name: `Equipos ${RUN}`, teams: [57132078, 57393663] })).data;
+  const get = async () => (await api('GET', '/users')).data.find((x) => x.id === u.id);
+  let x = await get();
+  assert.deepEqual([x.team_id, JSON.parse(x.extra_teams)], [57132078, [57393663]]);
+  await api('PATCH', `/users/${u.id}`, { teams: [57132078, 57393663, 58079782] });
+  x = await get();
+  assert.deepEqual([x.team_id, JSON.parse(x.extra_teams)], [57132078, [57393663, 58079782]], 'sumar uno no cambia el principal');
+  await api('PATCH', `/users/${u.id}`, { teams: [57393663, 58079782] });
+  x = await get();
+  assert.deepEqual([x.team_id, JSON.parse(x.extra_teams)], [57393663, [58079782]], 'si se saca el principal, pasa el siguiente');
+  await api('PATCH', `/users/${u.id}`, { teams: [] });
+  x = await get();
+  assert.deepEqual([x.team_id, JSON.parse(x.extra_teams)], [null, []]);
+  assert.equal((await api('POST', '/users', { email: `EQUIPOS.${RUN}@formas.ar`, name: 'Otra vez' })).status, 400, 'el mismo mail no se duplica');
+});
+
+test('usuarios: eliminar pasa sus registros y tareas abiertas a otro, no entra más y puede volver', async () => {
+  const email = `chau.${RUN}@formas.ar`;
+  const ida = (await api('POST', '/users', { email, name: `Chau ${RUN}`, teams: [57132078] })).data;
+  const recibe = (await api('POST', '/users', { email: `recibe.${RUN}@formas.ar`, name: `Recibe ${RUN}` })).data;
+  const contacto = (await api('POST', '/records/contact', { props: { firstname: 'Chau', lastname: RUN, email: `cliente.chau.${RUN}@ejemplo.com`, owner_id: ida.id } })).data;
+  const negocio = (await api('POST', '/records/deal', { props: { dealname: `Negocio chau ${RUN}`, pipeline: 'default', owner_id: ida.id } })).data;
+  const abierta = (await api('POST', '/activities', { type: 'task', subject: `Abierta ${RUN}`, owner_id: ida.id, links: [contacto.id] })).data;
+  const hecha = (await api('POST', '/activities', { type: 'task', subject: `Hecha ${RUN}`, owner_id: ida.id, status: 'COMPLETED', links: [contacto.id] })).data;
+  const nota = (await api('POST', '/activities', { type: 'note', body: `Nota ${RUN}`, owner_id: ida.id, links: [contacto.id] })).data;
+  const token = (await api('POST', '/tokens', { name: `Token ${RUN}`, source: 'api', user_id: ida.id })).data;
+
+  const uso = (await api('GET', `/users/${ida.id}/uso`)).data;
+  assert.equal(uso.registros.contact, 1);
+  assert.equal(uso.registros.deal, 1);
+  assert.equal(uso.tareas_abiertas, 1);
+
+  assert.equal((await api('DELETE', `/users/${ida.id}`, { reasignar_a: ida.id })).status, 400, 'no se le pasan a sí mismo');
+  const me = (await api('GET', '/me')).data;
+  assert.equal((await api('DELETE', `/users/${me.id}`, {})).status, 400, 'no te podés eliminar a vos');
+  const r = await api('DELETE', `/users/${ida.id}`, { reasignar_a: recibe.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+
+  assert.equal((await api('GET', `/records/contact/${contacto.id}`)).data.record.props.owner_id, recibe.id);
+  assert.equal((await api('GET', `/records/deal/${negocio.id}`)).data.record.props.owner_id, recibe.id);
+  const hist = (await api('GET', `/records/deal/${negocio.id}/history?prop=owner_id`)).data;
+  assert.equal(String(hist[0].new_value), String(recibe.id), 'queda en el historial');
+  assert.equal((await api('GET', `/activities/${abierta.id}`)).data.owner_id, recibe.id, 'la tarea abierta pasa');
+  assert.equal((await api('GET', `/activities/${hecha.id}`)).data.owner_id, ida.id, 'la tarea hecha queda con su nombre');
+  assert.equal((await api('GET', `/activities/${nota.id}`)).data.owner_id, ida.id, 'la nota queda con su nombre');
+
+  assert.ok(!(await api('GET', '/users')).data.some((x) => x.id === ida.id), 'sale de la lista');
+  const enMeta = (await api('GET', '/meta')).data.users.find((x) => x.id === ida.id);
+  assert.ok(enMeta?.deleted_at && !enMeta.active, 'sigue en meta (para el nombre), marcado');
+  const entra = await call('GET', '/api/me', undefined, { 'x-dev-user': email });
+  assert.equal(entra.status, 403);
+  assert.match(entra.data.error ?? JSON.stringify(entra.data), /no tiene usuario/);
+  if (token?.token) assert.equal((await call('GET', '/api/me', undefined, { authorization: `Bearer ${token.token}` })).status, 401, 'su token queda revocado');
+  assert.equal((await api('PATCH', `/users/${ida.id}`, { name: 'X' })).status, 404);
+  assert.equal((await api('DELETE', `/users/${ida.id}`, {})).status, 404, 'ya está eliminado');
+
+  const vuelve = await api('POST', '/users', { email, name: `Chau ${RUN}`, teams: [57393663] });
+  assert.equal(vuelve.status, 201, JSON.stringify(vuelve.data));
+  assert.equal(vuelve.data.id, ida.id, 'vuelve el mismo usuario, con su historial');
+  assert.equal((await call('GET', '/api/me', undefined, { 'x-dev-user': email })).status, 200);
+
+  // Sin propietario: los registros quedan sin asignar.
+  const otro = (await api('POST', '/users', { email: `nadie.${RUN}@formas.ar`, name: `Nadie ${RUN}` })).data;
+  const suyo = (await api('POST', '/records/contact', { props: { firstname: 'Sin', lastname: RUN, email: `sin.${RUN}@ejemplo.com`, owner_id: otro.id } })).data;
+  assert.equal((await api('DELETE', `/users/${otro.id}`, { reasignar_a: null })).status, 200);
+  assert.equal((await api('GET', `/records/contact/${suyo.id}`)).data.record.props.owner_id ?? null, null);
+});

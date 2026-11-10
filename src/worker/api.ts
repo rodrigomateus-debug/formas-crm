@@ -60,7 +60,8 @@ api.get('/meta', async (c) => {
   const meta = new Meta(db);
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
-    db.prepare('SELECT id, email, name, role, team_id, extra_teams, active, photo_url FROM users ORDER BY active DESC, name'),
+    // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
+    db.prepare('SELECT id, email, name, role, team_id, extra_teams, active, photo_url, deleted_at FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -1031,9 +1032,22 @@ api.delete('/pipelines/:id', async (c) => {
 });
 
 api.get('/users', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT * FROM users ORDER BY active DESC, name').all();
+  const { results } = await c.env.DB.prepare('SELECT * FROM users WHERE deleted_at IS NULL ORDER BY active DESC, name').all();
   return c.json(results);
 });
+
+// Equipos de un usuario: en la pantalla es una sola lista; se guarda como el principal (el primero, con el que arranca
+// Negocios) y los demás. También se aceptan team_id y extra_teams sueltos, como antes.
+function equiposDe(b: { teams?: number[]; team_id?: number | null; extra_teams?: number[] }, cur: { team_id?: unknown; extra_teams?: unknown }) {
+  if (b.teams !== undefined) {
+    const t = [...new Set(b.teams.map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+    return { team_id: t[0] ?? null, extra_teams: JSON.stringify(t.slice(1)) };
+  }
+  return {
+    team_id: b.team_id === undefined ? cur.team_id ?? null : b.team_id,
+    extra_teams: b.extra_teams === undefined ? cur.extra_teams ?? '[]' : JSON.stringify(b.extra_teams.map(Number)),
+  };
+}
 
 // Perfil y permisos van juntos en un punto: el perfil admin es el rol admin. Pasar a admin (por cualquiera de los dos) da
 // los dos; dejar de serlo vuelve a «edita» (member) y, si no se elige otro, al perfil comercial.
@@ -1050,10 +1064,20 @@ function profileAndRole(b: { profile?: string; role?: string }, cur: { profile: 
 
 api.post('/users', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null }>();
+  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null; teams?: number[] }>();
   const { profile, role } = profileAndRole(b, { profile: 'comercial', role: 'member' });
-  const row = await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id) VALUES (?, ?, ?, ?, ?) RETURNING *')
-    .bind(b.email.trim().toLowerCase(), b.name, role, profile, b.team_id ?? null).first<{ id: number }>();
+  const email = String(b.email ?? '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Falta un mail válido.');
+  const name = String(b.name ?? '').trim() || email;
+  const { team_id, extra_teams } = equiposDe(b, { team_id: null, extra_teams: '[]' });
+  // Un usuario eliminado con ese mail vuelve (con su historial); uno que ya está no se duplica.
+  const prev = await c.env.DB.prepare('SELECT id, deleted_at FROM users WHERE email = ?').bind(email).first<{ id: number; deleted_at: string | null }>();
+  if (prev && !prev.deleted_at) throw new HttpError(400, `Ya hay un usuario con ese mail (${email}).`);
+  const row = prev
+    ? await c.env.DB.prepare(`UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = 1, deleted_at = NULL
+        WHERE id = ? RETURNING *`).bind(name, role, profile, team_id, extra_teams, prev.id).first<{ id: number }>()
+    : await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id, extra_teams) VALUES (?, ?, ?, ?, ?, ?) RETURNING *')
+      .bind(email, name, role, profile, team_id, extra_teams).first<{ id: number }>();
   // Su foto de Google, ya (si no se puede, la trae el cron).
   if (c.env.GOOGLE_SA_JSON) c.executionCtx.waitUntil(actualizarFotos(c.env, Budget.of(c.env), { ids: [row!.id] }).catch((e) => console.error((e as Error).message)));
   return c.json(row, 201);
@@ -1071,18 +1095,81 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; active?: boolean }>();
-  const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean }>();
+  const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
     if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
   }
+  const { team_id, extra_teams } = equiposDe(b, cur);
   await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ? WHERE id = ?')
-    .bind(b.name ?? cur.name, role, profile, b.team_id === undefined ? cur.team_id : b.team_id,
-      b.extra_teams === undefined ? cur.extra_teams : JSON.stringify(b.extra_teams.map(Number)), b.active === undefined ? cur.active : b.active ? 1 : 0, cur.id).run();
+    .bind(b.name ?? cur.name, role, profile, team_id, extra_teams, b.active === undefined ? cur.active : b.active ? 1 : 0, cur.id).run();
   return c.json({ ok: true });
+});
+
+// Lo que tiene a su nombre (para el aviso antes de eliminarlo): registros por tipo, tareas abiertas y tokens.
+async function usoDe(db: D1Database, id: number) {
+  const [regs, tareas, tokens] = await db.batch([
+    db.prepare('SELECT object_type, COUNT(*) AS n FROM records WHERE owner_id = ? AND archived = 0 GROUP BY object_type').bind(id),
+    db.prepare("SELECT COUNT(*) AS n FROM activities WHERE owner_id = ? AND type = 'task' AND COALESCE(status, '') != 'COMPLETED' AND archived = 0").bind(id),
+    db.prepare('SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ? AND revoked = 0').bind(id),
+  ]);
+  const registros = Object.fromEntries(OBJECT_TYPES.map((t) => [t, 0])) as Record<ObjectType, number>;
+  for (const r of regs.results as Array<{ object_type: ObjectType; n: number }>) registros[r.object_type] = r.n;
+  return { registros, tareas_abiertas: (tareas.results[0] as { n: number }).n, tokens: (tokens.results[0] as { n: number }).n };
+}
+
+api.get('/users/:id/uso', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await usoDe(c.env.DB, Number(c.req.param('id'))));
+});
+
+// Eliminar un usuario: sus registros (todos, también los borrados) y sus tareas abiertas pasan a `reasignar_a` (o quedan sin
+// propietario), queda en el historial de cada registro, se revocan sus tokens y deja de entrar. La fila queda marcada
+// (deleted_at): las notas, mails y tareas hechas siguen con su nombre, y la sincronización con HubSpot no lo vuelve a crear.
+api.delete('/users/:id', async (c) => {
+  const ctx = c.get('ctx');
+  requireRole(ctx, 'admin');
+  const db = c.env.DB;
+  const b = await c.req.json<{ reasignar_a?: number | null }>().catch(() => ({} as { reasignar_a?: number | null }));
+  const cur = await db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Ctx['user']>();
+  if (!cur) throw new HttpError(404, 'No existe el usuario.');
+  if (cur.id === ctx.user.id) throw new HttpError(400, 'No te podés eliminar a vos.');
+  if (c.env.ADMIN_EMAIL && cur.email.toLowerCase() === c.env.ADMIN_EMAIL.toLowerCase()) {
+    throw new HttpError(400, 'Es el administrador principal del CRM (ADMIN_EMAIL): no se puede eliminar.');
+  }
+  if (cur.role === 'admin' && cur.active) {
+    const otros = await db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
+    if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
+  }
+  const to = b.reasignar_a == null ? null : Number(b.reasignar_a);
+  if (to != null) {
+    const dest = await db.prepare('SELECT id FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL').bind(to).first();
+    if (!dest || to === cur.id) throw new HttpError(400, 'Elegí un usuario activo para pasarle sus registros y tareas.');
+  }
+  const uso = await usoDe(db, cur.id);
+  const ts = now();
+  // json_set con el id (número) o json_remove si quedan sin propietario: la columna y la propiedad van siempre juntas.
+  const props = to == null ? "json_remove(props, '$.owner_id')" : "json_set(props, '$.owner_id', ?)";
+  const formProps = to == null ? "json_remove(value, '$.owner_id')" : "json_set(value, '$.owner_id', ?)";
+  await db.batch([
+    db.prepare(`INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source)
+      SELECT id, 'owner_id', CAST(owner_id AS TEXT), ?, ?, ?, ? FROM records WHERE owner_id = ?`)
+      .bind(to == null ? null : String(to), ts, ctx.user.id, ctx.source, cur.id),
+    db.prepare(`UPDATE records SET owner_id = ?, props = ${props}, updated_at = ? WHERE owner_id = ?`)
+      .bind(...(to == null ? [null, ts, cur.id] : [to, to, ts, cur.id])),
+    db.prepare("UPDATE activities SET owner_id = ?, updated_at = ? WHERE owner_id = ? AND type = 'task' AND COALESCE(status, '') != 'COMPLETED'")
+      .bind(to, ts, cur.id),
+    // Los formularios web que le asignaban los contactos nuevos pasan a la misma persona.
+    db.prepare(`UPDATE settings SET value = ${formProps} WHERE key LIKE 'form:%' AND json_extract(value, '$.owner_id') = ?`)
+      .bind(...(to == null ? [cur.id] : [to, cur.id])),
+    db.prepare('UPDATE api_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0').bind(cur.id),
+    db.prepare('DELETE FROM avisos WHERE user_id = ? AND sent_at IS NULL').bind(cur.id),
+    db.prepare('UPDATE users SET active = 0, deleted_at = ? WHERE id = ?').bind(ts, cur.id),
+  ]);
+  return c.json({ ok: true, reasignado_a: to, ...uso });
 });
 
 api.get('/tokens', async (c) => {

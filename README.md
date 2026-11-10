@@ -73,7 +73,11 @@ La prueba de Gmail necesita las variables de `node test/gmail-dev-vars.mjs` (y r
 
 **Quién entra:** la política de Access deja pasar los mails de Formas (regla «Emails ending in»: `@formas.ar`,
 `@formaspublicitarias.com`) y el CRM deja entrar solo a quien está en Configuración → Usuarios y activo. Para dar acceso
-a alguien, se lo agrega ahí; para sacárselo, se lo desactiva. La migración trae a los propietarios de HubSpot con su equipo.
+a alguien, se lo agrega ahí; para sacárselo, se lo desactiva o se lo elimina (el tachito de su fila). Al eliminarlo, sus
+registros y sus tareas abiertas pasan a quien se elija (o quedan sin propietario) y queda en el historial de cada registro; se
+revocan sus tokens y sale de la lista y de los desplegables, pero las notas, los mails y las tareas hechas siguen con su nombre.
+Si se lo vuelve a agregar con el mismo mail, vuelve. Los equipos de cada usuario son una sola lista: el primero es el principal
+(Negocios arranca en su pipeline). La migración trae a los propietarios de HubSpot con su equipo.
 
 ## Migrar desde HubSpot
 

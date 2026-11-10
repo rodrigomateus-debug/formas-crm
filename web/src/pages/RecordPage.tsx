@@ -910,6 +910,8 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {type === 'company' && <ComprasCard record={record} />}
         {type === 'deal' && <FacturarCard record={record} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} />}
+        {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}
+        {type === 'order' && <RemitosCard record={record} onChange={changed} />}
         {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
         {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}

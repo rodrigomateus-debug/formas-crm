@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import {
-  LinkInvalido, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
+  LinkInvalido, Rechazo, corregirPdv, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
 import { envios, type Envio } from './envios';
 import { achicarFoto } from './imagen';
@@ -51,6 +51,7 @@ type Lectura = { tono: Tono; icono: string; titulo: string };
 /** Qué significa cada respuesta del servidor para el chofer. */
 function lectura(r: RemitoChofer): Lectura {
   if (r.repetir) return { tono: 'mal', icono: 'repetir', titulo: 'Sacala de nuevo' };
+  if (faltaPdv(r)) return { tono: 'aviso', icono: 'aviso', titulo: 'Falta el número de PDV' };
   switch (r.estado) {
     case 'ok': return { tono: 'bien', icono: 'bien', titulo: 'Listo' };
     case 'revisar': return { tono: 'aviso', icono: 'aviso', titulo: 'Llegó. Lo revisa Logística' };
@@ -58,6 +59,11 @@ function lectura(r: RemitoChofer): Lectura {
     case 'descartado': return { tono: 'neutro', icono: 'cruz', titulo: 'Logística lo descartó' };
     default: return { tono: 'neutro', icono: 'reloj', titulo: 'Llegó. Se lee más tarde' };
   }
+}
+
+/** El servidor pide el PDV y todavía se puede escribir (un duplicado o un descartado ya no se corrigen). */
+function faltaPdv(r: RemitoChofer): boolean {
+  return !!r.pide_pdv && r.estado !== 'duplicado' && r.estado !== 'descartado';
 }
 
 function tituloRemito(r: RemitoChofer): string {
@@ -116,6 +122,8 @@ export default function App() {
   const [reemplazadas, setReemplazadas] = useState<string[]>(() => leerLista('chofer-reemplazadas'));
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [anuncio, setAnuncio] = useState('');
+  /** Un remito de la lista de hoy traído a la tarjeta grande (para escribirle el PDV). */
+  const [idSuelto, setIdSuelto] = useState<number | null>(null);
 
   const entrada = useRef<HTMLInputElement>(null);
   const entradaGuardadas = useRef<HTMLInputElement>(null);
@@ -282,14 +290,38 @@ export default function App() {
 
   const foco = estado.envios.find((e) => e.clave === estado.foco) ?? null;
 
+  // Una foto nueva (o una que pide repetirse) pasa al frente: el remito traído de la lista vuelve a la lista.
+  useEffect(() => { if (estado.foco) setIdSuelto(null); }, [estado.foco]);
+
+  /** Trae un remito de la lista a la tarjeta grande. */
+  function traerAlFrente(r: RemitoChofer) {
+    const suyo = estado.envios.find((e) => e.resultado?.id === r.id);
+    if (suyo) { setIdSuelto(null); envios.enfocar(suyo.clave); } else { envios.enfocar(null); setIdSuelto(r.id); }
+    window.scrollTo({ top: 0 });
+  }
+
+  /** El servidor contestó una corrección de PDV: se guarda el remito actualizado y se avisa. */
+  function alCorregirPdv(r: RemitoChofer) {
+    setRemitos((antes) => {
+      const lista = antes.some((x) => x.id === r.id) ? antes.map((x) => (x.id === r.id ? r : x)) : [r, ...antes];
+      try { localStorage.setItem('chofer-remitos', JSON.stringify(lista)); } catch { /* da igual */ }
+      return lista;
+    });
+    setAnuncio(r.mensaje || lectura(r).titulo);
+    try { navigator.vibrate?.(50); } catch { /* sin vibración */ }
+  }
+
   /** La versión más nueva de un remito: la de la lista del servidor si ya la trae, si no la respuesta del envío. */
   const alDia = useCallback((r: RemitoChofer): RemitoChofer => {
     return remitos.find((x) => x.id === r.id) ?? r;
   }, [remitos]);
 
-  const remitoFoco = foco?.resultado ? alDia(foco.resultado) : null;
-  const claveFoco = foco ? (remitoFoco?.clave ?? foco.clave) : null;
-  const focoPideOtra = !!foco && (foco.fase === 'fallo' || !!remitoFoco?.repetir) && !reemplazadas.includes(claveFoco ?? '');
+  const suelto = idSuelto != null ? remitos.find((r) => r.id === idSuelto) ?? null : null;
+  const envioFoco = suelto ? null : foco;
+  const remitoFoco = suelto ?? (foco?.resultado ? alDia(foco.resultado) : null);
+  const claveFoco = suelto ? (suelto.clave ?? `remito-${suelto.id}`) : foco ? (remitoFoco?.clave ?? foco.clave) : null;
+  const hayFoco = !!envioFoco || !!suelto;
+  const focoPideOtra = hayFoco && (envioFoco?.fase === 'fallo' || !!remitoFoco?.repetir) && !reemplazadas.includes(claveFoco ?? '');
 
   const filas = useMemo(() => {
     type Fila = { llave: string; cuando: string; clave: string; envio?: Envio; remito?: RemitoChofer };
@@ -297,7 +329,7 @@ export default function App() {
     const idsLocales = new Set<number>();
     for (const e of estado.envios) {
       if (e.resultado) idsLocales.add(e.resultado.id);
-      if (e.clave === estado.foco) continue;
+      if (e.clave === envioFoco?.clave) continue;
       if (e.resultado) {
         if (esHoy(e.resultado.creado) && !remitos.some((r) => r.id === e.resultado!.id)) {
           lista.push({ llave: `r${e.resultado.id}`, cuando: e.resultado.creado, clave: e.resultado.clave ?? e.clave, remito: e.resultado });
@@ -306,13 +338,13 @@ export default function App() {
         lista.push({ llave: `e${e.clave}`, cuando: e.tomada_el, clave: e.clave, envio: e });
       }
     }
-    const idFoco = foco?.resultado?.id;
+    const idFoco = remitoFoco?.id;
     for (const r of remitos) {
       if (!esHoy(r.creado) || r.id === idFoco) continue;
       lista.push({ llave: `r${r.id}`, cuando: r.creado, clave: r.clave ?? `remito-${r.id}`, remito: r });
     }
     return lista.sort((a, b) => b.cuando.localeCompare(a.cuando));
-  }, [estado.envios, estado.foco, remitos, foco]);
+  }, [estado.envios, remitos, envioFoco, remitoFoco]);
 
   const esperando = estado.envios.filter((e) => e.fase === 'espera');
   const esperandoFuera = esperando.filter((e) => e.clave !== estado.foco).length;
@@ -343,14 +375,17 @@ export default function App() {
 
         <p className="solo-lector" role="status" aria-live="polite">{anuncio}</p>
 
-        {foco && (
+        {hayFoco && (
           <TarjetaFoco
-            envio={foco}
+            key={remitoFoco ? `r${remitoFoco.id}` : `e${envioFoco?.clave}`}
+            envio={envioFoco}
             remito={remitoFoco}
             enLinea={enLinea}
             pideOtra={focoPideOtra}
+            escribirYa={!!suelto}
             alReintentar={() => envios.empujar()}
-            alSeguir={() => envios.enfocar(null)}
+            alSeguir={() => { setIdSuelto(null); envios.enfocar(null); }}
+            alCorregirPdv={alCorregirPdv}
           />
         )}
 
@@ -365,15 +400,15 @@ export default function App() {
           </section>
         )}
 
-        {!foco && <TarjetaInstalar />}
+        {!hayFoco && <TarjetaInstalar />}
 
-        {!foco && <Consejos />}
+        {!hayFoco && <Consejos />}
 
         <section className="hoy" aria-labelledby="titulo-hoy">
           <h2 id="titulo-hoy">Hoy {filas.length > 0 && <span className="cuenta">{filas.length}</span>}</h2>
           {filas.length === 0 ? (
             <p className="vacio">
-              {foco ? 'Acá vas a ver los otros remitos que mandes hoy.'
+              {hayFoco ? 'Acá vas a ver los otros remitos que mandes hoy.'
                 : listaAlDia || enLinea ? 'Todavía no mandaste ningún remito hoy.'
                 : 'Sin señal no se puede ver lo que mandaste hoy. Igual podés sacar fotos: se mandan solas después.'}
             </p>
@@ -387,6 +422,7 @@ export default function App() {
                         remito={f.remito!}
                         yaRepetida={reemplazadas.includes(f.clave)}
                         alRepetir={() => abrirCamara(f.clave)}
+                        alEscribirPdv={() => traerAlFrente(f.remito!)}
                       />}
                 </li>
               ))}
@@ -394,7 +430,7 @@ export default function App() {
           )}
         </section>
 
-        {foco && <Consejos />}
+        {hayFoco && <Consejos />}
       </main>
 
       <div className="muelle">
@@ -506,7 +542,7 @@ function Consejos() {
 }
 
 function DatosLeidos({ remito }: { remito: RemitoChofer }) {
-  const hayDatos = remito.pdv || remito.cliente || remito.numero || remito.items.length > 0;
+  const hayDatos = remito.pdv || remito.cliente || remito.numero || remito.pdv_chofer || remito.items.length > 0;
   if (!hayDatos) return null;
   return (
     <div className="leido">
@@ -517,6 +553,7 @@ function DatosLeidos({ remito }: { remito: RemitoChofer }) {
         </p>
       )}
       {remito.numero && <p className="numero">Remito {remito.numero}</p>}
+      {remito.pdv_chofer && remito.pdv_chofer !== remito.pdv && <p className="numero">PDV que escribiste: {remito.pdv_chofer}</p>}
       {remito.items.length > 0 && (
         <ul className="items">
           {remito.items.map((i, n) => (
@@ -531,11 +568,90 @@ function DatosLeidos({ remito }: { remito: RemitoChofer }) {
   );
 }
 
-function TarjetaFoco({ envio, remito, enLinea, pideOtra, alReintentar, alSeguir }: {
-  envio: Envio; remito: RemitoChofer | null; enLinea: boolean; pideOtra: boolean;
-  alReintentar: () => void; alSeguir: () => void;
+/** El campo para escribir o corregir el número de PDV. No va a la cola: si no hay señal, queda escrito y se prueba otra vez. */
+function CampoPdv({ remito, modo, enfocar, alListo, alCancelar }: {
+  remito: RemitoChofer;
+  /** falta: el servidor lo pide · alternativa: lo pide pero conviene otra foto · corregir: el chofer dice que no es ese pedido. */
+  modo: 'falta' | 'alternativa' | 'corregir';
+  enfocar: boolean;
+  alListo: (r: RemitoChofer) => void;
+  alCancelar?: () => void;
 }) {
-  if (envio.fase === 'fallo') {
+  const [valor, setValor] = useState(() => (modo === 'corregir' ? remito.pdv ?? '' : remito.pdv_chofer ?? ''));
+  const [mandando, setMandando] = useState(false);
+  const [error, setError] = useState('');
+  const [soloNumeros, setSoloNumeros] = useState(false);
+  const campo = useRef<HTMLInputElement>(null);
+  const id = `pdv-${remito.id}`;
+
+  useEffect(() => {
+    if (!enfocar) return;
+    campo.current?.focus();
+    campo.current?.select();
+  }, [enfocar]);
+
+  function alEscribir(texto: string) {
+    const limpio = texto.replace(/\D/g, '').slice(0, 10);
+    setValor(limpio);
+    setError('');
+    // Las letras no entran al campo; el aviso queda a la vista para que se entienda por qué.
+    if (/[^\d\s.]/.test(texto)) setSoloNumeros(true);
+  }
+
+  async function mandar(e: FormEvent) {
+    e.preventDefault();
+    if (mandando) return;
+    if (!valor) { setError('Escribí el número de PDV.'); campo.current?.focus(); return; }
+    setMandando(true);
+    setError('');
+    try {
+      const r = await corregirPdv(remito.id, valor);
+      alListo(r);
+      // Si el servidor lo vuelve a pedir (no hay pedido con ese número), el número queda a la vista para corregirlo.
+      if (r.pide_pdv) { campo.current?.focus(); campo.current?.select(); }
+    } catch (err) {
+      if (err instanceof LinkInvalido) envios.marcarLinkInvalido();
+      else if (err instanceof Rechazo) {
+        setError(err.status === 404 ? 'No encontramos este remito. Avisale a Logística.'
+          : err.status === 409 ? 'Este remito ya no se puede corregir.'
+          : err.detalle || 'Ese número no sirve. Revisalo y probá de nuevo.');
+      } else setError('No hay señal: probá de nuevo en un rato.');
+    } finally {
+      setMandando(false);
+    }
+  }
+
+  return (
+    <form className={`campo-pdv ${modo}`} onSubmit={mandar} noValidate>
+      <label htmlFor={id}>
+        {modo === 'alternativa' ? 'O escribí el número de PDV' : modo === 'corregir' ? 'Número de PDV correcto' : 'Número de PDV'}
+      </label>
+      <input
+        ref={campo} id={id} type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" enterKeyHint="send"
+        placeholder="Ej.: 30706" value={valor} onChange={(e) => alEscribir(e.target.value)}
+        aria-invalid={!!error} aria-describedby={error ? `${id}-error` : soloNumeros ? `${id}-pista` : undefined}
+      />
+      {error
+        ? <p id={`${id}-error`} className="error" role="alert">{error}</p>
+        : soloNumeros && <p id={`${id}-pista`} className="pista" role="status">Van solo números: las letras no se escriben.</p>}
+      <div className="acciones">
+        <button type="submit" className={`boton ${modo === 'alternativa' ? 'chico' : 'principal'}`} disabled={mandando}>
+          {mandando ? <><span className="girando" aria-hidden="true" /> Mandando…</> : modo === 'alternativa' ? 'Mandar el PDV' : 'Mandar'}
+        </button>
+        {alCancelar && <button type="button" className="enlace" onClick={alCancelar} disabled={mandando}>Cancelar</button>}
+      </div>
+    </form>
+  );
+}
+
+function TarjetaFoco({ envio, remito, enLinea, pideOtra, escribirYa, alReintentar, alSeguir, alCorregirPdv }: {
+  envio: Envio | null; remito: RemitoChofer | null; enLinea: boolean; pideOtra: boolean;
+  /** El chofer tocó «Escribir el PDV» en la lista: el campo arranca con el cursor. */
+  escribirYa: boolean;
+  alReintentar: () => void; alSeguir: () => void; alCorregirPdv: (r: RemitoChofer) => void;
+}) {
+  const [corrigiendo, setCorrigiendo] = useState(false);
+  if (envio?.fase === 'fallo') {
     return (
       <section className="foco mal" aria-label="Resultado de la última foto">
         <div className="cabeza"><span className="sello"><Icono nombre="repetir" tamano={30} /></span><h2>Sacala de nuevo</h2></div>
@@ -554,13 +670,30 @@ function TarjetaFoco({ envio, remito, enLinea, pideOtra, alReintentar, alSeguir 
         <div className="cabeza"><span className="sello"><Icono nombre={l.icono} tamano={30} /></span><h2>{l.titulo}</h2></div>
         <div className="detalle">
           {remito.mensaje && <p className="mensaje">{remito.mensaje}</p>}
+          {faltaPdv(remito) && !pideOtra && (
+            <CampoPdv remito={remito} modo="falta" enfocar={escribirYa} alListo={alCorregirPdv} />
+          )}
           <DatosLeidos remito={remito} />
           {remito.repetir && !pideOtra && <p className="nota">Ya sacaste otra foto de este remito.</p>}
+          {faltaPdv(remito) && pideOtra && (
+            <CampoPdv remito={remito} modo="alternativa" enfocar={escribirYa} alListo={alCorregirPdv} />
+          )}
+          {remito.estado === 'ok' && !remito.repetir && remito.pdv && (corrigiendo ? (
+            <CampoPdv
+              remito={remito} modo="corregir" enfocar
+              alListo={(r) => { setCorrigiendo(false); alCorregirPdv(r); }}
+              alCancelar={() => setCorrigiendo(false)}
+            />
+          ) : (
+            <button type="button" className="enlace" onClick={() => setCorrigiendo(true)}>¿No es este pedido? Corregilo</button>
+          ))}
           {pideOtra && <button type="button" className="enlace" onClick={alSeguir}>Seguir con otro remito</button>}
+          {!envio && !pideOtra && <button type="button" className="enlace" onClick={alSeguir}>Volver a la lista</button>}
         </div>
       </section>
     );
   }
+  if (!envio) return null;
 
   const porciento = Math.round(envio.subido * 100);
   return (
@@ -630,7 +763,9 @@ function FilaEnvio({ envio, enLinea, alRepetir }: { envio: Envio; enLinea: boole
   );
 }
 
-function FilaRemito({ remito, yaRepetida, alRepetir }: { remito: RemitoChofer; yaRepetida: boolean; alRepetir: () => void }) {
+function FilaRemito({ remito, yaRepetida, alRepetir, alEscribirPdv }: {
+  remito: RemitoChofer; yaRepetida: boolean; alRepetir: () => void; alEscribirPdv: () => void;
+}) {
   const l = lectura(remito);
   const pideOtra = remito.repetir && !yaRepetida;
   const tono = remito.repetir && yaRepetida ? 'neutro' : l.tono;
@@ -640,9 +775,15 @@ function FilaRemito({ remito, yaRepetida, alRepetir }: { remito: RemitoChofer; y
       <span className={`punto ${tono}`}><Icono nombre={l.icono} tamano={22} /></span>
       <div className="texto">
         <strong>{tituloRemito(remito)}</strong>
-        <span className={`estado ${tono}`}>{remito.repetir && yaRepetida ? 'No se leía bien. Ya sacaste otra' : l.titulo}</span>
-        {pideOtra && remito.mensaje ? <span className="sub">{remito.mensaje}</span> : resumen && <span className="sub">{resumen}</span>}
-        {pideOtra && <button type="button" className="boton chico" onClick={alRepetir}>Sacar otra foto</button>}
+        <span className={`estado ${tono}`}>{remito.repetir && yaRepetida ? 'No se leía bien. Ya sacaste otra' : faltaPdv(remito) && !remito.repetir ? 'Falta el PDV' : l.titulo}</span>
+        {faltaPdv(remito) && remito.repetir && !yaRepetida && <span className="estado aviso">Falta el PDV</span>}
+        {(pideOtra || faltaPdv(remito)) && remito.mensaje ? <span className="sub">{remito.mensaje}</span> : resumen && <span className="sub">{resumen}</span>}
+        {(pideOtra || (faltaPdv(remito) && !yaRepetida)) && (
+          <div className="botones">
+            {pideOtra && <button type="button" className="boton chico" onClick={alRepetir}>Sacar otra foto</button>}
+            {faltaPdv(remito) && <button type="button" className="boton chico" onClick={alEscribirPdv}>Escribir el PDV</button>}
+          </div>
+        )}
       </div>
       <time dateTime={remito.creado}>{hora(remito.creado)}</time>
     </div>

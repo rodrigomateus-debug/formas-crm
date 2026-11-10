@@ -123,8 +123,11 @@ export async function guardarRemito(env: Env, ctx: Ctx, n: NuevoRemito): Promise
     const ya = await db.prepare('SELECT id FROM remitos WHERE clave = ?').bind(n.clave).first<{ id: number }>();
     if (ya) return { id: ya.id, nuevo: false };
   }
+  // La misma foto dos veces del mismo chofer (o del CRM) es una sola. De otro chofer (una foto reenviada) entra aparte, y
+  // el número de remito igual la marca como repetida: así cada chofer ve y puede corregir lo suyo.
   const hash = await sha256Bytes(n.bytes);
-  const igual = await db.prepare("SELECT id FROM remitos WHERE hash = ? AND estado != 'descartado' ORDER BY id LIMIT 1").bind(hash).first<{ id: number }>();
+  const igual = await db.prepare("SELECT id FROM remitos WHERE hash = ? AND estado != 'descartado' AND COALESCE(token_id, 0) = COALESCE(?, 0) ORDER BY id LIMIT 1")
+    .bind(hash, n.tokenId ?? null).first<{ id: number }>();
   if (igual) return { id: igual.id, nuevo: false };
   if (n.recordId) {
     const rec = await getRow(db, n.recordId);
@@ -417,6 +420,8 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
       AND duplicado_de IS NULL ORDER BY (record_id = ?) DESC, id LIMIT 1`).bind(numero, r.id, p.id).first<{ id: number; record_id: number | null }>();
     if (otro && otro.record_id === p.id) return fin(p.id, 'duplicado', `Es el mismo remito ${numero} que ya estaba.`, { duplicadoDe: otro.id });
     if (otro && otro.record_id) { contra ??= `El remito ${numero} ya está en otro pedido.`; add('Duplicado', false, contra); }
+    // El mismo remito está para revisar sin pedido: este también, así no se cuenta dos veces cuando se resuelvan.
+    if (otro && !otro.record_id) { contra ??= `El mismo remito ${numero} ya está para revisar.`; add('Duplicado', null, contra); }
   }
 
   // Elegido por una persona: alcanza con que el PDV coincida (o, sin PDV, el CUIT). Desde la app: PDV y otro dato fuerte.
@@ -502,7 +507,8 @@ export async function corregirPdv(env: Env, ctx: Ctx, id: number, valor: unknown
   if (!r) throw new HttpError(404, 'No existe ese remito.');
   if (r.estado === 'descartado' || r.estado === 'duplicado') throw new HttpError(409, r.estado === 'duplicado' ? 'Ese remito ya estaba mandado.' : 'Logística descartó ese remito.');
   const pdv = normPdv(valor);
-  if (!pdv || pdv.length > 7) throw new HttpError(400, 'Escribí el número de PDV (solo números).');
+  if (!pdv) throw new HttpError(400, 'Escribí el número de PDV, solo con números.');
+  if (pdv.length > 7) throw new HttpError(400, 'Ese número es muy largo para un PDV. Fijate en el remito y escribilo de nuevo.');
   await db.prepare('UPDATE remitos SET pdv_chofer = ?, updated_at = ? WHERE id = ?').bind(pdv, now(), id).run();
   const nuevo = { ...r, pdv_chofer: pdv };
   if (!r.leido_at) return env.ANTHROPIC_API_KEY ? leerRemito(env, id, { ctx }) : remitoPorId(db, id);
@@ -655,7 +661,16 @@ export async function revisarRemito(env: Env, ctx: Ctx, id: number, body: { acci
     const pid = body.pedido ? Number(body.pedido) : r.record_id;
     if (!pid) throw new HttpError(400, 'Elegí el pedido del remito.');
     await getRow(db, pid, 'order');
-    // Asignar a un pedido lo deja en ese pedido; confirmar además lo da por bueno (cuenta para la entrega).
+    // Asignar a un pedido lo deja en ese pedido; confirmar además lo da por bueno (cuenta para la entrega). Si el pedido ya
+    // tiene ese mismo número de remito contado, este queda como repetido (no se cuenta dos veces).
+    const igual = r.numero ? await db.prepare("SELECT id FROM remitos WHERE record_id = ? AND numero = ? AND estado = 'ok' AND id != ? AND duplicado_de IS NULL LIMIT 1")
+      .bind(pid, r.numero, id).first<{ id: number }>() : null;
+    if (igual && body.accion === 'confirmar') {
+      await db.prepare("UPDATE remitos SET record_id = ?, estado = 'duplicado', duplicado_de = ?, motivo = ?, revisado_por = ?, revisado_at = ?, updated_at = ? WHERE id = ?")
+        .bind(pid, igual.id, `Es el mismo remito ${r.numero} que ya estaba en el pedido.`, ctx.user.id, ts, ts, id).run();
+      for (const x of new Set([antes, pid].filter(Boolean) as number[])) await recalcularEntrega(env, x, { ctx });
+      return remitoPorId(db, id);
+    }
     const estado = body.accion === 'confirmar' || r.estado === 'ok' ? 'ok' : 'revisar';
     await db.prepare(`UPDATE remitos SET record_id = ?, estado = ?, motivo = CASE WHEN ? = 'ok' THEN NULL ELSE ? END, repetir = 0, duplicado_de = NULL,
         revisado_por = ?, revisado_at = ?, updated_at = ? WHERE id = ?`)

@@ -161,6 +161,29 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .items li { display: contents; }
 .items .cant { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Escribir o corregir el número de PDV */
+.campo-pdv { display: flex; flex-direction: column; gap: 10px; }
+.campo-pdv.alternativa, .campo-pdv.corregir { padding-top: 16px; border-top: 2px solid var(--hundido); }
+.campo-pdv label { font-size: 17px; font-weight: 600; }
+.campo-pdv input {
+  width: 100%; min-height: 68px; padding: 0 18px; border-radius: 16px; border: 2.5px solid var(--tinta);
+  background: var(--superficie); color: var(--tinta); font-size: 30px; font-weight: 700; letter-spacing: .04em;
+  font-variant-numeric: tabular-nums;
+}
+.campo-pdv input::placeholder { color: var(--tinta-2); opacity: .55; font-weight: 500; letter-spacing: 0; font-size: 22px; }
+.campo-pdv input:focus-visible { outline-offset: 2px; }
+.campo-pdv input[aria-invalid="true"] { border-color: var(--mal); }
+.campo-pdv .error { color: var(--tinta-mal); font-weight: 600; font-size: 16px; }
+.campo-pdv .pista { color: var(--tinta-aviso); font-weight: 600; font-size: 16px; }
+.campo-pdv .acciones { display: flex; align-items: center; gap: 20px; }
+.campo-pdv .boton.principal { flex: 1; min-height: 60px; font-size: 19px; }
+.campo-pdv .enlace { align-self: center; }
+.enlace:disabled { opacity: .5; }
+/* Mientras se escribe el PDV, el botón de la cámara se corre para no quedar pegado al teclado. Vuelve un instante
+   después de salir del campo, así el toque en «Mandar» no cae sobre el botón de la cámara que reaparece. */
+.muelle { transition: visibility 0s linear .35s; }
+.app:has(.campo-pdv input:focus) .muelle { visibility: hidden; transition-delay: 0s; }
+
 /* En camino */
 .foco.curso { display: flex; gap: 16px; padding: 16px; align-items: stretch; }
 .foco.curso .mini { flex: none; width: 76px; height: 104px; object-fit: cover; border-radius: 12px; background: var(--hundido); }
@@ -211,6 +234,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .estado.mal { color: var(--tinta-mal); } .estado.neutro { color: var(--tinta-neutro); }
 .fila .sub { font-size: 15px; color: var(--tinta-2); overflow-wrap: anywhere; }
 .fila .boton { align-self: flex-start; margin-top: 8px; }
+.fila .botones { display: flex; flex-wrap: wrap; gap: 0 10px; }
 .fila time { flex: none; padding-top: 2px; font-size: 15px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
 
 .girando {

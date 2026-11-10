@@ -360,6 +360,16 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const rc = (await api('GET', '/remitos/revisar')).data.remitos.find((x) => x.id === contra.data.id);
   assert.ok(rc.candidatos.some((c) => c.id === A.id) && rc.candidatos.some((c) => c.id === B.id), 'los dos pedidos posibles');
   assert.equal(rc.pdv_chofer, PDV);
+  // La misma foto mandada por otro chofer (reenviada): entra aparte (cada uno ve lo suyo), pero como el remito ya está
+  // para revisar, este también; y si Logística confirma los dos en el mismo pedido, el segundo queda repetido.
+  const otraVez = await api('POST', '/hooks/chofer/api/remitos', form('CONTRA'), { authorization: `Bearer ${ch2.token}` });
+  assert.notEqual(otraVez.data.id, contra.data.id);
+  assert.equal(otraVez.data.estado, 'revisar');
+  asUser = logi.email;
+  assert.equal((await api('POST', `/remitos/${contra.data.id}/revisar`, { accion: 'confirmar', pedido: B.id })).data.estado, 'ok');
+  assert.equal((await api('POST', `/remitos/${otraVez.data.id}/revisar`, { accion: 'confirmar', pedido: B.id })).data.estado, 'duplicado');
+  asUser = null;
+  assert.equal((await remitosDe(B.id)).entrega.lineas[0].entregado, enB, 'contado una sola vez');
   // Dar de baja el link: deja de andar.
   asUser = logi.email;
   const lista = (await api('GET', '/choferes')).data;

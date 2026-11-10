@@ -13,6 +13,10 @@ export type RemitoChofer = {
   cliente: string | null;
   items: Array<{ descripcion: string; cantidad: number | null }>;
   pedido: { id: number; nombre: string } | null;
+  /** El servidor no pudo saber de qué pedido es por el PDV: el chofer lo puede escribir. */
+  pide_pdv?: boolean;
+  /** El PDV que escribió el chofer, si escribió. */
+  pdv_chofer?: string | null;
 };
 
 const API = '/hooks/chofer/api';
@@ -77,7 +81,7 @@ export class LinkInvalido extends Error {}
 export class SinSenal extends Error {}
 /** El servidor rechazó el pedido y reintentar igual no sirve. */
 export class Rechazo extends Error {
-  constructor(public status: number) { super(`HTTP ${status}`); }
+  constructor(public status: number, public detalle?: string) { super(`HTTP ${status}`); }
 }
 
 function reintentable(status: number): boolean {
@@ -111,6 +115,40 @@ export async function pedirYo(): Promise<string> {
 export async function pedirRemitos(): Promise<RemitoChofer[]> {
   const { remitos } = await pedir<{ remitos: RemitoChofer[] }>('/remitos');
   return Array.isArray(remitos) ? remitos : [];
+}
+
+/** El chofer escribe o corrige el número de PDV de un remito. No va a la cola: si no hay señal, se prueba de nuevo. */
+export async function corregirPdv(id: number, pdv: string): Promise<RemitoChofer> {
+  if (!tokenEnMemoria) throw new LinkInvalido();
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 30_000);
+  let r: Response;
+  try {
+    r = await fetch(`${API}/remitos/${id}/pdv`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdv }),
+      signal: corte.signal,
+    });
+  } catch {
+    throw new SinSenal();
+  } finally {
+    clearTimeout(reloj);
+  }
+  if (r.status === 401) throw new LinkInvalido();
+  if (reintentable(r.status)) throw new SinSenal();
+  if (!r.ok) {
+    let detalle: string | undefined;
+    try { const j = (await r.json()) as { error?: unknown }; if (typeof j.error === 'string') detalle = j.error; } catch { /* sin detalle */ }
+    throw new Rechazo(r.status, detalle);
+  }
+  try {
+    const remito = (await r.json()) as RemitoChofer;
+    if (!remito || typeof remito.estado !== 'string') throw new Error('respuesta rara');
+    return remito;
+  } catch {
+    throw new SinSenal();
+  }
 }
 
 export type FotoParaMandar = {

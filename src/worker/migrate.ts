@@ -66,16 +66,17 @@ migrate.post('/', async (c) => {
         const hs = String(u.hs_owner_id);
         // Quien ya está ligado a ese propietario de HubSpot conserva su usuario aunque en HubSpot tenga otro mail
         // (ej. entra con el de formas.ar y en HubSpot figura el de formaspublicitarias.com): no se crea otro.
+        // Uno eliminado en el CRM sigue eliminado: no se lo reactiva ni se lo vuelve a crear.
         stmts.push(db.prepare(`UPDATE users SET team_id = COALESCE(team_id, (SELECT id FROM teams WHERE hs_id = ?)),
             extra_teams = CASE WHEN extra_teams = '[]' THEN (SELECT json_group_array(id) FROM teams WHERE id IN (SELECT value FROM json_each(?))) ELSE extra_teams END,
             active = CASE WHEN role = 'admin' THEN active ELSE ? END
-          WHERE hs_owner_id = ?`).bind(u.team_hs_id ?? null, extra, u.active ? 1 : 0, hs));
+          WHERE hs_owner_id = ? AND deleted_at IS NULL`).bind(u.team_hs_id ?? null, extra, u.active ? 1 : 0, hs));
         stmts.push(db.prepare(`INSERT INTO users (id, email, name, role, team_id, extra_teams, active, hs_owner_id)
           SELECT ?, ?, ?, 'member', (SELECT id FROM teams WHERE hs_id = ?), (SELECT json_group_array(id) FROM teams WHERE id IN (SELECT value FROM json_each(?))), ?, ?
           WHERE NOT EXISTS (SELECT 1 FROM users WHERE hs_owner_id = ?)
           ON CONFLICT (email) DO UPDATE SET hs_owner_id = excluded.hs_owner_id, team_id = COALESCE(users.team_id, excluded.team_id),
             extra_teams = CASE WHEN users.extra_teams = '[]' THEN excluded.extra_teams ELSE users.extra_teams END,
-            active = CASE WHEN users.role = 'admin' THEN users.active ELSE excluded.active END`)
+            active = CASE WHEN users.role = 'admin' OR users.deleted_at IS NOT NULL THEN users.active ELSE excluded.active END`)
           .bind(Number(u.hs_owner_id), String(u.email).toLowerCase(), u.name || u.email, u.team_hs_id ?? null, extra, u.active ? 1 : 0, hs, hs));
       }
       break;

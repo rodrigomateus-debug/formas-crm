@@ -388,7 +388,7 @@ export function filterableProps(meta: Meta, type: ObjectType) {
 }
 
 export function optionsFor(meta: Meta, type: ObjectType, p: Property) {
-  if (p.type === 'owner') return [{ value: 'me', label: 'Yo' }, ...meta.users.map((u) => ({ value: String(u.id), label: u.name }))];
+  if (p.type === 'owner') return [{ value: 'me', label: 'Yo' }, ...meta.users.filter((u) => !u.deleted_at).map((u) => ({ value: String(u.id), label: u.name }))];
   if (p.name === 'pipeline') return meta.pipelines.map((x) => ({ value: x.id, label: x.label }));
   if (p.name === 'dealstage') return meta.pipelines.flatMap((x) => x.stages.map((s) => ({ value: s.id, label: `${s.label} · ${x.label}` })));
   if (p.type === 'bool' && !p.options.length) return [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }];
@@ -439,7 +439,7 @@ export function MultiPick({ options, values, onChange, small }: { options: { val
   const label = values.length ? values.map((v) => options.find((o) => o.value === v)?.label ?? v).join(', ') : 'Elegir…';
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open}>{label}</button>
+      <button type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} title={values.length ? label : undefined}><span className="select-value">{label}</span></button>
       {open && (
         <div className="popover" style={{ top: 38, left: 0 }}>
           {options.map((o) => (

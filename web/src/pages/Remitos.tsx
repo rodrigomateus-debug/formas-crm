@@ -75,7 +75,10 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
     catch (err) { toast((err as Error).message, true); }
   };
   const faltan = e?.lineas.filter((l) => l.falta > 0) ?? [];
-  const mostrarLineas = !!e && e.lineas.length > 0 && (e.remitos_ok > 0 || !!e.estado);
+  // Lo entregado y lo que falta, solo cuando hay algún remito leído y confirmado: antes, todo daría «falta» sin serlo.
+  const mostrarLineas = !!e && e.lineas.length > 0 && e.remitos_ok > 0;
+  const sinLeer = remitos.filter((r) => r.estado === 'sin_leer' && r.record_id === record.id).length;
+  const paraRevisar = remitos.filter((r) => r.estado === 'revisar').length;
   const puedeEditar = meta.me.role !== 'viewer';
   return (
     <div className="panel assoc-card remitos-card">
@@ -101,6 +104,11 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       {(e?.extras.length ?? 0) > 0 && (
         <div className="panel-body small"><div className="aviso bad">En los remitos pero no en el pedido: {e!.extras.map((x) => `${cant(x.quantity)} ${x.description ?? x.code ?? ''}`.trim()).join(' · ')}</div></div>
       )}
+      {e && !e.remitos_ok && (sinLeer > 0 || paraRevisar > 0) && (
+        <div className="panel-body small muted">{sinLeer > 0
+          ? `${sinLeer === 1 ? 'El remito todavía no se leyó' : `${sinLeer} remitos todavía no se leyeron`}: cuando se ${sinLeer === 1 ? 'lea' : 'lean'}, acá se ve qué se entregó y qué falta.`
+          : `${paraRevisar === 1 ? 'El remito está' : 'Los remitos están'} para revisar: cuando se confirme, acá se ve qué se entregó y qué falta.`}</div>
+      )}
       {e && e.reservas > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>{e.reservas === 1 ? 'Un remito se recibió' : `${e.reservas} remitos se recibieron`} «a controlar»: el cliente todavía puede reclamar.</div>}
       {e?.cerrada && (
         <div className="panel-body small">
@@ -108,7 +116,7 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
             {d?.puede_finalizar && <button className="btn sm ghost" style={{ marginLeft: 6 }} onClick={reabrir}>Reabrir</button>}</div>
         </div>
       )}
-      {d?.puede_finalizar && faltan.length > 0 && !e?.cerrada && (
+      {d?.puede_finalizar && mostrarLineas && faltan.length > 0 && !e?.cerrada && (
         <div className="panel-body" style={{ paddingTop: 0 }}><button className="btn sm" onClick={() => setFinalizar(true)}>Finalizar con faltante</button></div>
       )}
       {remitos.length > 0 && <div className="remitos-sub small muted">Remitos ({remitos.length})</div>}

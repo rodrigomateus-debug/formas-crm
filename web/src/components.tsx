@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
-  userOf, userName, type User, safeUrl, fmtMoney,
+  userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney,
 } from './lib';
 import { Select } from './Select';
 
@@ -53,6 +53,18 @@ export function ChatDarwin({ url, className = 'btn sm', label = 'Chat en Darwin'
   return (
     <a className={`${className} chat-darwin`} href={href} target="_blank" rel="noreferrer" title="Chat en Darwin: abrir la conversación de WhatsApp"
       onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}><Icon name="whatsapp" size={14} />{label}</a>
+  );
+}
+
+// Un teléfono (celular o fijo) que abre el chat de WhatsApp con ese número, con el ícono para que se entienda adónde lleva.
+// Si el número no alcanza para armar el link, queda el texto solo.
+export function WhatsAppLink({ phone, children }: { phone: unknown; children?: ReactNode }) {
+  const href = whatsappUrl(phone);
+  const text = children ?? String(phone ?? '');
+  if (!href) return <>{text}</>;
+  return (
+    <a className="wa-link" href={href} target="_blank" rel="noreferrer" title="Abrir el chat de WhatsApp"
+      onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}><Icon name="whatsapp" size={13} /><span className="ellipsis">{text}</span></a>
   );
 }
 

@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
-import { EtapaIcono, MultiPick, UnidadBadge, UserAvatar, etapaPedidoSlug } from '../components';
+import { AREAS_PEDIDO, EtapaIcono, MultiPick, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido } from '../components';
 import { SortPick, useCollapsed, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 
@@ -213,6 +213,55 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   });
 
 
+  const columna = (c: Column) => (collapsed.has(c.value) ? (
+    <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
+      title={`${c.label}: ${c.total}${conMonto ? ` · ${fmtMoneyExact(c.amount, 'ARS')} sin IVA` : ''}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
+      <Icon name="chevron" size={14} />
+      {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
+      {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
+      <span className="n num">{c.total}</span>
+      <span className="vlabel">{c.label}</span>
+    </div>
+  ) : (
+    <div key={c.value || 'vacio'} className={`col${over === c.value ? ' over' : ''}`} {...drop(c)}>
+      <div className={`col-head${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`}>
+        <div className="t">
+          {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
+          {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
+          <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
+          {onCreate && c.value !== '' && def?.type !== 'owner' && <button className="col-fold" title={`Crear en «${c.label}»`} aria-label={`Crear en ${c.label}`} onClick={() => onCreate({ [prop]: c.value })}><Icon name="plus" size={14} /></button>}
+          <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>
+        </div>
+      </div>
+      <div className="col-body">
+        {c.records.map((r) => <PropCard key={r.id} r={r} type={type} cardProps={cardProps} dragging={dragId === r.id} on={openId === r.id}
+          sel={!!selected?.has(r.id)} selecting={!!selected?.size} canSelect={!!onSelect} acciones={acciones} />)}
+        {c.total > c.records.length && (
+          <button className="btn sm ghost more" disabled={loadingMore === c.value} onClick={() => loadMore(c)}>
+            {loadingMore === c.value ? 'Cargando…' : `Cargar más (quedan ${(c.total - c.records.length).toLocaleString('es-AR')})`}
+          </button>
+        )}
+        {!c.total && <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>Vacío</div>}
+      </div>
+      {conMonto && (
+        <div className="col-foot" title={`${fmtMoneyExact(c.amount, 'ARS')} sin IVA`}>
+          <div><b className="num">{fmtMoney(c.amount, 'ARS') || '$ 0'}</b> <span className="muted">total sin IVA</span></div>
+          {c.sin_monto > 0 && <div className="muted">{c.sin_monto.toLocaleString('es-AR')} {c.sin_monto === 1 ? 'pedido' : 'pedidos'} sin monto</div>}
+        </div>
+      )}
+    </div>
+  ));
+
+  // Pedidos por etapa: las columnas se agrupan en un recuadro por quién las mueve (Ventas, Producción, Logística), en el
+  // orden de las etapas; las que no son de nadie (Anulado, Sin dato) quedan sueltas.
+  const porArea = type === 'order' && prop === 'hs_pipeline_stage';
+  const segmentos = porArea ? cols.reduce<Array<{ area: AreaPedido | null; cols: Column[] }>>((acc, c) => {
+    const area = areaPedido(c.value);
+    const last = acc[acc.length - 1];
+    if (last && last.area === area) last.cols.push(c); else acc.push({ area, cols: [c] });
+    return acc;
+  }, []) : [];
+
   return (
     <>
       <div className="toolbar">
@@ -236,44 +285,15 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           {conMonto && montoActivos != null && <><span className="sep">·</span>Total activos sin IVA <b className="num" title={fmtMoneyExact(montoActivos, 'ARS')}>{fmtMoney(montoActivos, 'ARS') || '$ 0'}</b></>}</span>
       </div>
       <div className={`board${boardStyle ? ' fill' : ''}${board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
-        {cols.map((c) => (collapsed.has(c.value) ? (
-          <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
-            title={`${c.label}: ${c.total}${conMonto ? ` · ${fmtMoneyExact(c.amount, 'ARS')} sin IVA` : ''}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
-            <Icon name="chevron" size={14} />
-            {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
-            {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
-            <span className="n num">{c.total}</span>
-            <span className="vlabel">{c.label}</span>
-          </div>
-        ) : (
-          <div key={c.value || 'vacio'} className={`col${over === c.value ? ' over' : ''}`} {...drop(c)}>
-            <div className={`col-head${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`}>
-              <div className="t">
-                {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
-                {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
-                <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
-                {onCreate && c.value !== '' && def?.type !== 'owner' && <button className="col-fold" title={`Crear en «${c.label}»`} aria-label={`Crear en ${c.label}`} onClick={() => onCreate({ [prop]: c.value })}><Icon name="plus" size={14} /></button>}
-                <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>
-              </div>
+        {porArea ? segmentos.map((s) => (
+          <section key={`${s.area ?? 'otras'}-${s.cols[0].value || 'vacio'}`} className={`col-group${s.area ? ` area-${s.area}` : ' sin-area'}`}
+            aria-label={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>
+            <div className="col-group-head" title={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>
+              {s.area && <><b>{AREAS_PEDIDO[s.area].label}</b><span className="ellipsis">{AREAS_PEDIDO[s.area].nota}</span></>}
             </div>
-            <div className="col-body">
-              {c.records.map((r) => <PropCard key={r.id} r={r} type={type} cardProps={cardProps} dragging={dragId === r.id} on={openId === r.id}
-                sel={!!selected?.has(r.id)} selecting={!!selected?.size} canSelect={!!onSelect} acciones={acciones} />)}
-              {c.total > c.records.length && (
-                <button className="btn sm ghost more" disabled={loadingMore === c.value} onClick={() => loadMore(c)}>
-                  {loadingMore === c.value ? 'Cargando…' : `Cargar más (quedan ${(c.total - c.records.length).toLocaleString('es-AR')})`}
-                </button>
-              )}
-              {!c.total && <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>Vacío</div>}
-            </div>
-            {conMonto && (
-              <div className="col-foot" title={`${fmtMoneyExact(c.amount, 'ARS')} sin IVA`}>
-                <div><b className="num">{fmtMoney(c.amount, 'ARS') || '$ 0'}</b> <span className="muted">total sin IVA</span></div>
-                {c.sin_monto > 0 && <div className="muted">{c.sin_monto.toLocaleString('es-AR')} {c.sin_monto === 1 ? 'pedido' : 'pedidos'} sin monto</div>}
-              </div>
-            )}
-          </div>
-        )))}
+            <div className="col-group-cols">{s.cols.map(columna)}</div>
+          </section>
+        )) : cols.map(columna)}
       </div>
     </>
   );

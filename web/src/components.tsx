@@ -557,6 +557,22 @@ const ETAPAS_PEDIDO: Record<string, { slug: string; d: string }> = {
 };
 export const etapaPedidoSlug = (value: unknown) => ETAPAS_PEDIDO[String(value ?? '')]?.slug;
 
+// Quién mueve cada etapa del pedido (pedido de Rodrigo del 10/11/2026): el tablero agrupa sus columnas en un recuadro
+// por área. Ventas, hasta que la vendedora lo pasa a producción; Producción, mientras se produce (lo mueve ClickUp según
+// los artículos); Logística, la entrega. «Anulado» no es de nadie y queda afuera.
+export type AreaPedido = 'ventas' | 'produccion' | 'logistica';
+export const AREAS_PEDIDO: Record<AreaPedido, { label: string; nota: string }> = {
+  ventas: { label: 'Ventas', nota: 'Las mueven las vendedoras y el backoffice' },
+  produccion: { label: 'Producción', nota: 'Las mueve producción en ClickUp' },
+  logistica: { label: 'Logística', nota: 'Las mueve logística al entregar' },
+};
+const AREA_DE_ETAPA: Record<string, AreaPedido> = {
+  confirmado: 'ventas', anticipo: 'ventas', 'boceto-digital': 'ventas', 'listo-produccion': 'ventas',
+  esperando: 'produccion', produccion: 'produccion', 'listo-entregar': 'produccion',
+  parcial: 'logistica', entregado: 'logistica',
+};
+export const areaPedido = (value: unknown): AreaPedido | null => AREA_DE_ETAPA[etapaPedidoSlug(value) ?? ''] ?? null;
+
 export function EtapaIcono({ value, size = 14 }: { value: unknown; size?: number }) {
   const e = ETAPAS_PEDIDO[String(value ?? '')];
   if (!e) return null;

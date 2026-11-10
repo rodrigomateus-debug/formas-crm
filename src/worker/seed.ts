@@ -258,11 +258,11 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['tipo_de_confirmacion_del_cliente', 'Tipo de confirmación del cliente', 'enum', 'Cierre', ['Orden de compra', 'Carta de adjudicación', 'Mail de confirmación', ['Pago anticipo', 'Pago anticipo del 50%']]],
     ['pdv_en_formas_shop', 'PDV en Formas Shop', 'bool', 'Cierre', SI_NO],
     ['codigo_de_finnegans', 'Código Finnegans', 'string', 'Cierre'],
+    // Solo estos 7 motivos (Rodrigo, 10/11/2026; migración 0035). La sincronización con HubSpot no suma otros.
     ['motivo_de_cierre_perdido', 'Motivo de cierre perdido', 'enum', 'Cierre', [
       ['Demora en la entrega de la cotización', 'Cotización (demora)'], ['Demora en tiempo de producción', 'Tiempos de producción (demora)'],
       ['Precio', 'Precio del producto'], ['Producto', 'Producto (calidad, stock, modelo, etc.)'], ['Sin respuesta', 'No contesta'],
-      ['Se dió de baja', 'No se hizo'], 'No Califica', ['Falta de Stock', 'No hay stock'], 'Calidad', 'Producto inexistente',
-      'Nunca respondió', 'Pospuesto para mas adelante', 'Eligió otra propuesta',
+      ['Se dió de baja', 'No se hizo'], 'No Califica',
     ]],
     ['closed_lost_reason', 'Detalle de cierre perdido', 'text', 'Cierre', [], CORE],
     ['closed_won_reason', 'Detalle de cierre ganado', 'text', 'Cierre', [], CORE],

@@ -35,7 +35,9 @@ const PROPS = {
   companies: [{ name: 'name', label: 'Name', type: 'string', hubspotDefined: true }, { name: 'campo_nuevo_hs', label: 'Campo nuevo', type: 'string', fieldType: 'text' },
     { name: 'tipo_de_empresa_cotizacion', label: 'Tipo', type: 'enumeration', fieldType: 'select', options: [{ value: 'a_cotizacion_mensual', label: 'A' }, { value: 'd_anual', label: 'D - anual' }] }],
   contacts: [{ name: 'firstname', label: 'First', type: 'string', hubspotDefined: true }],
-  deals: [{ name: 'dealname', label: 'Deal', type: 'string', hubspotDefined: true }],
+  // HubSpot tiene más motivos de cierre perdido: el CRM no los suma (solo los 7 elegidos).
+  deals: [{ name: 'dealname', label: 'Deal', type: 'string', hubspotDefined: true },
+    { name: 'motivo_de_cierre_perdido', label: 'Motivo', type: 'enumeration', fieldType: 'select', options: [{ value: 'Precio', label: 'Precio' }, { value: 'Eligió otra propuesta', label: 'Eligió otra propuesta' }] }],
   orders: [],
 };
 
@@ -102,6 +104,9 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   assert.equal(company.record.props.campo_nuevo_hs, 'valor raro', 'propiedad custom creada al vuelo');
   const meta = await api('/meta');
   assert.ok(meta.properties.find((p) => p.object_type === 'company' && p.name === 'tipo_de_empresa_cotizacion').options.some((o) => o.value === 'd_anual'), 'opción nueva sumada');
+  assert.deepEqual(meta.properties.find((p) => p.object_type === 'deal' && p.name === 'motivo_de_cierre_perdido').options.map((o) => o.label),
+    ['Cotización (demora)', 'Tiempos de producción (demora)', 'Precio del producto', 'Producto (calidad, stock, modelo, etc.)', 'No contesta', 'No se hizo', 'No Califica'],
+    'los motivos de cierre perdido no suman los de HubSpot');
 
   const contact = await api(`/records/contact/${id(2)}`);
   assert.equal(contact.associations.company[0].id, Number(id(1)));

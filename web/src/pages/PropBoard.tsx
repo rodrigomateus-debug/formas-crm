@@ -12,23 +12,27 @@ interface Column { value: string; label: string; total: number; amount: number; 
 const daysTo = (v: string) => { const d = new Date(`${String(v).slice(0, 10)}T00:00:00`); const t = new Date(); t.setHours(0, 0, 0, 0); return Math.round((d.getTime() - t.getTime()) / 86_400_000); };
 const ENTREGADO = '1237498998';
 const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
-const shortDate = (v: string) => new Date(`${String(v).slice(0, 10)}T12:00:00`).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' }).replace('.', '');
+// La fecha completa (18/11/2026), como en ClickUp y Finnegans.
+const fullDate = (v: string) => new Date(`${String(v).slice(0, 10)}T12:00:00`).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+// Cuánto falta, corto para que entre en la tarjeta («16 d», «hoy», «vencida 3 d») y largo para el cartelito.
+const falta = (n: number) => (n === 0 ? 'hoy' : n === 1 ? 'mañana' : n > 1 ? `${n} d` : `vencida ${-n} d`);
+const faltaLargo = (n: number) => (n === 0 ? 'es hoy' : n === 1 ? 'es mañana' : n > 1 ? `faltan ${n} días` : `venció hace ${-n} ${n === -1 ? 'día' : 'días'}`);
 
 // La línea del pedido en la tarjeta: «Evento» (los normales no llevan marca) y la entrega. Uno ya entregado dice cuándo se
-// entregó; uno anulado, nada; el resto, cuánto falta para la fecha prometida (en rojo si ya pasó, en ámbar si es hoy o mañana).
+// entregó; uno anulado, nada; el resto, la fecha prometida y cuánto falta (en rojo si ya pasó, en ámbar si es hoy o mañana).
 function OrderLine({ r }: { r: CrmRecord }) {
   const { meta } = useMeta();
   const p = r.props;
   const evento = p.tipo_de_pedido === 'EVENTO';
   let when: { text: string; cls: string; title: string } | null = null;
   if (p.hs_pipeline_stage === ENTREGADO) {
-    if (p.entregado_el) when = { text: `Entregado el ${shortDate(p.entregado_el)}`, cls: '', title: 'Fecha real de entrega' };
+    if (p.entregado_el) when = { text: `Entregado ${fullDate(p.entregado_el)}`, cls: '', title: 'Fecha real de entrega' };
   } else if (p.hs_pipeline_stage !== ANULADO && p.fecha_de_entrega) {
     const n = daysTo(p.fecha_de_entrega);
     when = {
-      text: n === 0 ? 'Entrega hoy' : n === 1 ? 'Entrega mañana' : n > 1 ? `Entrega en ${n} días` : `Vencida hace ${-n} ${n === -1 ? 'día' : 'días'}`,
+      text: `${fullDate(p.fecha_de_entrega)} · ${falta(n)}`,
       cls: n < 0 ? ' late' : n <= 1 ? ' soon' : '',
-      title: `Entrega prometida: ${shortDate(p.fecha_de_entrega)}`,
+      title: `Entrega prometida: ${fullDate(p.fecha_de_entrega)} (${faltaLargo(n)})`,
     };
   }
   const unidad = unidadesDe(meta, 'order', p)[0];

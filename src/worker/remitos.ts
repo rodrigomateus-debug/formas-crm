@@ -311,8 +311,8 @@ function parecido(a: unknown, b: unknown) {
   for (const w of A) if (B.has(w)) n++;
   return n / Math.min(A.size, B.size);
 }
-export function emparejar(items: Array<{ code: string | null; description: string | null; quantity?: number | null }>, lineas: Renglon[]) {
-  const resto = lineas.map((l) => (l.quantity == null ? Infinity : Number(l.quantity)));
+export function emparejar(items: Array<{ code: string | null; description: string | null; quantity?: number | null }>, lineas: Renglon[], ya: number[] = []) {
+  const resto = lineas.map((l, i) => (l.quantity == null ? Infinity : Number(l.quantity) - (ya[i] ?? 0)));
   return items.map((it) => {
     const c = normCodigo(it.code);
     const d = norm(it.description);
@@ -611,9 +611,15 @@ export const ETIQUETA_ENTREGA: Record<EstadoEntrega, string> = {
   falta_remito: 'Falta el remito', por_revisar: 'Remito por revisar',
 };
 export interface LineaEntrega { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
+// Un renglón de remito: clave es cuál es (la que usa la asignación a mano).
+interface ItemEntrega { clave: string; code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }
+// Un renglón asignado a mano a uno o más productos del pedido (i: la posición del producto en `lineas`).
+export interface Asignado extends ItemEntrega { a: Array<{ i: number; name: string; cantidad: number }>; por: number | null; el: string }
 export interface Entrega {
   estado: EstadoEntrega | null; lineas: LineaEntrega[];
-  extras: Array<{ code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>;
+  // extras: lo de los remitos que no es de ningún producto del pedido (o lo que quedó sin asignar de un renglón asignado).
+  extras: Array<ItemEntrega & { sin_asignar?: boolean }>;
+  asignados: Asignado[];
   remitos_ok: number; pendientes: number; reservas: number; sin_productos: boolean;
   clickup_entregado: boolean; alerta: string | null; falta_texto: string | null;
   cerrada: { el: string; por: number | null; motivo: string | null } | null;
@@ -623,38 +629,54 @@ const qty = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 
 export async function calcularEntrega(db: D1Database, orderId: number): Promise<Entrega> {
   const row = await getRow(db, orderId, 'order');
   const props = JSON.parse(row.props) as Record<string, unknown>;
-  const [lin, its, cuenta] = await db.batch([
+  const [lin, its, cuenta, asig] = await db.batch([
     db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity, li.description AS detalle
       FROM line_items li LEFT JOIN products pr ON pr.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(orderId),
-    db.prepare(`SELECT i.code, i.description, i.quantity, r.id AS remito_id, r.numero FROM remito_items i JOIN remitos r ON r.id = i.remito_id
+    db.prepare(`SELECT i.code, i.description, i.quantity, i.position, r.id AS remito_id, r.numero FROM remito_items i JOIN remitos r ON r.id = i.remito_id
       WHERE r.record_id = ? AND r.estado = 'ok' AND r.duplicado_de IS NULL ORDER BY r.id, i.position`).bind(orderId),
     db.prepare(`SELECT SUM(estado = 'ok' AND duplicado_de IS NULL) AS ok, SUM(estado IN ('sin_leer', 'revisar')) AS pendientes,
       SUM(estado = 'ok' AND duplicado_de IS NULL AND reservas = 1) AS reservas FROM remitos WHERE record_id = ?`).bind(orderId),
+    db.prepare('SELECT clave, lineas, user_id, created_at FROM remito_asignaciones WHERE record_id = ?').bind(orderId),
   ]);
   const lineas = (lin.results as Renglon[]);
   // Cada producto de un mismo número de remito cuenta una vez (con la cantidad más alta de sus fotos): las hojas
   // distintas suman y una foto repetida no.
   // Dos renglones iguales en la misma foto (dos materas sin código) son dos: la clave lleva cuál de ellos es.
-  const porClave = new Map<string, { code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>();
+  // La clave (número de remito, producto y cuál de los iguales) es también la de la asignación a mano: sigue valiendo si
+  // el remito se vuelve a leer o llega otra foto del mismo número.
+  const porClave = new Map<string, ItemEntrega>();
   const vez = new Map<string, number>();
-  for (const it of its.results as Array<{ code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }>) {
+  for (const { position, ...it } of its.results as Array<Omit<ItemEntrega, 'clave'> & { position: number }>) {
     const enFoto = `${it.remito_id}|${claveItem(it)}`;
     vez.set(enFoto, (vez.get(enFoto) ?? 0) + 1);
-    const k = it.numero && claveItem(it) ? `${it.numero}|${claveItem(it)}|${vez.get(enFoto)}` : `r${it.remito_id}|${porClave.size}`;
+    const k = it.numero && claveItem(it) ? `${it.numero}|${claveItem(it)}|${vez.get(enFoto)}` : `r${it.remito_id}|p${position}`;
     const ya = porClave.get(k);
-    if (!ya || Number(it.quantity ?? 0) > Number(ya.quantity ?? 0)) porClave.set(k, it);
+    if (!ya || Number(it.quantity ?? 0) > Number(ya.quantity ?? 0)) porClave.set(k, { clave: k, ...it });
   }
   const items = [...porClave.values()];
   const c = (cuenta.results[0] ?? {}) as { ok: number | null; pendientes: number | null; reservas: number | null };
   const stage = String(props.hs_pipeline_stage ?? '');
   const clickupEntregado = stage === ENTREGADO || stage === PARCIAL;
   const cerrada = props.entrega_cerrada_el ? { el: String(props.entrega_cerrada_el), por: props.entrega_cerrada_por == null ? null : Number(props.entrega_cerrada_por), motivo: (props.entrega_cerrada_motivo as string) ?? null } : null;
-  const out: Entrega = { estado: null, lineas: [], extras: [], remitos_ok: Number(c.ok ?? 0), pendientes: Number(c.pendientes ?? 0), reservas: Number(c.reservas ?? 0),
+  const out: Entrega = { estado: null, lineas: [], extras: [], asignados: [], remitos_ok: Number(c.ok ?? 0), pendientes: Number(c.pendientes ?? 0), reservas: Number(c.reservas ?? 0),
     sin_productos: !lineas.length, clickup_entregado: clickupEntregado, alerta: null, falta_texto: null, cerrada };
   if (stage === ANULADO) return out;
   const entregado = lineas.map(() => 0);
-  const pares = emparejar(items, lineas);
-  items.forEach((it, k) => { if (pares[k] >= 0) entregado[pares[k]] += Number(it.quantity ?? 0); else out.extras.push(it); });
+  // Primero lo asignado a mano (a qué producto va cada renglón que no se reconoció, y cuánto); lo demás se empareja solo.
+  // Si el producto ya no está en el pedido, la asignación no vale y el renglón vuelve a emparejarse solo.
+  const asignaciones = new Map((asig.results as Array<{ clave: string; lineas: string; user_id: number | null; created_at: string }>).map((a) => [a.clave, a]));
+  const libres: ItemEntrega[] = [];
+  for (const it of items) {
+    const a = asignaciones.get(it.clave);
+    const destinos = a ? destinosDe(a.lineas, lineas) : null;
+    if (!a || !destinos) { libres.push(it); continue; }
+    for (const d of destinos) entregado[d.i] += d.cantidad;
+    out.asignados.push({ ...it, a: destinos.map((d) => ({ ...d, name: lineas[d.i].name })), por: a.user_id, el: a.created_at });
+    const sobra = it.quantity == null ? 0 : Number(it.quantity) - destinos.reduce((n, d) => n + d.cantidad, 0);
+    if (sobra > 1e-9) out.extras.push({ ...it, quantity: sobra, sin_asignar: true });
+  }
+  const pares = emparejar(libres, lineas, entregado);
+  libres.forEach((it, k) => { if (pares[k] >= 0) entregado[pares[k]] += Number(it.quantity ?? 0); else out.extras.push(it); });
   out.lineas = lineas.map((l, i) => {
     const vendido = l.quantity == null ? null : Number(l.quantity);
     return { code: l.code, name: l.name, vendido, entregado: entregado[i], falta: vendido == null ? 0 : Math.max(0, vendido - entregado[i]), excede: vendido == null ? 0 : Math.max(0, entregado[i] - vendido) };
@@ -670,6 +692,54 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
   if (stage === ENTREGADO && faltan.length && out.remitos_ok && !cerrada) out.alerta = `ClickUp dice «Entregado», pero según los remitos falta: ${out.falta_texto}.`;
   else if (out.estado === 'falta_remito') out.alerta = 'ClickUp dice que se entregó, pero el pedido no tiene ningún remito leído.';
   return out;
+}
+
+// Los productos del pedido de una asignación a mano: por su posición si sigue siendo el mismo producto; si no (el pedido se
+// volvió a leer de Finnegans y cambió el orden), por código o por nombre. null si alguno ya no está.
+function destinosDe(json: string, lineas: Renglon[]): Array<{ i: number; cantidad: number }> | null {
+  let ds: Array<{ i?: number; code?: string | null; name?: string | null; cantidad?: number }>;
+  try { ds = JSON.parse(json); } catch { return null; }
+  if (!Array.isArray(ds) || !ds.length) return null;
+  const mismo = (l: Renglon | undefined, d: { code?: string | null; name?: string | null }) =>
+    !!l && (d.code ? normCodigo(l.code) === normCodigo(d.code) : norm(l.name) === norm(d.name));
+  const out = ds.map((d) => ({
+    i: mismo(lineas[Number(d.i)], d) ? Number(d.i) : lineas.findIndex((l) => mismo(l, d)),
+    cantidad: Number(d.cantidad),
+  }));
+  return out.every((d) => d.i >= 0 && Number.isFinite(d.cantidad) && d.cantidad > 0) ? out : null;
+}
+
+// Asignar a mano un renglón de los remitos a uno o más productos del pedido, con la cantidad de cada uno (lo que el
+// remito dice con otro nombre: «70 Jarro Bossa Waterdog» es el «Producción simple drinkware genérico» del pedido). La
+// suma no puede pasar lo que dice el remito; lo que no se asigne sigue como «en los remitos pero no en el pedido».
+// Sin productos, deshace la asignación.
+export async function asignarRenglon(env: Env, ctx: Ctx, orderId: number, clave: string, destinos: Array<{ i: number; cantidad: number }>) {
+  const db = env.DB;
+  const e = await calcularEntrega(db, orderId);
+  const it = e.asignados.find((x) => x.clave === clave) ?? e.extras.find((x) => x.clave === clave);
+  if (!it) throw new HttpError(400, 'Ese renglón ya no está en los remitos del pedido. Recargá la página.');
+  if (!destinos.length) {
+    await db.prepare('DELETE FROM remito_asignaciones WHERE record_id = ? AND clave = ?').bind(orderId, clave).run();
+    return recalcularEntrega(env, orderId, { ctx });
+  }
+  const vistos = new Set<number>();
+  const lineas = destinos.map((d) => {
+    const i = Number(d.i);
+    const l = e.lineas[i];
+    const cantidad = Number(d.cantidad);
+    if (!l || vistos.has(i)) throw new HttpError(400, 'Elegí productos del pedido (cada uno una vez).');
+    if (!Number.isFinite(cantidad) || cantidad <= 0) throw new HttpError(400, `Poné cuántos van a «${l.name}».`);
+    vistos.add(i);
+    return { i, code: l.code, name: l.name, cantidad };
+  });
+  const total = lineas.reduce((n, l) => n + l.cantidad, 0);
+  if (it.quantity != null && total > Number(it.quantity) + 1e-9) {
+    throw new HttpError(400, `Asignaste ${qty(total)} y el remito dice ${qty(Number(it.quantity))} de «${it.description ?? it.code ?? 'ese renglón'}».`);
+  }
+  await db.prepare(`INSERT INTO remito_asignaciones (record_id, clave, descripcion, lineas, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT (record_id, clave) DO UPDATE SET descripcion = excluded.descripcion, lineas = excluded.lineas, user_id = excluded.user_id, created_at = excluded.created_at`)
+    .bind(orderId, clave, it.description ?? it.code ?? null, JSON.stringify(lineas), ctx.user.id, now()).run();
+  return recalcularEntrega(env, orderId, { ctx });
 }
 
 // Guarda el estado de entrega en el pedido (para filtros, tablas y tarjetas), con su historial y sin tocar la fecha de

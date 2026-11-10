@@ -12,6 +12,7 @@ const PDV_B = String(Number(PDV) + 1);
 const PDV_C = String(Number(PDV) + 2);   // un remito de dos hojas
 const PDV_D = String(Number(PDV) + 3);   // dos materas de colores y un remito sin códigos
 const PDV_E = String(Number(PDV) + 4);   // sin propietario en ClickUp: lo toma de Finnegans
+const PDV_F = String(Number(PDV) + 5);   // el remito dice el producto con otro nombre: se asigna a mano
 const NRO = (n) => `R-0001-${String(n).padStart(8, '0')}`;
 const BASE_NRO = 20000 + Math.floor(Math.random() * 70000);
 
@@ -82,6 +83,9 @@ const LECTURAS = {
   MATERAS: { ...base, numero_remito: NRO(BASE_NRO + 50), pdv_pedido_web: '', pdv_observaciones: PDV_D, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
     items: [{ codigo: '', descripcion: 'Matera Engomada (equivale a 90 unidades)', cantidad: 1, cantidad_texto: '1' },
       { codigo: '', descripcion: 'Matera Engomada (equivale a 90 unidades)', cantidad: 1, cantidad_texto: '1' }] },
+  // Como el PDV 30971: el remito dice «70 Jarro Bossa Waterdog» y el pedido, «Producción simple drinkware genérico» (100).
+  JARROS: { ...base, numero_remito: NRO(BASE_NRO + 60), pdv_pedido_web: PDV_F, pdv_observaciones: PDV_F, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
+    items: [item('GOR-1', 'Gorra bordada', 50), { codigo: '', descripcion: 'Jarro Bossa Waterdog', cantidad: 70, cantidad_texto: '70' }] },
   SINPDV: { ...base, numero_remito: NRO(BASE_NRO + 12), pdv_pedido_web: null, pdv_observaciones: null, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra', 5)] },
 };
 let lecturas = 0;
@@ -98,7 +102,7 @@ const pdvTask = (id, npdv, cliente, status, vendedor = 'Rodrigo Mateus') => ({
 });
 const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor'),
   pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor'), pdvTask(`remD${RUN}`, PDV_D, `Cliente A ${RUN} S.A.`, 'en el impresor'),
-  pdvTask(`remE${RUN}`, PDV_E, `Cliente A ${RUN} S.A.`, 'en el impresor', `Nadie ${RUN}`)];
+  pdvTask(`remE${RUN}`, PDV_E, `Cliente A ${RUN} S.A.`, 'en el impresor', `Nadie ${RUN}`), pdvTask(`remF${RUN}`, PDV_F, `Cliente A ${RUN} S.A.`, 'en el impresor')];
 // Gmail simulado (puerto 8799, el de GOOGLE_TOKEN_URL y GMAIL_API_URL de .dev.vars): los mails de faltantes.
 const mails = [];
 let gmail;
@@ -159,6 +163,11 @@ before(async () => {
       return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
         { ProductoCodigo: 'MAT-N', Cantidad: 1, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '', IncluyeImpuesto: false },
         { ProductoCodigo: 'MAT-R', Cantidad: 1, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '', IncluyeImpuesto: false }] });
+    }
+    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_F.padStart(8, '0')}`) {
+      return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: 'DRK-1', Cantidad: 100, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Producción simple drinkware genérico', IncluyeImpuesto: false },
+        { ProductoCodigo: 'GOR-1', Cantidad: 50, Precio: 900, Descuento1: 0, Descuento2: 0, Descripcion: 'Gorra bordada', IncluyeImpuesto: false }] });
     }
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_C.padStart(8, '0')}`) {
       return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
@@ -370,6 +379,47 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const rD = await remitosDe(D.id);
   assert.equal(rD.entrega.estado, 'completa');
   assert.deepEqual(rD.entrega.lineas.map((l) => [l.entregado, l.falta, l.excede]), [[1, 0, 0], [1, 0, 0]]);
+
+  // 6d. Un renglón que el remito dice con otro nombre («Jarro Bossa Waterdog» es el «Producción simple drinkware
+  // genérico» del pedido) queda «en los remitos pero no en el pedido» hasta que una persona dice a qué producto va y
+  // cuánto: 70 de 100, quedan 30. Se puede repartir entre varios productos, no pasar lo que dice el remito, deshacer, y
+  // sigue asignado si el remito se vuelve a leer.
+  const F = await pedidoDe(PDV_F);
+  assert.equal((await api('GET', `/records/order/${F.id}/products`)).data.items.length, 2);
+  const jar = await api('POST', '/hooks/chofer/api/remitos', form('JARROS'), H);
+  assert.equal(jar.data.estado, 'ok', jar.data.mensaje);
+  let rF = (await remitosDe(F.id)).entrega;
+  assert.equal(rF.estado, 'diferencias');
+  assert.deepEqual(rF.extras.map((x) => [x.description, x.quantity]), [['Jarro Bossa Waterdog', 70]]);
+  const iDrk = rF.lineas.findIndex((l) => l.code === 'DRK-1');
+  const iGor = rF.lineas.findIndex((l) => l.code === 'GOR-1');
+  const porCodigo = (e) => [e.lineas[iDrk], e.lineas[iGor]].map((l) => [l.entregado, l.falta, l.excede]);
+  const claveJarro = rF.extras[0].clave;
+  const asignar = (lineas, k = claveJarro) => api('POST', `/records/order/${F.id}/entrega/asignar`, { clave: k, lineas });
+  const mas = await asignar([{ i: iDrk, cantidad: 80 }]);
+  assert.equal(mas.status, 400, 'no más de lo que dice el remito');
+  assert.match(mas.data.error, /Asignaste 80 y el remito dice 70/);
+  assert.equal((await asignar([{ i: iDrk, cantidad: 1 }], 'no-existe')).status, 400);
+  assert.equal((await asignar([{ i: 99, cantidad: 1 }])).status, 400, 'un producto del pedido');
+  let as = await asignar([{ i: iDrk, cantidad: 70 }]);
+  assert.equal(as.status, 200, JSON.stringify(as.data));
+  assert.equal(as.data.estado, 'parcial');
+  assert.deepEqual(porCodigo(as.data), [[70, 30, 0], [50, 0, 0]]);
+  assert.deepEqual([as.data.extras.length, as.data.asignados.length, as.data.asignados[0].a[0].cantidad], [0, 1, 70]);
+  assert.match((await props(F.id)).falta_entregar, /^30 /);
+  // Repartido entre dos productos, sin llegar a 70: lo que sobra sigue «en los remitos pero no en el pedido».
+  as = await asignar([{ i: iDrk, cantidad: 40 }, { i: iGor, cantidad: 20 }]);
+  assert.deepEqual(porCodigo(as.data), [[40, 60, 0], [70, 0, 20]]);
+  as = await asignar([{ i: iDrk, cantidad: 60 }]);
+  assert.deepEqual(as.data.extras.map((x) => [x.quantity, x.sin_asignar]), [[10, true]]);
+  // Deshacer.
+  as = await asignar([]);
+  assert.deepEqual([as.data.estado, as.data.asignados.length, as.data.extras[0].quantity], ['diferencias', 0, 70]);
+  // Asignado y el remito se vuelve a leer: sigue asignado.
+  await asignar([{ i: iDrk, cantidad: 70 }]);
+  assert.equal((await api('POST', `/remitos/${jar.data.id}/revisar`, { accion: 'releer' })).status, 200);
+  rF = (await remitosDe(F.id)).entrega;
+  assert.deepEqual([rF.estado, ...porCodigo(rF)], ['parcial', [70, 30, 0], [50, 0, 0]], 'sigue asignado después de releer');
 
   // 7. Pedido B: una entrega parcial y un remito subido en el CRM (elegido por una persona: alcanza con el PDV).
   assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('B1'), H)).data.estado, 'ok');

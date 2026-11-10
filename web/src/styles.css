@@ -368,8 +368,9 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .card-actions svg { vertical-align: -2px; }
 .card .card-check { position: absolute; top: 10px; right: 10px; display: none; margin: 0; }
 .card:hover .card-check, .card.sel .card-check, .board.selecting .card-check { display: block; }
-/* Pedido: «Evento» y la entrega en una línea que no se parte. */
-.card .order-line { gap: 6px; min-width: 0; }
+/* Pedido: la unidad, «Evento» y la entrega (fecha y cuánto falta). Si la entrega no entra al lado, baja entera a la línea
+   de abajo en vez de cortarse. */
+.card .order-line { gap: 4px 6px; min-width: 0; flex-wrap: wrap; }
 .chip-evento { flex: none; font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .card .when { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
 .card .when svg { flex: none; }

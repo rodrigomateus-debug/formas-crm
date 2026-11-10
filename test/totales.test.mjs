@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from '../scripts/pedidos-totales.mjs';
-const { totalesPorPedido, clavePedido, filasDeSaldo } = T;
+const { totalesPorPedido, clavePedido, filasDeSaldo, vendedoresPorPedido } = T;
 
 const CRM = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
@@ -21,6 +21,15 @@ test('total sin IVA por pedido a partir de los renglones del informe', () => {
   assert.deepEqual(t, { 'PEDVTASTP - 31277': 1250.26, 'PEDVTAFP - 12': 10, 'PEDVTANE - 84': 300 }, 'Formas primero, sin anulados ni objetivos');
   assert.equal(clavePedido('pedvtastp-00031277'), 'PEDVTASTP - 31277');
   assert.equal(clavePedido('29-10-2026'), null);
+});
+
+test('el vendedor de cada pedido: el que más se repite en sus renglones, sin STP ni objetivos', () => {
+  const fila = (doc, v) => ({ DOCNROINT: doc, VENDEDOR: v, ESTADO: 'Activa' });
+  const v = vendedoresPorPedido([
+    [fila('PEDVTAFP - 2402', 'SENINI, LUCIA'), fila('PEDVTAFP - 2402', 'SENINI, LUCIA'), fila('PEDVTAFP - 2402', 'Otro'), fila('PEDVTASTP - 9', 'STP'), fila('PDVOBJETIVOS - 1', 'X')],
+    [fila('PEDVTAFP - 00002402', 'Otra empresa'), fila('PEDVTANE - 5', ' Elizabeth Reynoso ')],
+  ]);
+  assert.deepEqual(v, { 'PEDVTAFP - 2402': 'SENINI, LUCIA', 'PEDVTANE - 5': 'Elizabeth Reynoso' }, 'Formas primero, sin STP ni objetivos');
 });
 
 test('el hook de totales pide token de administrador y valida el cuerpo', async () => {

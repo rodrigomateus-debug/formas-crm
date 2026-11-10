@@ -38,6 +38,24 @@ export function totalesPorPedido(filasPorEmpresa) {
   return out;
 }
 
+// El vendedor de cada pedido según los mismos renglones (el que más se repite; sin «STP», que es la tienda). El CRM se
+// lo pone de propietario a los pedidos que no tienen (ClickUp no trae el VENDEDOR o trae uno que no es usuario).
+export function vendedoresPorPedido(filasPorEmpresa) {
+  const out = {};
+  for (const filas of filasPorEmpresa) {
+    const cuenta = new Map();
+    for (const r of filas) {
+      const k = clavePedido(r.DOCNROINT);
+      const v = String(r.VENDEDOR ?? '').trim();
+      if (!k || !v || /^stp$/i.test(v) || /^PDVOBJETIVOS/.test(k)) continue;
+      const m = cuenta.get(k) ?? new Map();
+      m.set(v, (m.get(v) ?? 0) + 1);
+      cuenta.set(k, m);
+    }
+    for (const [k, m] of cuenta) if (!(k in out)) out[k] = [...m].sort((a, b) => b[1] - a[1])[0][0];
+  }
+  return out;
+}
 async function getJson(url, init, intentos = 4) {
   let ultimo;
   for (let i = 0; i < intentos; i++) {
@@ -329,10 +347,10 @@ async function main() {
   const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');
   if (!base || !process.env.CRM_TOKEN) throw new Error('Faltan CRM_URL y CRM_TOKEN.');
   const res = await fetch(`${base}/hooks/pedidos/totales`, { method: 'POST', redirect: 'manual',
-    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales }) });
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas) }) });
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
-  console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados.`);
+  console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans).`);
   // Si un informe falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
   const filasSaldo = await saldos(tok, hoy);
   const resumen = resumenPedidos(filas);

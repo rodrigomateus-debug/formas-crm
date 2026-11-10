@@ -1,6 +1,7 @@
 import type { Env } from './env';
 import { HttpError } from './env';
 import { montosDesdePedidos, type MontosEstado } from './montos';
+import { usuarioPorNombre } from './clickup';
 
 // Total sin IVA de cada pedido, desde Finnegans (scripts/pedidos-totales.mjs, solo lectura): el neto del pedido de venta,
 // en pesos, sumado renglón por renglón. Con eso el tablero de pedidos suma cada columna, como el de negocios.
@@ -13,9 +14,11 @@ export const clavePedido = (p: unknown) => {
   return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null;
 };
 
-export interface TotalesEstado { recibidos: number; pedidos: number; cruzados: number; actualizados: number; at: string; negocios?: MontosEstado }
+export interface TotalesEstado { recibidos: number; pedidos: number; cruzados: number; actualizados: number; propietarios?: number; at: string; negocios?: MontosEstado }
 
-export async function aplicarTotales(env: Env, body: { totales?: Record<string, number> }): Promise<TotalesEstado> {
+// Además del total, el vendedor de cada pedido según Finnegans (`vendedores`): a los pedidos sin propietario (ClickUp no
+// trae el VENDEDOR o trae uno que no es usuario del CRM) se les pone ese, si es usuario del CRM. Nunca pisa uno que ya está.
+export async function aplicarTotales(env: Env, body: { totales?: Record<string, number>; vendedores?: Record<string, string> }): Promise<TotalesEstado> {
   const tot = body?.totales;
   if (!tot || typeof tot !== 'object' || Array.isArray(tot)) throw new HttpError(400, 'Falta totales: {"PEDVTASTP - 31277": 123456.78, …}.');
   const db = env.DB;
@@ -26,15 +29,30 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
     if (c && Number.isFinite(n)) porPedido.set(c, Math.round(n * 100) / 100);
   }
   const sys = await db.prepare("SELECT id FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<{ id: number }>();
-  const { results } = await db.prepare(`SELECT id, json_extract(props, '$.pedido_finnegans') AS pedido, json_extract(props, '$.hs_total_price') AS total
+  const porVendedor = new Map<string, string>();
+  if (body.vendedores && typeof body.vendedores === 'object' && !Array.isArray(body.vendedores)) {
+    for (const [k, v] of Object.entries(body.vendedores)) { const c = clavePedido(k); if (c && typeof v === 'string' && v.trim()) porVendedor.set(c, v.trim()); }
+  }
+  const users = porVendedor.size ? (await db.prepare('SELECT id, name, email FROM users WHERE active = 1').all<{ id: number; name: string; email: string }>()).results : [];
+  const { results } = await db.prepare(`SELECT id, owner_id, json_extract(props, '$.pedido_finnegans') AS pedido, json_extract(props, '$.hs_total_price') AS total
     FROM records WHERE object_type = 'order' AND archived = 0 AND json_extract(props, '$.pedido_finnegans') IS NOT NULL`)
-    .all<{ id: number; pedido: string; total: number | string | null }>();
+    .all<{ id: number; owner_id: number | null; pedido: string; total: number | string | null }>();
   const ts = new Date().toISOString();
   const stmts: D1PreparedStatement[] = [];
-  let cruzados = 0, actualizados = 0;
+  let cruzados = 0, actualizados = 0, propietarios = 0;
   const cambiados: number[] = [];
   for (const r of results) {
     const k = clavePedido(r.pedido);
+    // El propietario, si no tiene: el vendedor de Finnegans, si es usuario del CRM.
+    const uid = k && !r.owner_id && porVendedor.has(k) ? usuarioPorNombre(users, porVendedor.get(k)!) : null;
+    if (uid) {
+      propietarios++;
+      stmts.push(
+        db.prepare("UPDATE records SET owner_id = ?, props = json_set(props, '$.owner_id', ?) WHERE id = ? AND owner_id IS NULL").bind(uid, uid, r.id),
+        db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, NULL, ?, ?, ?, ?)')
+          .bind(r.id, 'owner_id', String(uid), ts, sys?.id ?? null, 'finnegans'),
+      );
+    }
     if (!k || !porPedido.has(k)) continue;
     cruzados++;
     const v = porPedido.get(k)!;
@@ -51,7 +69,7 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
   for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
   // Los negocios de los pedidos cuyo total cambió pasan a tener la suma de sus pedidos (montos.ts).
   const negocios = await montosDesdePedidos(db, cambiados);
-  const out = { recibidos: porPedido.size, pedidos: results.length, cruzados, actualizados, at: ts, negocios };
+  const out = { recibidos: porPedido.size, pedidos: results.length, cruzados, actualizados, propietarios, at: ts, negocios };
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('totales_pedidos', ?)").bind(JSON.stringify(out)).run();
   return out;
 }

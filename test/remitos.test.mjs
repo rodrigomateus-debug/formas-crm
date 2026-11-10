@@ -11,6 +11,7 @@ const PDV = String(50000 + Math.floor(Math.random() * 9000));
 const PDV_B = String(Number(PDV) + 1);
 const PDV_C = String(Number(PDV) + 2);   // un remito de dos hojas
 const PDV_D = String(Number(PDV) + 3);   // dos materas de colores y un remito sin códigos
+const PDV_E = String(Number(PDV) + 4);   // sin propietario en ClickUp: lo toma de Finnegans
 const NRO = (n) => `R-0001-${String(n).padStart(8, '0')}`;
 const BASE_NRO = 20000 + Math.floor(Math.random() * 70000);
 
@@ -87,16 +88,17 @@ let lecturas = 0;
 
 // ---------- ClickUp y Finnegans simulados: dos PDV, A (entregado en ClickUp) y B (en producción) ----------
 const field = (name, value, type = 'short_text') => ({ name, type, value });
-const pdvTask = (id, npdv, cliente, status) => ({
+const pdvTask = (id, npdv, cliente, status, vendedor = 'Rodrigo Mateus') => ({
   id, name: `PDV - ${npdv}`, parent: null, url: `https://app.clickup.com/t/${id}`, date_updated: String(Date.now()), status: { status: 'pdv' },
-  text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: ${cliente}\nVendedor: Rodrigo Mateus\nEs evento: No\nFecha entrega: 30-11-2026`,
-  custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', cliente), field('🧑‍💻 VENDEDOR', 'Rodrigo Mateus'),
+  text_content: `Pedido: PEDVTASTP - ${npdv}\nCliente: ${cliente}\nVendedor: ${vendedor}\nEs evento: No\nFecha entrega: 30-11-2026`,
+  custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', cliente), field('🧑‍💻 VENDEDOR', vendedor),
     { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: 'CORPORATE' } }, field('ENTREGAS (FECHA REAL)', String(Date.now() - 86_400_000), 'date')],
   subtasks: [{ id: `${id}-0`, name: 'Artículo - Proveedor', parent: id, date_updated: String(Date.now()), status: { status }, text_content: `PDV - ${npdv}\nProducto: Artículo`, custom_fields: [] }],
   attachments: [],
 });
 const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor'),
-  pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor'), pdvTask(`remD${RUN}`, PDV_D, `Cliente A ${RUN} S.A.`, 'en el impresor')];
+  pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor'), pdvTask(`remD${RUN}`, PDV_D, `Cliente A ${RUN} S.A.`, 'en el impresor'),
+  pdvTask(`remE${RUN}`, PDV_E, `Cliente A ${RUN} S.A.`, 'en el impresor', `Nadie ${RUN}`)];
 // Gmail simulado (puerto 8799, el de GOOGLE_TOKEN_URL y GMAIL_API_URL de .dev.vars): los mails de faltantes.
 const mails = [];
 let gmail;
@@ -211,6 +213,18 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const B = await pedidoDe(PDV_B);
   assert.ok(A && B, 'los dos pedidos vinieron de ClickUp');
   assert.equal((await api('GET', `/records/order/${A.id}`)).data.associations.company[0].id, compA.id);
+  // El propietario desde Finnegans: el VENDEDOR de ClickUp no es usuario, así que el pedido E entra sin propietario; con
+  // el vendedor del informe de Finnegans («APELLIDO, NOMBRE») lo toma. Al que ya tiene, no se lo cambia.
+  const E = await pedidoDe(PDV_E);
+  assert.ok(!E.props.owner_id, 'sin propietario');
+  const admin = (await api('GET', '/meta')).data.me;
+  const [nom, ...ape] = admin.name.split(' ');
+  const tokT = (await api('POST', '/tokens', { name: `Totales ${RUN}`, source: 'api' })).data.token;
+  const tot = await api('POST', '/hooks/pedidos/totales', { totales: {}, vendedores: { [E.props.pedido_finnegans]: `${ape.join(' ').toUpperCase()}, ${nom.toUpperCase()}`, [A.props.pedido_finnegans]: 'Otra Persona' } },
+    { authorization: `Bearer ${tokT}` });
+  assert.equal(tot.data.propietarios, 1, JSON.stringify(tot.data));
+  assert.equal((await props(E.id)).owner_id, admin.id, 'propietario: el vendedor de Finnegans');
+  assert.equal((await props(A.id)).owner_id, A.props.owner_id, 'no pisa el que ya tiene');
   // Los productos del pedido (de Finnegans): lo vendido.
   assert.equal((await api('GET', `/records/order/${A.id}/products`)).data.items.length, 2);
   assert.equal((await api('GET', `/records/order/${B.id}/products`)).data.items.length, 1);

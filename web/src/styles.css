@@ -769,6 +769,20 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .remito-fila .small { overflow-wrap: anywhere; }
 .entrega-linea:last-child { border-bottom: 0; }
 .entrega-linea .num { color: var(--ui-ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Renglones del remito que no se reconocieron: cada uno con «Asignar a producto»; y los ya asignados a mano. */
+.extras-remito { display: flex; flex-direction: column; gap: 6px; }
+.extra-remito, .asignado-remito { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.extra-remito .grow, .asignado-remito .grow { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.extra-remito .btn { background: var(--ui-surface); }
+.asignados-remito { display: flex; flex-direction: column; gap: 6px; padding-top: 0; }
+.asignado-remito { padding: 4px 0; border-bottom: 1px dashed var(--ui-line); }
+.asignado-remito:last-child { border-bottom: 0; }
+.asignar-lista { display: flex; flex-direction: column; gap: 6px; }
+.asignar-op { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--ui-line); border-radius: var(--r-control); cursor: pointer; }
+.asignar-op.on { border-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 5%, var(--ui-surface)); }
+.asignar-op .grow { display: flex; flex-direction: column; min-width: 0; }
+.asignar-nombre { font-weight: 500; overflow-wrap: anywhere; }
+.bad-text { color: var(--ui-negative-ink); }
 .entrega-linea .tag { flex: none; }
 .remito-fila { flex-direction: column; align-items: stretch; gap: 6px; }
 .remito-cabeza { display: flex; align-items: center; gap: 8px; min-width: 0; }

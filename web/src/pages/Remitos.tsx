@@ -21,8 +21,11 @@ export interface Remito {
   pedido_nombre?: string | null;   // en la bandeja: el nombre del pedido donde está
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
+// Un renglón de los remitos (clave: cuál es, para asignarlo a mano a productos del pedido).
+interface ItemRemito { clave: string; code: string | null; description: string | null; quantity: number | null; numero: string | null }
+interface Asignado extends ItemRemito { a: Array<{ i: number; name: string; cantidad: number }>; por: number | null; el: string }
 export interface Entrega {
-  estado: string | null; lineas: Linea[]; extras: Array<{ code: string | null; description: string | null; quantity: number | null; numero: string | null }>;
+  estado: string | null; lineas: Linea[]; extras: Array<ItemRemito & { sin_asignar?: boolean }>; asignados: Asignado[];
   remitos_ok: number; pendientes: number; reservas: number; sin_productos: boolean; clickup_entregado: boolean; alerta: string | null;
   falta_texto: string | null; cerrada: { el: string; por: number | null; motivo: string | null } | null;
 }
@@ -52,6 +55,7 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
   const res = useAsync(() => http<{ remitos: Remito[]; entrega: Entrega; puede_finalizar: boolean; lector: boolean }>('GET', `/records/order/${record.id}/remitos`), [record.id]);
   const [subiendo, setSubiendo] = useState(0);
   const [finalizar, setFinalizar] = useState(false);
+  const [asignar, setAsignar] = useState<string | null>(null);   // la clave del renglón que se asigna a productos del pedido
   const d = res.data;
   const e = d?.entrega;
   const remitos = d?.remitos ?? [];
@@ -72,6 +76,10 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
   };
   const reabrir = async () => {
     try { await http('DELETE', `/records/order/${record.id}/entrega/finalizar`); toast('La entrega quedó abierta de nuevo'); recargar(); }
+    catch (err) { toast((err as Error).message, true); }
+  };
+  const deshacer = async (clave: string) => {
+    try { await http('POST', `/records/order/${record.id}/entrega/asignar`, { clave, lineas: [] }); toast('Asignación deshecha'); recargar(); }
     catch (err) { toast((err as Error).message, true); }
   };
   const faltan = e?.lineas.filter((l) => l.falta > 0) ?? [];
@@ -101,8 +109,35 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
           ))}
         </div>
       )}
+      {/* Lo que el remito dice con otro nombre: se puede decir a qué producto (o productos) del pedido corresponde. */}
       {(e?.extras.length ?? 0) > 0 && (
-        <div className="panel-body small"><div className="aviso bad">En los remitos pero no en el pedido: {e!.extras.map((x) => `${cant(x.quantity)} ${x.description ?? x.code ?? ''}`.trim()).join(' · ')}</div></div>
+        <div className="panel-body small">
+          <div className="aviso bad extras-remito">
+            <div>En los remitos pero no en el pedido:</div>
+            {e!.extras.map((x) => (
+              <div key={x.clave + (x.sin_asignar ? '-resto' : '')} className="extra-remito">
+                <span className="grow">{`${cant(x.quantity)} ${x.description ?? x.code ?? ''}`.trim()}{x.sin_asignar ? ' (sin asignar)' : ''}</span>
+                {puedeEditar && e!.lineas.length > 0 && <button className="btn sm" onClick={() => setAsignar(x.clave)}>Asignar a producto</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {(e?.asignados.length ?? 0) > 0 && (
+        <div className="panel-body small asignados-remito">
+          <div className="remitos-sub" style={{ padding: 0 }}>Asignados a mano</div>
+          {e!.asignados.map((x) => (
+            <div key={x.clave} className="asignado-remito">
+              <span className="grow">{`${cant(x.quantity)} ${x.description ?? x.code ?? ''}`.trim()}{x.numero ? <span className="muted"> ({x.numero})</span> : null}
+                {' → '}{x.a.map((d) => `${cant(d.cantidad)} ${d.name}`).join(' · ')}
+                <span className="muted"> · {userName(meta, x.por)}, {fmtDate(x.el)}</span></span>
+              {puedeEditar && <span className="row" style={{ gap: 4 }}>
+                <button className="btn sm ghost" onClick={() => setAsignar(x.clave)}>Cambiar</button>
+                <button className="btn sm ghost" onClick={() => deshacer(x.clave)}>Deshacer</button>
+              </span>}
+            </div>
+          ))}
+        </div>
       )}
       {e && !e.remitos_ok && (sinLeer > 0 || paraRevisar > 0) && (
         <div className="panel-body small muted">{sinLeer > 0
@@ -124,7 +159,78 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       {!remitos.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay remitos. Llegan solos de ClickUp y de la app del chofer, o subí la foto acá.'}</div>}
       {d && !d.lector && remitos.some((r) => r.estado === 'sin_leer') && <div className="panel-body small muted">Los remitos se leen cuando esté conectada la API de Claude (Configuración → Integraciones).</div>}
       {finalizar && e && <FinalizarModal orderId={record.id} faltan={faltan} onClose={() => setFinalizar(false)} onDone={() => { setFinalizar(false); recargar(); }} />}
+      {asignar && e && <AsignarModal orderId={record.id} entrega={e} clave={asignar} onClose={() => setAsignar(null)} onDone={() => { setAsignar(null); recargar(); }} />}
     </div>
+  );
+}
+
+// A qué producto (o productos) del pedido corresponde un renglón del remito que no se reconoció, y cuánto va a cada uno.
+// Se ofrecen los productos a los que todavía les falta (y, si hace falta, los completos). La suma no pasa lo que dice el
+// remito: si el remito dice 70 y el producto 100, quedan 30 por entregar.
+function AsignarModal({ orderId, entrega, clave, onClose, onDone }: { orderId: number; entrega: Entrega; clave: string; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const actual = entrega.asignados.find((x) => x.clave === clave);
+  const it = actual ?? entrega.extras.find((x) => x.clave === clave);
+  const total = it?.quantity ?? null;
+  // Lo que falta de cada producto sin contar esta asignación (si se está cambiando).
+  const antes = new Map((actual?.a ?? []).map((d) => [d.i, d.cantidad]));
+  const disponible = (i: number) => {
+    const l = entrega.lineas[i];
+    return l.vendido == null ? Infinity : Math.max(0, l.vendido - (l.entregado - (antes.get(i) ?? 0)));
+  };
+  const [sel, setSel] = useState<Map<number, string>>(() => new Map((actual?.a ?? []).map((d) => [d.i, String(d.cantidad)])));
+  const [todos, setTodos] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const num = (v: string | undefined) => Number(String(v ?? '').replace(',', '.'));
+  const suma = [...sel.values()].reduce((n, v) => n + (Number.isFinite(num(v)) ? num(v) : 0), 0);
+  const opciones = entrega.lineas.map((l, i) => ({ l, i })).filter(({ i }) => todos || disponible(i) > 0 || sel.has(i));
+  const tocar = (i: number, on: boolean) => setSel((m) => {
+    const n = new Map(m);
+    if (!on) { n.delete(i); return n; }
+    const resto = total == null ? Infinity : Math.max(0, total - [...m.values()].reduce((s, v) => s + (Number.isFinite(num(v)) ? num(v) : 0), 0));
+    const sug = Math.min(disponible(i), resto);
+    n.set(i, Number.isFinite(sug) && sug > 0 ? String(sug) : '');
+    return n;
+  });
+  const pasa = total != null && suma > total + 1e-9;
+  const invalida = !sel.size || [...sel.values()].some((v) => !(num(v) > 0)) || pasa;
+  const guardar = async () => {
+    setEnviando(true);
+    try {
+      await http('POST', `/records/order/${orderId}/entrega/asignar`, { clave, lineas: [...sel.entries()].map(([i, v]) => ({ i, cantidad: num(v) })) });
+      toast('Listo: cuenta como entregado');
+      onDone();
+    } catch (err) { toast((err as Error).message, true); } finally { setEnviando(false); }
+  };
+  if (!it) return null;
+  return (
+    <Modal title="¿A qué producto del pedido corresponde?" onClose={onClose} footer={<>
+      <span className={`small grow${pasa ? ' bad-text' : ' muted'}`}>{total == null ? `Asignás ${cant(suma)}`
+        : pasa ? `Asignás ${cant(suma)} y el remito dice ${cant(total)}` : suma < total ? `Asignás ${cant(suma)} de ${cant(total)}: ${cant(total - suma)} quedan sin asignar` : `Asignás los ${cant(total)}`}</span>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn primary" disabled={enviando || invalida} onClick={guardar}>{enviando ? 'Guardando…' : 'Asignar'}</button>
+    </>}>
+      <p className="small" style={{ marginTop: 0 }}>El remito{it.numero ? ` ${it.numero}` : ''} dice <b>{`${cant(total)} ${it.description ?? it.code ?? ''}`.trim()}</b>. Elegí el producto (o los productos) del pedido y cuánto va a cada uno: se descuenta de lo que falta entregar.</p>
+      <div className="asignar-lista">
+        {opciones.map(({ l, i }) => {
+          const on = sel.has(i);
+          const disp = disponible(i);
+          return (
+            <label key={i} className={`asignar-op${on ? ' on' : ''}`}>
+              <input type="checkbox" checked={on} onChange={(ev) => tocar(i, ev.target.checked)} />
+              <span className="grow"><span className="asignar-nombre">{l.name}</span>
+                <span className="small muted">{l.vendido == null ? 'Sin cantidad vendida' : disp > 0 ? `Faltan ${cant(disp)} de ${cant(l.vendido)}` : `Completo (${cant(l.vendido)})`}</span></span>
+              {on && <input className="input sm num" style={{ width: 90 }} inputMode="decimal" aria-label={`Cantidad para ${l.name}`} value={sel.get(i) ?? ''}
+                onChange={(ev) => { const v = ev.target.value; setSel((m) => new Map(m).set(i, v)); }} />}
+            </label>
+          );
+        })}
+        {!opciones.length && <div className="small muted">A ningún producto del pedido le falta entregar.</div>}
+      </div>
+      {entrega.lineas.some((_, i) => !(disponible(i) > 0) && !sel.has(i)) && (
+        <label className="row small muted" style={{ marginTop: 8 }}><input type="checkbox" checked={todos} onChange={(ev) => setTodos(ev.target.checked)} />Mostrar también los productos completos</label>
+      )}
+    </Modal>
   );
 }
 

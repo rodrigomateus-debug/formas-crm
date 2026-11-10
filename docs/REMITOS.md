@@ -66,6 +66,20 @@ remito. Cuando un remito nuevo deja un pedido con faltantes o diferencias, les l
 **Logística** y a los **administradores** (siempre: no hace falta sumarlos a la lista de avisos por mail). Si el pedido
 se completa o se finaliza antes de que salga el mail, no se manda.
 
+### Un renglón del remito con otro nombre: asignarlo a mano
+
+Pedido de Rodrigo del 10/11/2026 (PDV 30971: el remito decía «70 Jarro Bossa Waterdog» y el pedido, otro nombre). Si un
+renglón del remito no se parece a ningún producto del pedido, queda en «En los remitos pero no en el pedido» con el botón
+**«Asignar a producto»**: se elige el producto (o los productos) del pedido, entre los que todavía les falta, y cuánto va a
+cada uno. Cuenta como entregado: si el remito dice 70 y el producto 100, quedan 30. La suma no puede pasar lo que dice el
+remito; lo que no se asigna sigue como diferencia («sin asignar»). Lo asignado se ve en «Asignados a mano», con quién y
+cuándo, y se puede cambiar o deshacer. Cualquier usuario que puede editar lo puede hacer.
+
+Se guarda en `remito_asignaciones` (migración 0034) con la misma clave con que se cuenta el renglón (número de remito,
+producto y cuál de los iguales): sigue valiendo si el remito se vuelve a leer o llega otra foto del mismo número. Si el
+producto ya no está en el pedido, la asignación no vale y el renglón se vuelve a emparejar solo.
+`POST /api/records/order/:id/entrega/asignar` con `{ clave, lineas: [{ i, cantidad }] }` (sin líneas, la deshace).
+
 ## La pestaña «Entregas» de Logística (`/entregas`)
 
 - **Remitos para revisar:** lo que no se pudo adjuntar solo o no se pudo leer, con la foto, lo leído y cómo se controló. Se

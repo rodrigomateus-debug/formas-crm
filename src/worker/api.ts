@@ -21,7 +21,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
-import { archivoDeRemito, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, revisarRemito } from './remitos';
+import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -855,6 +855,15 @@ api.get('/remitos/revisar', async (c) => c.json({ remitos: await remitosParaRevi
 api.get('/remitos/revisar/cuantos', async (c) => {
   const r = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM remitos WHERE estado = 'revisar' OR (estado = 'sin_leer' AND intentos >= 1)").first<{ n: number }>();
   return c.json({ total: r?.n ?? 0 });
+});
+// Asignar a mano un renglón de los remitos (que no se reconoció como producto del pedido) a uno o más productos, con la
+// cantidad de cada uno: { clave, lineas: [{ i, cantidad }] }. Con lineas vacío, deshace la asignación.
+api.post('/records/order/:id/entrega/asignar', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const b = await c.req.json<{ clave?: string; lineas?: Array<{ i: number; cantidad: number }> }>();
+  if (!b.clave) throw new HttpError(400, 'Falta qué renglón del remito.');
+  return c.json(await asignarRenglon(c.env, ctx, Number(c.req.param('id')), b.clave, Array.isArray(b.lineas) ? b.lineas : []));
 });
 // Finalizar la entrega con faltante (Logística o un administrador), con el motivo; DELETE la vuelve a abrir.
 api.post('/records/order/:id/entrega/finalizar', async (c) => {

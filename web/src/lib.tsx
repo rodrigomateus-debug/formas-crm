@@ -24,7 +24,8 @@ export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
-export interface Meta { me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }>; tags: Tag[]; key_props?: Partial<Record<ObjectType, string[]>> }
+export interface Meta { me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }>; tags: Tag[]; key_props?: Partial<Record<ObjectType, string[]>>;
+  orden_vistas?: Partial<Record<ObjectType, Array<number | string>>> }
 export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean; tags?: number[] }
 export interface Activity {
   id: number; type: 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp'; occurred_at: string; owner_id: number | null; subject: string; body: string;
@@ -41,6 +42,27 @@ export const OBJECTS: Record<ObjectType, { path: string; plural: string; single:
 };
 export const typeFromPath = (p: string) => (Object.entries(OBJECTS).find(([, v]) => v.path === p)?.[0] ?? 'contact') as ObjectType;
 export const recordUrl = (type: ObjectType, id: number) => `/${OBJECTS[type].path}/${id}`;
+
+// ---------- De dónde se viene ----------
+// Las listas se abren limpias, en su primera pestaña, cuando se entra desde el menú u otra pantalla; y como se dejaron
+// cuando se vuelve de una ficha (por la flecha «← Negocios» o el botón de atrás) o se recarga la página. App avisa
+// cada cambio de pantalla, antes de que se dibuje la nueva.
+const esLista = (p: string) => Object.values(OBJECTS).some((o) => p === `/${o.path}`);
+const esFicha = (p: string) => Object.values(OBJECTS).some((o) => new RegExp(`^/${o.path}/[^/]+$`).test(p));
+const rutas = { actual: '', lista: '', soloFichas: false, volver: false };
+try {
+  const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+  if ((nav?.type === 'reload' || nav?.type === 'back_forward') && esLista(location.pathname)) { rutas.lista = location.pathname; rutas.soloFichas = true; }
+} catch { /* navegador sin el dato: se abre limpia */ }
+export function registrarRuta(p: string) {
+  if (p === rutas.actual) return;
+  rutas.actual = p;
+  rutas.volver = esLista(p) && rutas.lista === p && rutas.soloFichas;
+  if (esLista(p)) { rutas.lista = p; rutas.soloFichas = true; }
+  else if (!esFicha(p)) rutas.soloFichas = false;
+}
+// ¿Se está volviendo a la lista que se dejó (pasando solo por fichas)?
+export const vuelveALaLista = () => rutas.volver;
 
 // ---------- HTTP ----------
 

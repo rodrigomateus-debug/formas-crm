@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, OBJECTS, Icon, type CrmRecord, type ObjectType } from './lib';
+import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, type CrmRecord, type ObjectType } from './lib';
 import { Avatar, CreateRecord } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
@@ -13,6 +13,8 @@ export default function App() {
   const { meta } = useMeta();
   const [menu, setMenu] = useState(false);
   const loc = useLocation();
+  // Antes de dibujar la pantalla nueva: así cada lista sabe si se vuelve a ella desde una ficha o se entra de cero.
+  registrarRuta(loc.pathname);
   useEffect(() => setMenu(false), [loc.pathname]);
   const [tasks, setTasks] = useState<number | null>(null);
   useEffect(() => {

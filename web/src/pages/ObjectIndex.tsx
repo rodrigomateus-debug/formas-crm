@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips,
+  http, qs, useMeta, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips, vuelveALaLista,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -32,11 +32,33 @@ interface ViewConfig {
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
 interface SavedView { id: number; name: string; shared: number; team_id: number | null; user_id: number; config: ViewConfig }
-// Vista que se abre al entrar a cada lista (elegida por cada uno, en este navegador).
+// Vista que se abría por defecto antes de que se pudieran mover Todos y Míos (en este navegador). Ahora se abre la
+// primera pestaña; esto solo sirve para que quien la tenía elegida la encuentre primera hasta que reordene.
 const defaultViewKey = (t: ObjectType) => `crm.view.default.${t}`;
 const readDefault = (t: ObjectType) => { try { return localStorage.getItem(defaultViewKey(t)); } catch { return null; } };
 
+// Pestañas: «all» (Todos), «mine» (Míos) y el id de cada vista guardada, en el orden de cada uno (se arrastran).
+const FIJAS = ['all', 'mine'];
+const esFija = (k: string) => FIJAS.includes(k);
+// El orden recién cambiado, hasta que se recargue la página (que lo vuelve a traer en /meta).
+const ordenNuevo = new Map<ObjectType, string[]>();
+function ordenPestanas(guardado: string[] | null, vistas: SavedView[] | undefined, t: ObjectType): string[] {
+  const existe = (k: string) => esFija(k) || !vistas || vistas.some((v) => String(v.id) === k);
+  let o = (guardado ?? []).filter((k, i, a) => existe(k) && a.indexOf(k) === i);
+  if (!o.some(esFija)) {
+    // Sin orden propio (o de antes de poder moverlas): Todos y Míos primero, salvo la vista que se abría por defecto.
+    const d = readDefault(t);
+    o = ['all', 'mine', ...o];
+    if (d && existe(d)) o = [d, ...o.filter((k) => k !== d)];
+  }
+  for (const k of FIJAS) if (!o.includes(k)) o.push(k);
+  for (const v of vistas ?? []) if (!o.includes(String(v.id))) o.push(String(v.id)); // las nuevas, al final
+  return o;
+}
+
+// Columnas, orden y anchos de «Todos» y «Míos» (en este navegador). Los filtros no: cada vez que se entra, arrancan limpias.
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
+const SIN_FILTROS = { groups: [] as Filter[][], owner: undefined, owners: [] as string[], dates: {}, tags: [] as string[], unidades: [] as string[] };
 // Filtros de una vista: los avanzados (grupos O) más los rápidos (propietarios, fechas, etiquetas, unidades) en cada grupo.
 function gruposDeVista(c: ViewConfig) {
   const quick = quickFilters(c.owners, c.dates, c.tags, c.unidades);
@@ -52,6 +74,21 @@ function loadLocal(t: ObjectType): ViewConfig {
   } catch { /* sin vista guardada */ }
   return { groups: [], columns: DEFAULT_COLUMNS[t], sort: 'hs_lastmodifieddate', dir: 'desc' };
 }
+// «Todos» o «Míos» recién abiertas: sus columnas y orden, sin filtros (Míos, con el propietario «yo»).
+const limpia = (t: ObjectType, k: string): ViewConfig => ({ ...loadLocal(t), q: undefined, ...SIN_FILTROS, owners: k === 'mine' ? ['me'] : [] });
+// Una vista guardada; lo que no tenga guardado (anchos, por ejemplo) sale de «Todos».
+const deVista = (t: ObjectType, v: SavedView): ViewConfig => withOwners({ ...loadLocal(t), q: undefined, ...SIN_FILTROS, ...v.config });
+
+// Cómo quedó cada lista (pestaña, filtros, búsqueda, tabla o tablero) en esta pestaña del navegador: se recupera al
+// volver de una ficha o recargar; al entrar desde el menú u otra pantalla, no (se abre limpia en la primera pestaña).
+interface ListaComoQuedo { v: string; cfg: ViewConfig; q: string; mode: 'table' | 'board' }
+const sesionKey = (t: ObjectType) => `crm.lista.${t}`;
+function leerSesion(t: ObjectType): ListaComoQuedo | null {
+  try {
+    const s = JSON.parse(sessionStorage.getItem(sesionKey(t)) ?? '');
+    return s && typeof s.v === 'string' && Array.isArray(s.cfg?.columns) ? s : null;
+  } catch { return null; }
+}
 
 export default function ObjectIndex() {
   const { objectPath = 'contacts' } = useParams();
@@ -63,25 +100,41 @@ function IndexFor({ type }: { type: ObjectType }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type], `/views/${type}`);
+  // Orden de las pestañas: el de cada usuario (viene en /meta) o, recién arrastradas, el nuevo.
+  const [ordenGuardado, setOrdenGuardado] = useState<string[] | null>(() => ordenNuevo.get(type) ?? meta.orden_vistas?.[type]?.map(String) ?? null);
+  const pestanas = useMemo(() => ordenPestanas(ordenGuardado, views.data, type), [ordenGuardado, views.data, type]);
+  // Con qué se abre: la pestaña del link; si se vuelve de una ficha (o se recarga), como quedó; si no, la primera, limpia.
+  const [inicio] = useState(() => {
+    const ses = vuelveALaLista() ? leerSesion(type) : null;
+    const v = params.get('v') ?? ses?.v ?? pestanas[0];
+    if (ses && ses.v === v) return { v, de: v, cfg: withOwners(ses.cfg), q: ses.q ?? '', mode: ses.mode as 'table' | 'board' | undefined, restaurada: true };
+    if (esFija(v)) return { v, de: v, cfg: limpia(type, v), q: '', mode: undefined, restaurada: false };
+    const sv = views.data?.find((x) => String(x.id) === v); // si ya se vieron las vistas en esta página
+    return sv ? { v, de: v, cfg: deVista(type, sv), q: sv.config.q ?? '', mode: sv.config.mode, pipeline: sv.config.pipeline, restaurada: false }
+      : { v, de: '', cfg: limpia(type, 'all'), q: '', mode: undefined, restaurada: false }; // la vista llega con las vistas
+  });
   // Tablero: negocios por etapa del pipeline; empresas y contactos por etapa del ciclo de vida (u otra propiedad).
   // Tabla o tablero: lo que diga el link (o la vista guardada); si no dice nada, lo último que eligió cada uno.
   const [modePref, setModePref] = useState<'table' | 'board'>(() => {
     try { return localStorage.getItem(`crm.mode.${type}`) === 'board' ? 'board' : 'table'; } catch { return 'table'; }
   });
   const viewParam = params.get('view');
-  const mode = viewParam === 'board' || viewParam === 'table' ? viewParam : modePref;
+  const mode = viewParam === 'board' || viewParam === 'table' ? viewParam : inicio.mode ?? modePref;
   const setMode = (m: 'table' | 'board') => {
     setModePref(m);
     try { localStorage.setItem(`crm.mode.${type}`, m); } catch { /* ignorar */ }
     setParams((p) => { p.set('view', m); return p; });
   };
-  // Negocios: en qué pipeline estás. Sale del link (?pipeline=), si no de la última elección, si no del equipo.
+  // Negocios: en qué pipeline estás. Sale del link (?pipeline=), si no de la vista que se abre, si no de la última
+  // elección, si no del equipo.
   const [pipelineSel, setPipelineSelRaw] = useState<string>(() => {
-    const valid = (v: string | null) => !!v && (v === 'all' || meta.pipelines.some((p) => p.id === v));
+    const valid = (v: string | null | undefined) => !!v && (v === 'all' || meta.pipelines.some((p) => p.id === v));
     let saved: string | null = null;
     try { saved = localStorage.getItem(PIPE_KEY); } catch { /* sin preferencia guardada */ }
     const fromUrl = params.get('pipeline');
-    return valid(fromUrl) ? fromUrl! : valid(saved) ? saved! : defaultPipeline(meta).id;
+    const deLaVista = 'pipeline' in inicio ? inicio.pipeline : undefined;
+    return valid(fromUrl) ? fromUrl! : valid(deLaVista) ? deLaVista! : valid(saved) ? saved! : defaultPipeline(meta).id;
   });
   const boardPipeline = pipelineSel === 'all' ? defaultPipeline(meta).id : pipelineSel;
   const setPipelineSel = (v: string) => {
@@ -89,13 +142,24 @@ function IndexFor({ type }: { type: ObjectType }) {
     try { localStorage.setItem(PIPE_KEY, v); } catch { /* ignorar */ }
     setParams((p) => { p.set('pipeline', v); return p; }, { replace: true });
   };
+  // El link dice lo que se ve (pestaña, tabla o tablero, pipeline), para copiarlo o recargar.
   useEffect(() => {
-    if (type === 'deal' && params.get('pipeline') !== pipelineSel) setParams((p) => { p.set('pipeline', pipelineSel); return p; }, { replace: true });
+    const falta = (type === 'deal' && params.get('pipeline') !== pipelineSel) || (inicio.v !== 'all' && params.get('v') !== inicio.v) || (!!inicio.mode && !viewParam);
+    if (falta) setParams((p) => {
+      if (type === 'deal') p.set('pipeline', pipelineSel);
+      if (inicio.v !== 'all') p.set('v', inicio.v);
+      if (inicio.mode && !p.get('view')) p.set('view', inicio.mode);
+      return p;
+    }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [cfg, setCfg] = useState<ViewConfig>(() => loadLocal(type));
-  const [activeView, setActiveView] = useState<string>(params.get('v') ?? readDefault(type) ?? 'all');
-  const [q, setQ] = useState(cfg.q ?? '');
+  const [cfg, setCfg] = useState<ViewConfig>(inicio.cfg);
+  const [activeView, setActiveView] = useState<string>(inicio.v);
+  // De qué pestaña es lo que se ve: al tocar otra, la pestaña se marca enseguida y sus filtros llegan un instante
+  // después; mientras tanto no se compara (si no, aparecería un momento la barra de «Cambiaste…»). Vacío: todavía no llegó.
+  const [cfgDe, setCfgDe] = useState(inicio.de);
+  const restaurada = useRef(inicio.restaurada);
+  const [q, setQ] = useState(inicio.q);
   const dq = useDebounced(q, 300);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
@@ -113,37 +177,64 @@ function IndexFor({ type }: { type: ObjectType }) {
   const setPreview = (id: number | null, compose?: Activity['type']) => setPreviewState(id ? { id, compose } : null);
   const [boardKey, setBoardKey] = useState(0);
   const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'save' | 'import'>('');
-  const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type]);
-  // Orden de las pestañas: el del servidor (el de cada usuario) o, recién arrastradas, el nuevo mientras se guarda.
-  const [orden, setOrden] = useState<number[] | null>(null);
-  useEffect(() => setOrden(null), [views.data]);
-  const vistas = useMemo(() => {
-    const l = views.data ?? [];
-    if (!orden) return l;
-    const pos = (id: number) => { const i = orden.indexOf(id); return i < 0 ? Number.MAX_SAFE_INTEGER : i; };
-    return [...l].sort((a, b) => pos(a.id) - pos(b.id));
-  }, [views.data, orden]);
-  const [arrastrando, setArrastrando] = useState<number | null>(null);
-  const [marca, setMarca] = useState<{ id: number; lado: 'antes' | 'despues' } | null>(null);
-  const guardarOrden = async (ids: number[]) => {
-    setOrden(ids);
-    try { await http('PUT', `/views/${type}/orden`, { ids }); } catch (e) { toast((e as Error).message, true); setOrden(null); }
+  const vistaDe = (k: string) => views.data?.find((v) => String(v.id) === k);
+  // Las que se pueden dibujar (las vistas guardadas aparecen cuando llegan).
+  const visibles = pestanas.filter((k) => esFija(k) || vistaDe(k));
+  const [arrastrando, setArrastrando] = useState<string | null>(null);
+  const [marca, setMarca] = useState<{ k: string; lado: 'antes' | 'despues' } | null>(null);
+  const guardarOrden = async (ids: string[]) => {
+    const antes = ordenGuardado;
+    setOrdenGuardado(ids);
+    ordenNuevo.set(type, ids);
+    try {
+      await http('PUT', `/views/${type}/orden`, { ids: ids.map((k) => (esFija(k) ? k : Number(k))) });
+      try { localStorage.removeItem(defaultViewKey(type)); } catch { /* ignorar */ } // ahora manda el orden
+    } catch (e) {
+      toast((e as Error).message, true);
+      setOrdenGuardado(antes);
+      if (antes) ordenNuevo.set(type, antes); else ordenNuevo.delete(type);
+    }
   };
-  const soltarVista = (id: number, destino: number, lado: 'antes' | 'despues') => {
-    if (id === destino) return;
-    const ids = vistas.map((v) => v.id).filter((x) => x !== id);
-    ids.splice(ids.indexOf(destino) + (lado === 'despues' ? 1 : 0), 0, id);
+  const soltarPestana = (k: string, destino: string, lado: 'antes' | 'despues') => {
+    if (k === destino) return;
+    const ids = pestanas.filter((x) => x !== k);
+    ids.splice(ids.indexOf(destino) + (lado === 'despues' ? 1 : 0), 0, k);
     guardarOrden(ids);
   };
-  const moverVista = (id: number, d: -1 | 1) => {
-    const ids = vistas.map((v) => v.id);
-    const i = ids.indexOf(id);
-    if (i < 0 || i + d < 0 || i + d >= ids.length) return;
-    [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
-    guardarOrden(ids);
+  const moverPestana = (k: string, d: -1 | 1) => {
+    const i = visibles.indexOf(k);
+    const otra = visibles[i + d];
+    if (i < 0 || !otra) return;
+    soltarPestana(k, otra, d < 0 ? 'antes' : 'despues');
   };
+  // Cada pestaña se arrastra; una raya marca dónde va a quedar.
+  const arrastre = (k: string) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => { setArrastrando(k); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', k); },
+    onDragEnd: () => { setArrastrando(null); setMarca(null); },
+    onDragOver: (e: React.DragEvent<HTMLElement>) => {
+      if (arrastrando == null || arrastrando === k) return;
+      e.preventDefault();
+      const r = e.currentTarget.getBoundingClientRect();
+      const lado = e.clientX < r.left + r.width / 2 ? 'antes' : 'despues';
+      if (marca?.k !== k || marca.lado !== lado) setMarca({ k, lado });
+    },
+    onDragLeave: (e: React.DragEvent<HTMLElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setMarca((m) => (m?.k === k ? null : m)); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); if (arrastrando != null && marca) soltarPestana(arrastrando, k, marca.lado); setArrastrando(null); setMarca(null); },
+  });
+  const claseArrastre = (k: string) => `${arrastrando === k ? ' arrastrando' : ''}${marca?.k === k ? ` marca-${marca.lado}` : ''}`;
+  const AYUDA_ORDEN = 'Arrastrala para cambiar el orden: la primera es la que se abre al entrar.';
 
-  useEffect(() => { try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q })); } catch { /* ignorar */ } }, [cfg, q, type]);
+  // «Todos» y «Míos» recuerdan sus columnas, orden y anchos; la lista entera (con filtros), solo en esta pestaña del
+  // navegador, para encontrarla igual al volver de una ficha.
+  useEffect(() => {
+    if (!esFija(cfgDe)) return;
+    try { localStorage.setItem(storeKey(type), JSON.stringify({ ...cfg, q: undefined, ...SIN_FILTROS })); } catch { /* ignorar */ }
+  }, [cfg, cfgDe, type]);
+  useEffect(() => {
+    if (!cfgDe) return;
+    try { sessionStorage.setItem(sesionKey(type), JSON.stringify({ v: cfgDe, cfg, q, mode } satisfies ListaComoQuedo)); } catch { /* ignorar */ }
+  }, [cfg, cfgDe, q, mode, type]);
   useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.sort, cfg.dir, pipelineSel, mode]);
 
   // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
@@ -179,9 +270,9 @@ function IndexFor({ type }: { type: ObjectType }) {
       if (pipe) p.set('pipeline', pipe);
       return p;
     }, { replace: true });
-    if (key === 'all') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: [], dates: {}, tags: [], unidades: [] }));
-    else if (key === 'mine') setCfg((c) => ({ ...c, groups: [], owner: undefined, owners: ['me'], dates: {}, tags: [], unidades: [] }));
-    else if (v) { setCfg(withOwners({ ...loadLocal(type), owners: [], dates: {}, tags: [], unidades: [], ...v.config })); setQ(v.config.q ?? ''); }
+    // Todos y Míos con sus columnas y sin filtros; una vista guardada, como está guardada.
+    if (esFija(key)) { setCfg(limpia(type, key)); setCfgDe(key); }
+    else if (v) { setCfg(deVista(type, v)); setQ(v.config.q ?? ''); setCfgDe(key); }
   };
   // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
   const current: ViewConfig = {
@@ -196,9 +287,9 @@ function IndexFor({ type }: { type: ObjectType }) {
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), [...(c.unidades ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '', c.widths ?? {},
   ]);
-  const dirty = !!activeSaved && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
+  const dirty = !!activeSaved && cfgDe === activeView && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
-  const filtersChanged = (activeView === 'all' || activeView === 'mine') && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? [], cfg.unidades ?? []])
+  const filtersChanged = esFija(activeView) && cfgDe === activeView && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? [], cfg.unidades ?? []])
     !== JSON.stringify([[], activeView === 'mine' ? ['me'] : [], {}, [], []]);
   const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
   const saveView = async () => {
@@ -210,7 +301,18 @@ function IndexFor({ type }: { type: ObjectType }) {
       views.reload();
     } catch (e) { toast((e as Error).message, true); }
   };
-  useEffect(() => { if (views.data && activeView !== 'all' && activeView !== 'mine') applyView(activeView); /* eslint-disable-next-line */ }, [views.data]);
+  // Al llegar las vistas: se aplica la abierta (con lo último guardado); si se volvió de una ficha, queda como estaba.
+  useEffect(() => {
+    if (!views.data) return;
+    if (!esFija(activeView) && !vistaDe(activeView)) {
+      // Ya no está (la borraron o dejaron de compartirla): se abre la primera pestaña.
+      if (!views.loading) applyView(pestanas[0]);
+      return;
+    }
+    if (restaurada.current) { if (!views.loading) restaurada.current = false; return; }
+    if (!esFija(activeView)) applyView(activeView);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [views.data]);
 
   // Las otras pestañas (Todos, Míos y las vistas guardadas) se traen en segundo plano, de a una, un rato después de abrir
   // la lista: al tocarlas aparecen al instante (y se actualizan atrás). Negocios no: su tablero depende del pipeline.
@@ -218,11 +320,10 @@ function IndexFor({ type }: { type: ObjectType }) {
     if (!views.data || type === 'deal') return;
     let vivo = true;
     const t = window.setTimeout(async () => {
-      const base: ViewConfig = { ...cfg, q: dq, groups: [], owners: [], dates: {}, tags: [], unidades: [] };
       const otras: Array<[string, ViewConfig, 'board' | 'table']> = [
-        ['all', base, mode], ['mine', { ...base, owners: ['me'] }, mode],
+        ['all', { ...limpia(type, 'all'), q: dq }, mode], ['mine', { ...limpia(type, 'mine'), q: dq }, mode],
         ...views.data!.map((v): [string, ViewConfig, 'board' | 'table'] => {
-          const c = withOwners({ ...loadLocal(type), owners: [], dates: {}, tags: [], unidades: [], ...v.config });
+          const c = deVista(type, v);
           return [String(v.id), c, c.mode === 'board' || c.mode === 'table' ? c.mode : mode];
         }),
       ];
@@ -311,32 +412,29 @@ function IndexFor({ type }: { type: ObjectType }) {
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
-      {/* Las vistas (Todos, Míos, guardadas) y los filtros valen para la tabla y para el tablero, como en HubSpot. */}
+      {/* Las vistas (Todos, Míos, guardadas) y los filtros valen para la tabla y para el tablero, como en HubSpot.
+          Cada uno ordena sus pestañas arrastrándolas (el orden queda en su usuario) y la primera es la que se abre al entrar. */}
       <div className="tabs">
-        <button className={`tab ${activeView === 'all' ? 'on' : ''}`} onClick={() => applyView('all')}>Todos</button>
-        <button className={`tab ${activeView === 'mine' ? 'on' : ''}`} onClick={() => applyView('mine')}>Míos</button>
-        {vistas.map((v, i) => (
-          // Cada uno ordena sus pestañas arrastrándolas (el orden queda en su usuario); con quién se comparte, al pasar el mouse.
-          <div key={v.id} className={`tab-wrap${activeView === String(v.id) ? ' on' : ''}${arrastrando === v.id ? ' arrastrando' : ''}${marca?.id === v.id ? ` marca-${marca.lado}` : ''}`}
-            draggable onDragStart={(e) => { setArrastrando(v.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(v.id)); }}
-            onDragEnd={() => { setArrastrando(null); setMarca(null); }}
-            onDragOver={(e) => {
-              if (arrastrando == null || arrastrando === v.id) return;
-              e.preventDefault();
-              const r = e.currentTarget.getBoundingClientRect();
-              const lado = e.clientX < r.left + r.width / 2 ? 'antes' : 'despues';
-              if (marca?.id !== v.id || marca.lado !== lado) setMarca({ id: v.id, lado });
-            }}
-            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setMarca((m) => (m?.id === v.id ? null : m)); }}
-            onDrop={(e) => { e.preventDefault(); if (arrastrando != null && marca) soltarVista(arrastrando, v.id, marca.lado); setArrastrando(null); setMarca(null); }}>
-            <button className={`tab ${activeView === String(v.id) ? 'on' : ''}`} onClick={() => applyView(String(v.id))}
-              title={`${v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}. Arrastrala para cambiar el orden.`}>
-              {v.config.mode === 'board' && <Icon name="board" size={13} />}{v.name}
-            </button>
-            {activeView === String(v.id) && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView('all'); }}
-              onMover={(d) => moverVista(v.id, d)} puedeIzq={i > 0} puedeDer={i < vistas.length - 1} />}
-          </div>
-        ))}
+        {visibles.map((k, i) => {
+          const v = vistaDe(k);
+          if (!v) return (
+            <div key={k} className={`tab-wrap${activeView === k ? ' on' : ''}${claseArrastre(k)}`} {...arrastre(k)}>
+              <button className={`tab ${activeView === k ? 'on' : ''}`} onClick={() => applyView(k)} title={AYUDA_ORDEN}>{k === 'all' ? 'Todos' : 'Míos'}</button>
+            </div>
+          );
+          // Con quién se comparte, al pasar el mouse.
+          return (
+            <div key={k} className={`tab-wrap${activeView === k ? ' on' : ''}${claseArrastre(k)}`} {...arrastre(k)}>
+              <button className={`tab ${activeView === k ? 'on' : ''}`} onClick={() => applyView(k)}
+                title={`${v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}. ${AYUDA_ORDEN}`}>
+                {v.config.mode === 'board' && <Icon name="board" size={13} />}{v.name}
+              </button>
+              {activeView === k && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView(visibles.find((x) => x !== k) ?? 'all'); }}
+                onMover={(d) => moverPestana(k, d)} puedeIzq={i > 0} puedeDer={i < visibles.length - 1}
+                primera={i === 0} onPrimera={() => { guardarOrden([k, ...pestanas.filter((x) => x !== k)]); toast(`«${v.name}» quedó primera: se abre al entrar`); }} />}
+            </div>
+          );
+        })}
         <button className="tab" onClick={() => setShow('save')}>+ Agregar vista</button>
       </div>
 
@@ -431,7 +529,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} addProp={filterProp} onClose={() => { setShow(''); setFilterProp(undefined); }} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); setFilterProp(undefined); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
-      {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); }} />}
+      {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }} />}
     </div>
   );
 }
@@ -624,9 +722,10 @@ function ShareSelect({ value, onChange }: { value: string; onChange: (v: string)
 }
 
 // Menú de la vista abierta (como ⚙ «Ver configuración» de HubSpot): renombrar, compartir, copiar el link,
-// abrirla por defecto y borrarla. Cambiar o borrar una vista ajena solo puede un administrador.
-function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, puedeDer }: {
+// abrirla por defecto (la pasa primera) y borrarla. Cambiar o borrar una vista ajena solo puede un administrador.
+function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, puedeDer, primera, onPrimera }: {
   type: ObjectType; view: SavedView; onChanged: () => void; onDeleted: () => void; onMover?: (d: -1 | 1) => void; puedeIzq?: boolean; puedeDer?: boolean;
+  primera: boolean; onPrimera: () => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -634,7 +733,6 @@ function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, puedeDe
   const [edit, setEdit] = useState(false);
   const [name, setName] = useState(view.name);
   const [share, setShare] = useState(shareOf(view));
-  const [isDefault, setIsDefault] = useState(readDefault(type) === String(view.id));
   const ref = useRef<HTMLDivElement>(null);
   const btn = useRef<HTMLButtonElement>(null);
   const pop = useRef<HTMLDivElement>(null);
@@ -647,11 +745,6 @@ function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, puedeDe
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
-  const toggleDefault = () => {
-    try { isDefault ? localStorage.removeItem(defaultViewKey(type)) : localStorage.setItem(defaultViewKey(type), String(view.id)); } catch { /* ignorar */ }
-    setIsDefault(!isDefault);
-    toast(isDefault ? 'Ya no se abre por defecto' : `«${view.name}» se abre por defecto`);
-  };
   return (
     <div className="view-menu" ref={ref}>
       <button ref={btn} className={`view-menu-btn${open ? ' on' : ''}`} aria-label={`Opciones de la vista ${view.name}`} aria-haspopup="menu" aria-expanded={open}
@@ -660,7 +753,7 @@ function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, puedeDe
         <div ref={pop} className="popover" role="menu" style={{ ...popStyle, minWidth: 220, maxWidth: 320 }}>
           {mine && <div className="opt" onClick={() => { setEdit(true); setOpen(false); }}>Renombrar o compartir…</div>}
           <div className="opt" onClick={() => { setOpen(false); (navigator.clipboard?.writeText(window.location.href) ?? Promise.reject()).then(() => toast('Link copiado'), () => toast('El navegador no dejó copiar: copiá el link de la barra de direcciones.', true)); }}>Copiar link</div>
-          <div className="opt" onClick={() => { toggleDefault(); setOpen(false); }}>{isDefault ? '✓ Se abre por defecto' : 'Abrir por defecto'}</div>
+          <div className="opt" title="Se abre la primera pestaña al entrar" onClick={() => { if (!primera) onPrimera(); setOpen(false); }}>{primera ? '✓ Se abre por defecto' : 'Abrir por defecto (pasarla primera)'}</div>
           {onMover && puedeIzq && <div className="opt" onClick={() => { onMover(-1); setOpen(false); }}>Mover a la izquierda</div>}
           {onMover && puedeDer && <div className="opt" onClick={() => { onMover(1); setOpen(false); }}>Mover a la derecha</div>}
           {mine && <div className="opt danger-text" onClick={async () => {

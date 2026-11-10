@@ -36,7 +36,8 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Etiquetas de color por regla (las 7 de HubSpot cargadas), en tarjetas, columna «Etiquetas», ficha, vista previa y filtro rápido | ✅ | Configuración → Etiquetas |
 | Vistas guardadas propias y compartidas, «Todos» / «Míos», en la tabla y en el tablero (con sus filtros) | ✅ | Pestañas de cada lista |
 | Guardar los cambios de una vista (filtros, propietario, columnas, orden, tabla o tablero, pipeline), guardarla como nueva o descartar | ✅ | «Cambios sin guardar» a la derecha de las pestañas; pisar una vista ajena solo puede un administrador |
-| Vistas: compartir con solo yo, todos o un equipo; renombrar, copiar link, abrir por defecto, borrar; ícono de tablero en la pestaña | ✅ | «⋯» de la vista abierta |
+| Vistas: compartir con solo yo, todos o un equipo; renombrar, copiar link, abrir por defecto (la pasa primera), borrar; ícono de tablero en la pestaña | ✅ | «⋯» de la vista abierta |
+| Ordenar las pestañas (también «Todos» y «Míos») arrastrándolas, cada uno las suyas: la primera es la que se abre al entrar. Al entrar desde el menú u otra pantalla la lista arranca limpia en esa pestaña; al volver de una ficha (o recargar), como se dejó | ✅ | Pestañas de cada lista |
 | Elegir y ordenar columnas, ordenar por columna, paginado; menú ⋮ en cada encabezado (ordenar, filtrar por esa columna, mover, quitar); casilla y nombre fijos al desplazar | ✅ | «Columnas» y encabezados |
 | Editar un campo desde la lista (propietario, mail, desplegables, fechas…), sin entrar a la ficha | ✅ | Lápiz al pasar el mouse por la celda (o doble clic); solo lectura no edita |
 | Vista previa al costado: clic en una tarjeta del tablero o «Vista previa» en la tabla, con acciones rápidas, «Acerca de» editable, asociaciones (agregar existentes, crear nuevos ya asociados, quitar) y última actividad | ✅ | Botón «Ver registro» para la ficha completa |

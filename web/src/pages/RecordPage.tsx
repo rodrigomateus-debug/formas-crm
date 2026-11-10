@@ -762,7 +762,7 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
           <button className="btn sm" onClick={() => setMode('create')}>Crear {OBJECTS[toType].single.toLowerCase()} nuevo</button>
         </div>
       )}
-      {mode === 'create' && <CreateRecord type={toType} associateWith={record.id} onClose={() => setMode('')} onCreated={() => onChange()} />}
+      {mode === 'create' && <CreateRecord type={toType} associateWith={record} onClose={() => setMode('')} onCreated={() => onChange()} />}
       {shown.map((r) => (
         <div key={r.id} className="assoc-item">
           <Avatar name={r.name} type={toType} domain={r.props.domain} email={r.props.email} />

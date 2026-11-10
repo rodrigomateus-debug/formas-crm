@@ -153,10 +153,25 @@ api.post('/records/:type', async (c) => {
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown>; associations?: number[] }>();
   const assoc = [...new Set((body.associations ?? []).map(Number))];
-  // Se revisa antes de crear: si un registro para asociar no existe, no queda creado uno suelto.
-  for (const id of assoc) {
-    if (!Number.isInteger(id) || !(await c.env.DB.prepare('SELECT 1 FROM records WHERE id = ? AND archived = 0').bind(id).first())) {
-      throw new HttpError(400, `No existe el registro ${body.associations?.[assoc.indexOf(id)] ?? id} para asociar.`);
+  // Se revisa todo antes de crear: si una asociación no se puede hacer, no queda creado un registro suelto.
+  const bad = assoc.find((id) => !Number.isInteger(id));
+  if (bad !== undefined) throw new HttpError(400, `No existe el registro ${body.associations?.[assoc.indexOf(bad)] ?? bad} para asociar.`);
+  const { results: otros } = assoc.length
+    ? await c.env.DB.prepare('SELECT id, object_type, name FROM records WHERE id IN (SELECT value FROM json_each(?)) AND archived = 0')
+      .bind(JSON.stringify(assoc)).all<{ id: number; object_type: ObjectType; name: string }>()
+    : { results: [] as Array<{ id: number; object_type: ObjectType; name: string }> };
+  const falta = assoc.find((id) => !otros.some((o) => o.id === id));
+  if (falta !== undefined) throw new HttpError(400, `No existe el registro ${falta} para asociar.`);
+  if (type !== 'company' && otros.some((o) => o.object_type === type)) throw new HttpError(400, `No se asocian dos registros de tipo ${type}.`);
+  // Un pedido va en un solo negocio (associations.ts).
+  if (type === 'order' && otros.filter((o) => o.object_type === 'deal').length > 1) {
+    throw new HttpError(400, 'Un pedido va en un solo negocio: elegí uno.');
+  }
+  if (type === 'deal') {
+    for (const o of otros.filter((x) => x.object_type === 'order')) {
+      const en = await c.env.DB.prepare(`SELECT d.name FROM associations a JOIN records d ON d.id = a.to_id AND d.archived = 0
+        WHERE a.from_id = ? AND a.to_type = 'deal' LIMIT 1`).bind(o.id).first<{ name: string }>();
+      if (en) throw new HttpError(409, `El pedido «${o.name}» ya está en el negocio «${en.name}». Un pedido va en un solo negocio: quitalo de ese para sumarlo a este.`);
     }
   }
   if (type === 'deal') {
@@ -173,6 +188,9 @@ api.post('/records/:type', async (c) => {
     const hasCompany = await c.env.DB.prepare("SELECT 1 FROM associations WHERE from_id = ? AND to_type = 'company'").bind(row.id).first();
     if (!hasCompany) await autoAssociateCompany(c.env.DB, ctx, row);
   }
+  // Un negocio creado con pedidos (o un pedido creado en un negocio) toma el monto de sus pedidos (montos.ts).
+  const pedidos = type === 'deal' ? otros.some((o) => o.object_type === 'order') : type === 'order' && otros.some((o) => o.object_type === 'deal');
+  if (pedidos) await montosDesdePedidos(c.env.DB, [row.id], ctx);
   return c.json(rowToRecord(await getRow(c.env.DB, row.id)), 201);
 });
 

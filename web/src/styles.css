@@ -216,6 +216,10 @@ textarea.input { height: auto; min-height: 90px; padding: 8px 10px; resize: vert
 .search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--ui-ink-3); pointer-events: none; }
 label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ui-ink-2); font-weight: 500; }
 .field > .btn { align-self: flex-start; }
+.create-assoc { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--ui-line); }
+.create-assoc-title { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.create-assoc-group { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ui-ink-2); font-weight: 500; }
+.create-assoc-item { padding: 4px 0 4px 2px; font-size: 13px; color: var(--ui-ink); font-weight: 400; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--r-pill); background: var(--ui-surface-sunken); color: var(--ui-ink-2);
   font-size: 12px; font-weight: 500; border: 1px solid transparent; cursor: pointer; white-space: nowrap; transition: background var(--dur) var(--ease); }
 .chip:hover { border-color: var(--ui-line-strong); }

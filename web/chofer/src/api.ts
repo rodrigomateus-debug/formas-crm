@@ -1,4 +1,5 @@
 // Contrato con el servidor (/hooks/chofer/api) y el link personal del chofer.
+import { instalada } from './instalar';
 
 export type RemitoChofer = {
   id: number;
@@ -12,6 +13,10 @@ export type RemitoChofer = {
   cliente: string | null;
   items: Array<{ descripcion: string; cantidad: number | null }>;
   pedido: { id: number; nombre: string } | null;
+  /** El servidor no pudo saber de qué pedido es por el PDV: el chofer lo puede escribir. */
+  pide_pdv?: boolean;
+  /** El PDV que escribió el chofer, si escribió. */
+  pdv_chofer?: string | null;
 };
 
 const API = '/hooks/chofer/api';
@@ -35,20 +40,37 @@ export function tokenDeTexto(texto: string): string | null {
   return suelto ? suelto[0] : null;
 }
 
-/** Al abrir: si el link trae #t=…, lo guarda y lo saca de la barra de direcciones. */
+/** Al abrir: toma el token del link (#t=…) o, si no viene, el que quedó guardado en este celular. */
 export function tomarTokenDelLink(): void {
-  const hash = window.location.hash;
-  if (hash.includes('t=')) {
-    const t = tokenDeTexto(hash);
-    if (t) usarToken(t);
-    try { history.replaceState(null, '', window.location.pathname + window.location.search); } catch { /* da igual */ }
+  const delLink = window.location.hash.includes('t=') ? tokenDeTexto(window.location.hash) : null;
+  if (delLink) {
+    tokenEnMemoria = delLink;
+    guardar(CLAVE_TOKEN, delLink);
+  } else {
+    tokenEnMemoria = leer(CLAVE_TOKEN);
   }
-  if (!tokenEnMemoria) tokenEnMemoria = leer(CLAVE_TOKEN);
+  reflejarToken();
+}
+
+/** Deja el token donde lo necesita «Agregar a la pantalla de inicio».
+    - El manifest se pide con ?t=…: el servidor lo devuelve con el link personal como dirección de arranque. Así la app
+      instalada abre ya con el token (en iPhone la app de inicio no comparte lo guardado con Safari).
+    - En el navegador, #t=… queda en la dirección (iOS a veces guarda la dirección actual). Instalada, se saca. */
+function reflejarToken(): void {
+  const t = tokenEnMemoria;
+  try {
+    const enlace = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
+    if (enlace) enlace.href = `${import.meta.env.BASE_URL}manifest.webmanifest${t ? `?t=${encodeURIComponent(t)}` : ''}`;
+    const base = window.location.pathname + window.location.search;
+    const quiero = t && !instalada() ? `#t=${encodeURIComponent(t)}` : '';
+    if (window.location.hash !== quiero) history.replaceState(history.state, '', base + quiero);
+  } catch { /* da igual */ }
 }
 
 export function usarToken(t: string): void {
   tokenEnMemoria = t;
   guardar(CLAVE_TOKEN, t);
+  reflejarToken();
 }
 export function token(): string | null { return tokenEnMemoria; }
 
@@ -59,7 +81,7 @@ export class LinkInvalido extends Error {}
 export class SinSenal extends Error {}
 /** El servidor rechazó el pedido y reintentar igual no sirve. */
 export class Rechazo extends Error {
-  constructor(public status: number) { super(`HTTP ${status}`); }
+  constructor(public status: number, public detalle?: string) { super(`HTTP ${status}`); }
 }
 
 function reintentable(status: number): boolean {
@@ -93,6 +115,40 @@ export async function pedirYo(): Promise<string> {
 export async function pedirRemitos(): Promise<RemitoChofer[]> {
   const { remitos } = await pedir<{ remitos: RemitoChofer[] }>('/remitos');
   return Array.isArray(remitos) ? remitos : [];
+}
+
+/** El chofer escribe o corrige el número de PDV de un remito. No va a la cola: si no hay señal, se prueba de nuevo. */
+export async function corregirPdv(id: number, pdv: string): Promise<RemitoChofer> {
+  if (!tokenEnMemoria) throw new LinkInvalido();
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 30_000);
+  let r: Response;
+  try {
+    r = await fetch(`${API}/remitos/${id}/pdv`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdv }),
+      signal: corte.signal,
+    });
+  } catch {
+    throw new SinSenal();
+  } finally {
+    clearTimeout(reloj);
+  }
+  if (r.status === 401) throw new LinkInvalido();
+  if (reintentable(r.status)) throw new SinSenal();
+  if (!r.ok) {
+    let detalle: string | undefined;
+    try { const j = (await r.json()) as { error?: unknown }; if (typeof j.error === 'string') detalle = j.error; } catch { /* sin detalle */ }
+    throw new Rechazo(r.status, detalle);
+  }
+  try {
+    const remito = (await r.json()) as RemitoChofer;
+    if (!remito || typeof remito.estado !== 'string') throw new Error('respuesta rara');
+    return remito;
+  } catch {
+    throw new SinSenal();
+  }
 }
 
 export type FotoParaMandar = {

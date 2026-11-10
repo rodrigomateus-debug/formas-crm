@@ -11,7 +11,7 @@
   --aviso: #f2b632; --sobre-aviso: #2a1c00; --aviso-suave: #fbeecb; --tinta-aviso: #6f4700;
   --mal: #b3261e; --sobre-mal: #ffffff; --mal-suave: #fbe1de; --tinta-mal: #96201a;
   --neutro: #dfe3ee; --sobre-neutro: #12143a; --neutro-suave: #e9ecf3; --tinta-neutro: #3f4361;
-  --foco: #000085;
+  --foco: #000085; --cabecera: #000085;
   --sombra: 0 1px 2px rgba(18, 20, 58, .06), 0 8px 24px -12px rgba(18, 20, 58, .22);
   --fuente: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --suave: cubic-bezier(.2, 0, 0, 1);
@@ -26,7 +26,7 @@
     --aviso: #f2b632; --sobre-aviso: #2a1c00; --aviso-suave: #3a2b0c; --tinta-aviso: #f8cf83;
     --mal: #d5433a; --sobre-mal: #ffffff; --mal-suave: #401a18; --tinta-mal: #ffa59e;
     --neutro: #2a2f58; --sobre-neutro: #f1f2ff; --neutro-suave: #20244a; --tinta-neutro: #c0c4e2;
-    --foco: #c4c9ff;
+    --foco: #c4c9ff; --cabecera: #06062e;
     --sombra: 0 0 0 1px #2a2f58;
   }
 }
@@ -55,20 +55,25 @@ h1:focus { outline: none; }
 
 /* ---------- Estructura ---------- */
 .app { max-width: 560px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; }
+/* Barra de arriba, azul de marca: se continúa con la barra de estado del celular cuando la app está instalada. */
 .barra {
-  display: flex; align-items: center; gap: 10px;
-  padding: calc(12px + env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 4px max(20px, env(safe-area-inset-left));
+  display: flex; align-items: center; gap: 10px; min-height: 56px; background: var(--cabecera); color: #fff;
+  padding: calc(8px + env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 8px max(20px, env(safe-area-inset-left));
 }
-.barra img { display: block; border-radius: 50%; }
-.marca { font-size: 16px; font-weight: 600; letter-spacing: -.005em; }
-.marca span { color: var(--tinta-2); font-weight: 500; }
+.barra svg { flex: none; display: block; }
+.marca { font-size: 17px; font-weight: 600; letter-spacing: -.005em; }
+.marca span { opacity: .78; font-weight: 500; }
 .chip-senal {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px 0 10px;
-  border-radius: 999px; background: var(--tinta); color: var(--lienzo); font-size: 15px; font-weight: 600;
+  border-radius: 999px; background: #fff; color: #000085; font-size: 15px; font-weight: 600;
+}
+/* Instalada en iPhone el contenido pasa por debajo de la barra de estado: esta franja la mantiene azul al desplazar. */
+body::before {
+  content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: 4; height: env(safe-area-inset-top); background: var(--cabecera);
 }
 .cuerpo {
   flex: 1; display: flex; flex-direction: column; gap: 22px;
-  padding: 10px max(20px, env(safe-area-inset-right)) calc(150px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  padding: 20px max(20px, env(safe-area-inset-right)) calc(206px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
 }
 h1 { font-size: 32px; line-height: 1.15; font-weight: 700; letter-spacing: -.02em; }
 h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2); }
@@ -105,6 +110,31 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
   pointer-events: none;
 }
 .muelle .boton { pointer-events: auto; max-width: 528px; margin: 0 auto; display: flex; }
+/* La segunda opción: elegir una foto ya guardada. A la vista, pero sin competir con la cámara. */
+.boton.guardada {
+  width: 100%; min-height: 50px; margin-top: 8px; border-radius: 14px; background: transparent; color: var(--tinta);
+  font-size: 17px; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px;
+}
+.boton.guardada:active { background: var(--hundido); }
+
+/* ---------- Agregar a la pantalla de inicio ---------- */
+.instalar {
+  position: relative; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: start; padding: 14px;
+  border-radius: 18px; background: var(--superficie); box-shadow: var(--sombra);
+}
+.instalar img { display: block; border-radius: 11px; }
+.instalar h2 { color: var(--tinta); font-size: 16px; line-height: 1.3; padding-right: 36px; }
+.instalar p { margin-top: 4px; font-size: 15px; line-height: 1.5; color: var(--tinta-2); }
+.instalar p strong { color: var(--tinta); font-weight: 600; white-space: nowrap; }
+.instalar .boton { margin-top: 10px; }
+.tecla {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 7px; background: var(--hundido);
+  color: var(--tinta); font-weight: 600; vertical-align: -5px; line-height: 26px;
+}
+.cerrar-tarjeta {
+  position: absolute; top: 2px; right: 2px; display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 50%;
+  background: none; color: var(--tinta-2); cursor: pointer;
+}
 
 /* ---------- Tarjeta grande: la última foto ---------- */
 .foco { background: var(--superficie); border-radius: 22px; box-shadow: var(--sombra); overflow: hidden; animation: aparecer 240ms var(--suave); }
@@ -130,6 +160,29 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .items { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 18px; }
 .items li { display: contents; }
 .items .cant { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Escribir o corregir el número de PDV */
+.campo-pdv { display: flex; flex-direction: column; gap: 10px; }
+.campo-pdv.alternativa, .campo-pdv.corregir { padding-top: 16px; border-top: 2px solid var(--hundido); }
+.campo-pdv label { font-size: 17px; font-weight: 600; }
+.campo-pdv input {
+  width: 100%; min-height: 68px; padding: 0 18px; border-radius: 16px; border: 2.5px solid var(--tinta);
+  background: var(--superficie); color: var(--tinta); font-size: 30px; font-weight: 700; letter-spacing: .04em;
+  font-variant-numeric: tabular-nums;
+}
+.campo-pdv input::placeholder { color: var(--tinta-2); opacity: .55; font-weight: 500; letter-spacing: 0; font-size: 22px; }
+.campo-pdv input:focus-visible { outline-offset: 2px; }
+.campo-pdv input[aria-invalid="true"] { border-color: var(--mal); }
+.campo-pdv .error { color: var(--tinta-mal); font-weight: 600; font-size: 16px; }
+.campo-pdv .pista { color: var(--tinta-aviso); font-weight: 600; font-size: 16px; }
+.campo-pdv .acciones { display: flex; align-items: center; gap: 20px; }
+.campo-pdv .boton.principal { flex: 1; min-height: 60px; font-size: 19px; }
+.campo-pdv .enlace { align-self: center; }
+.enlace:disabled { opacity: .5; }
+/* Mientras se escribe el PDV, el botón de la cámara se corre para no quedar pegado al teclado. Vuelve un instante
+   después de salir del campo, así el toque en «Mandar» no cae sobre el botón de la cámara que reaparece. */
+.muelle { transition: visibility 0s linear .35s; }
+.app:has(.campo-pdv input:focus) .muelle { visibility: hidden; transition-delay: 0s; }
 
 /* En camino */
 .foco.curso { display: flex; gap: 16px; padding: 16px; align-items: stretch; }
@@ -181,6 +234,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .estado.mal { color: var(--tinta-mal); } .estado.neutro { color: var(--tinta-neutro); }
 .fila .sub { font-size: 15px; color: var(--tinta-2); overflow-wrap: anywhere; }
 .fila .boton { align-self: flex-start; margin-top: 8px; }
+.fila .botones { display: flex; flex-wrap: wrap; gap: 0 10px; }
 .fila time { flex: none; padding-top: 2px; font-size: 15px; color: var(--tinta-2); font-variant-numeric: tabular-nums; }
 
 .girando {
@@ -200,6 +254,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
   padding: calc(10px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(20px, env(safe-area-inset-left));
 }
 .previa-arriba h2 { flex: 1; color: #fff; font-size: 20px; font-weight: 600; }
+.cuantas { display: block; font-size: 15px; font-weight: 500; opacity: .8; }
 .cerrar { flex: none; display: grid; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #fff; cursor: pointer; }
 .previa-foto { display: grid; place-items: center; min-height: 0; padding: 0 12px; }
 .previa-foto img { max-width: 100%; max-height: 100%; min-height: 0; object-fit: contain; border-radius: 8px; background: #fff; }
@@ -216,7 +271,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
   max-width: 480px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; gap: 14px;
   padding: calc(32px + env(safe-area-inset-top)) 24px calc(32px + env(safe-area-inset-bottom));
 }
-.link-roto img { border-radius: 50%; margin-bottom: 6px; }
+.link-roto img { border-radius: 14px; margin-bottom: 6px; }
 .link-roto .grande { font-size: 21px; line-height: 1.35; }
 .link-roto .nota { color: var(--tinta-2); }
 .link-roto form { display: flex; flex-direction: column; gap: 10px; margin-top: 28px; padding-top: 24px; border-top: 2px solid var(--hundido); }
@@ -236,6 +291,7 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
   .cuerpo { padding-left: 14px; padding-right: 14px; }
   .consejos li { font-size: 14px; gap: 8px; padding: 8px 10px; }
   .boton.enorme { font-size: 19px; }
+  .boton.guardada { font-size: 15px; padding: 0 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

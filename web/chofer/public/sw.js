@@ -1,6 +1,6 @@
 // Service worker de «Remitos Formas»: guarda la cáscara de la app (la página, el código, los estilos, la tipografía)
 // para que abra sin señal. Nunca toca las llamadas a /api/: las fotos las maneja la app con su propia cola.
-const CACHE = 'chofer-v1';
+const CACHE = 'chofer-v2';
 const BASE = new URL('./', self.location.href); // …/hooks/chofer/
 // Sin mirar la cabecera Vary: lo guardado sirve igual aunque el pedido venga con otras cabeceras (Origin, Accept-Encoding).
 const SIN_VARY = { ignoreVary: true };
@@ -23,6 +23,7 @@ self.addEventListener('message', (e) => {
   if (!d || d.tipo !== 'guardar' || !Array.isArray(d.urls)) return;
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
+    d.urls = d.urls.filter((u) => typeof u === 'string' && !esManifest(new URL(u, BASE).pathname));
     const quedan = new Set([BASE.href, ...d.urls]);
     const guardar = async (u) => {
       const ya = await c.match(u, SIN_VARY);
@@ -51,6 +52,8 @@ self.addEventListener('message', (e) => {
   })());
 });
 
+const esManifest = (ruta) => ruta.endsWith('manifest.webmanifest');
+
 function conTope(promesa, ms) {
   return new Promise((ok, mal) => {
     const reloj = setTimeout(() => mal(new Error('tardó')), ms);
@@ -66,6 +69,8 @@ self.addEventListener('fetch', (e) => {
   const tipografia = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
   if (!propio && !tipografia) return;
   if (propio && url.pathname.startsWith(BASE.pathname + 'api/')) return;
+  // El manifest lleva el link personal de cada chofer (?t=…): siempre a la red, nunca guardado.
+  if (propio && esManifest(url.pathname)) return;
 
   // Abrir la app: primero la red (para tener la última versión); si no hay señal o tarda, la guardada.
   if (pedido.mode === 'navigate') {

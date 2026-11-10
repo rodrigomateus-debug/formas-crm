@@ -17,6 +17,7 @@ export interface Remito {
   chofer: string | null; controles: Control[]; candidatos: Array<{ id: number; nombre: string; pdv: string | null }>;
   duplicado_de: number | null; otros_remitos_en_foto: boolean; dudas: string[]; leido_at: string | null; created_at: string;
   items: Array<{ code: string | null; description: string | null; quantity: number | null }>;
+  pdv_chofer: string | null;   // el PDV que escribió el chofer en la app
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
 export interface Entrega {
@@ -155,7 +156,7 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
     <div className="assoc-item remito-fila">
       <span className={`tag ${cls}`}>{label}</span>
       <div className="grow" style={{ minWidth: 0 }}>
-        <div className="remito-titulo">{titulo(r)}{r.pdv ? ` · PDV ${r.pdv}` : ''}</div>
+        <div className="remito-titulo">{titulo(r)}{r.pdv ? ` · PDV ${r.pdv}` : ''}{r.pdv_chofer ? ' (escrito por el chofer)' : ''}</div>
         <div className="small muted">{[r.fecha && fmtDate(r.fecha), origenDe(r), r.recibido_por && `recibió ${r.recibido_por}`].filter(Boolean).join(' · ')}</div>
         {productos && <div className="small">{productos}{r.items.length > 3 ? ` y ${r.items.length - 3} más` : ''}</div>}
         {r.reservas && <div className="small"><span className="tag warn">Recibido a controlar</span>{r.notas ? <span className="muted"> {r.notas}</span> : null}</div>}
@@ -237,7 +238,7 @@ function RevisionCard({ r, onCambio }: { r: Remito; onCambio: () => void }) {
         </div>
         {r.motivo && <div className="aviso warn small">{r.motivo}</div>}
         <dl className="revision-dl small">
-          {r.pdv && <><dt>PDV</dt><dd>{r.pdv}</dd></>}
+          {r.pdv && <><dt>PDV</dt><dd>{r.pdv}{r.pdv_chofer ? ' (lo escribió el chofer)' : ''}</dd></>}
           {r.cliente && <><dt>Cliente</dt><dd>{r.cliente}{r.cuit ? ` · CUIT ${r.cuit}` : ''}</dd></>}
           {r.fecha && <><dt>Fecha</dt><dd>{fmtDate(r.fecha)}</dd></>}
           {r.recibido_por && <><dt>Recibió</dt><dd>{r.recibido_por}{r.reservas ? ' · a controlar' : ''}</dd></>}

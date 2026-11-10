@@ -13,7 +13,7 @@ import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
-import { guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
+import { corregirPdv, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -328,7 +328,7 @@ hooks.get('/chofer/api/yo', async (c) => {
 hooks.get('/chofer/api/remitos', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
   const { results } = await c.env.DB.prepare(`SELECT r.*, o.name AS pedido_nombre FROM (SELECT id, record_id, clave, created_at, estado, repetir, motivo,
-      numero, pdv, cliente, lectura FROM remitos WHERE token_id = ? ORDER BY created_at DESC LIMIT 30) r LEFT JOIN records o ON o.id = r.record_id`)
+      numero, pdv, cliente, lectura, pide_pdv, pdv_chofer, controles FROM remitos WHERE token_id = ? ORDER BY created_at DESC LIMIT 30) r LEFT JOIN records o ON o.id = r.record_id`)
     .bind(ctx.tokenId).all<RemitoRow & { pedido_nombre: string | null }>();
   const items = await itemsDe(c.env.DB, results.map((r) => r.id));
   return c.json({ remitos: results.map((r) => paraChofer(r, items.get(r.id) ?? [], r.pedido_nombre)) });
@@ -358,6 +358,26 @@ hooks.post('/chofer/api/remitos', async (c) => {
   const ya = await remitoPorId(c.env.DB, id);
   const r = nuevo || ya.estado === 'sin_leer' ? await leerRemito(c.env, id, { ctx }) : ya;
   return c.json(paraChofer(r, (await itemsDe(c.env.DB, [id])).get(id) ?? [], await pedidoNombre(c.env.DB, r.record_id)), nuevo ? 201 : 200);
+});
+// El manifest de la app con el link del chofer adentro (?t=<token>): así, al guardarla en la pantalla de inicio, abre ya
+// con su link. Hace falta en iPhone, donde la app de inicio no comparte lo guardado con Safari. El token solo se copia
+// si tiene la forma de uno; sin token, el manifest de siempre. Nunca queda en caché.
+hooks.get('/chofer/manifest.webmanifest', async (c) => {
+  const url = new URL(c.req.url);
+  const res = await c.env.ASSETS.fetch(new Request(new URL('/chofer/manifest.webmanifest', url.origin)));
+  if (!res.ok) return c.text('No existe.', 404);
+  const m = await res.json<Record<string, unknown>>();
+  const t = url.searchParams.get('t') ?? '';
+  if (/^fcrm_[0-9a-f]{48}$/.test(t)) Object.assign(m, { id: '/hooks/chofer/', start_url: `/hooks/chofer/#t=${t}` });
+  return new Response(JSON.stringify(m), { headers: { 'content-type': 'application/manifest+json; charset=utf-8', 'cache-control': 'no-store' } });
+});
+// El chofer escribe el PDV de uno de sus remitos ({"pdv": "30706"}): no se leía, no coincidía o se leyó mal.
+hooks.post('/chofer/api/remitos/:id/pdv', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  const { pdv } = await c.req.json<{ pdv?: unknown }>().catch(() => ({ pdv: null }));
+  const id = Number(c.req.param('id'));
+  const r = await corregirPdv(c.env, ctx, id, pdv);
+  return c.json(paraChofer(r, (await itemsDe(c.env.DB, [id])).get(id) ?? [], await pedidoNombre(c.env.DB, r.record_id)));
 });
 // La app: index.html y sus archivos, desde dist/chofer.
 hooks.get('/chofer', (c) => c.redirect('/hooks/chofer/', 301));

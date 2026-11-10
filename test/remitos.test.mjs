@@ -56,7 +56,11 @@ const LECTURAS = {
     notas: 'Se reciben bultos cerrados, mercadería a controlar', otros_remitos_en_foto: true },
   OK1B: { ...base, numero_remito: `R-1-${BASE_NRO}`, pdv_pedido_web: PDV, pdv_observaciones: PDV, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('SIM10001273', 'Llavero corto', 1000)] },
   OK2: { ...base, numero_remito: NRO(BASE_NRO + 3), pdv_pedido_web: PDV, pdv_observaciones: PDV, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
-    items: [item('SIM10001273', 'Llavero corto', 500), item('GOR-1', 'Gorra bordada', 200)] },
+    items: [item('SIM10001273', 'Llavero corto', 500), item('GOR-1', 'Gorra bordada', 180)] },
+  // El remito no dice el PDV: la app se lo pide al chofer, y con el CUIT del cliente alcanza.
+  PIDEPDV: { ...base, numero_remito: NRO(BASE_NRO + 20), pdv_pedido_web: null, pdv_observaciones: null, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra bordada', 20)] },
+  // Bien leído (PDV B en los dos lugares); el chofer lo «corrige» a otro: lo revisa Logística.
+  CONTRA: { ...base, numero_remito: NRO(BASE_NRO + 30), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra bordada', 1)] },
   MALPDV: { ...base, numero_remito: NRO(BASE_NRO + 5), pdv_pedido_web: PDV, pdv_observaciones: String(Number(PDV) + 7), cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra', 5)] },
   BORROSA: { ...base, legible: false, problemas_foto: ['cortada', 'sombra'], repetir_foto: true, motivo_repetir: 'El número de PDV quedó cortado. Que se vea el remito entero.',
     numero_remito: null, pdv_pedido_web: null, pdv_observaciones: null, cliente: null, cuit_cliente: null, items: [] },
@@ -249,8 +253,8 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
 
   // 4. Lo que no cierra queda para revisar, nunca va a un pedido «parecido».
   const mal = await api('POST', '/hooks/chofer/api/remitos', form('MALPDV'), H);
-  assert.equal(mal.data.estado, 'revisar');
-  assert.match(mal.data.mensaje, /Logística lo revisa/);
+  assert.deepEqual([mal.data.estado, mal.data.pide_pdv], ['revisar', true]);
+  assert.match(mal.data.mensaje, /no coincide en los dos lugares/);
   const borrosa = await api('POST', '/hooks/chofer/api/remitos', form('BORROSA'), H);
   assert.deepEqual([borrosa.data.estado, borrosa.data.repetir], ['revisar', true]);
   assert.match(borrosa.data.mensaje, /quedó cortado/);
@@ -265,6 +269,18 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const rSin = (await api('GET', '/remitos/revisar')).data.remitos.find((x) => x.id === sinpdv.data.id);
   assert.ok(rSin.candidatos.some((c) => c.id === B.id), 'sin PDV: los pedidos de la empresa, para elegir');
   assert.ok((await api('GET', '/remitos/revisar/cuantos')).data.total >= 5);
+
+  // 4b. El PDV que escribe el chofer: el remito no lo dice, la app se lo pide y, con el CUIT del cliente, va al pedido
+  // (sin volver a leer la foto).
+  const pide = await api('POST', '/hooks/chofer/api/remitos', form('PIDEPDV'), H);
+  assert.deepEqual([pide.data.estado, pide.data.pide_pdv], ['revisar', true]);
+  assert.match(pide.data.mensaje, /No se lee el número de PDV/);
+  assert.equal((await api('POST', `/hooks/chofer/api/remitos/${pide.data.id}/pdv`, { pdv: 'abc' }, H)).status, 400);
+  const leidasAntes = lecturas;
+  const corr = await api('POST', `/hooks/chofer/api/remitos/${pide.data.id}/pdv`, { pdv: PDV }, H);
+  assert.deepEqual([corr.status, corr.data.estado, corr.data.pedido?.id, corr.data.pdv_chofer, corr.data.pide_pdv], [200, 'ok', A.id, PDV, false]);
+  assert.equal(lecturas, leidasAntes, 'no se vuelve a leer la foto');
+  assert.ok((await remitosDe(A.id)).remitos.find((x) => x.id === pide.data.id).controles.some((c) => c.dato === 'PDV' && /chofer/.test(c.detalle)));
 
   // 5. La segunda entrega completa el pedido A.
   const m2 = await api('POST', '/hooks/chofer/api/remitos', form('OK2'), H);
@@ -328,6 +344,32 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const mios = (await api('GET', '/hooks/chofer/api/remitos', undefined, H)).data.remitos;
   assert.equal(mios[0].id, (await api('POST', '/hooks/chofer/api/remitos', form('B1', { clave: 'x' }), H)).data.id);
   assert.ok(mios.some((x) => x.estado === 'ok' && x.pedido?.id === A.id));
+  // «¿No es este pedido?»: el chofer corrige un PDV bien leído. No se cambia a ciegas: deja de contar y lo revisa
+  // Logística, con los dos pedidos posibles. Otro chofer no puede tocar sus remitos.
+  const contra = await api('POST', '/hooks/chofer/api/remitos', form('CONTRA'), H);
+  assert.deepEqual([contra.data.estado, contra.data.pedido?.id], ['ok', B.id]);
+  const enB = (await remitosDe(B.id)).entrega.lineas[0].entregado;
+  asUser = logi.email;
+  const ch2 = (await api('POST', '/choferes', { name: `Pedro ${RUN}` })).data;
+  asUser = null;
+  assert.equal((await api('POST', `/hooks/chofer/api/remitos/${contra.data.id}/pdv`, { pdv: PDV }, { authorization: `Bearer ${ch2.token}` })).status, 404);
+  const c2 = await api('POST', `/hooks/chofer/api/remitos/${contra.data.id}/pdv`, { pdv: PDV }, H);
+  assert.equal(c2.data.estado, 'revisar');
+  assert.match(c2.data.mensaje, /Logística lo revisa/);
+  assert.equal((await remitosDe(B.id)).entrega.lineas[0].entregado, enB - 1, 'ya no cuenta en B');
+  const rc = (await api('GET', '/remitos/revisar')).data.remitos.find((x) => x.id === contra.data.id);
+  assert.ok(rc.candidatos.some((c) => c.id === A.id) && rc.candidatos.some((c) => c.id === B.id), 'los dos pedidos posibles');
+  assert.equal(rc.pdv_chofer, PDV);
+  // La misma foto mandada por otro chofer (reenviada): entra aparte (cada uno ve lo suyo), pero como el remito ya está
+  // para revisar, este también; y si Logística confirma los dos en el mismo pedido, el segundo queda repetido.
+  const otraVez = await api('POST', '/hooks/chofer/api/remitos', form('CONTRA'), { authorization: `Bearer ${ch2.token}` });
+  assert.notEqual(otraVez.data.id, contra.data.id);
+  assert.equal(otraVez.data.estado, 'revisar');
+  asUser = logi.email;
+  assert.equal((await api('POST', `/remitos/${contra.data.id}/revisar`, { accion: 'confirmar', pedido: B.id })).data.estado, 'ok');
+  assert.equal((await api('POST', `/remitos/${otraVez.data.id}/revisar`, { accion: 'confirmar', pedido: B.id })).data.estado, 'duplicado');
+  asUser = null;
+  assert.equal((await remitosDe(B.id)).entrega.lineas[0].entregado, enB, 'contado una sola vez');
   // Dar de baja el link: deja de andar.
   asUser = logi.email;
   const lista = (await api('GET', '/choferes')).data;
@@ -348,4 +390,12 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.equal((await fetch(`${BASE}${js}`)).status, 200);
   assert.equal((await fetch(`${BASE}/hooks/chofer/no-existe.js`)).status, 404);
   assert.equal((await fetch(`${BASE}/hooks/chofer`, { redirect: 'manual' })).status, 301);
+  // El manifest con el link del chofer: guardada en la pantalla de inicio (iPhone), abre ya con su link.
+  const man = async (q) => { const r = await fetch(`${BASE}/hooks/chofer/manifest.webmanifest${q}`); return { tipo: r.headers.get('content-type'), cache: r.headers.get('cache-control'), m: await r.json() }; };
+  const conLink = await man(`?t=${ch.token}`);
+  assert.equal(conLink.m.start_url, `/hooks/chofer/#t=${ch.token}`);
+  assert.deepEqual([conLink.m.id, conLink.m.scope, conLink.cache], ['/hooks/chofer/', '/hooks/chofer/', 'no-store']);
+  assert.match(conLink.tipo, /manifest\+json/);
+  assert.equal((await man('')).m.start_url, '/hooks/chofer/');
+  assert.equal((await man('?t=<script>')).m.start_url, '/hooks/chofer/', 'solo se copia algo con forma de token');
 });

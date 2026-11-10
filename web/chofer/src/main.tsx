@@ -1,10 +1,16 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { tomarTokenDelLink } from './api';
+import { token, tokenDeTexto, tomarTokenDelLink, usarToken } from './api';
 import App from './App';
 import './estilos.css';
 
 tomarTokenDelLink();
+
+// Si en la misma pestaña se abre el link de otro chofer, se entra con ese.
+window.addEventListener('hashchange', () => {
+  const t = window.location.hash.includes('t=') ? tokenDeTexto(window.location.hash) : null;
+  if (t && t !== token()) { usarToken(t); window.location.reload(); }
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -22,7 +28,7 @@ if (import.meta.env.PROD && 'serviceWorker' in navigator) {
       // Le pasa al service worker lo que esta página necesitó para abrir (los archivos llevan un nombre distinto en cada versión).
       const urls = performance.getEntriesByType('resource')
         .map((r) => r.name)
-        .filter((u) => (u.startsWith(location.origin + base) && !u.includes('/api/')) || u.startsWith('https://fonts.'));
+        .filter((u) => (u.startsWith(location.origin + base) && !u.includes('/api/') && !u.includes('manifest.webmanifest')) || u.startsWith('https://fonts.'));
       reg.active?.postMessage({ tipo: 'guardar', urls });
     }).catch(() => { /* sin service worker la app anda igual, solo que no abre sin señal */ });
   });

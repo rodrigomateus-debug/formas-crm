@@ -37,6 +37,15 @@ const TRAZOS: Record<string, ReactNode> = {
     <path d="M14 10a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 0 0 5.7 5.7l1.1-1.1" />
     <path d="M4 4l16 16" />
   </>),
+  compartir: (<>
+    <path d="M12 14.5V3.5M8 7l4-3.5L16 7" />
+    <path d="M8.5 10.5H7A1.5 1.5 0 0 0 5.5 12v7A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-1.5" />
+  </>),
+  galeria: (<>
+    <rect x="4" y="5" width="16" height="14" rx="2.5" />
+    <circle cx="9" cy="10" r="1.6" />
+    <path d="m5 17 4.5-4 3 2.5 3-3L20 16" />
+  </>),
   // Consejos para la foto
   entero: (<>
     <path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16" />
@@ -57,6 +66,21 @@ const TRAZOS: Record<string, ReactNode> = {
 };
 
 export type NombreIcono = keyof typeof TRAZOS;
+
+/** La marca de la app (la hoja de remito con el tilde verde del ícono), para la barra de arriba. */
+export function Marca({ tamano = 30 }: { tamano?: number }) {
+  return (
+    <svg width={tamano} height={tamano} viewBox="100 66 380 400" aria-hidden="true" focusable="false">
+      <g transform="rotate(-6 256 256)">
+        <rect x="132" y="84" width="232" height="318" rx="26" fill="#fff" />
+        <path d="M170 150h110M170 206h156M170 262h156M170 318h74" stroke="#000085" strokeWidth="24" strokeLinecap="round" opacity=".85" />
+      </g>
+      <circle cx="352" cy="352" r="100" fill="var(--cabecera, #000085)" />
+      <circle cx="352" cy="352" r="80" fill="#8cc63f" />
+      <path d="M314 354l28 28 50-56" fill="none" stroke="#000085" strokeWidth="26" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export function Icono({ nombre, tamano = 24 }: { nombre: string; tamano?: number }) {
   return (

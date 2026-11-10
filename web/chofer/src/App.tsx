@@ -3,6 +3,7 @@ import {
   LinkInvalido, Rechazo, corregirPdv, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
 import { envios, type Envio } from './envios';
+import { guardarEnTanda, leerTanda, sacarDeTanda, vaciarTanda, type FotoDeTanda } from './cola';
 import { achicarFoto } from './imagen';
 import { conTope, ubicacion, type Punto } from './ubicacion';
 import { Icono, Marca } from './iconos';
@@ -104,13 +105,10 @@ function useEnLinea(): boolean {
 
 /** De dónde viene la foto: recién sacada con la cámara o elegida entre las guardadas en el celular. */
 type Origen = 'camara' | 'guardada';
-/** Dónde va la vista previa cuando se eligieron varias fotos guardadas a la vez: «foto n de total». */
-type Tanda = { origen: Origen; n: number; total: number };
-type Previa = Tanda & (
-  | { paso: 'preparando' }
-  | { paso: 'lista'; blob: Blob; url: string; tomada_el: string }
-  | { paso: 'error' }
-);
+/** Una foto de la tanda que se está armando: ya achicada, con su dirección para mostrarla. */
+type FotoTanda = FotoDeTanda & { url: string };
+/** Cuántas fotos entran en una tanda. */
+const TOPE_TANDA = 10;
 
 export default function App() {
   const estado = useSyncExternalStore(envios.suscribir, envios.leer);
@@ -120,15 +118,22 @@ export default function App() {
   const [remitos, setRemitos] = useState<RemitoChofer[]>(remitosGuardados);
   const [listaAlDia, setListaAlDia] = useState(false);
   const [reemplazadas, setReemplazadas] = useState<string[]>(() => leerLista('chofer-reemplazadas'));
-  const [previa, setPrevia] = useState<Previa | null>(null);
+  /** La tanda: las fotos sacadas o elegidas que todavía no se mandaron. También queda guardada en el celular. */
+  const [tanda, setTanda] = useState<FotoTanda[]>([]);
+  const [viendo, setViendo] = useState(false);       // la vista previa está abierta
+  const [preparando, setPreparando] = useState(0);   // fotos que se están achicando
+  const [elegida, setElegida] = useState<string | null>(null); // la que se ve grande
+  const [avisoTanda, setAvisoTanda] = useState('');
   const [anuncio, setAnuncio] = useState('');
   /** Un remito de la lista de hoy traído a la tarjeta grande (para escribirle el PDV). */
   const [idSuelto, setIdSuelto] = useState<number | null>(null);
 
   const entrada = useRef<HTMLInputElement>(null);
   const entradaGuardadas = useRef<HTMLInputElement>(null);
-  /** Las fotos elegidas (una de la cámara, o una o varias guardadas) y por cuál va la vista previa. */
-  const tanda = useRef<{ archivos: File[]; i: number; origen: Origen }>({ archivos: [], i: 0, origen: 'camara' });
+  const tandaAhora = useRef(tanda); // la tanda al día, para lo que corre fuera del dibujado
+  tandaAhora.current = tanda;
+  const enCamino = useRef(0);       // fotos que se están achicando (cuentan para el tope)
+  const tandaLevantada = useRef(false);
   const reemplaza = useRef<string | undefined>(undefined);
   const punto = useRef<Promise<Punto | null> | null>(null);
   const arriba = useRef<HTMLHeadingElement>(null);
@@ -192,27 +197,36 @@ export default function App() {
     return () => clearInterval(t);
   }, [hayPorLeer, refrescar]);
 
-  // ----- Cámara y vista previa -----
+  // ----- Cámara, fotos guardadas y la tanda -----
 
-  const soltarPrevia = useCallback(() => {
-    setPrevia((p) => {
-      if (p?.paso === 'lista') URL.revokeObjectURL(p.url);
-      return null;
-    });
-  }, []);
+  // Al abrir: si quedó una tanda a medio armar (cerró la app antes de mandar), vuelve a aparecer.
+  useEffect(() => {
+    if (!hayToken || tandaLevantada.current) return;
+    tandaLevantada.current = true;
+    leerTanda().then((guardadas) => {
+      if (!guardadas.length) return;
+      setTanda((antes) => [...guardadas.filter((g) => !antes.some((a) => a.clave === g.clave)).map((g) => ({ ...g, url: URL.createObjectURL(g.blob) })), ...antes]);
+    }).catch(() => { /* sin IndexedDB no hay tanda guardada */ });
+  }, [hayToken]);
 
   // El botón «atrás» del celular cierra la vista previa en vez de salir de la app: al abrirla se suma un paso al
   // historial y al cerrarla se vuelve.
   useEffect(() => {
-    window.addEventListener('popstate', soltarPrevia);
-    return () => window.removeEventListener('popstate', soltarPrevia);
-  }, [soltarPrevia]);
+    const atras = () => setViendo(false);
+    window.addEventListener('popstate', atras);
+    return () => window.removeEventListener('popstate', atras);
+  }, []);
 
   const enPrevia = () => {
     try { return !!(history.state as { previa?: boolean } | null)?.previa; } catch { return false; }
   };
+  function abrirPrevia() {
+    setViendo(true);
+    if (!enPrevia()) { try { history.pushState({ previa: true }, ''); } catch { /* da igual */ } }
+  }
+  /** Cierra la vista previa. La tanda no se pierde: queda en el inicio como «fotos sin mandar». */
   function cerrarPrevia() {
-    soltarPrevia();
+    setViendo(false);
     if (enPrevia()) history.back();
   }
 
@@ -225,65 +239,98 @@ export default function App() {
     entradaGuardadas.current?.click();
   }
 
-  function alElegir(lista: FileList | null, origen: Origen) {
+  /** Fotos nuevas (una de la cámara, o una o varias guardadas): se achican y se suman a la tanda. */
+  async function alElegir(lista: FileList | null, origen: Origen) {
     const archivos = Array.from(lista ?? []);
     if (!archivos.length) return;
-    tanda.current = { archivos, i: 0, origen };
-    void preparar();
-  }
-
-  /** Achica la foto que toca de la tanda y la muestra en la vista previa. */
-  async function preparar() {
-    const { archivos, i, origen } = tanda.current;
-    const archivo = archivos[i];
-    const donde: Tanda = { origen, n: i + 1, total: archivos.length };
-    const tomada = archivo.lastModified > 0 && archivo.lastModified <= Date.now() ? archivo.lastModified : Date.now();
-    setPrevia((p) => {
-      if (p?.paso === 'lista') URL.revokeObjectURL(p.url);
-      return { ...donde, paso: 'preparando' };
-    });
-    if (!enPrevia()) { try { history.pushState({ previa: true }, ''); } catch { /* da igual */ } }
-    // La ubicación solo sirve si la foto se está sacando ahora: una guardada pudo sacarse en cualquier lado.
-    punto.current = origen === 'camara' ? (punto.current ?? ubicacion()) : null;
-    try {
-      const blob = await achicarFoto(archivo);
-      setPrevia({ ...donde, paso: 'lista', blob, url: URL.createObjectURL(blob), tomada_el: new Date(tomada).toISOString() });
-    } catch {
-      setPrevia({ ...donde, paso: 'error' });
-    }
-  }
-
-  /** Pasa a la foto siguiente de la tanda; si no quedan, cierra la vista previa. */
-  function seguir() {
-    const t = tanda.current;
-    if (t.i + 1 < t.archivos.length) {
-      t.i += 1;
-      void preparar();
-    } else {
-      cerrarPrevia();
-      window.scrollTo({ top: 0 });
-      arriba.current?.focus({ preventScroll: true });
-    }
-  }
-
-  async function mandar() {
-    if (previa?.paso !== 'lista') return;
-    const { blob, tomada_el } = previa;
     const reemplazaA = reemplaza.current;
     reemplaza.current = undefined;
+    const lugar = Math.max(0, TOPE_TANDA - tandaAhora.current.length - enCamino.current);
+    const entran = archivos.slice(0, lugar);
+    setAvisoTanda(entran.length < archivos.length
+      ? `Entran hasta ${TOPE_TANDA} fotos por vez. Mandá estas y después seguí con las que faltan.` : '');
+    abrirPrevia();
+    if (!entran.length) return;
+    // La ubicación solo sirve si la foto se está sacando ahora: una guardada pudo sacarse en cualquier lado.
+    if (origen === 'camara' && !punto.current) punto.current = ubicacion();
+    enCamino.current += entran.length;
+    setPreparando((n) => n + entran.length);
+    let fallaron = 0;
+    for (const [i, archivo] of entran.entries()) {
+      try {
+        const blob = await achicarFoto(archivo);
+        const tomada = archivo.lastModified > 0 && archivo.lastModified <= Date.now() ? archivo.lastModified : Date.now();
+        const foto: FotoDeTanda = {
+          clave: claveNueva(), blob, tomada_el: new Date(tomada).toISOString(), origen,
+          reemplaza: i === 0 ? reemplazaA : undefined, // «Sacala de nuevo» reemplaza a una sola foto
+          orden: Date.now() + i / 1000,
+        };
+        setTanda((antes) => [...antes, { ...foto, url: URL.createObjectURL(blob) }]);
+        setElegida(foto.clave);
+        guardarEnTanda(foto).catch(() => { /* sin IndexedDB la tanda vive mientras la app esté abierta */ });
+      } catch {
+        fallaron += 1;
+      } finally {
+        enCamino.current -= 1;
+        setPreparando((n) => n - 1);
+      }
+    }
+    if (fallaron) {
+      setAvisoTanda(fallaron === 1
+        ? (origen === 'guardada' ? 'Una foto no se pudo abrir. Probá con otra.' : 'La foto no se pudo abrir. Probá sacarla de nuevo.')
+        : `${fallaron} fotos no se pudieron abrir. Probá con otras.`);
+    }
+  }
+
+  function sacarDeLaTanda(clave: string) {
+    const foto = tandaAhora.current.find((f) => f.clave === clave);
+    if (!foto) return;
+    URL.revokeObjectURL(foto.url);
+    setTanda((antes) => antes.filter((f) => f.clave !== clave));
+    setAvisoTanda('');
+    sacarDeTanda(clave).catch(() => {});
+  }
+
+  function descartarTanda() {
+    tandaAhora.current.forEach((f) => URL.revokeObjectURL(f.url));
+    setTanda([]);
+    setAvisoTanda('');
+    vaciarTanda().catch(() => {});
+  }
+
+  // Si se sacaron todas las fotos de la tanda, no queda nada que mirar: se cierra la vista previa.
+  useEffect(() => {
+    if (viendo && tanda.length === 0 && preparando === 0 && !avisoTanda) cerrarPrevia();
+  });
+
+  /** Manda la tanda: cada foto es un envío propio, con su clave; las que van juntas comparten lote. */
+  async function mandarTanda() {
+    const fotos = tandaAhora.current;
+    if (!fotos.length) return;
     const esperaLugar = punto.current;
     punto.current = null;
-    seguir();
-    setAnuncio('Mandando la foto.');
-    const lugar = esperaLugar ? await conTope(esperaLugar, 800) : null;
-    if (reemplazaA) {
+    setTanda([]);
+    setAvisoTanda('');
+    cerrarPrevia();
+    setAnuncio(fotos.length === 1 ? 'Mandando la foto.' : `Mandando ${fotos.length} fotos.`);
+    const lugar = esperaLugar && fotos.some((f) => f.origen === 'camara') ? await conTope(esperaLugar, 800) : null;
+    const repetidas = fotos.map((f) => f.reemplaza).filter((c): c is string => !!c);
+    if (repetidas.length) {
       setReemplazadas((antes) => {
-        const lista = [...antes.filter((c) => c !== reemplazaA), reemplazaA].slice(-60);
+        const lista = [...antes.filter((c) => !repetidas.includes(c)), ...repetidas].slice(-60);
         try { localStorage.setItem('chofer-reemplazadas', JSON.stringify(lista)); } catch { /* da igual */ }
         return lista;
       });
     }
-    await envios.agregar({ clave: claveNueva(), blob, tomada_el, lat: lugar?.lat, lng: lugar?.lng, reemplaza: reemplazaA });
+    const lote = fotos.length > 1 ? claveNueva() : undefined;
+    for (const f of fotos) {
+      const conLugar = f.origen === 'camara' ? lugar : null;
+      await envios.agregar({ clave: f.clave, blob: f.blob, tomada_el: f.tomada_el, lat: conLugar?.lat, lng: conLugar?.lng, reemplaza: f.reemplaza, lote });
+      sacarDeTanda(f.clave).catch(() => {}); // ya quedó en la cola de envíos
+      URL.revokeObjectURL(f.url);
+    }
+    window.scrollTo({ top: 0 });
+    arriba.current?.focus({ preventScroll: true });
   }
 
   // ----- Qué se muestra -----
@@ -323,13 +370,26 @@ export default function App() {
   const hayFoco = !!envioFoco || !!suelto;
   const focoPideOtra = hayFoco && (envioFoco?.fase === 'fallo' || !!remitoFoco?.repetir) && !reemplazadas.includes(claveFoco ?? '');
 
+  // Fotos mandadas juntas: mientras ninguna pida nada, la tarjeta grande muestra el avance de todas («Mandando 2 de 3…»)
+  // y cada resultado va apareciendo en la lista de hoy. La que pide algo (otra foto o el PDV) pasa al frente.
+  const pideAlgo = (e: Envio): boolean => {
+    if (e.fase === 'fallo') return true;
+    const r = e.resultado ? alDia(e.resultado) : null;
+    return !!r && ((r.repetir && !reemplazadas.includes(r.clave ?? e.clave)) || faltaPdv(r));
+  };
+  const loteFoco = envioFoco?.lote ? estado.envios.filter((e) => e.lote === envioFoco.lote) : [];
+  const enLote = !!envioFoco && loteFoco.length > 1 && !pideAlgo(envioFoco);
+  const loteTerminado = enLote && loteFoco.every((e) => e.fase === 'listo' || e.fase === 'fallo');
+  const pideDelLote = loteTerminado ? loteFoco.find(pideAlgo)?.clave : undefined;
+  useEffect(() => { if (pideDelLote) envios.enfocar(pideDelLote); }, [pideDelLote]);
+
   const filas = useMemo(() => {
     type Fila = { llave: string; cuando: string; clave: string; envio?: Envio; remito?: RemitoChofer };
     const lista: Fila[] = [];
     const idsLocales = new Set<number>();
     for (const e of estado.envios) {
       if (e.resultado) idsLocales.add(e.resultado.id);
-      if (e.clave === envioFoco?.clave) continue;
+      if (!enLote && e.clave === envioFoco?.clave) continue;
       if (e.resultado) {
         if (esHoy(e.resultado.creado) && !remitos.some((r) => r.id === e.resultado!.id)) {
           lista.push({ llave: `r${e.resultado.id}`, cuando: e.resultado.creado, clave: e.resultado.clave ?? e.clave, remito: e.resultado });
@@ -338,13 +398,13 @@ export default function App() {
         lista.push({ llave: `e${e.clave}`, cuando: e.tomada_el, clave: e.clave, envio: e });
       }
     }
-    const idFoco = remitoFoco?.id;
+    const idFoco = enLote ? undefined : remitoFoco?.id;
     for (const r of remitos) {
       if (!esHoy(r.creado) || r.id === idFoco) continue;
       lista.push({ llave: `r${r.id}`, cuando: r.creado, clave: r.clave ?? `remito-${r.id}`, remito: r });
     }
     return lista.sort((a, b) => b.cuando.localeCompare(a.cuando));
-  }, [estado.envios, remitos, envioFoco, remitoFoco]);
+  }, [estado.envios, remitos, envioFoco, remitoFoco, enLote]);
 
   const esperando = estado.envios.filter((e) => e.fase === 'espera');
   const esperandoFuera = esperando.filter((e) => e.clave !== estado.foco).length;
@@ -375,7 +435,25 @@ export default function App() {
 
         <p className="solo-lector" role="status" aria-live="polite">{anuncio}</p>
 
-        {hayFoco && (
+        {tanda.length > 0 && !viendo && (
+          <section className="sin-mandar" aria-labelledby="titulo-sin-mandar">
+            <h2 id="titulo-sin-mandar">{tanda.length === 1 ? 'Tenés 1 foto sin mandar' : `Tenés ${tanda.length} fotos sin mandar`}</h2>
+            <button type="button" className="minis" onClick={abrirPrevia} aria-label="Ver las fotos sin mandar">
+              {tanda.slice(0, 5).map((f) => <img key={f.clave} src={f.url} alt="" />)}
+              {tanda.length > 5 && <span>+{tanda.length - 5}</span>}
+            </button>
+            <div className="acciones">
+              <button type="button" className="boton principal" onClick={() => void mandarTanda()}>
+                <Icono nombre="subir" tamano={24} /> {tanda.length === 1 ? 'Mandar' : `Mandar las ${tanda.length}`}
+              </button>
+              <button type="button" className="enlace" onClick={descartarTanda}>Descartar</button>
+            </div>
+          </section>
+        )}
+
+        {enLote && <TarjetaLote envios={loteFoco} enLinea={enLinea} alReintentar={() => envios.empujar()} />}
+
+        {hayFoco && !enLote && (
           <TarjetaFoco
             key={remitoFoco ? `r${remitoFoco.id}` : `e${envioFoco?.clave}`}
             envio={envioFoco}
@@ -476,16 +554,19 @@ export default function App() {
         onChange={(e) => { const l = e.target.files; alElegir(l, 'guardada'); e.target.value = ''; }}
       />
 
-      {previa && (
+      {viendo && (
         <VistaPrevia
-          previa={previa}
-          alMandar={() => void mandar()}
-          alOtra={() => {
-            if (previa.total > 1) seguir(); // varias guardadas: se saltea esta
-            else if (previa.origen === 'guardada') abrirGuardadas(reemplaza.current);
-            else abrirCamara(reemplaza.current);
-          }}
-          alCancelar={() => { reemplaza.current = undefined; cerrarPrevia(); }}
+          fotos={tanda}
+          elegida={elegida}
+          preparando={preparando}
+          aviso={avisoTanda}
+          llena={tanda.length + preparando >= TOPE_TANDA}
+          alElegir={setElegida}
+          alSacar={sacarDeLaTanda}
+          alCamara={() => abrirCamara()}
+          alGuardadas={() => abrirGuardadas()}
+          alMandar={() => void mandarTanda()}
+          alCerrar={cerrarPrevia}
         />
       )}
     </div>
@@ -790,14 +871,19 @@ function FilaRemito({ remito, yaRepetida, alRepetir, alEscribirPdv }: {
   );
 }
 
-function VistaPrevia({ previa, alMandar, alOtra, alCancelar }: {
-  previa: Previa; alMandar: () => void; alOtra: () => void; alCancelar: () => void;
+/** La tanda antes de mandar: la foto elegida en grande, la tira con todas (cada una con su X) y los botones. */
+function VistaPrevia({ fotos, elegida, preparando, aviso, llena, alElegir, alSacar, alCamara, alGuardadas, alMandar, alCerrar }: {
+  fotos: FotoTanda[]; elegida: string | null; preparando: number; aviso: string; llena: boolean;
+  alElegir: (clave: string) => void; alSacar: (clave: string) => void;
+  alCamara: () => void; alGuardadas: () => void; alMandar: () => void; alCerrar: () => void;
 }) {
   const principal = useRef<HTMLButtonElement>(null);
-  const lista = previa.paso === 'lista';
-  const varias = previa.total > 1;
-  const otra = varias ? 'Saltear esta' : previa.origen === 'guardada' ? 'Elegir otra' : 'Sacar otra';
-  useEffect(() => { principal.current?.focus(); }, [previa.paso, previa.n]);
+  const tira = useRef<HTMLUListElement>(null);
+  const n = fotos.length;
+  const grande = fotos.find((f) => f.clave === elegida) ?? fotos[n - 1];
+  useEffect(() => { principal.current?.focus(); }, [n > 0]);
+  // La foto nueva queda a la vista en la tira.
+  useEffect(() => { tira.current?.scrollTo({ left: tira.current.scrollWidth }); }, [n, preparando]);
   useEffect(() => {
     const antes = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -805,32 +891,97 @@ function VistaPrevia({ previa, alMandar, alOtra, alCancelar }: {
   }, []);
   return (
     <div className="previa" role="dialog" aria-modal="true" aria-labelledby="titulo-previa"
-      onKeyDown={(e) => { if (e.key === 'Escape') alCancelar(); }}>
+      onKeyDown={(e) => { if (e.key === 'Escape') alCerrar(); }}>
       <div className="previa-arriba">
-        <h2 id="titulo-previa">
-          {varias && <span className="cuantas">Foto {previa.n} de {previa.total}</span>}
-          {previa.paso === 'preparando' ? 'Preparando la foto…' : lista ? '¿Se lee todo el remito?' : 'No se pudo abrir la foto'}
+        <h2 id="titulo-previa" aria-live="polite">
+          {n === 0 ? (preparando > 0 ? 'Preparando la foto…' : 'No hay fotos para mandar')
+            : n === 1 ? '¿Se lee todo el remito?' : `${n} fotos para mandar`}
         </h2>
-        <button type="button" className="cerrar" onClick={alCancelar} aria-label="Cancelar y volver">
+        <button type="button" className="cerrar" onClick={alCerrar} aria-label="Cerrar. Las fotos quedan guardadas sin mandar">
           <Icono nombre="cruz" tamano={26} />
         </button>
       </div>
       <div className="previa-foto">
-        {lista && <img src={previa.url} alt="La foto que sacaste del remito" />}
-        {previa.paso === 'preparando' && <span className="girando grande" role="status" aria-label="Preparando la foto" />}
-        {previa.paso === 'error' && <p>{previa.origen === 'guardada' ? 'Probá con otra foto.' : 'Probá sacarla de nuevo.'}</p>}
+        {grande
+          ? <img src={grande.url} alt={n > 1 ? `Foto ${fotos.indexOf(grande) + 1} de ${n}` : 'La foto del remito'} />
+          : preparando > 0 && <span className="girando grande" role="status" aria-label="Preparando la foto" />}
       </div>
+      {(n > 0 || preparando > 0) && (
+        <ul className="tira" ref={tira} aria-label="Fotos de esta tanda">
+          {fotos.map((f, i) => (
+            <li key={f.clave} className={f === grande ? 'elegida' : undefined}>
+              <button type="button" className="ver" onClick={() => alElegir(f.clave)} aria-label={`Ver la foto ${i + 1}`} aria-pressed={f === grande}>
+                <img src={f.url} alt="" />
+              </button>
+              <button type="button" className="sacar" onClick={() => alSacar(f.clave)} aria-label={`Sacar la foto ${i + 1} de la tanda`}>
+                <span><Icono nombre="cruz" tamano={18} /></span>
+              </button>
+            </li>
+          ))}
+          {Array.from({ length: Math.max(0, preparando) }, (_, i) => (
+            <li key={`p${i}`} className="llegando"><span className="girando" role="status" aria-label="Preparando la foto" /></li>
+          ))}
+        </ul>
+      )}
+      {aviso
+        ? <p className="previa-nota aviso" role="alert">{aviso}</p>
+        : <p className="previa-nota">¿El remito tiene varias hojas? Sacale una foto a cada una.</p>}
       <div className="previa-abajo">
-        <button type="button" className="boton fantasma" ref={lista ? undefined : principal} onClick={alOtra}>
-          {!varias && <Icono nombre={previa.origen === 'guardada' ? 'galeria' : 'repetir'} tamano={24} />} {otra}
-        </button>
-        {lista && (
-          <button type="button" className="boton verde" ref={principal} onClick={alMandar}>
-            <Icono nombre="subir" tamano={26} /> Mandar
+        <div className="sumar">
+          <button type="button" className="boton fantasma" ref={n > 0 ? undefined : principal} onClick={alCamara} disabled={llena}>
+            <Icono nombre="camara" tamano={24} /> Sacar otra foto
+          </button>
+          <button type="button" className="boton fantasma" onClick={alGuardadas} disabled={llena}>
+            <Icono nombre="galeria" tamano={24} /> Sumar guardada
+          </button>
+        </div>
+        {n > 0 && (
+          <button type="button" className="boton verde" ref={principal} onClick={alMandar} disabled={preparando > 0}>
+            <Icono nombre="subir" tamano={26} /> {n === 1 ? 'Mandar' : `Mandar las ${n} fotos`}
           </button>
         )}
       </div>
     </div>
+  );
+}
+
+/** Varias fotos mandadas juntas: el avance de todas y, al final, cuántas llegaron. Cada resultado está en la lista de hoy. */
+function TarjetaLote({ envios: lote, enLinea, alReintentar }: { envios: Envio[]; enLinea: boolean; alReintentar: () => void }) {
+  const total = lote.length;
+  const hechas = lote.filter((e) => e.fase === 'listo' || e.fase === 'fallo').length;
+  if (hechas === total) {
+    const todasBien = lote.every((e) => e.resultado?.estado === 'ok');
+    return (
+      <section className={`foco ${todasBien ? 'bien' : 'neutro'}`} aria-label="Resultado de las fotos">
+        <div className="cabeza"><span className="sello"><Icono nombre="bien" tamano={30} /></span><h2>Llegaron las {total} fotos</h2></div>
+        <div className="detalle">
+          <p className="mensaje">{todasBien ? 'Quedaron todas en su pedido.' : 'Abajo está cómo quedó cada una.'}</p>
+        </div>
+      </section>
+    );
+  }
+  const avance = lote.reduce((suma, e) => suma + (e.fase === 'listo' || e.fase === 'fallo' ? 1 : e.fase === 'leyendo' ? .7 : e.fase === 'mandando' ? e.subido * .5 : 0), 0) / total;
+  const andando = lote.some((e) => e.fase === 'mandando' || e.fase === 'leyendo');
+  const faltan = total - hechas;
+  return (
+    <section className="foco curso lote" aria-label="Fotos en camino">
+      <div className="paso">
+        {andando || (enLinea && !lote.some((e) => e.fase === 'espera' && e.reintento)) ? (<>
+          <h2>Mandando {Math.min(hechas + 1, total)} de {total}…</h2>
+          <div className="barra-avance" role="progressbar" aria-label="Fotos mandadas" aria-valuemin={0} aria-valuemax={total} aria-valuenow={hechas}>
+            <span style={{ width: `${Math.max(4, Math.round(avance * 100))}%` }} />
+          </div>
+          <p>Cada foto puede tardar hasta un minuto. Mientras, podés seguir sacando fotos.</p>
+        </>) : enLinea ? (<>
+          <h2>{faltan === 1 ? 'Falta salir 1 foto' : `Faltan salir ${faltan} fotos`}</h2>
+          <p>Están guardadas en el celular. Se vuelven a mandar solas.</p>
+          <button type="button" className="boton chico" onClick={alReintentar}>Probar ahora</button>
+        </>) : (<>
+          <h2>{faltan === 1 ? '1 foto guardada. Esperando señal' : `${faltan} fotos guardadas. Esperando señal`}</h2>
+          <p>Salen solas cuando vuelva la señal. No hace falta que hagas nada.</p>
+        </>)}
+      </div>
+    </section>
   );
 }
 

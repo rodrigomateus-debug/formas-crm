@@ -312,9 +312,15 @@ test('cada uno ordena sus pestañas de vistas sin cambiárselas a los demás', a
   assert.equal((await api('PUT', '/views/contact/orden', { ids: 'x' })).status, 400);
   assert.equal((await api('PUT', '/views/contact/orden', { ids: [c.id, a.id, b.id] })).status, 200);
   assert.deepEqual(await mias(), [c.id, a.id, b.id]);
+  // Todos («all») y Míos («mine») también se mueven; la primera pestaña es la que se abre al entrar (viene en /meta).
+  assert.equal((await api('PUT', '/views/contact/orden', { ids: ['todos', a.id] })).status, 400);
+  assert.equal((await api('PUT', '/views/contact/orden', { ids: ['mine', b.id, 'all', c.id, a.id] })).status, 200);
+  assert.deepEqual(await mias(), [b.id, c.id, a.id]);
+  assert.deepEqual((await api('GET', '/meta')).data.orden_vistas.contact, ['mine', b.id, 'all', c.id, a.id]);
   // Otro usuario las sigue viendo en el orden de siempre.
   await api('POST', '/users', { email: `orden.${RUN}@formas.ar`, name: `Orden ${RUN}`, role: 'member', team_id: 57132078 });
   asUser = `orden.${RUN}@formas.ar`;
   assert.deepEqual(await mias(), [a.id, b.id, c.id]);
+  assert.equal((await api('GET', '/meta')).data.orden_vistas.contact, undefined);
   asUser = null;
 });

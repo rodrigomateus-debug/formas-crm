@@ -59,7 +59,7 @@ api.get('/meta', async (c) => {
   const db = c.env.DB;
   const meta = new Meta(db);
   const me = c.get('ctx').user;
-  const [users, teams, tags, mine, keyProps] = await db.batch([
+  const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     db.prepare('SELECT id, email, name, role, team_id, extra_teams, active, photo_url FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
@@ -67,6 +67,7 @@ api.get('/meta', async (c) => {
     db.prepare(`SELECT pipeline_id FROM records WHERE object_type = 'deal' AND owner_id = ? AND archived = 0
       GROUP BY pipeline_id ORDER BY COUNT(*) DESC`).bind(me.id),
     db.prepare("SELECT value FROM settings WHERE key = 'key_props'"),
+    db.prepare('SELECT object_type, ids FROM view_order WHERE user_id = ?').bind(me.id),
   ]);
   const pipelines = (await meta.pipelines()).filter((p) => canSee(me, p));
   return c.json({
@@ -78,6 +79,8 @@ api.get('/meta', async (c) => {
     tags: (tags.results as Array<{ rule: string }>).map((t) => ({ ...t, rule: JSON.parse(t.rule || '{}') })),
     // «Acerca de» de contactos, empresas y pedidos, elegido en la ficha (los negocios lo tienen por pipeline).
     key_props: JSON.parse((keyProps.results[0] as { value?: string } | undefined)?.value ?? '{}'),
+    // Orden de las pestañas de cada lista (Todos, Míos y las vistas): la primera es la que se abre al entrar.
+    orden_vistas: Object.fromEntries((ordenVistas.results as Array<{ object_type: string; ids: string }>).map((r) => [r.object_type, JSON.parse(r.ids)])),
   });
 });
 
@@ -620,11 +623,12 @@ api.get('/views/:type', async (c) => {
   return c.json(rows.map((v) => ({ ...v, config: JSON.parse(v.config) })));
 });
 
-// El orden de las pestañas de vistas de quien lo pide: {ids: [3, 1, 2]}.
+// El orden de las pestañas de vistas de quien lo pide: {ids: ['mine', 3, 'all', 1, 2]}. «all» (Todos) y «mine» (Míos)
+// también se mueven; la primera pestaña es la que se abre al entrar a la lista.
 api.put('/views/:type/orden', async (c) => {
   const type = assertType(c.req.param('type'));
   const b = await c.req.json<{ ids?: unknown }>();
-  if (!Array.isArray(b.ids) || !b.ids.every((x) => Number.isInteger(x))) throw new HttpError(400, 'Falta ids: la lista de vistas en orden.');
+  if (!Array.isArray(b.ids) || !b.ids.every((x) => Number.isInteger(x) || x === 'all' || x === 'mine')) throw new HttpError(400, 'Falta ids: la lista de vistas en orden.');
   await c.env.DB.prepare(`INSERT INTO view_order (user_id, object_type, ids, updated_at) VALUES (?, ?, ?, ?)
     ON CONFLICT(user_id, object_type) DO UPDATE SET ids = excluded.ids, updated_at = excluded.updated_at`)
     .bind(c.get('ctx').user.id, type, JSON.stringify(b.ids.slice(0, 200)), new Date().toISOString()).run();

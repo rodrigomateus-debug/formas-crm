@@ -52,7 +52,8 @@ app.route('/', compat);
 
 // La carga desde HubSpot (scripts/migrate-hubspot.mjs) entra por acá con su token: /api pide el login de Cloudflare
 // Access, que un script no puede pasar, y /hooks no. Solo con token (nunca con la sesión) y de administrador (migrate.ts).
-app.use('/hooks/migrate', async (c, next) => {
+// El comodín cubre /hooks/migrate y lo de abajo (/hooks/migrate/properties).
+app.use('/hooks/migrate/*', async (c, next) => {
   if (!/^Bearer fcrm_/.test(c.req.header('authorization') ?? '')) throw new HttpError(401, 'Falta el token de administrador (Authorization: Bearer fcrm_…).');
   c.set('ctx', await authenticate(c.env, c.req.raw));
   await next();

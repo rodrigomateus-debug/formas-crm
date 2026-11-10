@@ -49,6 +49,16 @@ async function hs(method, path, body) {
   throw new Error(`HubSpot ${method} ${path}: demasiados reintentos`);
 }
 
+// El CRM siempre contesta JSON. Otra cosa (casi siempre la página de login de Cloudflare Access, con 200 o una
+// redirección) quiere decir que el pedido no llegó al Worker: se corta con un mensaje claro y no con un error de JSON.
+async function crmJson(res, what) {
+  const type = res.headers.get('content-type') ?? '';
+  if (!type.includes('application/json')) {
+    throw new Error(`CRM ${what}: respondió ${res.status} ${type ? `(${type.split(';')[0]})` : 'sin content-type'} en vez de datos (¿el login de Cloudflare Access está tapando /hooks?).`);
+  }
+  return res.json();
+}
+
 async function crm(kind, items = [], extra = {}) {
   if (DRY) return { ok: true };
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -56,10 +66,7 @@ async function crm(kind, items = [], extra = {}) {
     const res = await fetch(`${CRM}/hooks/migrate`, {
       method: 'POST', redirect: 'manual', headers: { authorization: `Bearer ${CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ kind, items, ...extra }),
     });
-    if (!(res.headers.get('content-type') ?? '').includes('application/json')) {
-      throw new Error(`CRM ${kind}: respondió ${res.status} sin datos (¿el login de Cloudflare Access está tapando /hooks?).`);
-    }
-    const data = await res.json();
+    const data = await crmJson(res, kind);
     if (res.ok) return data;
     if (res.status < 500) throw new Error(`CRM ${kind}: ${res.status} ${data.error ?? ''}`);
     await sleep(2000 * (attempt + 1));
@@ -154,9 +161,10 @@ const CRM_TYPES = { contacts: 'contact', companies: 'company', deals: 'deal', or
 let crmProps = null;
 async function loadCrmProps() {
   if (!CRM_TOKEN) return null;
-  const res = await fetch(`${CRM}/api/meta`, { headers: { authorization: `Bearer ${CRM_TOKEN}` } });
-  if (!res.ok) throw new Error(`CRM /api/meta: ${res.status}`);
-  const meta = await res.json();
+  // Por /hooks/migrate y no por /api/meta, igual que la carga: /api pide el login de Cloudflare Access.
+  const res = await fetch(`${CRM}/hooks/migrate/properties`, { redirect: 'manual', headers: { authorization: `Bearer ${CRM_TOKEN}` } });
+  const meta = await crmJson(res, 'propiedades');
+  if (!res.ok) throw new Error(`CRM propiedades: ${res.status} ${meta.error ?? ''}`);
   return meta.properties.reduce((acc, p) => ((acc[p.object_type] ??= []).push(p.name === 'owner_id' ? 'hubspot_owner_id' : p.name), acc), {});
 }
 

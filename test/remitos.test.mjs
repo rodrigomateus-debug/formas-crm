@@ -188,6 +188,13 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const ch = (await api('POST', '/choferes', { name: `Juan ${RUN}` })).data;
   asUser = null;
   assert.match(ch.link, /\/hooks\/chofer\/#t=fcrm_/);
+  // Si lo pierde, Logística lo vuelve a copiar (una vendedora no).
+  asUser = logi.email;
+  assert.equal((await api('GET', `/choferes/${ch.id}/link`)).data.link, ch.link);
+  asUser = `vende.rem.${RUN}@formas.ar`;
+  assert.equal((await api('GET', `/choferes/${ch.id}/link`)).status, 403);
+  asUser = null;
+  assert.ok(!JSON.stringify((await api('GET', '/choferes')).data).includes(ch.token), 'la lista no trae los links');
   const H = { authorization: `Bearer ${ch.token}` };
   assert.deepEqual((await api('GET', '/hooks/chofer/api/yo', undefined, H)).data, { nombre: `Juan ${RUN}` });
   assert.equal((await api('GET', '/records/order', undefined, H)).status, 403, 'el link del chofer no abre el CRM');
@@ -327,6 +334,7 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const yo = lista.find((x) => x.name === `Juan ${RUN}`);
   assert.ok(yo.remitos >= 8);
   await api('DELETE', `/choferes/${yo.id}`);
+  assert.equal((await api('GET', `/choferes/${yo.id}/link`)).status, 410, 'dado de baja, el link ya no se muestra');
   asUser = null;
   assert.equal((await api('GET', '/hooks/chofer/api/yo', undefined, H)).status, 401);
 

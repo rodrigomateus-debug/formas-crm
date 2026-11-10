@@ -57,12 +57,12 @@ remito. Cuando un remito nuevo deja un pedido con faltantes o diferencias, les l
 **Logística** y a los **administradores** (siempre: no hace falta sumarlos a la lista de avisos por mail). Si el pedido
 se completa o se finaliza antes de que salga el mail, no se manda.
 
-## La bandeja de Logística (`/remitos`)
+## La pestaña «Entregas» de Logística (`/entregas`)
 
-- **Para revisar:** lo que no se pudo adjuntar solo o no se pudo leer, con la foto, lo leído y cómo se controló. Se
+- **Remitos para revisar:** lo que no se pudo adjuntar solo o no se pudo leer, con la foto, lo leído y cómo se controló. Se
   confirma en el pedido sugerido, se busca otro pedido, se lee de nuevo o se descarta.
-- **Choferes:** Logística y los administradores crean el link de cada chofer (se muestra una sola vez, con un botón para
-  mandarlo por WhatsApp) y lo dan de baja si se pierde. El link es un token tipo «chofer» que solo sirve para la app de
+- **Choferes:** Logística y los administradores crean el link de cada chofer (con un botón para mandarlo por WhatsApp), lo
+  vuelven a copiar con «Ver link» si el chofer lo pierde, y lo dan de baja si cambia de celular o quedó en manos de otro. El link es un token tipo «chofer» que solo sirve para la app de
   remitos: no abre el resto del CRM ni las otras entradas.
 
 ## La app del chofer (`web/chofer/`)
@@ -79,7 +79,7 @@ guardadas en el celular y se mandan solas cuando vuelve; reintentar nunca duplic
    Actions). El despliegue la carga en el Worker. Sin la clave, los remitos se guardan igual y se leen cuando esté.
 2. **Logística:** los usuarios de Logística, con el perfil Logística (Configuración → Usuarios). Ellos y los
    administradores reciben los faltantes y pueden finalizar entregas y crear los links de los choferes.
-3. **Choferes:** crear el link de cada uno en Remitos → Choferes (con el nombre del chofer) y mandárselo por WhatsApp.
+3. **Choferes:** crear el link de cada uno en Entregas → Choferes (con el nombre del chofer) y mandárselo por WhatsApp.
    Es la misma app para todos; el link es la llave personal de cada uno: dice quién mandó cada remito y se puede dar de
    baja sin tocar a los demás. En iPhone, si la agregan a la pantalla de inicio, la primera vez piden pegar el link otra
    vez (el iPhone no comparte lo guardado entre Safari y la app de inicio).

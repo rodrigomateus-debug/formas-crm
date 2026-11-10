@@ -352,7 +352,7 @@ function Pedidos() {
       {/* Lectura de remitos con la API de Claude (src/worker/remitos.ts). */}
       <div className="row wrap">
         <b style={{ width: 90 }}>Remitos</b>
-        {r?.configured ? <span className="grow">Lectura con Claude conectada · {r.leidos ?? 0} leídos{r.at ? ` (el último ${fmtDate(r.at, true)})` : ''} · {r.sin_leer ?? 0} sin leer · {r.revisar ?? 0} para revisar en <Link to="/remitos">Remitos</Link></span>
+        {r?.configured ? <span className="grow">Lectura con Claude conectada · {r.leidos ?? 0} leídos{r.at ? ` (el último ${fmtDate(r.at, true)})` : ''} · {r.sin_leer ?? 0} sin leer · {r.revisar ?? 0} para revisar en <Link to="/entregas">Entregas</Link></span>
           : <span className="grow muted">Falta el secreto ANTHROPIC_API_KEY en el repo: los remitos se guardan, pero no se leen ni cuentan para la entrega.</span>}
         <button className="btn sm" disabled={!r?.configured || !!busy} onClick={() => go('rem', '/integrations/remitos/leer')}>{busy === 'rem' ? 'Leyendo…' : 'Leer pendientes'}</button>
       </div>

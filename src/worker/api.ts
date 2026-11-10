@@ -843,7 +843,8 @@ api.post('/records/order/:id/entrega/finalizar', async (c) => {
 api.delete('/records/order/:id/entrega/finalizar', async (c) => c.json(await finalizarEntrega(c.env, c.get('ctx'), Number(c.req.param('id')), null)));
 
 // Links de los choferes (tokens tipo «chofer», que solo sirven para la app de remitos). Los manejan Logística y los
-// administradores; el link se muestra una sola vez.
+// administradores, que los pueden volver a copiar mientras estén activos.
+const linkChofer = (url: string, token: string) => `${new URL(url).origin}/hooks/chofer/#t=${token}`;
 function logistica(ctx: Ctx) { if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador.'); }
 api.get('/choferes', async (c) => {
   logistica(c.get('ctx'));
@@ -860,12 +861,23 @@ api.post('/choferes', async (c) => {
   const nombre = String(name ?? '').trim();
   if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre del chofer.');
   const token = newToken();
-  await c.env.DB.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source) VALUES (?, ?, ?, 'chofer')").bind(nombre.slice(0, 80), await sha256(token), ctx.user.id).run();
-  return c.json({ token, link: `${new URL(c.req.url).origin}/hooks/chofer/#t=${token}` }, 201);
+  const r = await c.env.DB.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source, chofer_token) VALUES (?, ?, ?, 'chofer', ?) RETURNING id")
+    .bind(nombre.slice(0, 80), await sha256(token), ctx.user.id, token).first<{ id: number }>();
+  return c.json({ id: r!.id, token, link: linkChofer(c.req.url, token) }, 201);
+});
+// El link de un chofer, para volver a mandárselo si lo perdió (solo los activos).
+api.get('/choferes/:id/link', async (c) => {
+  logistica(c.get('ctx'));
+  const t = await c.env.DB.prepare("SELECT name, chofer_token, revoked FROM api_tokens WHERE id = ? AND source = 'chofer'")
+    .bind(Number(c.req.param('id'))).first<{ name: string; chofer_token: string | null; revoked: number }>();
+  if (!t) throw new HttpError(404, 'No existe ese chofer.');
+  if (t.revoked) throw new HttpError(410, 'Ese link está dado de baja: creá uno nuevo.');
+  if (!t.chofer_token) throw new HttpError(410, 'Ese link no se guardó: dalo de baja y creá uno nuevo.');
+  return c.json({ nombre: t.name, link: linkChofer(c.req.url, t.chofer_token) });
 });
 api.delete('/choferes/:id', async (c) => {
   logistica(c.get('ctx'));
-  await c.env.DB.prepare("UPDATE api_tokens SET revoked = 1 WHERE id = ? AND source = 'chofer'").bind(Number(c.req.param('id'))).run();
+  await c.env.DB.prepare("UPDATE api_tokens SET revoked = 1, chofer_token = NULL WHERE id = ? AND source = 'chofer'").bind(Number(c.req.param('id'))).run();
   return c.json({ ok: true });
 });
 
@@ -1193,7 +1205,7 @@ api.post('/tokens', async (c) => {
 
 api.delete('/tokens/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  await c.env.DB.prepare('UPDATE api_tokens SET revoked = 1 WHERE id = ?').bind(Number(c.req.param('id'))).run();
+  await c.env.DB.prepare('UPDATE api_tokens SET revoked = 1, chofer_token = NULL WHERE id = ?').bind(Number(c.req.param('id'))).run();
   return c.json({ ok: true });
 });
 

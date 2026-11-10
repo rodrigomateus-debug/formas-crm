@@ -49,6 +49,10 @@ CREATE TABLE remito_items (
   PRIMARY KEY (remito_id, position)
 );
 
+-- El link de cada chofer (tokens tipo «chofer», que solo sirven para la app de remitos) se guarda para poder volver a
+-- copiarlo si el chofer lo pierde. Los demás tokens se guardan solo cifrados (token_hash), como siempre.
+ALTER TABLE api_tokens ADD COLUMN chofer_token TEXT;
+
 -- Los remitos que ya vinieron de ClickUp también se leen.
 INSERT INTO remitos (record_id, origen, file_id, nombre, mime, size, created_at, updated_at)
   SELECT record_id, 'clickup', id, name, mime, size, created_at, created_at FROM files WHERE kind = 'remito';

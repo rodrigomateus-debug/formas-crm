@@ -180,7 +180,7 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
   );
 }
 
-// ---------- Bandeja de Logística (/remitos) ----------
+// ---------- Bandeja de Logística: la pestaña «Entregas» (/entregas) ----------
 
 export default function RemitosPage() {
   const { meta } = useMeta();
@@ -188,9 +188,9 @@ export default function RemitosPage() {
   const puede = meta.me.role === 'admin' || meta.me.profile === 'logistica';
   return (
     <div className="content">
-      <div className="page-head"><h1>Remitos</h1></div>
+      <div className="page-head"><h1>Entregas</h1></div>
       <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'revisar'} className={`tab${tab === 'revisar' ? ' on' : ''}`} onClick={() => setTab('revisar')}>Para revisar</button>
+        <button role="tab" aria-selected={tab === 'revisar'} className={`tab${tab === 'revisar' ? ' on' : ''}`} onClick={() => setTab('revisar')}>Remitos para revisar</button>
         {puede && <button role="tab" aria-selected={tab === 'choferes'} className={`tab${tab === 'choferes' ? ' on' : ''}`} onClick={() => setTab('choferes')}>Choferes</button>}
       </div>
       {tab === 'revisar' ? <Bandeja /> : <Choferes />}
@@ -283,9 +283,14 @@ function Choferes() {
     try { await http('DELETE', `/choferes/${c.id}`); res.reload(); } catch (err) { toast((err as Error).message, true); }
   };
   const copiar = async (t: string) => { try { await navigator.clipboard.writeText(t); toast('Link copiado'); } catch { toast('No se pudo copiar: seleccionalo y copialo a mano.', true); } };
+  // El link de un chofer ya creado, para volver a mandárselo si lo perdió.
+  const verLink = async (c: Chofer) => {
+    try { const r = await http<{ link: string }>('GET', `/choferes/${c.id}/link`); setNuevo({ nombre: c.name, link: r.link }); }
+    catch (err) { toast((err as Error).message, true); }
+  };
   return (
     <div className="stack" style={{ gap: 12, marginTop: 12 }}>
-      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su link personal a la app de remitos: lo abre en el celular, saca la foto del remito firmado y queda en el pedido. El link solo sirve para eso; si se pierde, dalo de baja y creá otro.</p>
+      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su link personal a la app de remitos: lo abre en el celular, saca la foto del remito firmado y queda en el pedido. El link solo sirve para eso. Si lo pierde, «Ver link» te lo muestra para mandárselo de nuevo; si cambia de celular o el link quedó en manos de otro, dalo de baja y creá uno nuevo.</p>
       <form className="row" style={{ gap: 6 }} onSubmit={(ev) => { ev.preventDefault(); crear(); }}>
         <input className="input" placeholder="Nombre del chofer" value={nombre} onChange={(ev) => setNombre(ev.target.value)} style={{ maxWidth: 280 }} />
         <button className="btn primary" disabled={nombre.trim().length < 2}>Crear link</button>
@@ -293,10 +298,11 @@ function Choferes() {
       {nuevo && (
         <div className="panel panel-body stack" style={{ gap: 8 }}>
           <b>Link de {nuevo.nombre}</b>
-          <span className="small muted">Se muestra una sola vez. Mandáselo por WhatsApp y que lo abra en el celular (conviene agregarlo a la pantalla de inicio).</span>
+          <span className="small muted">Mandáselo por WhatsApp y que lo abra en el celular (conviene agregarlo a la pantalla de inicio). Si lo pierde, lo volvés a copiar desde la lista.</span>
           <input className="input" readOnly value={nuevo.link} onFocus={(ev) => ev.target.select()} />
           <div className="row wrap" style={{ gap: 6 }}>
             <button className="btn sm" onClick={() => copiar(nuevo.link)}>Copiar</button>
+            <button className="btn sm ghost" onClick={() => setNuevo(null)}>Cerrar</button>
             <a className="btn sm wa-link" href={`https://wa.me/?text=${encodeURIComponent(`Tu link para mandar los remitos firmados: ${nuevo.link}`)}`} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Mandar por WhatsApp</a>
           </div>
         </div>
@@ -308,6 +314,7 @@ function Choferes() {
               <div>{c.name}{c.revoked ? ' (dado de baja)' : ''}</div>
               <div className="small muted">{c.remitos} remitos{c.ultimo ? ` · el último ${fmtDate(c.ultimo, true)}` : ''} · creado por {c.user_name}</div>
             </div>
+            {!c.revoked && <button className="btn sm" onClick={() => verLink(c)}>Ver link</button>}
             {!c.revoked && <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>}
           </div>
         ))}

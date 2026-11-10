@@ -21,7 +21,7 @@ export default function App() {
   useEffect(() => {
     http<{ total: number }>('GET', `/tasks${qs({ due: 'today', limit: 1 })}`).then((r) => setTasks(r.total)).catch(() => {});
   }, [loc.pathname]);
-  // Remitos para revisar (bandeja de Logística).
+  // Remitos para revisar (bandeja de Logística, pestaña «Entregas»).
   const [remitos, setRemitos] = useState<number | null>(null);
   useEffect(() => {
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
@@ -38,7 +38,7 @@ export default function App() {
         <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>
         <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
-        <NavLink to="/remitos" className="nav-link"><Icon name="truck" />Remitos{remitos ? <span className="count">{remitos}</span> : null}</NavLink>
+        <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>
         {meta.me.role === 'admin' && <>
           <div className="nav-group">Cuenta</div>
           <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>
@@ -55,7 +55,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/tasks" element={<Tasks />} />
-          <Route path="/remitos" element={<RemitosPage />} />
+          <Route path="/entregas" element={<RemitosPage />} />
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={<ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />

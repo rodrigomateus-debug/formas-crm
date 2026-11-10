@@ -52,6 +52,8 @@ before(async () => {
       { id: '989921333', label: 'Respuesta de Cotización', displayOrder: 2, metadata: { probability: '0.7', isClosed: 'false' } }] }] });
     if ((m = url.pathname.match(/^\/crm\/v3\/properties\/(\w+)$/))) return send({ results: PROPS[m[1]] ?? [] });
     if ((m = url.pathname.match(/^\/crm\/v3\/objects\/(\w+)$/))) return send({ results: OBJECTS[m[1]] ?? [] });
+    // Lo que contesta Cloudflare Access cuando una ruta no está liberada: su página de login, con 200.
+    if (url.pathname.startsWith('/access/')) { res.setHeader('content-type', 'text/html; charset=utf-8'); return res.end('<!DOCTYPE html><html><body>Sign in - Cloudflare Access</body></html>'); }
     if ((m = url.pathname.match(/^\/crm\/v4\/associations\/(\w+)\/companies\/batch\/read$/))) {
       return send({ results: m[1] === 'contacts' ? [{ from: { id: id(2) }, to: [{ toObjectId: Number(id(1)), associationTypes: [{ typeId: 1, label: 'Primary' }] }] }] : [] });
     }
@@ -140,8 +142,23 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   assert.equal(dDeal.record.props.link_a_darwin, DARWIN_LINK);
   assert.deepEqual(dDeal.associations.contact.map((x) => x.id), [Number(id(7))], 'un solo contacto');
 
+  // Las propiedades que lee el script salen de /hooks/migrate (no de /api/meta, que tapa Access), con el mismo token.
+  const props = await fetch(`${CRM}/hooks/migrate/properties`, { headers: { authorization: `Bearer ${tok.token}` } });
+  assert.equal(props.status, 200);
+  assert.ok((await props.json()).properties.some((p) => p.object_type === 'company' && p.name === 'campo_nuevo_hs'), 'con las custom creadas al migrar');
+  assert.equal((await fetch(`${CRM}/hooks/migrate/properties`)).status, 401, 'sin token no entra');
+
   // Repetir la migración no duplica nada.
   await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`], { env });
   const again = await api(`/records/company/${id(1)}/timeline`);
   assert.equal(again.activities.length, 4);
+});
+
+test('si Cloudflare Access contesta con su login, el script lo dice en vez de fallar leyendo JSON', async () => {
+  const env = { ...process.env, HUBSPOT_TOKEN: 'fake', CRM_URL: `http://localhost:${port}/access`, CRM_TOKEN: 'fcrm_falso' };
+  // Solo contactos: no escribe nada antes de leer las propiedades del CRM.
+  const err = await run('node', ['scripts/migrate-hubspot.mjs', `--hubspot-url=http://localhost:${port}`, '--only=contacts', '--since=2026-11-01'], { env }).then(() => null, (e) => e);
+  assert.ok(err, 'el script tiene que fallar');
+  assert.match(err.stderr, /CRM propiedades: respondió 200 \(text\/html\) en vez de datos \(¿el login de Cloudflare Access/);
+  assert.doesNotMatch(err.stderr, /is not valid JSON/);
 });

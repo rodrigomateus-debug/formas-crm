@@ -22,7 +22,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | `/mcp` | Servidor MCP para Claude y Cowork (`src/worker/mcp.ts`). |
 | `/hooks/*` | Entradas de Darwin, prospección por LinkedIn y formularios web (`src/worker/hooks.ts`). Sin Zapier. |
 | `/crm/v3/*`, `/crm/v4/*`, `/oauth/*` | API compatible con HubSpot para los tableros (`src/worker/compat.ts`). |
-| `/hooks/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`), con token de administrador. Va por `/hooks` porque `/api` pide el login de Access. |
+| `/hooks/migrate` | Carga masiva desde HubSpot (`src/worker/migrate.ts` + `scripts/migrate-hubspot.mjs`), con token de administrador: `POST /hooks/migrate` carga cada lote y `GET /hooks/migrate/properties` da las propiedades que el CRM ya conoce. Va por `/hooks` (no por `/api/migrate` ni `/api/meta`) porque `/api` pide el login de Access. |
 | Cron a los :05, :15… | Avisos por mail (`src/worker/avisos.ts`: resumen de tareas a la mañana y lo que te asignan), fotos de Google de los usuarios (`src/worker/fotos.ts`) y registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
 | Tareas de GitHub | Compras de clientes cada mañana (`scripts/clientes.mjs`, [docs/CLIENTES.md](docs/CLIENTES.md)), PDF de facturas (`scripts/facturas-pdf.mjs`) y respaldo diario. |
 

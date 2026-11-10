@@ -658,6 +658,8 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 /* Etapas de los pedidos (solo pedidos): ícono propio y un color suave por etapa (components.tsx, EtapaPedido). El color
    base de cada una es --e; el texto y el fondo salen de él según el tema, para que se lean igual en claro y en oscuro. */
 .e-confirmado { --e: #2f6fb7; }
+.e-anticipo { --e: #c2364f; }
+.e-boceto-digital { --e: #a8459c; }
 .e-listo-produccion { --e: #6a4fc4; }
 .e-esperando { --e: #b7791f; }
 .e-produccion { --e: #c55a1a; }

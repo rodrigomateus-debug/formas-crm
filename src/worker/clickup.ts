@@ -15,7 +15,9 @@ import { recalcularEntrega } from './remitos';
 // tiene un tope de consultas (budget.ts): la lista de PDV por revisar queda guardada y sigue en la próxima.
 //
 // - El estado sale de los ARTÍCULOS, no del PDV (regla de Rodrigo: el del PDV no es certero).
-// - La vendedora solo pasa el pedido de «Pedido confirmado» a «Listo para producción»; lo demás lo mueve esto.
+// - Antes de producción lo mueven a mano las vendedoras y el backoffice («Pedido confirmado», «$ Pendiente de Anticipo»,
+//   «Pendiente Boceto Digital» y «Listo para producción»): mientras los artículos no arrancan, esto no lo toca. Lo demás
+//   lo mueve esto.
 // - Cuando el PDV está entregado, la foto del remito que suben a la tarea del PDV queda en el pedido (tabla `files`).
 // - ClickUp solo se lee.
 

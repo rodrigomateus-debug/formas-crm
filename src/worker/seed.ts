@@ -99,11 +99,14 @@ const CORE = { system: true };
 const RO = { system: true, read_only: true };
 const FORM = { in_create_form: true };
 
-// Estados generales del pedido (los mueve ClickUp; la vendedora solo pasa de «Pedido confirmado» a «Listo para producción»).
+// Estados generales del pedido. Los mueve ClickUp, salvo los de antes de producción (de «Pedido confirmado» a «Listo para
+// producción»), que los mueven a mano las vendedoras y el backoffice (records.ts, checkOrderStage).
 // Conservan los ids de HubSpot que siguen; los estados de HubSpot que se juntan se traducen en la migración (ORDER_STAGE_ALIAS).
 // En el CRM la etapa del pedido es un desplegable: el tablero de pedidos se arma con él.
 export const ORDER_STAGES: Array<[string, string]> = [
   ['4b27b500-f031-4927-9811-68a0b525cbae', 'Pedido confirmado'],
+  ['937ea84d-0a4f-4dcf-9028-3f9c2aafbf03', '$ Pendiente de Anticipo'],
+  ['aa99e8d0-c1d5-4071-b915-d240bbb1aed9', 'Pendiente Boceto Digital'],
   ['3725360f-519b-4b18-a593-494d60a29c9f', 'Listo para producción'],
   ['esperando_boceto', 'Esperando boceto o confirmación'],
   ['1237498994', 'En producción'],
@@ -112,9 +115,8 @@ export const ORDER_STAGES: Array<[string, string]> = [
   ['1237498998', 'Entregado'],
   ['3c85a297-e9ce-400b-b42e-9f16853d69d6', 'Anulado'],
 ];
+// «$ Pendiente de Anticipo» y «Boceto Digital» volvieron como etapas propias (migración 0030): ya no se traducen.
 export const ORDER_STAGE_ALIAS: Record<string, string> = {
-  '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03': '4b27b500-f031-4927-9811-68a0b525cbae',
-  'aa99e8d0-c1d5-4071-b915-d240bbb1aed9': 'esperando_boceto',
   '1250237623': '1237498994',
   '1237498995': '1237498996',
   '1237498997': '1237498996',

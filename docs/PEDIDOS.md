@@ -2,11 +2,13 @@
 
 Pedido de Rodrigo del 30/10/2026: que los pedidos vengan directo de ClickUp, con estados generales que les sirvan a las
 comerciales para saber dónde están sus pedidos, y que se adjunten solos la factura de Finnegans (cuando está lista) y el
-remito (cuando lo cargan en ClickUp al entregar). Las vendedoras solo mueven el pedido de «Pedido confirmado» a «Listo
-para producción»; lo demás lo mueve ClickUp.
+remito (cuando lo cargan en ClickUp al entregar). Las vendedoras y el backoffice solo mueven el pedido antes de
+producción (de «Pedido confirmado» a «Listo para producción», pasando si hace falta por «$ Pendiente de Anticipo» y
+«Pendiente Boceto Digital»); lo demás lo mueve ClickUp.
 
 **Finnegans solo se lee. De ClickUp se lee todo y se escriben solo dos cosas.** La primera (pedido de Rodrigo del 4/11/2026): cuando la
-vendedora pasa el pedido de «Pedido confirmado» a «Listo para producción» (en la pantalla, en masa o desde Claude), el PDV y
+vendedora pasa el pedido a «Listo para producción» desde «Pedido confirmado», «$ Pendiente de Anticipo» o «Pendiente Boceto
+Digital» (en la pantalla, en masa o desde Claude), el PDV y
 sus artículos que siguen en «ingreso de pedido» pasan a «pdv» en ClickUp. Lo que ya avanzó no se toca. El pedido queda en
 la cola `clickup_salida` y sale enseguida; si ClickUp falla, se reintenta cada 10 minutos (hasta 6 veces). Con token de
 administrador, `GET /hooks/clickup/salida` muestra lo último que se mandó y si hubo errores. Los cambios en ClickUp
@@ -31,7 +33,9 @@ El estado sale de los **artículos**, no del PDV (regla de Rodrigo: el del PDV n
 | Estado en el CRM | Cuándo | Lo mueve |
 |---|---|---|
 | Pedido confirmado | Al crearse desde ClickUp | — |
-| Listo para producción | La vendedora confirmó que puede arrancar | **La vendedora** (el único movimiento a mano) |
+| $ Pendiente de Anticipo | Falta que el cliente pague el anticipo. Solo Formas Shop y No Estrés | **La vendedora o el backoffice** |
+| Pendiente Boceto Digital | Falta que el cliente apruebe el boceto digital. Formas Shop, No Estrés y Corporate | **La vendedora o el backoffice** |
+| Listo para producción | La vendedora confirmó que puede arrancar | **La vendedora o el backoffice** |
 | Esperando boceto o confirmación | Algún artículo en `boceto pendiente` o `en espera de confirmación` | ClickUp |
 | En producción | Algún artículo en producción (`pedido al proveedor`, `en el impresor`, `articulo con logo`, `en revision`…) | ClickUp |
 | Listo para entregar | Todos los artículos en `listo para entergar` | ClickUp |
@@ -40,8 +44,14 @@ El estado sale de los **artículos**, no del PDV (regla de Rodrigo: el del PDV n
 | Anulado | Todos los artículos (o el PDV) anulados | ClickUp |
 
 - Mientras los artículos están en `ingreso de pedido`, `pdv` o `personales`, la producción no arrancó: queda lo que puso la vendedora.
-- Los administradores pueden poner cualquier estado. Las vendedoras solo pasan de «Pedido confirmado» a «Listo para producción» y pueden volver atrás si se equivocaron; cualquier otro cambio a mano rebota con un aviso.
-- Los estados de HubSpot se traducen (`ORDER_STAGE_ALIAS` en `seed.ts` y `0008_pedidos_clickup.sql`): «$ Pendiente de Anticipo» → Pedido confirmado; «Boceto Digital» → Esperando boceto; «Producción en revisión» → En producción; «$ Pendiente de Saldo» y «Listo para retirar» → Listo para entregar; «Pedido Completo» → Entregado; «Pedido Cancelado» → Anulado.
+- Las dos etapas previas (pedido de Rodrigo del 10/11/2026, migración `0030_pedidos_etapas_previas.sql`) son para que las
+  vendedoras y el backoffice sigan de su lado la parte previa a la producción. ClickUp no las mueve: las cuatro etapas antes
+  de producción se mueven a mano, en cualquier orden y también para atrás. «Pendiente Boceto Digital» es antes de producción;
+  «Esperando boceto o confirmación» es cuando producción espera un boceto en ClickUp, y esa la sigue moviendo ClickUp.
+- «$ Pendiente de Anticipo» es solo para Formas Shop y No Estrés: un pedido de Corporate rebota con un aviso (también para
+  los administradores). Los pedidos sin unidad de negocio pueden ir.
+- Los administradores pueden poner cualquier estado. Las vendedoras y el backoffice solo mueven las cuatro etapas antes de producción; cualquier otro cambio a mano rebota con un aviso.
+- Los estados de HubSpot se traducen (`ORDER_STAGE_ALIAS` en `seed.ts` y `0008_pedidos_clickup.sql`): «$ Pendiente de Anticipo» y «Boceto Digital» van a sus etapas (desde la 0030 conservan sus ids de HubSpot); «Producción en revisión» → En producción; «$ Pendiente de Saldo» y «Listo para retirar» → Listo para entregar; «Pedido Completo» → Entregado; «Pedido Cancelado» → Anulado.
 
 ## Qué trae cada pedido
 

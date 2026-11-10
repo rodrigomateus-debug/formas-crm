@@ -135,10 +135,26 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   assert.equal((await api('POST', '/hooks/pedidos/revisar', undefined, { authorization: `Bearer ${tokR}` })).status, 200);
   assert.equal((await api('GET', `/records/order/${c.id}`)).data.record.props.owner_id, nueva.id, 'con la vendedora nueva');
 
-  // 2. La vendedora solo lo pasa a «Listo para producción»; el resto lo mueve ClickUp.
+  // 2. La vendedora lo mueve antes de producción (anticipo, boceto digital, listo para producción); el resto lo mueve ClickUp.
+  const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
+  const BOCETO_DIGITAL = 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9';
   await api('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vende ${RUN}`, role: 'member' });
   asUser = `vende.${RUN}@formas.ar`;
   assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '1237498994' } })).status, 403, 'no a En producción');
+  assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: ANTICIPO } })).status, 200, 'a Pendiente de Anticipo');
+  assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: BOCETO_DIGITAL } })).status, 200, 'a Pendiente Boceto Digital');
+  assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '1237498994' } })).status, 403, 'tampoco desde el boceto');
+  // Mientras los artículos no arrancan, ClickUp no le cambia la etapa que puso la vendedora.
+  asUser = null;
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  assert.equal((await order()).props.hs_pipeline_stage, BOCETO_DIGITAL, 'ClickUp no la pisa');
+  asUser = `vende.${RUN}@formas.ar`;
+  assert.equal(cu.puts.length, 0, 'ClickUp no se toca hasta «Listo para producción»');
+  // Corporate no tiene anticipo; el boceto digital, sí.
+  const pc = (stage) => api('PATCH', `/records/order/${c.id}`, { props: { hs_pipeline_stage: stage } });
+  assert.equal((await pc(ANTICIPO)).status, 400, 'Corporate no va a Pendiente de Anticipo');
+  assert.equal((await pc(BOCETO_DIGITAL)).status, 200, 'Corporate sí a Pendiente Boceto Digital');
+  assert.equal((await pc('4b27b500-f031-4927-9811-68a0b525cbae')).status, 200, 'y vuelve atrás');
   assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '3725360f-519b-4b18-a593-494d60a29c9f' } })).status, 200);
   asUser = null;
   // En ClickUp, lo que seguía en «ingreso de pedido» pasa a «pdv» (el artículo 0); lo que ya estaba en «pdv» no se toca.

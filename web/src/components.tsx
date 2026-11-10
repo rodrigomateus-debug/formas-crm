@@ -536,6 +536,10 @@ export function ColumnWidths({ scope, order, widths }: { scope: string; order: s
 const ETAPAS_PEDIDO: Record<string, { slug: string; d: string }> = {
   // Pedido confirmado: la planilla con el tilde.
   '4b27b500-f031-4927-9811-68a0b525cbae': { slug: 'confirmado', d: 'M9 3.5h6v3H9zM15 5h3v16H6V5h3M9 13.5l2 2 4-4.5' },
+  // $ Pendiente de Anticipo: el billete (el «$» ya está en el nombre).
+  '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03': { slug: 'anticipo', d: 'M2.5 6.5h19v11h-19zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6 9.5v5M18 9.5v5' },
+  // Pendiente Boceto Digital: el lápiz.
+  'aa99e8d0-c1d5-4071-b915-d240bbb1aed9': { slug: 'boceto-digital', d: 'M4 20l1-4.5L16 4.5l3.5 3.5L8.5 19zM13.5 7l3.5 3.5M4 20h16' },
   // Listo para producción: la bandera de largada.
   '3725360f-519b-4b18-a593-494d60a29c9f': { slug: 'listo-produccion', d: 'M5 21V4M5 4h12l-2.5 4L17 12H5' },
   // Esperando boceto o confirmación: el reloj de arena.

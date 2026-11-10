@@ -297,21 +297,34 @@ export async function getRow(db: D1Database, id: number, type?: ObjectType) {
 
 const TRACK_ON_CREATE = ['dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'amount', 'hs_lead_status'];
 
-// Estado del pedido: lo mueve ClickUp. A mano, la vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción»
-// (y lo puede volver atrás si se equivocó). Los administradores y las sincronizaciones lo pueden poner en cualquiera.
+// Estado del pedido: lo mueve ClickUp. A mano, las vendedoras y el backoffice lo mueven en la parte previa a la
+// producción: «Pedido confirmado», «$ Pendiente de Anticipo», «Pendiente Boceto Digital» y «Listo para producción», en
+// cualquier orden (también para atrás, si se equivocaron). Los administradores y las sincronizaciones lo pueden poner en
+// cualquiera. Las dos etapas del medio (pedido de Rodrigo del 10/11/2026) conservan los ids que tenían en HubSpot.
 export const ORDER_CONFIRMED = '4b27b500-f031-4927-9811-68a0b525cbae';
+export const ORDER_ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
+export const ORDER_BOCETO_DIGITAL = 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9';
 export const ORDER_READY = '3725360f-519b-4b18-a593-494d60a29c9f';
-function checkOrderStage(ctx: Ctx, opts: { system?: boolean }, from: unknown, to: unknown) {
-  if (opts.system || ctx.user.role === 'admin' || ['clickup', 'hubspot'].includes(ctx.source)) return;
-  const manual = [ORDER_CONFIRMED, ORDER_READY];
-  if (manual.includes(String(from ?? ORDER_CONFIRMED)) && manual.includes(String(to))) return;
-  throw new HttpError(403, 'El estado del pedido lo mueve ClickUp. A mano solo se pasa de «Pedido confirmado» a «Listo para producción».');
+// Antes de producción: de cualquiera de estas, pasar a «Listo para producción» mueve el PDV en ClickUp.
+export const ORDER_PREVIAS = [ORDER_CONFIRMED, ORDER_ANTICIPO, ORDER_BOCETO_DIGITAL];
+const ORDER_MANUAL = [...ORDER_PREVIAS, ORDER_READY];
+// El anticipo se pide solo en Formas Shop y No Estrés (Corporate no trabaja con anticipo).
+export const ANTICIPO_UNIDADES = ['FORMAS SHOP', 'NO ESTRÉS'];
+function checkOrderStage(ctx: Ctx, opts: { system?: boolean }, from: unknown, to: unknown, unidad: unknown) {
+  if (opts.system || ['clickup', 'hubspot'].includes(ctx.source)) return;
+  // Vale también para los administradores: es una regla del negocio, no un permiso.
+  if (String(to) === ORDER_ANTICIPO && unidad && !ANTICIPO_UNIDADES.includes(String(unidad))) {
+    throw new HttpError(400, `«$ Pendiente de Anticipo» es solo para Formas Shop y No Estrés (este pedido es de ${unidad}).`);
+  }
+  if (ctx.user.role === 'admin') return;
+  if (ORDER_MANUAL.includes(String(from ?? ORDER_CONFIRMED)) && ORDER_MANUAL.includes(String(to))) return;
+  throw new HttpError(403, 'El estado del pedido lo mueve ClickUp. A mano solo se mueve antes de producción: «Pedido confirmado», «$ Pendiente de Anticipo», «Pendiente Boceto Digital» y «Listo para producción».');
 }
 
 export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, input: Props, opts: { strict?: boolean; system?: boolean; skipDedupe?: boolean; id?: number; createdAt?: string } = {}) {
   const meta = new Meta(db);
   const { props } = await validateProps(meta, type, input, opts);
-  if (type === 'order' && props.hs_pipeline_stage != null) checkOrderStage(ctx, opts, ORDER_CONFIRMED, props.hs_pipeline_stage);
+  if (type === 'order' && props.hs_pipeline_stage != null) checkOrderStage(ctx, opts, ORDER_CONFIRMED, props.hs_pipeline_stage, props.unidad_de_negocio);
   for (const p of await meta.properties(type)) {
     if (p.required && (props[p.name] == null || props[p.name] === '') && !(type === 'deal' && ['pipeline', 'dealstage'].includes(p.name))) {
       throw new HttpError(400, `Falta "${p.label}".`);
@@ -355,7 +368,9 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   const row = await getRow(db, id, type);
   const current = JSON.parse(row.props) as Props;
   const { props } = await validateProps(meta, type, input, opts);
-  if (type === 'order' && 'hs_pipeline_stage' in props && props.hs_pipeline_stage !== current.hs_pipeline_stage) checkOrderStage(ctx, opts, current.hs_pipeline_stage, props.hs_pipeline_stage);
+  if (type === 'order' && 'hs_pipeline_stage' in props && props.hs_pipeline_stage !== current.hs_pipeline_stage) {
+    checkOrderStage(ctx, opts, current.hs_pipeline_stage, props.hs_pipeline_stage, 'unidad_de_negocio' in props ? props.unidad_de_negocio : current.unidad_de_negocio);
+  }
   const next: Props = { ...current, ...props };
   if (type === 'deal' && ('pipeline' in props || 'dealstage' in props)) {
     const stagePart: Props = { pipeline: props.pipeline ?? current.pipeline, dealstage: props.dealstage };
@@ -398,8 +413,9 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   await db.batch(stmts);
   if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
-  // La vendedora pasó el pedido a «Listo para producción»: en ClickUp, el PDV pasa de «ingreso de pedido» a «pdv».
-  if (type === 'order' && changed.includes('hs_pipeline_stage') && String(current.hs_pipeline_stage ?? ORDER_CONFIRMED) === ORDER_CONFIRMED
+  // La vendedora pasó el pedido a «Listo para producción» (desde «Pedido confirmado», «$ Pendiente de Anticipo» o
+  // «Pendiente Boceto Digital»): en ClickUp, el PDV pasa de «ingreso de pedido» a «pdv».
+  if (type === 'order' && changed.includes('hs_pipeline_stage') && ORDER_PREVIAS.includes(String(current.hs_pipeline_stage ?? ORDER_CONFIRMED))
     && next.hs_pipeline_stage === ORDER_READY && !opts.system && ['crm', 'mcp', 'api'].includes(ctx.source)) {
     await db.prepare("INSERT INTO clickup_salida (record_id, action, user_id) VALUES (?, 'pasar_a_pdv', ?)").bind(id, ctx.user.id).run();
   }

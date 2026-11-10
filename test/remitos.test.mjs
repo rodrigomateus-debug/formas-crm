@@ -63,8 +63,9 @@ const LECTURAS = {
   // Bien leído (PDV B en los dos lugares); el chofer lo «corrige» a otro: lo revisa Logística.
   CONTRA: { ...base, numero_remito: NRO(BASE_NRO + 30), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra bordada', 1)] },
   MALPDV: { ...base, numero_remito: NRO(BASE_NRO + 5), pdv_pedido_web: PDV, pdv_observaciones: String(Number(PDV) + 7), cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A, items: [item('GOR-1', 'Gorra', 5)] },
+  // Como contesta la API real: lo que no se lee viene vacío ("") y la cantidad que no se lee, -1.
   BORROSA: { ...base, legible: false, problemas_foto: ['cortada', 'sombra'], repetir_foto: true, motivo_repetir: 'El número de PDV quedó cortado. Que se vea el remito entero.',
-    numero_remito: null, pdv_pedido_web: null, pdv_observaciones: null, cliente: null, cuit_cliente: null, items: [] },
+    numero_remito: '', pdv_pedido_web: '', pdv_observaciones: '', cliente: '', cuit_cliente: '', bultos: '', items: [{ codigo: '', descripcion: '', cantidad: -1, cantidad_texto: '' }] },
   NOREM: { ...base, es_remito: false, numero_remito: null, pdv_pedido_web: null, pdv_observaciones: null, cliente: null, cuit_cliente: null, items: [] },
   OTROCUIT: { ...base, numero_remito: NRO(BASE_NRO + 8), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `OTRA EMPRESA ${RUN} SA`, cuit_cliente: CUIT_OTRO, items: [item('GOR-1', 'Gorra', 50)] },
   B1: { ...base, numero_remito: NRO(BASE_NRO + 10), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra bordada', 50)] },
@@ -126,6 +127,14 @@ before(async () => {
         assert.equal(pedido.model, 'claude-opus-5-5');
         assert.equal(pedido.output_config?.format?.type, 'json_schema');
         assert.equal(pedido.fallbacks, 'default');
+        // Los límites de la API para un esquema estricto: hasta 16 campos de dos tipos (anyOf o type: [...]) y hasta 24
+        // opcionales (fuera de «required»). Con más, la API contesta 400 y no lee ningún remito.
+        const esquema = pedido.output_config.format.schema;
+        const recorrer = (o, f) => (o && typeof o === 'object' ? f(o) + Object.values(o).reduce((n, x) => n + recorrer(x, f), 0) : 0);
+        const uniones = recorrer(esquema, (o) => (!Array.isArray(o) && (o.anyOf || Array.isArray(o.type)) ? 1 : 0));
+        const opcionales = recorrer(esquema, (o) => (o.type === 'object' && o.properties ? Object.keys(o.properties).filter((k) => !(o.required ?? []).includes(k)).length : 0));
+        assert.ok(uniones <= 16, `el esquema tiene ${uniones} campos de dos tipos (máximo 16)`);
+        assert.ok(opcionales <= 24, `el esquema tiene ${opcionales} campos opcionales (máximo 24)`);
         send({ id: `msg_${lecturas}`, type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: JSON.stringify(l) }],
           stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 2000, output_tokens: 400 } });
       });

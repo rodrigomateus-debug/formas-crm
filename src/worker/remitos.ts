@@ -170,20 +170,22 @@ export interface Lectura {
   recibido_con_reservas: boolean; notas: string | null; otros_remitos_en_foto: boolean; dudas: string[];
 }
 
+// El formato de la respuesta. Sin campos que puedan ser de dos tipos (anyOf o ["string", "null"]): la API acepta como
+// mucho 16 en un esquema estricto y cada uno encarece la compilación. Un dato que no está o no se lee va como texto
+// vacío ("") y una cantidad que no se lee, como -1; limpiarLectura los pasa a null.
 const S = { type: 'string' } as const;
 const N = { type: 'number' } as const;
 const B = { type: 'boolean' } as const;
-const o = (x: object) => ({ anyOf: [x, { type: 'null' }] });
 const LISTA = { type: 'array', items: S } as const;
 export const ESQUEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    es_remito: B, legible: B, problemas_foto: LISTA, repetir_foto: B, motivo_repetir: o(S),
-    numero_remito: o(S), fecha: o(S), pdv_pedido_web: o(S), pdv_observaciones: o(S), cliente: o(S), cuit_cliente: o(S),
-    direccion_entrega: o(S), orden_compra: o(S), bultos: o(N),
+    es_remito: B, legible: B, problemas_foto: LISTA, repetir_foto: B, motivo_repetir: S,
+    numero_remito: S, fecha: S, pdv_pedido_web: S, pdv_observaciones: S, cliente: S, cuit_cliente: S,
+    direccion_entrega: S, orden_compra: S, bultos: S,
     items: { type: 'array', items: { type: 'object', additionalProperties: false,
-      properties: { codigo: o(S), descripcion: S, cantidad: o(N), cantidad_texto: o(S) }, required: ['codigo', 'descripcion', 'cantidad', 'cantidad_texto'] } },
-    firmado: B, sello_recepcion: o(S), fecha_recepcion: o(S), aclaracion_firma: o(S), recibido_con_reservas: B, notas: o(S),
+      properties: { codigo: S, descripcion: S, cantidad: N, cantidad_texto: S }, required: ['codigo', 'descripcion', 'cantidad', 'cantidad_texto'] } },
+    firmado: B, sello_recepcion: S, fecha_recepcion: S, aclaracion_firma: S, recibido_con_reservas: B, notas: S,
     otros_remitos_en_foto: B, dudas: LISTA,
   },
   required: ['es_remito', 'legible', 'problemas_foto', 'repetir_foto', 'motivo_repetir', 'numero_remito', 'fecha', 'pdv_pedido_web', 'pdv_observaciones',
@@ -191,7 +193,7 @@ export const ESQUEMA = {
     'recibido_con_reservas', 'notas', 'otros_remitos_en_foto', 'dudas'],
 };
 
-export const INSTRUCCIONES = `Leés fotos (o PDF) de remitos de entrega de Formas Publicitarias SA, impresos por el sistema Finnegans, después de que el cliente los firmó. Devolvés exactamente lo que está escrito en el remito, sin completar ni adivinar: si un dato no está o no se lee con seguridad, va null y lo anotás en "dudas".
+export const INSTRUCCIONES = `Leés fotos (o PDF) de remitos de entrega de Formas Publicitarias SA, impresos por el sistema Finnegans, después de que el cliente los firmó. Devolvés exactamente lo que está escrito en el remito, sin completar ni adivinar: si un dato de texto no está o no se lee con seguridad, va vacío ("") y lo anotás en "dudas"; si una cantidad no se lee, va -1.
 
 Cómo es el remito: arriba a la izquierda el logo de Formas; en el centro una "R" grande ("No válido como factura"); arriba a la derecha "Remito" con Numero (por ejemplo R-0001-00027857), Fecha y Nro Int. Debajo, los datos del cliente: "Sr. (es)" (la razón social), Domicilio, Cond. IVA y, a la derecha, su C.U.I.T. Después "Dirección de Entrega", "Nº Orden de Compra", "Nº Pedido Web" y "Bultos/Cajas". Luego la tabla de Cantidad y Descripción (la descripción empieza con el código del producto, por ejemplo "SIM10001273 Llavero corto | ..."). Abajo, "Observaciones" (suele decir "pdv 30706") y "Observaciones de Entrega". Encima o al costado puede haber un sello de recepción, una firma, una aclaración y cosas escritas a mano.
 
@@ -199,18 +201,18 @@ Campos:
 - numero_remito: el "Numero" de arriba a la derecha, tal cual (no el "Nro Int").
 - fecha: la "Fecha" del remito, en formato AAAA-MM-DD.
 - pdv_pedido_web: el "Nº Pedido Web", solo dígitos sin ceros a la izquierda ("00030706" es "30706").
-- pdv_observaciones: el número de PDV que aparece en "Observaciones" (por ejemplo "pdv 30706" es "30706"), solo dígitos. Si no aparece, null.
+- pdv_observaciones: el número de PDV que aparece en "Observaciones" (por ejemplo "pdv 30706" es "30706"), solo dígitos. Si no aparece, "".
 - cliente: la razón social de "Sr. (es)". No uses el nombre del sello de quien recibió: a veces recibe otra empresa (una agencia, un depósito).
 - cuit_cliente: el C.U.I.T. del cliente, con guiones como está impreso. Nunca el de Formas (33-70995151-9), que es el que emite.
-- direccion_entrega, orden_compra, bultos: como están impresos.
-- items: un renglón por cada línea de la tabla: codigo (el código con que empieza la descripción, o null), descripcion (el resto, sin el código), cantidad (número de unidades; en estos remitos "1000.00" es mil y "1.000,00" también) y cantidad_texto (la cantidad tal cual está impresa).
+- direccion_entrega, orden_compra, bultos: como están impresos (texto).
+- items: un renglón por cada línea de la tabla: codigo (el código con que empieza la descripción, o "" si no tiene), descripcion (el resto, sin el código), cantidad (número de unidades; en estos remitos "1000.00" es mil y "1.000,00" también; -1 si no se lee) y cantidad_texto (la cantidad tal cual está impresa).
 - firmado: true si hay firma o sello de recepción.
 - sello_recepcion: el nombre de la empresa o persona que dice el sello de recepción. fecha_recepcion: la fecha del sello o la escrita a mano junto a la firma (AAAA-MM-DD). aclaracion_firma: la aclaración escrita a mano, si se lee.
 - recibido_con_reservas: true si el sello o algo escrito a mano dice que la mercadería se recibe sin controlar o "a controlar", con faltantes, dañada, o con cualquier otra salvedad. En "notas" transcribí esas leyendas y lo escrito a mano que importe.
 - otros_remitos_en_foto: true si en la foto se ve otro remito además del principal (el que está entero y al frente). Leé solo el principal.
 - es_remito: false si no es un remito de Formas (una factura, otra cosa, una foto de producto).
 - legible y problemas_foto: si los datos clave (número de remito, PDV, cliente, cantidades) se leen bien; en problemas_foto, lo que pasa con la foto ("cortada", "borrosa", "sombra", "reflejo", "lejos", "torcida").
-- repetir_foto: true si falta algún dato clave porque la foto no deja leerlo (cortada, borrosa, con reflejo o sombra encima). motivo_repetir: una frase corta para el chofer que la sacó, en castellano rioplatense con "vos", que diga qué falta y cómo sacarla (por ejemplo "El número de PDV quedó cortado. Que se vea el remito entero, de frente."); la app ya le dice que la saque de nuevo. Si no hay que repetirla, null.
+- repetir_foto: true si falta algún dato clave porque la foto no deja leerlo (cortada, borrosa, con reflejo o sombra encima). motivo_repetir: una frase corta para el chofer que la sacó, en castellano rioplatense con "vos", que diga qué falta y cómo sacarla (por ejemplo "El número de PDV quedó cortado. Que se vea el remito entero, de frente."); la app ya le dice que la saque de nuevo. Si no hay que repetirla, "".
 - dudas: cada dato que leíste pero del que no estás seguro.`;
 
 // 55 segundos por intento y un reintento: entra en los 120 s que espera la app del chofer.
@@ -238,12 +240,29 @@ export async function leerConClaude(env: Env, bytes: ArrayBuffer, mime: string):
   if (res.stop_reason === 'refusal') throw new LecturaFallida('Claude no quiso leer el archivo.');
   if (res.stop_reason === 'max_tokens') throw new LecturaFallida('La lectura quedó cortada.');
   const texto = res.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim();
-  let lectura: Lectura;
-  try { lectura = JSON.parse(texto) as Lectura; } catch { throw new LecturaFallida('La lectura no vino en el formato esperado.'); }
-  if (!Array.isArray(lectura.items)) lectura.items = [];
-  if (!Array.isArray(lectura.dudas)) lectura.dudas = [];
-  if (!Array.isArray(lectura.problemas_foto)) lectura.problemas_foto = [];
-  return { lectura, modelo: res.model, usage: res.usage };
+  let crudo: Record<string, unknown>;
+  try { crudo = JSON.parse(texto) as Record<string, unknown>; } catch { throw new LecturaFallida('La lectura no vino en el formato esperado.'); }
+  return { lectura: limpiarLectura(crudo), modelo: res.model, usage: res.usage };
+}
+
+// Lo que devuelve Claude, con los vacíos ("" y -1) pasados a null y las listas siempre como listas. Acepta también null
+// (lecturas guardadas antes de este formato).
+export function limpiarLectura(x: Record<string, unknown>): Lectura {
+  const txt = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : typeof v === 'number' ? String(v) : null);
+  const cant = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+  const lista = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && !!s.trim()) : []);
+  const bultos = txt(x.bultos);
+  return {
+    es_remito: x.es_remito !== false, legible: x.legible !== false, problemas_foto: lista(x.problemas_foto), repetir_foto: x.repetir_foto === true,
+    motivo_repetir: txt(x.motivo_repetir), numero_remito: txt(x.numero_remito), fecha: txt(x.fecha), pdv_pedido_web: txt(x.pdv_pedido_web),
+    pdv_observaciones: txt(x.pdv_observaciones), cliente: txt(x.cliente), cuit_cliente: txt(x.cuit_cliente), direccion_entrega: txt(x.direccion_entrega),
+    orden_compra: txt(x.orden_compra), bultos: bultos && /\d/.test(bultos) ? Number(bultos.replace(/[^\d]/g, '')) : null,
+    items: (Array.isArray(x.items) ? x.items : []).map((it: Record<string, unknown>) => ({
+      codigo: txt(it?.codigo), descripcion: txt(it?.descripcion) ?? '', cantidad: cant(it?.cantidad), cantidad_texto: txt(it?.cantidad_texto),
+    })).filter((it) => it.descripcion || it.codigo),
+    firmado: x.firmado === true, sello_recepcion: txt(x.sello_recepcion), fecha_recepcion: txt(x.fecha_recepcion), aclaracion_firma: txt(x.aclaracion_firma),
+    recibido_con_reservas: x.recibido_con_reservas === true, notas: txt(x.notas), otros_remitos_en_foto: x.otros_remitos_en_foto === true, dudas: lista(x.dudas),
+  };
 }
 
 // ---------- Cruce con los pedidos ----------
@@ -482,7 +501,11 @@ export async function leerRemito(env: Env, id: number, opts: { budget?: Budget; 
   try { leida = await leerConClaude(env, a.bytes, mime); } catch (e) {
     if (e instanceof LecturaFallida) return error(e.message, 'revisar');
     console.error('remito', id, (e as Error).message);
-    return error(`No se pudo leer: ${(e as Error).message.slice(0, 200)}`);
+    // El error de la API, legible (sin el JSON crudo): se vuelve a intentar solo en la próxima corrida.
+    const m = (e as Error).message;
+    const detalle = m.match(/"message"\s*:\s*"([^"]+)"/)?.[1] ?? m;
+    const status = (e as { status?: number }).status;
+    return error(`No se pudo leer: la API de Claude contestó ${status ? `con error ${status}` : 'con un error'} (${detalle.slice(0, 160)}). Se vuelve a intentar solo.`);
   }
   return aplicarLectura(env, r, { ...leida.lectura, _modelo: leida.modelo }, b, opts.ctx ?? null, true);
 }
@@ -529,8 +552,7 @@ export async function corregirPdv(env: Env, ctx: Ctx, id: number, valor: unknown
   const nuevo = { ...r, pdv_chofer: pdv };
   if (!r.leido_at) return env.ANTHROPIC_API_KEY ? leerRemito(env, id, { ctx }) : remitoPorId(db, id);
   let l: Lectura;
-  try { l = JSON.parse(r.lectura) as Lectura; } catch { return leerRemito(env, id, { ctx }); }
-  if (!Array.isArray(l.items)) return leerRemito(env, id, { ctx });
+  try { l = limpiarLectura(JSON.parse(r.lectura) as Record<string, unknown>); } catch { return leerRemito(env, id, { ctx }); }
   return aplicarLectura(env, nuevo, l, Budget.of(env), ctx, false);
 }
 
@@ -738,10 +760,11 @@ export async function remitosDelPedido(db: D1Database, orderId: number) {
 
 // La bandeja de revisión: lo que no se pudo adjuntar solo, más lo que no se pudo leer.
 export async function remitosParaRevisar(db: D1Database, limit = 100) {
-  const { results } = await db.prepare(`SELECT ${SIN_DATA} FROM remitos WHERE estado = 'revisar' OR (estado = 'sin_leer' AND intentos >= 1)
-    ORDER BY created_at DESC LIMIT ?`).bind(limit).all<RemitoRow>();
+  const { results } = await db.prepare(`SELECT ${SIN_DATA.split(',').map((c) => `m.${c.trim()}`).join(', ')}, o.name AS pedido_nombre FROM remitos m
+    LEFT JOIN records o ON o.id = m.record_id WHERE m.estado = 'revisar' OR (m.estado = 'sin_leer' AND m.intentos >= 1)
+    ORDER BY m.created_at DESC LIMIT ?`).bind(limit).all<RemitoRow & { pedido_nombre: string | null }>();
   const items = await itemsDe(db, results.map((r) => r.id));
-  return results.map((r) => remitoPublico(r, items.get(r.id)));
+  return results.map((r) => ({ ...remitoPublico(r, items.get(r.id)), pedido_nombre: r.pedido_nombre }));
 }
 
 // Por qué se le pide el PDV al chofer, en sus palabras (de los controles del cruce).

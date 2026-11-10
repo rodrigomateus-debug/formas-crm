@@ -18,6 +18,7 @@ export interface Remito {
   duplicado_de: number | null; otros_remitos_en_foto: boolean; dudas: string[]; leido_at: string | null; created_at: string;
   items: Array<{ code: string | null; description: string | null; quantity: number | null }>;
   pdv_chofer: string | null;   // el PDV que escribió el chofer en la app
+  pedido_nombre?: string | null;   // en la bandeja: el nombre del pedido donde está
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
 export interface Entrega {
@@ -224,7 +225,7 @@ function RevisionCard({ r, onCambio }: { r: Remito; onCambio: () => void }) {
     catch (err) { toast((err as Error).message, true); } finally { setOcupado(false); }
   };
   const esImagen = (r.mime ?? '').startsWith('image/');
-  const candidatos = r.candidatos.length ? r.candidatos : r.record_id ? [{ id: r.record_id, nombre: 'El pedido donde está', pdv: null }] : [];
+  const candidatos = r.candidatos.length ? r.candidatos : r.record_id ? [{ id: r.record_id, nombre: r.pedido_nombre ?? 'el pedido donde está', pdv: null }] : [];
   return (
     <div className="panel revision">
       <a className="revision-foto" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer" title="Ver el remito entero">

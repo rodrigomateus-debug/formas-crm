@@ -7,6 +7,7 @@ import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, M
 import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
+import { RemitosCard } from './Remitos';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number }
@@ -44,6 +45,7 @@ export default function RecordPage() {
           {type === 'deal' && <FacturarCard record={record} />}
           {type === 'deal' && <BocetosNegocioCard dealId={record.id} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
+          {type === 'order' && <RemitosCard record={record} onChange={refresh} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
@@ -696,11 +698,12 @@ function FacturarCard({ record }: { record: CrmRecord }) {
 
 function FilesCard({ recordId }: { recordId: number }) {
   const files = useAsync(() => http<FileRow[]>('GET', `/records/order/${recordId}/files`), [recordId]);
-  const list = files.data ?? [];
-  const label = (f: FileRow) => (f.kind === 'factura' ? 'Factura' : f.kind === 'remito' ? 'Remito' : 'Archivo');
+  // Los remitos van en su propia tarjeta (Entrega y remitos), con lo que se leyó de cada uno.
+  const list = (files.data ?? []).filter((f) => f.kind !== 'remito');
+  const label = (f: FileRow) => (f.kind === 'factura' ? 'Factura' : 'Archivo');
   return (
     <div className="panel assoc-card">
-      <div className="panel-head"><h3>Factura y remito <span className="muted small">({list.length})</span></h3></div>
+      <div className="panel-head"><h3>Factura <span className="muted small">({list.length})</span></h3></div>
       {list.map((f) => (
         <div key={f.id} className="assoc-item">
           <span className={`tag ${f.kind === 'factura' ? 'info' : 'ok'}`}>{label(f)}</span>
@@ -716,7 +719,7 @@ function FilesCard({ recordId }: { recordId: number }) {
             : <span className="small muted" title="Se baja sola de Finnegans en la próxima hora">PDF en camino</span>}
         </div>
       ))}
-      {!list.length && <div className="panel-body muted small">{files.loading ? 'Cargando…' : 'Cuando Finnegans tenga la factura con CAE y ClickUp el remito, aparecen acá solos.'}</div>}
+      {!list.length && <div className="panel-body muted small">{files.loading ? 'Cargando…' : 'Cuando Finnegans tenga la factura con CAE, aparece acá sola.'}</div>}
     </div>
   );
 }

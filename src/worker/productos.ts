@@ -366,7 +366,7 @@ export interface Adjuntos { facturas: number; remitos: number; bocetos: number; 
 export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
   return db.prepare(`WITH ids(id) AS (${ids}) SELECT r.id AS record_id,
       (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'factura') AS facturas,
-      (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'remito') AS remitos,
+      (SELECT COUNT(*) FROM remitos m WHERE m.record_id = r.id AND m.estado NOT IN ('descartado', 'duplicado')) AS remitos,
       (SELECT COUNT(*) FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0) AS bocetos,
       (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id
         AND EXISTS (SELECT 1 FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0 AND b.producto IN (li.code, li.name, p.name))) AS con_boceto,

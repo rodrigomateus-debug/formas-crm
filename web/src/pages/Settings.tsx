@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, userTeams, PROFILE_LABEL, ROLE_LABEL } from '../lib';
 import { Avatar, FilterRow, Modal, MultiPick, UserChip, describeFilter, filterableProps, opsFor } from '../components';
 import { Select } from '../Select';
@@ -321,7 +322,7 @@ function NewPipeline({ onClose, onCreated }: { onClose: () => void; onCreated: (
 interface SyncState { configured: boolean; at?: string; error?: string | null; creados?: number; actualizados?: number; pendientes?: number; leyendo_lista?: boolean; revisados?: number; facturas?: number; pdf_pendientes?: number }
 function Pedidos() {
   const toast = useToast();
-  const st = useAsync(() => http<{ clickup: SyncState; finnegans: SyncState }>('GET', '/integrations/pedidos'), []);
+  const st = useAsync(() => http<{ clickup: SyncState; finnegans: SyncState; remitos?: { configured: boolean; sin_leer: number | null; revisar: number | null; leidos: number | null; at: string | null } }>('GET', '/integrations/pedidos'), []);
   const [busy, setBusy] = useState('');
   const go = async (what: string, path: string, body?: unknown) => {
     setBusy(what);
@@ -330,10 +331,11 @@ function Pedidos() {
   };
   const c = st.data?.clickup;
   const f = st.data?.finnegans;
+  const r = st.data?.remitos;
   const when = (s?: SyncState) => (s?.at ? fmtDate(s.at, true) : 'nunca');
   return (
     <div className="panel"><div className="panel-head"><h2>Pedidos: ClickUp y Finnegans</h2></div><div className="panel-body stack small">
-      <p style={{ margin: 0 }}>Los pedidos salen de la lista PEC de ClickUp: cada PDV nuevo crea su pedido y su estado se mueve solo según los artículos. La vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción». Cuando la factura de Finnegans tiene CAE se adjunta sola, y el remito cuando lo suben a ClickUp al entregar. ClickUp y Finnegans solo se leen.</p>
+      <p style={{ margin: 0 }}>Los pedidos salen de la lista PEC de ClickUp: cada PDV nuevo crea su pedido y su estado se mueve solo según los artículos. La vendedora solo lo pasa de «Pedido confirmado» a «Listo para producción». Cuando la factura de Finnegans tiene CAE se adjunta sola. Los remitos llegan de ClickUp (cuando los suben al entregar), de la app del chofer y de la ficha del pedido; Claude los lee y el pedido sabe qué falta entregar. ClickUp y Finnegans solo se leen.</p>
       <div className="row wrap">
         <b style={{ width: 90 }}>ClickUp</b>
         {c?.configured ? <span className="grow">Última vez: {when(c)}{c.at ? ` · ${c.creados ?? 0} creados, ${c.actualizados ?? 0} actualizados${c.pendientes ? `, ${c.pendientes} PDV para las próximas corridas` : ''}${c.leyendo_lista ? ' · todavía leyendo la lista' : ''}` : ''}{c.error ? <span className="danger-text"> · {c.error}</span> : null}</span>
@@ -346,6 +348,13 @@ function Pedidos() {
         {f?.configured ? <span className="grow">Última vez: {when(f)}{f.at ? ` · ${f.revisados ?? 0} pedidos revisados, ${f.facturas ?? 0} facturas nuevas` : ''}{f.pdf_pendientes ? ` · ${f.pdf_pendientes} PDF por bajar` : ''}{f.error ? <span className="danger-text"> · {f.error}</span> : null}</span>
           : <span className="grow muted">Faltan los secretos FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET en el repo.</span>}
         <button className="btn sm" disabled={!f?.configured || !!busy} onClick={() => go('fin', '/integrations/finnegans/sync')}>{busy === 'fin' ? 'Buscando…' : 'Buscar facturas ahora'}</button>
+      </div>
+      {/* Lectura de remitos con la API de Claude (src/worker/remitos.ts). */}
+      <div className="row wrap">
+        <b style={{ width: 90 }}>Remitos</b>
+        {r?.configured ? <span className="grow">Lectura con Claude conectada · {r.leidos ?? 0} leídos{r.at ? ` (el último ${fmtDate(r.at, true)})` : ''} · {r.sin_leer ?? 0} sin leer · {r.revisar ?? 0} para revisar en <Link to="/remitos">Remitos</Link></span>
+          : <span className="grow muted">Falta el secreto ANTHROPIC_API_KEY en el repo: los remitos se guardan, pero no se leen ni cuentan para la entrega.</span>}
+        <button className="btn sm" disabled={!r?.configured || !!busy} onClick={() => go('rem', '/integrations/remitos/leer')}>{busy === 'rem' ? 'Leyendo…' : 'Leer pendientes'}</button>
       </div>
     </div></div>
   );

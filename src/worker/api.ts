@@ -21,6 +21,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
+import { archivoDeRemito, calcularEntrega, finalizarEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -789,6 +790,85 @@ api.get('/files/:id', async (c) => {
   throw new HttpError(404, 'El PDF de la factura todavía no se bajó de Finnegans (se baja solo en la próxima hora).');
 });
 
+// ---------- Remitos y estado de entrega (remitos.ts) ----------
+
+// Los remitos del pedido (de ClickUp, del CRM y del chofer), lo que se entregó y lo que falta. Los que todavía no se
+// leyeron se leen de fondo (como mucho 2 por vez).
+api.get('/records/order/:id/remitos', async (c) => {
+  const id = Number(c.req.param('id'));
+  await getRow(c.env.DB, id, 'order');
+  const remitos = await remitosDelPedido(c.env.DB, id);
+  const sinLeer = remitos.filter((r) => r.estado === 'sin_leer' && r.record_id === id).slice(0, 2);
+  if (sinLeer.length && c.env.ANTHROPIC_API_KEY) {
+    c.executionCtx.waitUntil((async () => { const b = Budget.of(c.env); for (const r of sinLeer) await leerRemito(c.env, r.id, { budget: b }).catch((e) => console.error('remito', r.id, (e as Error).message)); })());
+  }
+  return c.json({ remitos, entrega: await calcularEntrega(c.env.DB, id), puede_finalizar: puedeFinalizar(c.get('ctx')), lector: !!c.env.ANTHROPIC_API_KEY });
+});
+// Subir un remito al pedido (foto o PDF, formulario con «archivo»): se guarda y se lee en el momento.
+api.post('/records/order/:id/remitos', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const id = Number(c.req.param('id'));
+  const form = await c.req.formData();
+  const archivo = form.get('archivo');
+  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del remito.');
+  const { id: rid } = await guardarRemito(c.env, ctx, { recordId: id, origen: 'crm', bytes: await archivo.arrayBuffer(), mime: archivo.type || 'application/octet-stream', nombre: archivo.name });
+  const r = await leerRemito(c.env, rid, { ctx });
+  return c.json({ remito: remitoPublico(r, (await itemsDe(c.env.DB, [rid])).get(rid)), entrega: await calcularEntrega(c.env.DB, id) }, 201);
+});
+api.get('/remitos/:id/archivo', async (c) => {
+  const id = Number(c.req.param('id'));
+  const a = await archivoDeRemito(c.env, id);
+  if (!a) throw new HttpError(404, 'No se pudo traer el archivo del remito (si es de ClickUp, abrilo desde el PDV).');
+  return new Response(a.bytes, { headers: { 'content-type': a.mime, 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(a.nombre)}`, 'cache-control': 'private, max-age=3600' } });
+});
+// Revisión: asignarlo a un pedido, confirmarlo (cuenta para la entrega), descartarlo o leerlo de nuevo.
+api.post('/remitos/:id/revisar', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const r = await revisarRemito(c.env, ctx, Number(c.req.param('id')), await c.req.json());
+  return c.json(remitoPublico(r, (await itemsDe(c.env.DB, [r.id])).get(r.id)));
+});
+// La bandeja de Logística: lo que no se pudo adjuntar solo o no se pudo leer.
+api.get('/remitos/revisar', async (c) => c.json({ remitos: await remitosParaRevisar(c.env.DB), lector: !!c.env.ANTHROPIC_API_KEY }));
+api.get('/remitos/revisar/cuantos', async (c) => {
+  const r = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM remitos WHERE estado = 'revisar' OR (estado = 'sin_leer' AND intentos >= 1)").first<{ n: number }>();
+  return c.json({ total: r?.n ?? 0 });
+});
+// Finalizar la entrega con faltante (Logística o un administrador), con el motivo; DELETE la vuelve a abrir.
+api.post('/records/order/:id/entrega/finalizar', async (c) => {
+  const { motivo } = await c.req.json<{ motivo?: string }>();
+  return c.json(await finalizarEntrega(c.env, c.get('ctx'), Number(c.req.param('id')), String(motivo ?? '')));
+});
+api.delete('/records/order/:id/entrega/finalizar', async (c) => c.json(await finalizarEntrega(c.env, c.get('ctx'), Number(c.req.param('id')), null)));
+
+// Links de los choferes (tokens tipo «chofer», que solo sirven para la app de remitos). Los manejan Logística y los
+// administradores; el link se muestra una sola vez.
+function logistica(ctx: Ctx) { if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador.'); }
+api.get('/choferes', async (c) => {
+  logistica(c.get('ctx'));
+  const { results } = await c.env.DB.prepare(`SELECT t.id, t.name, t.created_at, t.last_used_at, t.revoked, u.name AS user_name,
+      (SELECT COUNT(*) FROM remitos r WHERE r.token_id = t.id) AS remitos,
+      (SELECT MAX(r.created_at) FROM remitos r WHERE r.token_id = t.id) AS ultimo
+    FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.source = 'chofer' ORDER BY t.revoked, t.name`).all();
+  return c.json(results);
+});
+api.post('/choferes', async (c) => {
+  const ctx = c.get('ctx');
+  logistica(ctx);
+  const { name } = await c.req.json<{ name?: string }>();
+  const nombre = String(name ?? '').trim();
+  if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre del chofer.');
+  const token = newToken();
+  await c.env.DB.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source) VALUES (?, ?, ?, 'chofer')").bind(nombre.slice(0, 80), await sha256(token), ctx.user.id).run();
+  return c.json({ token, link: `${new URL(c.req.url).origin}/hooks/chofer/#t=${token}` }, 201);
+});
+api.delete('/choferes/:id', async (c) => {
+  logistica(c.get('ctx'));
+  await c.env.DB.prepare("UPDATE api_tokens SET revoked = 1 WHERE id = ? AND source = 'chofer'").bind(Number(c.req.param('id'))).run();
+  return c.json({ ok: true });
+});
+
 // ---------- Bocetos de producción (bocetos.ts, drive.ts) ----------
 
 async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
@@ -871,7 +951,14 @@ api.get('/integrations/pedidos', async (c) => {
   return c.json({
     clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
     finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
+    remitos: { configured: !!c.env.ANTHROPIC_API_KEY, ...(await c.env.DB.prepare(`SELECT SUM(estado = 'sin_leer') AS sin_leer, SUM(estado = 'revisar') AS revisar,
+      SUM(estado = 'ok') AS leidos, MAX(leido_at) AS at FROM remitos`).first<{ sin_leer: number | null; revisar: number | null; leidos: number | null; at: string | null }>()) },
   });
+});
+// Leer una tanda de remitos sin leer ahora (lo mismo que hace el cron cada 10 minutos).
+api.post('/integrations/remitos/leer', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await leerPendientes(c.env, undefined, 4));
 });
 api.post('/integrations/clickup/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');

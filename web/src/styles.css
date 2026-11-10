@@ -735,3 +735,36 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
   .boceto-vista { height: 60vh; }
   .boceto-subir { grid-template-columns: 1fr; }
 }
+
+/* ---------- Remitos y estado de entrega (pages/Remitos.tsx) ---------- */
+.aviso { border-radius: var(--r-control); padding: 8px 10px; font-size: 13px; line-height: 1.45; border: 1px solid transparent; }
+.aviso.warn { background: var(--ui-warning-soft); color: var(--ui-warning-ink); border-color: color-mix(in srgb, var(--ui-warning) 30%, transparent); }
+.aviso.bad { background: var(--ui-negative-soft); color: var(--ui-negative-ink); border-color: color-mix(in srgb, var(--ui-negative) 30%, transparent); }
+.aviso.info { background: var(--ui-info-soft); color: var(--ui-info-ink); border-color: color-mix(in srgb, var(--ui-info) 30%, transparent); }
+.remitos-card .panel-head { gap: 8px; }
+.remitos-card .panel-head h3 { margin-right: auto; }
+.entrega-lineas { display: flex; flex-direction: column; padding: 0 16px 8px; }
+.entrega-linea { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 6px 0; border-bottom: 1px dashed var(--ui-line); font-size: 13px; min-width: 0; }
+.entrega-nombre { flex: 1 1 100%; font-weight: 500; overflow-wrap: anywhere; }
+.remitos-sub { padding: 8px 16px 0; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 11px; }
+.remito-titulo { font-weight: 500; overflow-wrap: anywhere; }
+.remito-fila .small { overflow-wrap: anywhere; }
+.entrega-linea:last-child { border-bottom: 0; }
+.entrega-linea .num { color: var(--ui-ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.entrega-linea .tag { flex: none; }
+.remito-fila { align-items: flex-start; }
+.remito-fila > .tag { margin-top: 1px; flex: none; }
+.controles { margin: 4px 0 0; }
+.controles summary { cursor: pointer; color: var(--text-3); }
+.controles ul, ul.controles { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 2px; }
+.controles li.ok { color: var(--ui-positive-ink); }
+.controles li.bad { color: var(--ui-negative-ink); }
+.revision { display: grid; grid-template-columns: 220px 1fr; gap: 16px; padding: 14px; }
+.revision-foto { display: grid; place-items: center; background: var(--ui-surface-sunken); border-radius: var(--r-control); overflow: hidden; min-height: 160px; max-height: 300px; }
+.revision-foto img { width: 100%; height: 100%; object-fit: contain; max-height: 300px; }
+.revision-foto span { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.revision-datos { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.revision-dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 0; }
+.revision-dl dt { color: var(--text-3); }
+.revision-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 720px) { .revision { grid-template-columns: 1fr; } }

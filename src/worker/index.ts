@@ -16,6 +16,7 @@ import { procesarSalidaClickup, syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
+import { leerPendientes } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 const GMAIL_CRON = '5-59/10 * * * *';   // el mismo que en wrangler.jsonc
@@ -93,6 +94,7 @@ export default {
         await safe(() => correrAvisos(env, b));
         await safe(() => procesarSalidaClickup(env, b));   // lo que quedó pendiente para ClickUp (pedidos a «pdv»)
         await safe(() => actualizarFotos(env, b));          // fotos de Google de los usuarios: unas pocas, una vez por semana
+        await safe(() => leerPendientes(env, b, 2));        // remitos sin leer (los del chofer se leen al llegar; acá los reintentos y ClickUp)
         await safe(() => syncAll(env, b));
       }
       else {

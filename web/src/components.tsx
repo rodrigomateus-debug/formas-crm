@@ -468,6 +468,17 @@ export function EstadoCliente({ value }: { value: string }) {
   return <span className={`estado-cliente ec-${slug}`}>{value}</span>;
 }
 
+// Estado de entrega del pedido según sus remitos leídos (remitos.ts).
+const ENTREGA: Record<string, [string, string]> = {
+  completa: ['Completa', 'ok'], parcial: ['Faltan entregas', 'warn'], diferencias: ['Con diferencias', 'bad'],
+  cerrada_con_faltante: ['Finalizada con faltante', 'info'], falta_remito: ['Falta el remito', 'warn'], por_revisar: ['Remito por revisar', 'info'],
+};
+export function EstadoEntrega({ value, title }: { value: unknown; title?: string }) {
+  const e = ENTREGA[String(value ?? '')];
+  if (!e) return null;
+  return <span className={`tag ${e[1]} estado-entrega`} title={title}>{e[0]}</span>;
+}
+
 // Unidad de negocio con su ícono y su color.
 export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean }) {
   const u = UNIDADES.find((x) => x.key === k);

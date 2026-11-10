@@ -392,6 +392,10 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 /* «Chat en Darwin» (components.tsx): el ícono en el verde de WhatsApp, para que se entienda adónde lleva. */
 .chat-darwin svg { color: #1a9e4f; flex: none; }
 [data-theme="dark"] .chat-darwin svg { color: #3ccf75; }
+/* Teléfonos que abren el chat de WhatsApp (WhatsAppLink en components.tsx), en la tabla, la ficha y la vista previa. */
+.wa-link { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.wa-link svg { color: #1a9e4f; flex: none; }
+[data-theme="dark"] .wa-link svg { color: #3ccf75; }
 /* En la tarjeta del tablero resalta entre los íconos grises: pastilla verde suave, como las etiquetas «ok». */
 .card .card-actions .chat-darwin { background: var(--ui-positive-soft); color: var(--ui-positive-ink); border: 1px solid color-mix(in srgb, var(--ui-positive) 35%, transparent);
   border-radius: var(--r-pill); padding: 0 8px 0 6px; font-weight: 600; gap: 3px; flex: none; }

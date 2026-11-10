@@ -179,6 +179,23 @@ export function safeUrl(v: unknown) {
   return undefined;
 }
 
+// Link para abrir el chat de WhatsApp con un teléfono. Los de Argentina van como los usa WhatsApp, 549 + característica +
+// número, aunque estén cargados a mano («011 15 4567-8901», «+54 11 4567 8901», «3465 53-6693»…); los de otro país,
+// tal cual si traen el «+». Sin número que alcance, nada.
+export function whatsappUrl(v: unknown) {
+  const s = String(v ?? '').trim();
+  let d = s.replace(/\D/g, '');
+  const intl = s.startsWith('+') || d.startsWith('00');
+  d = d.replace(/^00/, '');
+  if (d.length < 8) return undefined;
+  if (d.startsWith('54') && (intl || d.length >= 12)) d = d.slice(2).replace(/^9/, '');
+  else if (intl || (!d.startsWith('0') && d.length !== 10 && !(d.length === 12 && /^\d{2,4}15/.test(d)))) return `https://wa.me/${d}`;
+  d = d.replace(/^0/, '');
+  // El «15» de los celulares va después de la característica (2 a 4 dígitos) y WhatsApp no lo usa.
+  if (d.length === 12) { const i = [2, 3, 4].find((k) => d.slice(k, k + 2) === '15'); if (i != null) d = d.slice(0, i) + d.slice(i + 2); }
+  return d.length >= 10 ? `https://wa.me/549${d.slice(-10)}` : undefined;
+}
+
 export function initials(name: string) {
   return name.split(/\s+/).filter((w) => /^[\p{L}\p{N}]/u.test(w)).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '·';
 }

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage,
+  http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
-import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable } from '../components';
+import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink } from '../components';
 import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
@@ -166,7 +166,7 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
           ))}
         </div>
         <div className="row wrap">
-          {type === 'contact' && record.props.mobilephone && <a className="btn sm" href={`https://wa.me/${String(record.props.mobilephone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer">Abrir WhatsApp</a>}
+          {type === 'contact' && whatsappUrl(record.props.mobilephone || record.props.phone) && <a className="btn sm wa-link" href={whatsappUrl(record.props.mobilephone || record.props.phone)} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
           {type === 'deal' && <ChatDarwin url={record.props.link_a_darwin} />}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
@@ -234,6 +234,7 @@ function PropRow({ type, prop, record, onSave, onHistory }: { type: ObjectType; 
       <div className={`v${shown ? '' : ' blank'}`}>
         {shown && prop.type === 'url' && safeUrl(record.props[prop.name]) ? <a href={safeUrl(record.props[prop.name])} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{shown}</a>
           : shown && prop.type === 'email' ? <a href={`mailto:${shown}`} onClick={(e) => e.stopPropagation()}>{shown}</a>
+          : shown && prop.type === 'phone' ? <WhatsAppLink phone={record.props[prop.name]}>{shown}</WhatsAppLink>
             : shown && type === 'order' && prop.name === 'hs_pipeline_stage' ? <EtapaPedido value={record.props[prop.name]} label={shown} />
               : shown && prop.type === 'owner' ? <UserChip id={record.props[prop.name]} />
                 : shown || '—'}
@@ -850,7 +851,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Propietario', <UserChip key="owner" id={record.props.owner_id} empty="—" />],
   ] : type === 'contact' ? [
     ['Email', record.props.email || '—'],
-    ['Celular', record.props.mobilephone || record.props.phone || '—'],
+    ['Celular', record.props.mobilephone || record.props.phone ? <WhatsAppLink key="cel" phone={record.props.mobilephone || record.props.phone} /> : '—'],
     ['Propietario', <UserChip key="owner" id={record.props.owner_id} empty="—" />],
   ] : [
     ['Total sin IVA', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],

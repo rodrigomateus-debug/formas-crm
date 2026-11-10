@@ -25,8 +25,10 @@ CRM cruzando datos que se controlan entre sí.
   pedido (el de la empresa en el CRM o, si no tiene, el de Finnegans). Nunca se toma el de Formas.
 - **Número de remito:** Finnegans sabe de qué pedido es cada remito que emite.
 - **Productos:** tienen que ser del pedido (por código; si no hay código, por nombre).
-- **Duplicados:** el mismo número de remito dos veces (una foto repetida, o el mismo remito por la app y por ClickUp) es
-  un solo remito; la misma foto o la misma clave de la app tampoco duplican.
+- **Duplicados y hojas:** el mismo número de remito dos veces (una foto repetida, o el mismo remito por la app y por
+  ClickUp) es un solo remito; la misma foto o la misma clave de la app tampoco duplican. Si la otra foto del mismo número
+  trae productos que las demás no tienen, es otra hoja de un remito largo y suma (cada producto de un remito cuenta una
+  vez). El chofer puede sacar o elegir varias fotos seguidas: cada una va por separado.
 
 Desde la app, el remito va solo al pedido cuando el PDV lleva a un único pedido **y** el CUIT o el número de remito en
 Finnegans lo confirman, sin que nada lo contradiga. Si una persona ya eligió el pedido (ficha del pedido o adjunto del

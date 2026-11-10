@@ -152,6 +152,18 @@ la vendedora), de la ficha del producto en Finnegans o, si no, de la foto del SK
 de cotizaciones se baja cada hora con el workflow «Totales de pedidos»; necesita el secreto `STPO_TOKEN` en GitHub (el mismo
 que usa formas-tablero). Detalle en [docs/PEDIDOS.md](docs/PEDIDOS.md#fotos-del-registro-de-cotizaciones-del-stp).
 
+## Monto de los negocios
+
+Al cerrar un negocio el monto es un estimado; el número final es el del pedido. Cuando cambia el total de un pedido
+asociado a un negocio (el total sin IVA de Finnegans, cada hora, o editado a mano), o se le asocia, se le quita o se anula
+un pedido, el negocio pasa a tener la suma de sus pedidos (`src/worker/montos.ts`), y queda en el historial del monto.
+Solo hacia adelante: no reescribe de golpe los montos de negocios viejos. Casos raros: varios pedidos suman; los anulados
+no cuentan; si a un pedido todavía no le llegó el total, el negocio espera; los negocios perdidos o en otra moneda no se
+tocan. Un pedido va en un solo negocio (un negocio sí puede tener varios pedidos): el CRM no deja sumarlo a un segundo. Para
+controlar los pedidos que no están en ningún negocio, la lista de pedidos tiene el filtro «Sin negocio» (propiedad «Negocios
+asociados» = 0). Quien cambia a mano el monto de un negocio con pedidos lo deja
+«Monto a mano» (y los pedidos ya no lo cambian); al desmarcarlo vuelve al total de los pedidos.
+
 ## Fotos de los usuarios
 
 Cada usuario se ve con la foto de su cuenta de Google (la misma de Gmail) en todo el CRM: el menú de abajo, las tarjetas del

@@ -267,9 +267,15 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   const H = { authorization: `Bearer ${tok}` };
   // Como lo manda scripts/pedidos-totales.mjs, con el número como lo guarda Finnegans (con ceros adelante).
   const pad = (p) => p.replace(/(\d+)$/, (n) => n.padStart(8, '0'));
+  // Un negocio con el pedido A: cuando llega el total de Finnegans, el monto del negocio pasa a ser el del pedido (montos.ts).
+  const deal = (await api('POST', '/records/deal', { props: { dealname: `Negocio del PDV ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 5000 } })).data;
+  // Un pedido va en un solo negocio: si quedó en el de una corrida anterior, se lo saca de ahí.
+  for (const d of (await api('GET', `/records/order/${a.id}`)).data.associations?.deal ?? []) await api('DELETE', '/associations', { from_id: d.id, to_id: a.id });
+  assert.equal((await api('POST', '/associations', { from_id: deal.id, to_id: a.id })).status, 200);
   const body = { totales: { [pad(a.props.pedido_finnegans)]: 1000.5, [b.props.pedido_finnegans]: 2000 } };
   const r = (await api('POST', '/hooks/pedidos/totales', body, H)).data;
   assert.ok(r.cruzados >= 2 && r.actualizados >= 2, JSON.stringify(r));
+  assert.equal((await api('GET', `/records/deal/${deal.id}`)).data.record.props.amount, 1000.5, 'el negocio toma el total del pedido');
   const pa = (await api('GET', `/records/order/${a.id}`)).data.record.props;
   assert.equal(Number(pa.hs_total_price), 1000.5);
   assert.equal(pa.hs_currency_code, 'ARS');

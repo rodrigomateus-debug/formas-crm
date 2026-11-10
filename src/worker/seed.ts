@@ -201,6 +201,8 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['dealstage', 'Etapa', 'string', 'Información del negocio', [], { ...CORE, ...FORM, required: true }],
     ['amount', 'Monto', 'currency', 'Información del negocio', [], { ...CORE, ...FORM }],
     ['deal_currency_code', 'Moneda', 'enum', 'Información del negocio', ['ARS', 'USD'], CORE],
+    // El monto sigue al total de los pedidos (montos.ts) salvo que esté marcado (migración 0025).
+    ['monto_a_mano', 'Monto a mano', 'bool', 'Información del negocio', [], { ...CORE, description: 'Si está marcado, el monto no se actualiza con el total de los pedidos del negocio.' }],
     ['closedate', 'Fecha de cierre', 'date', 'Información del negocio', [], { ...CORE, ...FORM }],
     ['owner_id', 'Propietario', 'owner', 'Información del negocio', [], { ...CORE, ...FORM }],
     ['dealtype', 'Tipo de negocio', 'enum', 'Información del negocio', [['newbusiness', 'Cliente nuevo'], ['existingbusiness', 'Cliente existente']], CORE],
@@ -333,6 +335,8 @@ export const COMPUTED: Record<string, PropDef[]> = {
   order: [
     ['createdate', 'Fecha de creación', 'datetime', 'Actividad', [], RO],
     ['source', 'Origen del registro', 'string', 'Actividad', [], RO],
+    // Para controlar los pedidos sin negocio (filtro «Sin negocio» de la lista de pedidos; migración 0026).
+    ['num_associated_deals', 'Negocios asociados', 'number', 'Actividad', [], { ...RO, description: 'Un pedido va en un solo negocio: 0 es un pedido sin negocio.' }],
   ],
 };
 

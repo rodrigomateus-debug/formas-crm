@@ -729,6 +729,9 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
   const [all, setAll] = useState(false);
   const shown = all ? items : items.slice(0, 5);
   const title = toType === type ? 'Empresas relacionadas' : OBJECTS[toType].plural;
+  // Un pedido va en un solo negocio (el servidor tampoco deja un segundo): con uno ya no se ofrece «Agregar».
+  const pedidoNegocio = type === 'order' && toType === 'deal';
+  const lleno = pedidoNegocio && items.length >= 1;
   const add = async (r: CrmRecord) => {
     try { await http('POST', '/associations', { from_id: record.id, to_id: r.id }); toast('Asociado'); setMode(''); onChange(); }
     catch (e) { toast((e as Error).message, true); }
@@ -736,7 +739,7 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
   return (
     <div className="panel assoc-card">
       <div className="panel-head"><h3>{title} <span className="muted small">({items.length})</span></h3>
-        <button className="btn sm" onClick={() => setMode(mode ? '' : 'pick')}>+ Agregar</button></div>
+        {!lleno && <button className="btn sm" onClick={() => setMode(mode ? '' : 'pick')}>+ Agregar</button>}</div>
       {mode === 'pick' && (
         <div className="panel-body stack">
           <RecordPicker type={toType} exclude={[record.id, ...items.map((i) => i.id)]} onPick={add} />
@@ -768,7 +771,9 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
           </div>
         </div>
       ))}
-      {!items.length && mode === '' && <div className="panel-body muted small">Nada asociado todavía.</div>}
+      {!items.length && mode === '' && (pedidoNegocio
+        ? <div className="panel-body small warn-text">Sin negocio asociado: asocialo para que el monto del negocio siga al total de este pedido.</div>
+        : <div className="panel-body muted small">Nada asociado todavía.</div>)}
       {items.length > 5 && <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)}>{all ? 'Ver menos' : `Ver los ${items.length}`}</button></div>}
     </div>
   );

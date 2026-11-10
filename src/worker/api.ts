@@ -313,7 +313,7 @@ api.get('/records/:type/:id/history', async (c) => {
   const id = Number(c.req.param('id'));
   const prop = c.req.query('prop');
   const { results } = await c.env.DB.prepare(
-    `SELECT c.*, u.name AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.record_id = ? ${prop ? 'AND c.prop = ?' : ''}
+    `SELECT c.*, COALESCE(c.actor, u.name) AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id WHERE c.record_id = ? ${prop ? 'AND c.prop = ?' : ''}
      ORDER BY c.changed_at DESC LIMIT 300`,
   ).bind(...(prop ? [id, prop] : [id])).all();
   return c.json(results);

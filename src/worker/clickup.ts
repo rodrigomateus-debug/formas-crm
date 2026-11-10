@@ -62,6 +62,7 @@ export function generalStage(statuses: string[]): string | null {
 interface CuTask {
   id: string; name: string; parent?: string | null; url: string; date_updated?: string; text_content?: string; description?: string;
   status?: { status: string; type?: string };
+  assignees?: Array<{ id?: number; username?: string | null; email?: string | null }>;
   custom_fields?: Array<{ name: string; type: string; value?: unknown; type_config?: { options?: Array<{ id: string; name: string; orderindex?: number }> } }>;
   subtasks?: CuTask[];
   attachments?: Array<{ id: string; title?: string; extension?: string; mimetype?: string; size?: number; date?: string }>;
@@ -271,6 +272,20 @@ async function ownerFor(db: D1Database, vendedor: string, mail: string) {
     ?? null;
 }
 
+// Quién mueve el pedido en ClickUp: el asignado del PDV (Sole, Ceci…) o, si el PDV no tiene, el primero de sus artículos.
+// Los cambios que trae la sincronización quedan a su nombre en el historial (pedido de Rodrigo del 10/11/2026); si tiene
+// usuario en el CRM (por mail o por nombre), con su usuario.
+const titulo = (s: string) => s.replace(/\S+/g, (w) => w[0].toUpperCase() + w.slice(1));
+export async function responsableClickup(db: D1Database, t: CuTask): Promise<{ name: string; userId: number | null } | null> {
+  const a = t.assignees?.find((x) => x.username || x.email) ?? t.subtasks?.flatMap((x) => x.assignees ?? []).find((x) => x.username || x.email);
+  if (!a) return null;
+  const users = (await db.prepare('SELECT id, name, email FROM users WHERE deleted_at IS NULL').all<{ id: number; name: string; email: string }>()).results;
+  const mail = (a.email ?? '').toLowerCase();
+  const name = norm(a.username ?? '');
+  const u = (mail && users.find((x) => x.email.toLowerCase() === mail)) || (name && users.find((x) => norm(x.name) === name)) || null;
+  return { name: u?.name ?? titulo(a.username || mail.split('@')[0]), userId: u?.id ?? null };
+}
+
 // Pedidos que entraron sin vendedora (todavía no tenía usuario en el CRM): se completan con el VENDEDOR que ya trae la
 // lista de ClickUp, sin volver a pedir cada PDV. «Revisar todo» relee la lista entera y así los completa en un par de corridas.
 async function ownersFromList(db: D1Database, ctx: Ctx, tasks: CuTask[]) {
@@ -283,7 +298,8 @@ async function ownersFromList(db: D1Database, ctx: Ctx, tasks: CuTask[]) {
   for (const r of results) {
     const pdv = readPdv(pdvs.get(r.url)!);
     const o = await ownerFor(db, pdv.vendedor, pdv.mailVendedor);
-    if (o) { await updateRecord(db, ctx, 'order', r.id, { owner_id: o }, { system: true, strict: false }); n++; }
+    const resp = o ? await responsableClickup(db, pdvs.get(r.url)!) : null;
+    if (o) { await updateRecord(db, resp ? { ...ctx, actor: resp } : ctx, 'order', r.id, { owner_id: o }, { system: true, strict: false }); n++; }
   }
   return n;
 }
@@ -320,6 +336,9 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   const db = env.DB;
   const pdv = readPdv(t);
   if (!pdv.npdv || !pdv.unidad) return 'omitido';
+  // Lo que cambia ClickUp en este pedido queda a nombre de quien tiene asignado el PDV, no del usuario de la sincronización.
+  const resp = await responsableClickup(db, t);
+  const pctx: Ctx = resp ? { ...ctx, actor: resp } : ctx;
   const existing = await findOrder(db, pdv);
   let id: number;
   let result: 'creado' | 'actualizado' | 'igual' = 'igual';
@@ -331,7 +350,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   };
   if (!existing) {
     const pipeline = (await new Meta(db).property('order', 'hs_pipeline'))?.options[0]?.value;
-    const row = await createRecord(db, ctx, 'order', {
+    const row = await createRecord(db, pctx, 'order', {
       ...synced, hs_order_name: `PDV ${pdv.npdv}${pdv.cliente ? ` · ${pdv.cliente}` : ''}`, pdv_finnegans: pdv.npdv,
       hs_pipeline_stage: pdv.stage ?? STAGE.confirmado, hs_pipeline: pipeline ?? null, tipo_de_pedido: pdv.evento ? 'EVENTO' : 'PEDIDO NORMAL',
       fecha_de_entrega: pdv.entrega, owner_id: (owner = (await ownerFor(db, pdv.vendedor, pdv.mailVendedor)) ?? null),
@@ -352,7 +371,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     if (cur.owner_id == null) { const o = await ownerFor(db, pdv.vendedor, pdv.mailVendedor); if (o) change.owner_id = o; }
     owner = (change.owner_id ?? cur.owner_id ?? null) as number | null;
     entregadoAhora = change.hs_pipeline_stage === STAGE.entregado;
-    if (Object.keys(change).length) { await updateRecord(db, ctx, 'order', id, change, { system: true, strict: false }); result = 'actualizado'; }
+    if (Object.keys(change).length) { await updateRecord(db, pctx, 'order', id, change, { system: true, strict: false }); result = 'actualizado'; }
     // Anulado (o desanulado) en ClickUp: el monto de su negocio se vuelve a sumar sin este pedido (montos.ts).
     if ('hs_pipeline_stage' in change && (change.hs_pipeline_stage === STAGE.anulado || cur.hs_pipeline_stage === STAGE.anulado)) await montosDesdePedidos(db, [id], ctx);
     // Cambió el pedido de Finnegans: los productos se vuelven a leer al abrir el pedido.
@@ -363,6 +382,10 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
       const company = await companyFor(env, pdv, fin, b);
       if (company) { await associate(db, ctx, id, company, { primary: true }).catch(() => undefined); result = 'actualizado'; }
     }
+  }
+  // Lo que ClickUp cambió antes de esto (a nombre de la sincronización) pasa a quien tiene asignado el PDV.
+  if (resp) {
+    await db.prepare("UPDATE changes SET user_id = ?, actor = ? WHERE record_id = ? AND source = 'clickup' AND actor IS NULL").bind(resp.userId, resp.name, id).run();
   }
   if (entregadoAhora) {
     await tareaPostEntrega(db, ctx, id, { npdv: pdv.npdv, cliente: pdv.cliente, vendedor: pdv.vendedor, recibido: pdv.entregado, ownerId: owner })

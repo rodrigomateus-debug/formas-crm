@@ -57,6 +57,9 @@ export interface Ctx {
   source: string;
   sourceDetail?: string;
   tokenId?: number;   // el token con que entró (integraciones y choferes)
+  // Quién hizo el cambio afuera, cuando no es el usuario de la sincronización: en ClickUp, quien tiene asignado el PDV.
+  // El historial lo guarda a su nombre (userId: su usuario del CRM, si lo tiene). Lo demás sigue siendo de `user`.
+  actor?: { name: string; userId: number | null };
 }
 
 export type ObjectType = 'contact' | 'company' | 'deal' | 'order';

@@ -323,6 +323,8 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
 // ---------- Línea de tiempo y registro de actividades ----------
 
 const FILTERS: Array<[string, string]> = [['', 'Actividad'], ['note', 'Notas'], ['email', 'Emails'], ['call', 'Llamadas'], ['task', 'Tareas'], ['meeting', 'Reuniones'], ['whatsapp', 'WhatsApp']];
+// De dónde vino un cambio, como se lee en el historial.
+const SOURCE_LABEL: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API' };
 const CHANGE_LABEL: Record<string, string> = { dealstage: 'Etapa', pipeline: 'Pipeline', owner_id: 'Propietario', lifecyclestage: 'Ciclo de vida', amount: 'Monto', archived: 'Borrado', merged: 'Combinado con', hs_pipeline_stage: 'Estado del pedido', factura_numero: 'Factura' };
 
 function Timeline({ type, record, associations, onChange }: { type: ObjectType; record: CrmRecord; associations: Assoc; onChange: () => void }) {
@@ -384,7 +386,17 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
         if (it.kind === 'c') {
           const c = it.c;
           const val = (v: string) => (c.prop === 'merged' ? v : formatValue(meta, type, c.prop, v) || '—');
-          return <div key={`c${c.changed_at}${c.prop}`}>{head}<div className="tl-change">{CHANGE_LABEL[c.prop] ?? c.prop}: {c.old_value != null && c.prop !== 'merged' ? `${val(c.old_value)} → ` : ''}<b>{c.prop === 'merged' ? c.new_value : val(c.new_value)}</b> · <UserChip id={c.user_id} name={c.user_name} empty="sistema" size="xs" />{c.source !== 'crm' ? ` (${c.source})` : ''} · {new Date(c.changed_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}</div></div>;
+          // La hora a la izquierda, en su columna, y a la derecha qué cambió y quién (lo que viene de ClickUp, a nombre de
+          // quien tiene asignado el PDV).
+          return (
+            <div key={`c${c.changed_at}${c.prop}`}>{head}
+              <div className="tl-change">
+                <time className="tl-hora" dateTime={c.changed_at}>{new Date(c.changed_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
+                <span>{CHANGE_LABEL[c.prop] ?? c.prop}: {c.old_value != null && c.prop !== 'merged' ? `${val(c.old_value)} → ` : ''}<b>{c.prop === 'merged' ? c.new_value : val(c.new_value)}</b>
+                  {' · '}<UserChip id={c.user_id} name={c.user_name} empty="sistema" size="xs" />{c.source !== 'crm' ? ` (${SOURCE_LABEL[c.source] ?? c.source})` : ''}</span>
+              </div>
+            </div>
+          );
         }
         return <div key={`a${it.a.id}`}>{head}<ActivityItem a={it.a} currentId={record.id} onChange={reload} /></div>;
       })}

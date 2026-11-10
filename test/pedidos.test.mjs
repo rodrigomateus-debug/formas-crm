@@ -34,6 +34,8 @@ const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.no
     : `Pedido: PEDVTASTP - ${npdv}\nCliente: Cliente ${RUN} S.R.L.\nVendedor: ${vendedor}\nEs evento: Sí\nFecha entrega: 30-11-2026`,
   custom_fields: [field('N° PDV', `PDV - ${npdv}`), field('CLIENTE', `Cliente ${RUN} S.R.L.`), field('🧑‍💻 VENDEDOR', vendedor),
     { name: 'UNIDAD DE NEGOCIO', type: 'drop_down', value: { name: unidad } }, field('ENTREGAS (FECHA REAL)', String(RECIBIDO), 'date')],
+  // Quien tiene asignado el PDV en ClickUp: lo que mueve ClickUp queda a su nombre en el historial del pedido.
+  assignees: [{ id: 7, username: `ceci ${RUN}`, email: `ceci.${RUN}@formas.ar` }],
   subtasks: statuses.map((s, i) => ({ id: `${id}-${i}`, name: `Taza ${i} - Proveedor`, parent: id, date_updated: String(updated), status: { status: s },
     text_content: `PDV - ${npdv}\nProducto: Taza ${i}\nCantidad: 1.000\nCódigo: TAZA\\_${i}`, custom_fields: [field('CANTIDAD ', '150', 'number')] })),
   attachments,
@@ -161,13 +163,24 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   for (let i = 0; i < 30 && !cu.puts.length; i++) await new Promise((r) => setTimeout(r, 100));
   assert.deepEqual(cu.puts, [{ id: 'cuA-0', status: 'pdv' }]);
 
-  // 3. El estado sale de los artículos.
+  // 3. El estado sale de los artículos. Lo que mueve ClickUp queda a nombre de quien tiene asignado el PDV: sin usuario en
+  // el CRM, con el nombre de ClickUp (y lo de antes, que estaba a nombre de la sincronización, también).
   cu.statuses = ['en el impresor', 'boceto pendiente'];
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.equal((await order()).props.hs_pipeline_stage, 'esperando_boceto');
+  const cambios = async () => (await api('GET', `/records/order/${o.id}/timeline`)).data.changes.filter((ch) => ch.source === 'clickup');
+  const ceci = `Ceci ${RUN[0].toUpperCase()}${RUN.slice(1)}`;
+  let ch = await cambios();
+  assert.ok(ch.length >= 2, 'hay cambios de ClickUp');
+  assert.ok(ch.every((x) => x.user_name === ceci && x.user_id == null), JSON.stringify(ch.map((x) => [x.prop, x.user_name, x.user_id])));
+  // Con usuario en el CRM (por el mail), los cambios nuevos van con su usuario.
+  const ceciUser = (await api('POST', '/users', { email: `ceci.${RUN}@formas.ar`, name: ceci, role: 'member', profile: 'produccion' })).data;
   cu.statuses = ['en el impresor', 'listo para entergar'];
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.equal((await order()).props.hs_pipeline_stage, '1237498994');
+  ch = await cambios();
+  assert.equal(ch[0].new_value, '1237498994');
+  assert.deepEqual([ch[0].user_id, ch[0].user_name], [ceciUser.id, ceci], 'con su usuario del CRM');
   assert.match((await order()).props.detalle_produccion, /1 en el impresor/);
 
   // 4. Entregado: con el remito que suben a ClickUp (al artículo, como hacen en la realidad; se busca al abrir el pedido).

@@ -79,8 +79,23 @@ const pdvTask = (id, npdv, cliente, status) => ({
   attachments: [],
 });
 const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor')];
+// Gmail simulado (puerto 8799, el de GOOGLE_TOKEN_URL y GMAIL_API_URL de .dev.vars): los mails de faltantes.
+const mails = [];
+let gmail;
 let server;
 before(async () => {
+  gmail = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const ch of req) body += ch;
+    const send = (b) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(b)); };
+    if (req.url === '/token') {
+      const claims = JSON.parse(Buffer.from(new URLSearchParams(body).get('assertion').split('.')[1], 'base64url').toString());
+      return send({ access_token: `tok:${claims.sub}`, expires_in: 3600 });
+    }
+    if (req.url === '/gmail/v1/users/me/messages/send') { mails.push(Buffer.from(JSON.parse(body).raw, 'base64url').toString()); return send({ id: `m${mails.length}` }); }
+    res.statusCode = 404; send({});
+  });
+  await new Promise((r) => gmail.listen(8799, r));
   server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     const p = decodeURIComponent(url.pathname);
@@ -134,7 +149,11 @@ before(async () => {
   });
   await new Promise((r) => server.listen(8797, r));
 });
-after(() => server.close());
+after(() => { server.close(); gmail.close(); });
+const textoDe = (raw) => raw.split(/--fcrm\w+/).map((part) => {
+  const [head, ...rest] = part.split('\r\n\r\n');
+  return /base64/.test(head) ? Buffer.from(rest.join('').replace(/\s+/g, ''), 'base64').toString() : '';
+}).join('\n');
 
 const pedidoDe = async (pdv) => (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${pdv}`)}`)).data.results.find((o) => String(o.props.pdv_finnegans) === pdv);
 const remitosDe = async (id) => (await api('GET', `/records/order/${id}/remitos`)).data;
@@ -279,6 +298,24 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   asUser = null;
   // A un pedido completo no se le «finaliza con faltante».
   assert.equal((await api('POST', `/records/order/${A.id}/entrega/finalizar`, { motivo: 'nada' })).status, 400);
+
+  // El mail de faltantes: a Logística y a los administradores (como el usuario de desarrollo), aunque no estén en la
+  // lista de avisos (que acá tiene a otra persona). El de A no sale: se completó antes de que saliera.
+  const tokA = (await api('POST', '/tokens', { name: `Avisos ${RUN}`, source: 'api' })).data.token;
+  const HA = { authorization: `Bearer ${tokA}` };
+  if ((await api('GET', '/hooks/avisos', undefined, HA)).data.has_credentials) {
+    const admin = (await api('GET', '/meta')).data.me;
+    assert.equal(admin.role, 'admin');
+    await api('PUT', '/hooks/avisos', { enabled: true, users: [`nadie.${RUN}@formas.ar`] }, HA);
+    await api('POST', '/hooks/avisos/enviar', undefined, HA);
+    const para = (email) => mails.filter((m) => m.includes(`<${email}>`)).map(textoDe);
+    for (const lista of [para(logi.email), para(admin.email)]) {
+      const m = lista.find((x) => x.includes(B.name));
+      assert.ok(m, 'le llegó el faltante del pedido B');
+      assert.match(m, /falta 35 Gorra bordada/);
+      assert.ok(!lista.some((x) => x.includes(A.name)), 'el pedido A ya está completo');
+    }
+  }
 
   // 9. Lo que ve el chofer: sus remitos, el más nuevo primero, con el mensaje de cada uno.
   const mios = (await api('GET', '/hooks/chofer/api/remitos', undefined, H)).data.remitos;

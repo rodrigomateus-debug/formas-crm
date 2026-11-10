@@ -151,11 +151,14 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     // Faltantes de entrega (remitos.ts): si el pedido ya se completó o se finalizó, no se avisa.
     const resueltas = todas.filter((r) => r.kind === 'entrega' && r.entrega !== 'parcial' && r.entrega !== 'diferencias').map((r) => r.id);
     if (resueltas.length) await marcar(resueltas, 'ya no falta nada');
-    const rows = todas.filter((r) => !resueltas.includes(r.id));
+    // Los faltantes de entrega les llegan siempre a Logística y a los administradores (no dependen de la lista `users`,
+    // que es para ir abriendo los otros avisos de a poco).
+    const fuera = todas.filter((r) => r.kind !== 'entrega' && !recibe(cfg, r.email)).map((r) => r.id);
+    if (fuera.length) await marcar(fuera, 'sin avisos por mail');
+    const rows = todas.filter((r) => !resueltas.includes(r.id) && !fuera.includes(r.id));
     if (!rows.length) continue;
     const ids = rows.map((r) => r.id);
     const u = rows[0];
-    if (!recibe(cfg, u.email)) { await marcar(ids, 'sin avisos por mail'); continue; }
     // Lo que no pudo salir en 3 días no se manda más (por ejemplo, si falta el permiso de Google).
     const viejos = rows.filter((r) => Date.now() - Date.parse(r.created_at) > 3 * 86_400_000).map((r) => r.id);
     if (viejos.length === rows.length) { await marcar(ids, 'vencido'); continue; }

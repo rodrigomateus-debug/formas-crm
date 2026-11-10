@@ -540,7 +540,7 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
 
 // Guarda el estado de entrega en el pedido (para filtros, tablas y tarjetas), con su historial y sin tocar la fecha de
 // modificación (así el tablero no se reordena). Si el pedido pasa a «Faltan entregas» o «Con diferencias» por un remito
-// nuevo, le avisa por mail a Logística.
+// nuevo, les avisa por mail a Logística y a los administradores.
 export async function recalcularEntrega(env: Env, orderId: number, opts: { ctx?: Ctx | null; avisar?: boolean } = {}) {
   const db = env.DB;
   const e = await calcularEntrega(db, orderId);
@@ -562,7 +562,8 @@ export async function recalcularEntrega(env: Env, orderId: number, opts: { ctx?:
 }
 
 async function avisarLogistica(db: D1Database, orderId: number, ctx: Ctx | null) {
-  const { results } = await db.prepare("SELECT id FROM users WHERE active = 1 AND profile = 'logistica'").all<{ id: number }>();
+  // A Logística y a los administradores (que ven todo).
+  const { results } = await db.prepare("SELECT id FROM users WHERE active = 1 AND (profile = 'logistica' OR role = 'admin')").all<{ id: number }>();
   const stmts = results.map((u) => db.prepare(`INSERT INTO avisos (user_id, kind, record_id, by_user)
     SELECT ?, 'entrega', ?, ? WHERE NOT EXISTS (SELECT 1 FROM avisos WHERE user_id = ? AND kind = 'entrega' AND record_id = ? AND sent_at IS NULL)`)
     .bind(u.id, orderId, ctx?.user.id ?? null, u.id, orderId));

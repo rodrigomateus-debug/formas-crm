@@ -296,6 +296,9 @@ export async function getRow(db: D1Database, id: number, type?: ObjectType) {
 }
 
 const TRACK_ON_CREATE = ['dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'amount', 'hs_lead_status'];
+// A nombre de quién queda un cambio en el historial: quien lo hizo afuera (ctx.actor, por ejemplo el asignado del PDV en
+// ClickUp) o, si no, el usuario que lo hizo en el CRM.
+const quien = (ctx: Ctx) => (ctx.actor ? ctx.actor.userId : ctx.user.id);
 
 // Estado del pedido: lo mueve ClickUp. A mano, las vendedoras y el backoffice lo mueven en la parte previa a la
 // producción: «Pedido confirmado», «$ Pendiente de Anticipo», «Pendiente Boceto Digital» y «Listo para producción», en
@@ -355,8 +358,8 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   ).bind(opts.id ?? null, type, c.name, JSON.stringify(props), c.owner_id, c.email, c.domain, c.phone, c.pipeline_id, c.stage_id, c.amount,
     c.close_date, c.stage_id ? ts : null, ts, ts, ctx.user.id, ctx.source, ctx.sourceDetail ?? null).first<RecordRow>();
   const changes = TRACK_ON_CREATE.filter((k) => props[k] != null).map((k) =>
-    db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, NULL, ?, ?, ?, ?)')
-      .bind(row!.id, k, String(props[k]), ts, ctx.user.id, ctx.source));
+    db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source, actor) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
+      .bind(row!.id, k, String(props[k]), ts, quien(ctx), ctx.source, ctx.actor?.name ?? null));
   if (changes.length) await db.batch(changes);
   await avisarAsignacion(db, ctx, c.owner_id, { recordId: row!.id });
   if (type === 'deal') await stageAutomation(db, ctx, row!.id, (await meta.stage(c.stage_id!))!, c.owner_id, c.name);
@@ -398,8 +401,8 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
       amount = ?, close_date = ?, stage_entered_at = CASE WHEN ? THEN ? ELSE stage_entered_at END, updated_at = ? WHERE id = ?`)
       .bind(c.name, JSON.stringify(next), c.owner_id, c.email, c.domain, c.phone, c.pipeline_id, c.stage_id, c.amount, c.close_date,
         stageMoved ? 1 : 0, ts, ts, id),
-    ...changed.map((k) => db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .bind(id, k, current[k] == null ? null : String(current[k]), next[k] == null ? null : String(next[k]), ts, ctx.user.id, ctx.source)),
+    ...changed.map((k) => db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(id, k, current[k] == null ? null : String(current[k]), next[k] == null ? null : String(next[k]), ts, quien(ctx), ctx.source, ctx.actor?.name ?? null)),
   ];
   // Si el negocio pasa a una etapa cerrada sin fecha de cierre, se completa con hoy (igual que HubSpot).
   if (type === 'deal' && stageMoved) {

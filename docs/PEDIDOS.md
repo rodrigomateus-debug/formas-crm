@@ -50,6 +50,11 @@ El estado sale de los **artículos**, no del PDV (regla de Rodrigo: el del PDV n
   «Esperando boceto o confirmación» es cuando producción espera un boceto en ClickUp, y esa la sigue moviendo ClickUp.
 - «$ Pendiente de Anticipo» es solo para Formas Shop y No Estrés: un pedido de Corporate rebota con un aviso (también para
   los administradores). Los pedidos sin unidad de negocio pueden ir.
+- En el historial del pedido, lo que mueve ClickUp queda a nombre de quien tiene asignado el PDV en ClickUp (si el PDV no
+  tiene, el primero asignado de sus artículos), no del usuario de la sincronización (pedido de Rodrigo del 10/11/2026). Si
+  esa persona tiene usuario en el CRM (por mail o por nombre), con su usuario; si no, con su nombre de ClickUp. Lo que ya
+  estaba a nombre de la sincronización pasa a esa persona la próxima vez que se lee el PDV (columna `changes.actor`,
+  migración `0032`).
 - Los administradores pueden poner cualquier estado. Las vendedoras y el backoffice solo mueven las cuatro etapas antes de producción; cualquier otro cambio a mano rebota con un aviso.
 - Los estados de HubSpot se traducen (`ORDER_STAGE_ALIAS` en `seed.ts` y `0008_pedidos_clickup.sql`): «$ Pendiente de Anticipo» y «Boceto Digital» van a sus etapas (desde la 0030 conservan sus ids de HubSpot); «Producción en revisión» → En producción; «$ Pendiente de Saldo» y «Listo para retirar» → Listo para entregar; «Pedido Completo» → Entregado; «Pedido Cancelado» → Anulado.
 

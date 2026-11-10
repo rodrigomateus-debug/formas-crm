@@ -34,6 +34,9 @@ export function UserAvatar({ id, size }: { id: unknown; size?: 'lg' | 'sm' | 'xs
 // (actividad, historial): ahí el nombre se corta con «…» como el resto de la línea.
 export function UserChip({ id, name, empty = 'Sin asignar', size = 'sm' }: { id: unknown; name?: string | null; empty?: ReactNode; size?: 'sm' | 'xs' }) {
   const { meta } = useMeta();
+  // Sin usuario del CRM pero con nombre (por ejemplo, quien tiene asignado el PDV en ClickUp): el nombre con sus iniciales.
+  if ((id == null || id === '') && name) return size === 'xs' ? <span className="user-inline"><Avatar name={name} size="xs" />{name}</span>
+    : <span className="user-chip" title={name}><Avatar name={name} size={size} /><span className="ellipsis">{name}</span></span>;
   if (id == null || id === '') return <>{empty}</>;
   const u = userOf(meta, id);
   const n = u?.name ?? name ?? userName(meta, id);

@@ -307,7 +307,7 @@ const TOOLS: Tool[] = [
     inputSchema: { type: 'object', properties: { id: { type: 'integer' }, property: { type: 'string' } }, required: ['id'] },
     run: async (a, _ctx, env) => {
       const { results } = await env.DB.prepare(
-        `SELECT c.prop, c.old_value, c.new_value, c.changed_at, c.source, u.name AS user FROM changes c LEFT JOIN users u ON u.id = c.user_id
+        `SELECT c.prop, c.old_value, c.new_value, c.changed_at, c.source, COALESCE(c.actor, u.name) AS user FROM changes c LEFT JOIN users u ON u.id = c.user_id
          WHERE c.record_id = ? ${a.property ? 'AND c.prop = ?' : ''} ORDER BY c.changed_at DESC LIMIT 200`,
       ).bind(...(a.property ? [Number(a.id), a.property] : [Number(a.id)])).all();
       return results;

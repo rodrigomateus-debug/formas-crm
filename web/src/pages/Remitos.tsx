@@ -159,16 +159,28 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
     catch (err) { toast((err as Error).message, true); } finally { setOcupado(false); }
   };
   const [label, cls] = ESTADO[r.estado];
-  const ajeno = orderId != null && r.record_id !== orderId;
+  const ajeno = orderId != null && r.record_id !== orderId && (r.estado === 'revisar' || r.estado === 'sin_leer');
   const productos = r.items.slice(0, 3).map((i) => `${cant(i.quantity)} ${i.description ?? i.code ?? ''}`.trim()).join(' · ');
+  const [notasAbiertas, setNotasAbiertas] = useState(false);
+  const notasLargas = (r.notas ?? '').length > 110;
   return (
     <div className="assoc-item remito-fila">
-      <span className={`tag ${cls}`}>{label}</span>
-      <div className="grow" style={{ minWidth: 0 }}>
-        <div className="remito-titulo">{titulo(r)}{r.pdv ? ` · PDV ${r.pdv}` : ''}{r.pdv_chofer ? ' (escrito por el chofer)' : ''}</div>
-        <div className="small muted">{[r.fecha && fmtDate(r.fecha), origenDe(r), r.recibido_por && `recibió ${r.recibido_por}`].filter(Boolean).join(' · ')}</div>
+      {/* Arriba, en una línea: el estado, el número y «Ver». Abajo, los datos a todo el ancho de la tarjeta. */}
+      <div className="remito-cabeza">
+        <span className={`tag ${cls}`}>{label}</span>
+        <span className="remito-titulo grow">{titulo(r)}</span>
+        <a className="btn sm" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer">Ver</a>
+      </div>
+      <div className="remito-cuerpo">
+        <div className="small muted">{[r.pdv && `PDV ${r.pdv}${r.pdv_chofer ? ' (escrito por el chofer)' : ''}`, r.fecha && fmtDate(r.fecha), origenDe(r), r.recibido_por && `recibió ${r.recibido_por}`].filter(Boolean).join(' · ')}</div>
         {productos && <div className="small">{productos}{r.items.length > 3 ? ` y ${r.items.length - 3} más` : ''}</div>}
-        {r.reservas && <div className="small"><span className="tag warn">Recibido a controlar</span>{r.notas ? <span className="muted"> {r.notas}</span> : null}</div>}
+        {r.reservas && <div><span className="tag warn">Recibido a controlar</span></div>}
+        {r.notas && (
+          <div className="small muted">
+            <span className={notasLargas && !notasAbiertas ? 'clamp-2' : undefined}>{r.notas}</span>
+            {notasLargas && <button type="button" className="link-btn" onClick={() => setNotasAbiertas(!notasAbiertas)}>{notasAbiertas ? 'ver menos' : 'ver más'}</button>}
+          </div>
+        )}
         {(r.estado === 'revisar' || r.estado === 'sin_leer' || r.estado === 'duplicado') && r.motivo && <div className="small warn-text">{r.motivo}</div>}
         {ajeno && <div className="small warn-text">No está en este pedido: puede ser de este (el PDV o el cliente coinciden).</div>}
         {r.controles.length > 0 && (
@@ -178,14 +190,13 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
           </details>
         )}
         {(r.estado === 'revisar' || r.estado === 'sin_leer') && (
-          <div className="row wrap" style={{ gap: 6, marginTop: 4 }}>
+          <div className="row wrap" style={{ gap: 6, marginTop: 2 }}>
             {orderId != null && r.estado === 'revisar' && <button className="btn sm" disabled={ocupado} onClick={() => accion({ accion: 'confirmar', pedido: orderId }, 'Remito confirmado en este pedido')}>Es de este pedido</button>}
             <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'releer' }, 'Remito leído de nuevo')}>{ocupado ? 'Leyendo…' : 'Leer de nuevo'}</button>
             <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'descartar' }, 'Remito descartado')}>Descartar</button>
           </div>
         )}
       </div>
-      <a className="btn sm" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer">Ver</a>
     </div>
   );
 }

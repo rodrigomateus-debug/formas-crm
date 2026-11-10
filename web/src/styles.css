@@ -766,8 +766,13 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .entrega-linea:last-child { border-bottom: 0; }
 .entrega-linea .num { color: var(--ui-ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .entrega-linea .tag { flex: none; }
-.remito-fila { align-items: flex-start; }
-.remito-fila > .tag { margin-top: 1px; flex: none; }
+.remito-fila { flex-direction: column; align-items: stretch; gap: 6px; }
+.remito-cabeza { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.remito-cabeza .tag { flex: none; }
+.remito-cabeza .btn { flex: none; }
+.remito-cuerpo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.remito-cuerpo .controles { margin-top: 0; }
+.link-btn { border: 0; background: none; padding: 0 0 0 4px; color: var(--accent-ink); font: inherit; cursor: pointer; text-decoration: underline; }
 .controles { margin: 4px 0 0; }
 .controles summary { cursor: pointer; color: var(--text-3); }
 .controles ul, ul.controles { list-style: none; padding: 0; margin: 4px 0 0; display: flex; flex-direction: column; gap: 2px; }

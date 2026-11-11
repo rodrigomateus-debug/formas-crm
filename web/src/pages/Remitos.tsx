@@ -22,11 +22,14 @@ export interface Remito {
   pedido_nombre?: string | null;   // en la bandeja: el nombre del pedido donde está
   revisado_por?: number | null; revisado_at?: string | null;
   revisor?: string | null;   // en «Revisados»: quién lo revisó
-  pares?: Array<{ position: number; i: number; name: string; cantidad: number }>;   // en «Revisados»: a qué producto del pedido va cada renglón
+  // en «Revisados»: a qué producto del pedido va cada renglón (pedido: de cuál, en un remito de varios pedidos)
+  pares?: Array<{ position: number; pedido?: number; i: number; name: string; cantidad: number }>;
+  pedidos?: Array<{ id: number; nombre: string }>;   // los pedidos del remito: el principal primero y, si es de varios, los otros
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
 // Un renglón de los remitos (clave: cuál es, para asignarlo a mano a productos del pedido).
-interface ItemRemito { clave: string; code: string | null; description: string | null; quantity: number | null; numero: string | null }
+// compartido: de un remito de varios pedidos donde este no es el principal (si no se asigna acá, cuenta en ese pedido).
+interface ItemRemito { clave: string; code: string | null; description: string | null; quantity: number | null; numero: string | null; compartido?: string }
 interface Asignado extends ItemRemito { a: Array<{ i: number; name: string; cantidad: number }>; por: number | null; el: string }
 export interface Entrega {
   estado: string | null; lineas: Linea[]; extras: Array<ItemRemito & { sin_asignar?: boolean }>; asignados: Asignado[];
@@ -87,6 +90,8 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
     catch (err) { toast((err as Error).message, true); }
   };
   const faltan = e?.lineas.filter((l) => l.falta > 0) ?? [];
+  const propios = e?.extras.filter((x) => !x.compartido) ?? [];
+  const compartidos = e?.extras.filter((x) => x.compartido) ?? [];
   // Lo entregado y lo que falta, solo cuando hay algún remito leído y confirmado: antes, todo daría «falta» sin serlo.
   const mostrarLineas = !!e && e.lineas.length > 0 && e.remitos_ok > 0;
   const sinLeer = remitos.filter((r) => r.estado === 'sin_leer' && r.record_id === record.id).length;
@@ -114,13 +119,27 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
         </div>
       )}
       {/* Lo que el remito dice con otro nombre: se puede decir a qué producto (o productos) del pedido corresponde. */}
-      {(e?.extras.length ?? 0) > 0 && (
+      {propios.length > 0 && (
         <div className="panel-body small">
           <div className="aviso bad extras-remito">
             <div>En los remitos pero no en el pedido:</div>
-            {e!.extras.map((x) => (
+            {propios.map((x) => (
               <div key={x.clave + (x.sin_asignar ? '-resto' : '')} className="extra-remito">
                 <span className="grow">{`${cant(x.quantity)} ${x.description ?? x.code ?? ''}`.trim()}{x.sin_asignar ? ' (sin asignar)' : ''}</span>
+                {puedeEditar && e!.lineas.length > 0 && <button className="btn sm" onClick={() => setAsignar(x.clave)}>Asignar a producto</button>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Un remito de varios pedidos: lo que se asigna acá cuenta en este pedido; lo demás, en el principal. */}
+      {compartidos.length > 0 && (
+        <div className="panel-body small">
+          <div className="aviso info extras-remito">
+            <div>De un remito de varios pedidos: lo que asignes acá cuenta en este pedido; lo demás, en «{compartidos[0].compartido}».</div>
+            {compartidos.map((x) => (
+              <div key={x.clave + (x.sin_asignar ? '-resto' : '')} className="extra-remito">
+                <span className="grow">{`${cant(x.quantity)} ${x.description ?? x.code ?? ''}`.trim()}{x.numero ? <span className="muted"> ({x.numero})</span> : null}</span>
                 {puedeEditar && e!.lineas.length > 0 && <button className="btn sm" onClick={() => setAsignar(x.clave)}>Asignar a producto</button>}
               </div>
             ))}
@@ -273,6 +292,7 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
   const productos = r.items.slice(0, 3).map((i) => `${cant(i.quantity)} ${i.description ?? i.code ?? ''}`.trim()).join(' · ');
   const [notasAbiertas, setNotasAbiertas] = useState(false);
   const notasLargas = (r.notas ?? '').length > 110;
+  const otrosPedidos = (r.pedidos ?? []).length > 1 ? r.pedidos!.filter((p) => p.id !== orderId) : [];
   return (
     <div className="assoc-item remito-fila">
       {/* Arriba, en una línea: el estado, el número y «Ver». Abajo, los datos a todo el ancho de la tarjeta. */}
@@ -284,6 +304,9 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
       <div className="remito-cuerpo">
         <div className="small muted">{[r.pdv && `PDV ${r.pdv}${r.pdv_chofer ? ' (escrito por el chofer)' : ''}`, r.fecha && fmtDate(r.fecha), origenDe(r), r.recibido_por && `recibió ${r.recibido_por}`].filter(Boolean).join(' · ')}</div>
         {productos && <div className="small">{productos}{r.items.length > 3 ? ` y ${r.items.length - 3} más` : ''}</div>}
+        {otrosPedidos.length > 0 && (
+          <div className="small">Remito de varios pedidos: también {otrosPedidos.map((p, k) => <span key={p.id}>{k ? ' y ' : ''}<Link to={recordUrl('order', p.id)}>{p.nombre}</Link></span>)}</div>
+        )}
         {r.reservas && <div><span className="tag warn">Recibido a controlar</span></div>}
         {r.notas && (
           <div className="small muted">
@@ -359,7 +382,8 @@ function Revisados() {
 
 // Lo que se decidió en la revisión, en palabras.
 function resultado(r: Remito) {
-  const pedido = r.pedido_nombre ? `«${r.pedido_nombre}»` : 'el pedido';
+  const varios = (r.pedidos ?? []).length > 1;
+  const pedido = varios ? r.pedidos!.map((p) => `«${p.nombre}»`).join(' y ') : r.pedido_nombre ? `«${r.pedido_nombre}»` : 'el pedido';
   if (r.estado === 'ok') return `Confirmado en ${pedido}`;
   if (r.estado === 'descartado') return `Descartado${r.motivo ? `: ${r.motivo}` : ''}`;
   if (r.estado === 'duplicado') return `Repetido${r.motivo ? `: ${r.motivo}` : ''}`;
@@ -368,37 +392,49 @@ function resultado(r: Remito) {
 }
 
 // Para cada producto del remito, su par en el pedido (cuando el remito los nombra distinto y no se reconocieron). Los
-// productos del pedido, con lo que falta entregar de cada uno; «Que lo busque solo» deja que el CRM lo empareje.
+// productos del pedido, con lo que falta entregar de cada uno; «Que lo busque solo» deja que el CRM lo empareje. En un
+// remito de varios pedidos, los productos de todos, agrupados por pedido: el valor es «pedido:producto».
 interface LineaPedido { name: string; vendido: number | null; falta: number }
-function ParesProductos({ r, orderId, pares, onChange }: { r: Remito; orderId: number; pares: Record<number, string>; onChange: (p: Record<number, string>) => void }) {
-  const [lineas, setLineas] = useState<LineaPedido[] | null>(null);
+interface PedidoLite { id: number; nombre: string }
+function ParesProductos({ r, pedidos, pares, onChange }: { r: Remito; pedidos: PedidoLite[]; pares: Record<number, string>; onChange: (p: Record<number, string>) => void }) {
+  const [lineas, setLineas] = useState<Record<number, LineaPedido[]> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const ids = pedidos.map((p) => p.id).join(',');
   useEffect(() => {
     let vivo = true;
+    setLineas(null);
     (async () => {
       try {
-        // Primero los productos (si el pedido todavía no los tiene, los trae de Finnegans); después, cuánto falta de cada uno.
-        await http('GET', `/records/order/${orderId}/products`);
-        const d = await http<{ entrega: { lineas: LineaPedido[] } }>('GET', `/records/order/${orderId}/remitos`);
-        if (vivo) setLineas(d.entrega.lineas);
+        const out: Record<number, LineaPedido[]> = {};
+        for (const p of pedidos) {
+          // Primero los productos (si el pedido todavía no los tiene, los trae de Finnegans); después, cuánto falta de cada uno.
+          await http('GET', `/records/order/${p.id}/products`);
+          out[p.id] = (await http<{ entrega: { lineas: LineaPedido[] } }>('GET', `/records/order/${p.id}/remitos`)).entrega.lineas;
+        }
+        if (vivo) { setLineas(out); setError(null); }
       } catch (err) { if (vivo) setError((err as Error).message); }
     })();
     return () => { vivo = false; };
-  }, [orderId]);
+  }, [ids]);   // eslint-disable-line react-hooks/exhaustive-deps
   if (error) return <div className="small warn-text">No se pudieron traer los productos del pedido: {error}</div>;
   if (!lineas) return <div className="small muted">Cargando los productos del pedido…</div>;
-  if (!lineas.length) return <div className="small muted">El pedido todavía no tiene productos cargados: confirmalo y asigná los productos desde la ficha del pedido.</div>;
+  const varios = pedidos.length > 1;
+  if (!pedidos.some((p) => lineas[p.id]?.length)) return <div className="small muted">{varios ? 'Los pedidos todavía no tienen productos cargados' : 'El pedido todavía no tiene productos cargados'}: confirmalo y asigná los productos desde la ficha del pedido.</div>;
+  // Con varios pedidos, cada producto lleva adelante su pedido (el PDV): así se ve también con el desplegable cerrado.
+  const opciones = (p: PedidoLite) => (lineas[p.id] ?? []).map((l, i) => (
+    <option key={`${p.id}:${i}`} value={`${p.id}:${i}`}>{varios ? `${p.nombre.split(' · ')[0]} · ` : ''}{l.name}{l.vendido != null ? ` · faltan ${cant(l.falta)} de ${cant(l.vendido)}` : ''}</option>
+  ));
   return (
     <div className="pares-productos">
-      <div className="small"><b>¿A qué producto del pedido corresponde cada uno?</b></div>
+      <div className="small"><b>{varios ? '¿A qué pedido y producto va cada uno?' : '¿A qué producto del pedido corresponde cada uno?'}</b></div>
       {r.items.map((it, k) => (
         <div key={k} className="par-producto">
           <span className="small par-remito">{`${cant(it.quantity)} ${it.description ?? it.code ?? ''}`.trim()}</span>
           <span className="small muted" aria-hidden="true">→</span>
           <Select className="input sm" value={pares[k] ?? ''} aria-label={`Producto del pedido para ${it.description ?? it.code ?? 'este renglón'}`}
             onChange={(ev) => { const n = { ...pares }; if (ev.target.value === '') delete n[k]; else n[k] = ev.target.value; onChange(n); }}>
-            <option value="">Que lo busque solo</option>
-            {lineas.map((l, i) => <option key={i} value={String(i)}>{l.name}{l.vendido != null ? ` · faltan ${cant(l.falta)} de ${cant(l.vendido)}` : ''}</option>)}
+            <option value="">{varios ? `Que lo busque solo (en «${pedidos[0].nombre}»)` : 'Que lo busque solo'}</option>
+            {varios ? pedidos.map((p) => <optgroup key={p.id} label={p.nombre}>{opciones(p)}</optgroup>) : opciones(pedidos[0])}
           </Select>
         </div>
       ))}
@@ -406,12 +442,24 @@ function ParesProductos({ r, orderId, pares, onChange }: { r: Remito; orderId: n
   );
 }
 
+// Buscar un pedido por PDV o cliente.
+function BuscarPedido({ inicial, excluir = [], ocupado, onElegir, placeholder }: { inicial: string; excluir?: number[]; ocupado: boolean; onElegir: (o: CrmRecord) => void; placeholder: string }) {
+  const [q, setQ] = useState(inicial);
+  const busqueda = useAsync(() => (q.trim().length >= 2 ? http<{ results: CrmRecord[] }>('GET', `/records/order${qs({ q, limit: 6 })}`) : Promise.resolve({ results: [] })), [q]);
+  return (
+    <div className="stack" style={{ gap: 4 }}>
+      <input className="input sm" placeholder={placeholder} value={q} autoFocus onChange={(ev) => setQ(ev.target.value)} />
+      {(busqueda.data?.results ?? []).filter((o) => !excluir.includes(o.id)).map((o) => (
+        <button key={o.id} className="btn sm ghost" style={{ justifyContent: 'flex-start' }} disabled={ocupado} onClick={() => onElegir(o)}>{o.name}</button>
+      ))}
+    </div>
+  );
+}
+
 function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => void; revisado?: boolean }) {
   const toast = useToast();
-  const [q, setQ] = useState(r.pdv ? `PDV ${r.pdv}` : '');
   const [buscar, setBuscar] = useState(false);
   const [ocupado, setOcupado] = useState(false);
-  const busqueda = useAsync(() => (buscar && q.trim().length >= 2 ? http<{ results: CrmRecord[] }>('GET', `/records/order${qs({ q, limit: 6 })}`) : Promise.resolve({ results: [] })), [buscar, q]);
   const accion = async (body: Record<string, unknown>, ok: string) => {
     setOcupado(true);
     try { await http('POST', `/remitos/${r.id}/revisar`, body); toast(ok); onCambio(); }
@@ -424,10 +472,35 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
   // Si el pedido está identificado pero sus productos no coinciden con los del remito, se elige el par de cada uno.
   const destino = candidatos.length === 1 ? candidatos[0].id : revisado && r.record_id ? r.record_id : null;
   const productosNoCierran = r.controles.some((c) => c.dato === 'Productos' && c.ok !== true) || (r.pares?.length ?? 0) > 0;
-  const [pares, setPares] = useState<Record<number, string>>(() => Object.fromEntries((r.pares ?? []).map((p) => [p.position, String(p.i)])));
+  // El par de cada renglón, como «pedido:producto».
+  const [pares, setPares] = useState<Record<number, string>>(() => Object.fromEntries((r.pares ?? []).map((p) => [p.position, `${p.pedido ?? r.record_id}:${p.i}`])));
   const [elegir, setElegir] = useState(!revisado);
-  const conPares = (pedido: number) => ({ accion: 'confirmar', pedido, ...(pedido === destino && Object.keys(pares).length
-    ? { productos: Object.entries(pares).map(([position, i]) => ({ position: Number(position), i: Number(i) })) } : {}) });
+  // Un remito de varios pedidos (un camión, un remito, dos PDV): los pedidos, el principal primero. null: de un solo pedido.
+  const [varios, setVarios] = useState<PedidoLite[] | null>(() => ((r.pedidos ?? []).length > 1 ? r.pedidos! : null));
+  const [sumar, setSumar] = useState(false);
+  const productos = (pedidos: number[]) => Object.entries(pares).map(([position, v]) => {
+    const [pedido, i] = v.split(':').map(Number);
+    return { position: Number(position), pedido, i };
+  }).filter((x) => pedidos.includes(x.pedido));
+  const conPares = (pedido: number) => ({ accion: 'confirmar', pedido, ...(pedido === destino && Object.keys(pares).length ? { productos: productos([pedido]) } : {}) });
+  const empezarVarios = () => {
+    // Arranca con el pedido donde está (o los posibles, si el PDV no coincide en los dos lugares) y se suman los demás.
+    const base = revisado && r.record_id ? [{ id: r.record_id, nombre: r.pedido_nombre ?? 'el pedido' }] : candidatos.map((c) => ({ id: c.id, nombre: c.nombre }));
+    setVarios(base);
+    setSumar(true);
+    setBuscar(false);
+    setElegir(true);
+  };
+  const confirmarVarios = () => {
+    const ids = varios!.map((p) => p.id);
+    return accion({ accion: 'confirmar', pedido: ids[0], pedidos: ids.slice(1), productos: productos(ids) },
+      ids.length > 1 ? `Remito confirmado en los ${ids.length} pedidos` : 'Remito confirmado en el pedido');
+  };
+  const quitarPedido = (id: number) => {
+    setVarios((v) => v!.filter((p) => p.id !== id));
+    setPares((ps) => Object.fromEntries(Object.entries(ps).filter(([, v]) => Number(v.split(':')[0]) !== id)));
+  };
+  const nombreDe = (id: number | undefined) => r.pedidos?.find((p) => p.id === id)?.nombre;
   return (
     <div className="panel revision">
       <a className="revision-foto" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer" title="Ver el remito entero">
@@ -452,33 +525,59 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
         {r.controles.length > 0 && <ul className="controles small">{r.controles.map((c, i) => <li key={i} className={c.ok === true ? 'ok' : c.ok === false ? 'bad' : ''}>{c.ok === true ? '✓' : c.ok === false ? '✗' : '•'} {c.detalle}</li>)}</ul>}
         {r.otros_remitos_en_foto && <div className="small warn-text">En la foto se ve otro remito: se leyó solo el de adelante.</div>}
         {revisado && (r.pares?.length ?? 0) > 0 && (
-          <div className="small">Productos: {r.pares!.map((p) => `${cant(r.items[p.position]?.quantity)} ${r.items[p.position]?.description ?? r.items[p.position]?.code ?? ''} → ${p.name}`).join(' · ')}</div>
+          <div className="small">Productos: {r.pares!.map((p) => `${cant(r.items[p.position]?.quantity)} ${r.items[p.position]?.description ?? r.items[p.position]?.code ?? ''} → ${p.name}${(r.pedidos ?? []).length > 1 && nombreDe(p.pedido) ? ` (${nombreDe(p.pedido)})` : ''}`).join(' · ')}</div>
         )}
-        {destino && productosNoCierran && r.items.length > 0 && (elegir
-          ? <ParesProductos r={r} orderId={destino} pares={pares} onChange={setPares} />
-          : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setElegir(true)}>Cambiar a qué producto va cada uno</button>)}
-        <div className="row wrap" style={{ gap: 6 }}>
-          {candidatos.map((c) => {
-            // Ya confirmado en ese pedido: solo hace falta el botón para guardar los productos si se están cambiando.
-            const yaEsta = revisado && c.id === r.record_id && r.estado === 'ok';
-            if (yaEsta && !elegir) return null;
-            return (
-              <button key={c.id} className="btn sm primary" disabled={ocupado} onClick={() => accion(conPares(c.id), yaEsta ? 'Productos guardados' : 'Remito confirmado en el pedido')}>
-                {yaEsta ? 'Guardar los productos' : `Es de «${c.nombre}»`}</button>
-            );
-          })}
-          {r.record_id && <Link className="btn sm ghost" to={recordUrl('order', r.record_id)}>Abrir el pedido</Link>}
-          <button className="btn sm ghost" disabled={ocupado} onClick={() => setBuscar(!buscar)}>Otro pedido…</button>
-          <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'releer' }, 'Remito leído de nuevo')}>{ocupado ? 'Un momento…' : 'Leer de nuevo'}</button>
-          {r.estado !== 'descartado' && <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'descartar' }, 'Remito descartado')}>Descartar</button>}
-        </div>
-        {buscar && (
-          <div className="stack" style={{ gap: 4 }}>
-            <input className="input sm" placeholder="Buscar el pedido: PDV o cliente" value={q} autoFocus onChange={(ev) => setQ(ev.target.value)} />
-            {(busqueda.data?.results ?? []).map((o) => (
-              <button key={o.id} className="btn sm ghost" style={{ justifyContent: 'flex-start' }} disabled={ocupado}
-                onClick={() => accion({ accion: 'confirmar', pedido: o.id }, 'Remito confirmado en el pedido')}>{o.name}</button>
+        {varios ? (
+          // Remito de varios pedidos: cuáles son, a cuál va cada renglón y confirmar en todos.
+          <div className="varios-pedidos">
+            <div className="small"><b>Pedidos de este remito</b></div>
+            {varios.map((p, k) => (
+              <div key={p.id} className="row small varios-pedido">
+                <span className="grow">{p.nombre}{k === 0 && varios.length > 1 ? <span className="muted"> · principal: lo que no se elija abajo se busca acá</span> : null}</span>
+                {varios.length > 1 && <button className="btn sm ghost" disabled={ocupado} onClick={() => quitarPedido(p.id)}>Quitar</button>}
+              </div>
             ))}
+            {sumar
+              ? <BuscarPedido inicial="" excluir={varios.map((p) => p.id)} ocupado={ocupado} placeholder="Sumar otro pedido: PDV o cliente"
+                  onElegir={(o) => { setVarios((v) => [...(v ?? []), { id: o.id, nombre: o.name }]); setSumar(false); }} />
+              : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setSumar(true)}>+ Sumar otro pedido</button>}
+            {varios.length > 0 && r.items.length > 0 && <ParesProductos r={r} pedidos={varios} pares={pares} onChange={setPares} />}
+            <div className="row wrap" style={{ gap: 6 }}>
+              <button className="btn sm primary" disabled={ocupado || !varios.length} onClick={confirmarVarios}>
+                {varios.length > 1 ? `Confirmar en los ${varios.length} pedidos` : varios.length ? `Es de «${varios[0].nombre}»` : 'Elegí los pedidos'}</button>
+              <button className="btn sm ghost" disabled={ocupado} onClick={() => { setVarios(null); setSumar(false); }}>Cancelar</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {destino && productosNoCierran && r.items.length > 0 && (elegir
+              ? <ParesProductos r={r} pedidos={[{ id: destino, nombre: candidatos.find((c) => c.id === destino)?.nombre ?? 'el pedido' }]} pares={pares} onChange={setPares} />
+              : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setElegir(true)}>Cambiar a qué producto va cada uno</button>)}
+            <div className="row wrap" style={{ gap: 6 }}>
+              {candidatos.map((c) => {
+                // Ya confirmado en ese pedido: solo hace falta el botón para guardar los productos si se están cambiando.
+                const yaEsta = revisado && c.id === r.record_id && r.estado === 'ok';
+                if (yaEsta && !elegir) return null;
+                return (
+                  <button key={c.id} className="btn sm primary" disabled={ocupado} onClick={() => accion(conPares(c.id), yaEsta ? 'Productos guardados' : 'Remito confirmado en el pedido')}>
+                    {yaEsta ? 'Guardar los productos' : `Es de «${c.nombre}»`}</button>
+                );
+              })}
+              {r.record_id && <Link className="btn sm ghost" to={recordUrl('order', r.record_id)}>Abrir el pedido</Link>}
+              <button className="btn sm ghost" disabled={ocupado} onClick={() => setBuscar(!buscar)}>Otro pedido…</button>
+              {r.estado !== 'descartado' && <button className="btn sm ghost" disabled={ocupado} onClick={empezarVarios}>Es de varios pedidos…</button>}
+              <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'releer' }, 'Remito leído de nuevo')}>{ocupado ? 'Un momento…' : 'Leer de nuevo'}</button>
+              {r.estado !== 'descartado' && <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'descartar' }, 'Remito descartado')}>Descartar</button>}
+            </div>
+            {buscar && <BuscarPedido inicial={r.pdv ? `PDV ${r.pdv}` : ''} ocupado={ocupado} placeholder="Buscar el pedido: PDV o cliente"
+              onElegir={(o) => accion({ accion: 'confirmar', pedido: o.id }, 'Remito confirmado en el pedido')} />}
+          </>
+        )}
+        {varios && (
+          <div className="row wrap" style={{ gap: 6 }}>
+            {(r.pedidos ?? []).map((p) => <Link key={p.id} className="btn sm ghost" to={recordUrl('order', p.id)}>Abrir {p.nombre}</Link>)}
+            <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'releer' }, 'Remito leído de nuevo')}>{ocupado ? 'Un momento…' : 'Leer de nuevo'}</button>
+            {r.estado !== 'descartado' && <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'descartar' }, 'Remito descartado')}>Descartar</button>}
           </div>
         )}
       </div>

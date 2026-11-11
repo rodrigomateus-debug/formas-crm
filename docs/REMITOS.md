@@ -80,6 +80,23 @@ producto y cuál de los iguales): sigue valiendo si el remito se vuelve a leer o
 producto ya no está en el pedido, la asignación no vale y el renglón se vuelve a emparejar solo.
 `POST /api/records/order/:id/entrega/asignar` con `{ clave, lineas: [{ i, cantidad }] }` (sin líneas, la deshace).
 
+### Un remito de varios pedidos
+
+Pedido del 11/11/2026 (remito R-0001-00027818, PDV 30314 y 30315): un mismo remito (un camión) puede llevar productos de
+más de un pedido. En la revisión, **«Es de varios pedidos…»** arranca con el pedido donde está (o con los posibles, si el
+PDV no coincide en los dos lugares), **«+ Sumar otro pedido»** agrega los demás y, para cada renglón, el desplegable ofrece
+los productos de todos los pedidos agrupados por pedido (cada uno con su PDV adelante). **«Confirmar en los N pedidos»**
+guarda todo. El primero es el **principal** (`remitos.record_id`); los otros van en `remito_pedidos` (migración 0036).
+
+Cómo cuenta: cada renglón cuenta en el pedido al que se lo asignó (`remito_asignaciones`, con la misma clave de siempre); lo
+que no se asignó a ninguno se empareja solo en el principal. Lo asignado a los otros pedidos se descuenta del renglón, así
+nada se cuenta dos veces. En un pedido que no es el principal, lo del remito que no se le asignó aparece aparte («De un remito
+de varios pedidos…», no es una diferencia de ese pedido) con «Asignar a producto», por si va ahí. El remito se ve en la
+tarjeta «Entrega» de todos sus pedidos («Remito de varios pedidos: también …»). Quitar un pedido del remito lo saca de ahí y
+sus renglones vuelven al principal; otra foto del mismo número que dice el PDV de otro de sus pedidos queda repetida.
+`POST /api/remitos/:id/revisar` con `{ accion: 'confirmar', pedido, pedidos: [otros], productos: [{ position, pedido, i }] }`
+(`pedidos` reemplaza la lista; si no se manda, queda la que había).
+
 ## La pestaña «Entregas» de Logística (`/entregas`)
 
 - **Remitos para revisar:** lo que no se pudo adjuntar solo o no se pudo leer, con la foto, lo leído y cómo se controló. Se

@@ -789,6 +789,9 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .par-producto { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr); align-items: center; gap: 6px 10px; }
 .par-producto .par-remito { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .par-producto { grid-template-columns: 1fr; } .par-producto > [aria-hidden] { display: none; } }
+.varios-pedidos { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--ui-line-strong); border-radius: var(--r-control); }
+.varios-pedido { gap: 8px; min-height: 28px; }
+.varios-pedido > .grow { min-width: 0; overflow-wrap: anywhere; }
 .entrega-linea .tag { flex: none; }
 .remito-fila { flex-direction: column; align-items: stretch; gap: 6px; }
 .remito-cabeza { display: flex; align-items: center; gap: 8px; min-width: 0; }

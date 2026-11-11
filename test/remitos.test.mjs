@@ -13,6 +13,8 @@ const PDV_C = String(Number(PDV) + 2);   // un remito de dos hojas
 const PDV_D = String(Number(PDV) + 3);   // dos materas de colores y un remito sin códigos
 const PDV_E = String(Number(PDV) + 4);   // sin propietario en ClickUp: lo toma de Finnegans
 const PDV_F = String(Number(PDV) + 5);   // el remito dice el producto con otro nombre: se asigna a mano
+const PDV_G = String(Number(PDV) + 8);   // un remito de dos pedidos (G y H): cada renglón va a uno
+const PDV_H = String(Number(PDV) + 9);
 const NRO = (n) => `R-0001-${String(n).padStart(8, '0')}`;
 const BASE_NRO = 20000 + Math.floor(Math.random() * 70000);
 
@@ -89,6 +91,13 @@ const LECTURAS = {
   // Como el remito del PDV 2402: el PDV y el CUIT son del pedido, pero ningún producto se reconoce: queda para revisar.
   TAZAS: { ...base, numero_remito: NRO(BASE_NRO + 61), pdv_pedido_web: PDV_F, pdv_observaciones: PDV_F, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
     items: [{ codigo: '', descripcion: 'Taza misteriosa', cantidad: 20, cantidad_texto: '20' }, { codigo: '', descripcion: 'Taza misteriosa roja', cantidad: 10, cantidad_texto: '10' }] },
+  // Un remito de dos pedidos (un camión, dos PDV): dice el PDV de G, pero un renglón es de G y el otro de H. Los dos
+  // renglones se llaman igual; ninguno se reconoce solo.
+  COMPARTIDO: { ...base, numero_remito: NRO(BASE_NRO + 70), pdv_pedido_web: PDV_G, pdv_observaciones: PDV_G, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
+    items: [{ codigo: '', descripcion: 'Conservadora médica DLC', cantidad: 236, cantidad_texto: '236' }, { codigo: '', descripcion: 'Conservadora médica DLC', cantidad: 110, cantidad_texto: '110' }] },
+  // Otra foto del mismo remito, que dice el PDV de H: es el mismo remito (ya está en H), no suma.
+  COMPARTIDO_H: { ...base, numero_remito: NRO(BASE_NRO + 70), pdv_pedido_web: PDV_H, pdv_observaciones: PDV_H, cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
+    items: [{ codigo: '', descripcion: 'Conservadora médica DLC', cantidad: 236, cantidad_texto: '236' }, { codigo: '', descripcion: 'Conservadora médica DLC', cantidad: 110, cantidad_texto: '110' }] },
   SINPDV: { ...base, numero_remito: NRO(BASE_NRO + 12), pdv_pedido_web: null, pdv_observaciones: null, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra', 5)] },
 };
 let lecturas = 0;
@@ -105,7 +114,8 @@ const pdvTask = (id, npdv, cliente, status, vendedor = 'Rodrigo Mateus') => ({
 });
 const TAREAS = () => [pdvTask(`remA${RUN}`, PDV, `Cliente A ${RUN} S.A.`, 'entregados'), pdvTask(`remB${RUN}`, PDV_B, `Cliente B ${RUN} SRL`, 'en el impresor'),
   pdvTask(`remC${RUN}`, PDV_C, `Cliente A ${RUN} S.A.`, 'en el impresor'), pdvTask(`remD${RUN}`, PDV_D, `Cliente A ${RUN} S.A.`, 'en el impresor'),
-  pdvTask(`remE${RUN}`, PDV_E, `Cliente A ${RUN} S.A.`, 'en el impresor', `Nadie ${RUN}`), pdvTask(`remF${RUN}`, PDV_F, `Cliente A ${RUN} S.A.`, 'en el impresor')];
+  pdvTask(`remE${RUN}`, PDV_E, `Cliente A ${RUN} S.A.`, 'en el impresor', `Nadie ${RUN}`), pdvTask(`remF${RUN}`, PDV_F, `Cliente A ${RUN} S.A.`, 'en el impresor'),
+  pdvTask(`remG${RUN}`, PDV_G, `Cliente A ${RUN} S.A.`, 'en el impresor'), pdvTask(`remH${RUN}`, PDV_H, `Cliente A ${RUN} S.A.`, 'en el impresor')];
 // Gmail simulado (puerto 8799, el de GOOGLE_TOKEN_URL y GMAIL_API_URL de .dev.vars): los mails de faltantes.
 const mails = [];
 let gmail;
@@ -172,6 +182,14 @@ before(async () => {
         { ProductoCodigo: 'DRK-1', Cantidad: 100, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Producción simple drinkware genérico', IncluyeImpuesto: false },
         { ProductoCodigo: 'GOR-1', Cantidad: 50, Precio: 900, Descuento1: 0, Descuento2: 0, Descripcion: 'Gorra bordada', IncluyeImpuesto: false }] });
     }
+    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_G.padStart(8, '0')}`) {
+      return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: 'VAS-B', Cantidad: 110, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Contigo Vaso Térmico Autoseal 532 ml Blanco', IncluyeImpuesto: false }] });
+    }
+    if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_H.padStart(8, '0')}`) {
+      return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: 'KIT-M', Cantidad: 236, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Kit de primeros auxilios', IncluyeImpuesto: false }] });
+    }
     if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_C.padStart(8, '0')}`) {
       return send({ Cliente: 'C-REM-A', MonedaCodigo: 'PES', Items: [
         { ProductoCodigo: 'SIM10001273', Cantidad: 100, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: 'Llavero corto', IncluyeImpuesto: false },
@@ -188,7 +206,8 @@ before(async () => {
     if (p === '/fin/cliente/C-REM-A') return send({ IdentificacionTributariaNumero: CUIT_A, RazonSocial: `CLIENTE A ${RUN} SA` });
     if (p === '/fin/cliente/C-REM-B') return send({ IdentificacionTributariaNumero: CUIT_B, RazonSocial: `CLIENTE B ${RUN} SRL` });
     if (p.startsWith('/fin/producto/')) {
-      const nombre = { 'GOR-1': 'Gorra bordada', 'MAT-N': 'Matera Engomada Negra', 'MAT-R': 'Matera Engomada Roja' }[p.split('/').pop()] ?? 'Llavero corto';
+      const nombre = { 'GOR-1': 'Gorra bordada', 'MAT-N': 'Matera Engomada Negra', 'MAT-R': 'Matera Engomada Roja',
+        'VAS-B': 'Contigo Vaso Térmico Autoseal 532 ml Blanco', 'KIT-M': 'Kit de primeros auxilios' }[p.split('/').pop()] ?? 'Llavero corto';
       return send({ Nombre: nombre, Descripcion: '', ProductoImagen: '' });
     }
     if (p === '/fin/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals') {
@@ -439,6 +458,49 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.ok(rev?.revisado_por && rev.revisor, 'en «Revisados», con quién lo revisó');
   assert.deepEqual(rev.pares.map((x) => [x.position, x.i, x.cantidad]), [[0, iDrk, 20], [1, iDrk, 10]]);
   assert.ok(!(await api('GET', '/remitos/revisar')).data.remitos.some((x) => x.id === tz.data.id), 'ya no está para revisar');
+
+  // 6f. Un remito de dos pedidos (un camión, un remito, dos PDV): en la revisión se suman los dos y se dice a cuál va cada
+  // renglón. Cada pedido cuenta lo suyo; el remito se ve en los dos. Lo que no se asigna a ninguno se busca en el principal.
+  const G = await pedidoDe(PDV_G);
+  const Hp = await pedidoDe(PDV_H);
+  assert.ok(G && Hp, 'los pedidos G y H vinieron de ClickUp');
+  const cmp = await api('POST', '/hooks/chofer/api/remitos', form('COMPARTIDO'), H);
+  assert.equal(cmp.data.estado, 'revisar', cmp.data.mensaje);
+  const revisarCmp = (body) => api('POST', `/remitos/${cmp.data.id}/revisar`, { accion: 'confirmar', pedido: G.id, ...body });
+  assert.equal((await revisarCmp({ pedidos: [Hp.id], productos: [{ position: 0, pedido: B.id, i: 0 }] })).status, 400, 'un pedido que no es del remito');
+  const doble = await revisarCmp({ pedidos: [Hp.id], productos: [{ position: 0, pedido: Hp.id, i: 0 }, { position: 1, pedido: G.id, i: 0 }] });
+  assert.equal(doble.status, 200, JSON.stringify(doble.data));
+  assert.equal(doble.data.estado, 'ok');
+  const entregaDe = async (id) => (await remitosDe(id)).entrega;
+  const resumen = (e) => [e.estado, e.lineas.map((l) => [l.entregado, l.falta]), e.extras.length];
+  assert.deepEqual(resumen(await entregaDe(G.id)), ['completa', [[110, 0]], 0]);
+  assert.deepEqual(resumen(await entregaDe(Hp.id)), ['completa', [[236, 0]], 0]);
+  const enH = (await remitosDe(Hp.id)).remitos.find((x) => x.id === cmp.data.id);
+  assert.deepEqual(enH?.pedidos.map((x) => x.id), [G.id, Hp.id], 'el remito se ve en H, con sus dos pedidos (el principal primero)');
+  assert.equal((await props(Hp.id)).estado_entrega, 'completa');
+  const revCmp = (await api('GET', '/remitos/revisados')).data.remitos.find((x) => x.id === cmp.data.id);
+  assert.deepEqual(revCmp.pares.map((x) => [x.position, x.pedido, x.i, x.cantidad]), [[0, Hp.id, 0, 236], [1, G.id, 0, 110]]);
+  // Desde la ficha de H: deshacer su renglón lo devuelve al principal (G, donde no se reconoce: diferencia); en H queda
+  // para asignar sin ser una diferencia de H. Se vuelve a asignar desde H, sin pasar lo que dice el remito.
+  const claveH = (await entregaDe(Hp.id)).asignados[0].clave;
+  const asignarH = (lineas) => api('POST', `/records/order/${Hp.id}/entrega/asignar`, { clave: claveH, lineas });
+  let eH = (await asignarH([])).data;
+  assert.deepEqual([eH.estado, eH.extras.map((x) => [x.quantity, x.compartido])], ['parcial', [[236, G.name]]]);
+  assert.equal((await entregaDe(G.id)).estado, 'diferencias');
+  assert.equal((await asignarH([{ i: 0, cantidad: 300 }])).status, 400);
+  eH = (await asignarH([{ i: 0, cantidad: 236 }])).data;
+  assert.equal(eH.estado, 'completa');
+  assert.deepEqual(resumen(await entregaDe(G.id)), ['completa', [[110, 0]], 0]);
+  // Otra foto del mismo remito que dice el PDV de H: es el mismo remito, no suma.
+  assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('COMPARTIDO_H'), H)).data.estado, 'duplicado');
+  // Quitar H del remito: deja de verse ahí y su renglón vuelve a G (donde queda como diferencia).
+  assert.equal((await revisarCmp({ pedidos: [] })).status, 200);
+  assert.ok(!(await remitosDe(Hp.id)).remitos.some((x) => x.id === cmp.data.id), 'ya no está en H');
+  assert.equal((await props(Hp.id)).estado_entrega, undefined);
+  assert.equal((await entregaDe(G.id)).estado, 'diferencias');
+  // Y volver a sumarlo: lo que tenía asignado en H vuelve a valer.
+  assert.equal((await revisarCmp({ pedidos: [Hp.id] })).status, 200);
+  assert.deepEqual([(await entregaDe(G.id)).estado, (await entregaDe(Hp.id)).estado], ['completa', 'completa']);
 
   // 7. Pedido B: una entrega parcial y un remito subido en el CRM (elegido por una persona: alcanza con el PDV).
   assert.equal((await api('POST', '/hooks/chofer/api/remitos', form('B1'), H)).data.estado, 'ok');

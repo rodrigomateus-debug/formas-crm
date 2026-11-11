@@ -12,7 +12,7 @@ import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
 import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, UserChip, WhatsAppLink, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
-import { QuickFilterBar, quickFilters } from './QuickFilters';
+import { QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select, useFloating } from '../Select';
 
 const PIPE_KEY = 'crm.deals.pipeline';
@@ -27,6 +27,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
 // `owner` es de las vistas viejas (un solo propietario); ahora van `owners` (varios) y `dates` (filtros rápidos de fecha).
 interface ViewConfig {
   q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[]; unidades?: string[];
+  relacion?: string[];   // contactos y empresas: tipo de relación (sin elegir, solo clientes y prospectos; [] = todos)
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string; cardProps?: string[];
   widths?: Record<string, number>;   // ancho de cada columna (se arrastra el borde del encabezado)
 }
@@ -58,10 +59,11 @@ function ordenPestanas(guardado: string[] | null, vistas: SavedView[] | undefine
 
 // Columnas, orden y anchos de «Todos» y «Míos» (en este navegador). Los filtros no: cada vez que se entra, arrancan limpias.
 const storeKey = (t: ObjectType) => `crm.view.${t}`;
-const SIN_FILTROS = { groups: [] as Filter[][], owner: undefined, owners: [] as string[], dates: {}, tags: [] as string[], unidades: [] as string[] };
-// Filtros de una vista: los avanzados (grupos O) más los rápidos (propietarios, fechas, etiquetas, unidades) en cada grupo.
-function gruposDeVista(c: ViewConfig) {
-  const quick = quickFilters(c.owners, c.dates, c.tags, c.unidades);
+const SIN_FILTROS = { groups: [] as Filter[][], owner: undefined, owners: [] as string[], dates: {}, tags: [] as string[], unidades: [] as string[], relacion: undefined };
+// Filtros de una vista: los avanzados (grupos O) más los rápidos (propietarios, fechas, etiquetas, unidades, relación) en
+// cada grupo.
+function gruposDeVista(c: ViewConfig, type: ObjectType) {
+  const quick = quickFilters(c.owners, c.dates, c.tags, c.unidades, relacionDe(type, c.relacion));
   return (c.groups?.length ? c.groups : [[]]).map((g) => [...g, ...quick]).filter((g) => g.length);
 }
 const urlLista = (type: ObjectType, q: string, groups: Filter[][], c: ViewConfig, limit: number, offset: number) => `/records/${type}${qs({
@@ -235,11 +237,11 @@ function IndexFor({ type }: { type: ObjectType }) {
     if (!cfgDe) return;
     try { sessionStorage.setItem(sesionKey(type), JSON.stringify({ v: cfgDe, cfg, q, mode } satisfies ListaComoQuedo)); } catch { /* ignorar */ }
   }, [cfg, cfgDe, q, mode, type]);
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.sort, cfg.dir, pipelineSel, mode]);
+  useEffect(() => { setPage(0); setSelected(new Set()); }, [dq, cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.relacion, cfg.sort, cfg.dir, pipelineSel, mode]);
 
   // Filtros de la vista para el tablero: los avanzados (grupos O) más los rápidos (propietarios y fechas) en cada grupo.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const viewGroups = useMemo(() => gruposDeVista(cfg), [cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades]);
+  const viewGroups = useMemo(() => gruposDeVista(cfg, type), [cfg.groups, cfg.owners, cfg.dates, cfg.tags, cfg.unidades, cfg.relacion, type]);
   // La tabla además filtra por el pipeline elegido.
   const groups = useMemo(() => {
     const pipe: Filter[] = type === 'deal' && pipelineSel !== 'all' ? [{ prop: 'pipeline', op: 'eq', value: pipelineSel }] : [];
@@ -277,6 +279,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   // Lo que se ve ahora, para guardar en una vista y saber si la vista abierta tiene cambios sin guardar (como HubSpot).
   const current: ViewConfig = {
     q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], unidades: cfg.unidades ?? [], mode,
+    ...(cfg.relacion ? { relacion: cfg.relacion } : {}),
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
     ...(cfg.widths && Object.keys(cfg.widths).length ? { widths: cfg.widths } : {}),
   };
@@ -286,11 +289,12 @@ function IndexFor({ type }: { type: ObjectType }) {
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), [...(c.unidades ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '', c.widths ?? {},
+    [...relacionDe(type, c.relacion)].sort(),
   ]);
   const dirty = !!activeSaved && cfgDe === activeView && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
-  const filtersChanged = esFija(activeView) && cfgDe === activeView && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? [], cfg.unidades ?? []])
-    !== JSON.stringify([[], activeView === 'mine' ? ['me'] : [], {}, [], []]);
+  const filtersChanged = esFija(activeView) && cfgDe === activeView && JSON.stringify([cfg.groups, [...(cfg.owners ?? [])].sort(), cfg.dates ?? {}, cfg.tags ?? [], cfg.unidades ?? [], [...relacionDe(type, cfg.relacion)].sort()])
+    !== JSON.stringify([[], activeView === 'mine' ? ['me'] : [], {}, [], [], relacionDe(type, undefined)]);
   const canSaveView = !!activeSaved && (activeSaved.user_id === meta.me.id || meta.me.role === 'admin');
   const saveView = async () => {
     if (!activeSaved) return;
@@ -330,7 +334,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       for (const [key, c, m] of otras) {
         if (!vivo) return;
         if (key === activeView) continue;
-        const g = gruposDeVista(c);
+        const g = gruposDeVista(c, type);
         await precargar(m === 'board' ? urlTableroProp(meta, type, c.boardProp, c.q ?? '', g, c.sort, c.dir).url : urlLista(type, c.q ?? '', g, c, pageSize, 0));
       }
     }, 1200);
@@ -380,10 +384,10 @@ function IndexFor({ type }: { type: ObjectType }) {
       <div className="qf"><button className={`btn qf-btn${faltanEntregas ? ' on' : ''}`} aria-pressed={faltanEntregas} onClick={toggleFaltan}
         title="Pedidos a los que les falta entregar algo según sus remitos, con diferencias, o entregados sin remito">Faltan entregas</button></div>
     )}
-    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} extra={cfg.groups.length > 0}
+    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} relacion={cfg.relacion} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
-      onUnidades={(unidades) => setCfg((c) => ({ ...c, unidades }))}
-      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [] }))} />
+      onUnidades={(unidades) => setCfg((c) => ({ ...c, unidades }))} onRelacion={(relacion) => setCfg((c) => ({ ...c, relacion }))}
+      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [], relacion: undefined }))} />
     </>
   );
   const filterButton = <button className={`btn${mode === 'board' ? ' sm' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;

@@ -65,6 +65,9 @@ export default function App() {
   );
 }
 
+// En el buscador se encuentra todo; los que no son clientes llevan su marca (tipo de relación, relacion.ts).
+const RELACION_MARCA: Record<string, string> = { proveedor: 'Proveedor', equipo: 'Equipo Formas', otro: 'Otro' };
+
 function GlobalSearch() {
   const [q, setQ] = useState('');
   const dq = useDebounced(q, 200);
@@ -104,7 +107,7 @@ function GlobalSearch() {
               {list.map((r) => (
                 <div key={r.id} className="opt" onClick={() => go(t, r.id)}>
                   <Avatar name={r.name} type={t} />
-                  <div className="grow"><div className="ellipsis">{r.name}</div>
+                  <div className="grow"><div className="ellipsis">{r.name}{RELACION_MARCA[String(r.props.tipo_de_relacion ?? '')] && <span className="tag" style={{ marginLeft: 6 }}>{RELACION_MARCA[String(r.props.tipo_de_relacion)]}</span>}</div>
                     <div className="small muted ellipsis">{r.props.email || r.props.domain || r.props.company || ''}</div></div>
                 </div>
               ))}

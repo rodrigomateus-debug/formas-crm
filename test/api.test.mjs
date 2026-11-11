@@ -41,6 +41,34 @@ test('crea empresa, contacto con dominio corporativo y se asocian solos', async 
   assert.equal(rec.data.associations.company[0].primary, true);
 });
 
+test('tipo de relación: los proveedores, el equipo de Formas y otros no se mezclan con los clientes', async () => {
+  const props = (await api('GET', '/meta')).data.properties;
+  for (const t of ['contact', 'company']) {
+    assert.deepEqual(props.find((p) => p.object_type === t && p.name === 'tipo_de_relacion')?.options.map((o) => o.value), ['cliente', 'proveedor', 'equipo', 'otro']);
+  }
+  const tag = `Rel ${RUN}`;
+  // Equipo Formas, solo: el mail de un dominio de Formas.
+  const vendedora = (await api('POST', '/records/contact', { props: { firstname: 'Vende', lastname: tag, email: `vende.rel.${RUN}@formas.ar` } })).data;
+  assert.equal(vendedora.props.tipo_de_relacion, 'equipo');
+  // Una empresa proveedora: sus contactos (por dominio, se asocian solos como principal) heredan el tipo.
+  const prov = (await api('POST', '/records/company', { props: { name: `Proveedor ${tag}`, domain: `prov-${RUN}.com.ar`, tipo_de_relacion: 'proveedor' } })).data;
+  const juan = (await api('POST', '/records/contact', { props: { firstname: 'Juan', lastname: tag, email: `juan@prov-${RUN}.com.ar` }, associations: [prov.id] })).data;
+  assert.equal((await api('GET', `/records/contact/${juan.id}`)).data.record.props.tipo_de_relacion, 'proveedor', 'hereda el de su empresa');
+  // Uno que se marcó a mano como cliente lo conserva cuando la empresa cambia; el que heredó, sigue a la empresa.
+  const pepa = (await api('POST', '/records/contact', { props: { firstname: 'Pepa', lastname: tag, email: `pepa@prov-${RUN}.com.ar`, tipo_de_relacion: 'cliente' }, associations: [prov.id] })).data;
+  await api('PATCH', `/records/company/${prov.id}`, { props: { tipo_de_relacion: 'otro' } });
+  assert.equal((await api('GET', `/records/contact/${juan.id}`)).data.record.props.tipo_de_relacion, 'otro');
+  assert.equal((await api('GET', `/records/contact/${pepa.id}`)).data.record.props.tipo_de_relacion, 'cliente');
+  // Un cliente común (sin tipo).
+  const cli = (await api('POST', '/records/contact', { props: { firstname: 'Cliente', lastname: tag, email: `cli.${RUN}@cliente-${RUN}.com.ar` } })).data;
+  // La lista filtra por relación (vacío = cliente): la de clientes no trae al equipo ni a los otros.
+  const lista = async (values) => (await api('GET', `/records/contact?q=${encodeURIComponent(tag)}&groups=${encodeURIComponent(JSON.stringify([[{ prop: '__relacion', op: 'in', values }]]))}`)).data.results.map((r) => r.id).sort();
+  assert.deepEqual(await lista(['cliente']), [pepa.id, cli.id].sort());
+  assert.deepEqual(await lista(['equipo', 'otro']), [vendedora.id, juan.id].sort());
+  assert.deepEqual(await lista(['proveedor']), []);
+  await api('POST', '/records/contact/batch', { ids: [vendedora.id, juan.id, pepa.id, cli.id], archive: true });
+});
+
 test('valida opciones de enums y tipos', async () => {
   const bad = await api('PATCH', `/records/company/${state.company}`, { props: { tipo_de_empresa_cotizacion: 'Z' } });
   assert.equal(bad.status, 400);

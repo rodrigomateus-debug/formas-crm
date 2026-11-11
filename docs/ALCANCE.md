@@ -48,6 +48,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Clonar un negocio (mismos datos y asociaciones, en la primera etapa), para repetir un pedido | ✅ | Ficha y vista previa → «Clonar» |
 | Crear y asociar empresa por dominio del mail | ✅ | Automático en toda alta |
 | Dedupe de contactos por mail y de empresas por dominio | ✅ | Alta, importación, integraciones |
+| Tipo de relación (cliente, proveedor, equipo de Formas, otro): las listas muestran por defecto solo clientes y prospectos | ✅ | `docs/RELACION.md` |
 
 ### Ficha de cada registro
 | Función | Estado | Dónde |

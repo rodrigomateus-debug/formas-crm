@@ -5,6 +5,7 @@ import { HttpError, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
 import { emitDealEvent } from './events';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
+import { RELACIONES, propagarRelacion, relacionSola } from './relacion';
 
 // Los registros nuevos arrancan en este id para no chocar con los ids de HubSpot que trae la migración
 // (los migrados conservan su id de HubSpot, así los links y los tableros siguen andando).
@@ -348,6 +349,11 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     const dup = await db.prepare("SELECT id FROM records WHERE object_type = 'company' AND domain = ? AND archived = 0").bind(normDomain(props.domain)).first<{ id: number }>();
     if (dup) throw new HttpError(409, `Ya existe una empresa con el dominio ${props.domain} (id ${dup.id}).`);
   }
+  // Contacto o empresa de Formas (por el mail o el dominio): «Equipo Formas» solo, si no se eligió otro tipo (relacion.ts).
+  if ((type === 'contact' || type === 'company') && (props.tipo_de_relacion == null || props.tipo_de_relacion === '')) {
+    const auto = await relacionSola(db, type, props);
+    if (auto) props.tipo_de_relacion = auto;
+  }
   const c = promote(type, props);
   const ts = opts.createdAt ?? now();
   const row = await db.prepare(
@@ -391,6 +397,10 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     }
   }
   for (const k of Object.keys(next)) if (next[k] === null) delete next[k];
+  if ((type === 'contact' || type === 'company') && ('email' in props || 'domain' in props) && !next.tipo_de_relacion) {
+    const auto = await relacionSola(db, type, next);
+    if (auto) next.tipo_de_relacion = auto;
+  }
   const changed = Object.keys({ ...current, ...next }).filter((k) => String(current[k] ?? '') !== String(next[k] ?? ''));
   if (!changed.length) return row;
   const c = promote(type, next);
@@ -416,6 +426,8 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   await db.batch(stmts);
   if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
+  // La empresa cambió de tipo de relación: sus contactos lo siguen (relacion.ts).
+  if (type === 'company' && changed.includes('tipo_de_relacion')) await propagarRelacion(db, ctx, id, current.tipo_de_relacion, next.tipo_de_relacion);
   // La vendedora pasó el pedido a «Listo para producción» (desde «Pedido confirmado», «$ Pendiente de Anticipo» o
   // «Pendiente Boceto Digital»): en ClickUp, el PDV pasa de «ingreso de pedido» a «pdv».
   if (type === 'order' && changed.includes('hs_pipeline_stage') && ORDER_PREVIAS.includes(String(current.hs_pipeline_stage ?? ORDER_CONFIRMED))
@@ -584,6 +596,14 @@ function unidadSql(type: ObjectType, keys: string[], binds: unknown[]) {
 }
 
 async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, binds: unknown[]): Promise<string> {
+  // Tipo de relación de contactos y empresas: vacío cuenta como «cliente» (relacion.ts).
+  if (f.prop === '__relacion') {
+    const want = (f.values ?? String(f.value ?? '').split(';')).map(String).filter((v) => (RELACIONES as readonly string[]).includes(v));
+    if (!want.length) return '1';
+    binds.push(...want);
+    const cond = `(COALESCE(NULLIF(json_extract(r.props, '$.tipo_de_relacion'), ''), 'cliente') IN (${want.map(() => '?').join(', ')}))`;
+    return ['neq', 'not_in'].includes(f.op) ? `NOT ${cond}` : cond;
+  }
   if (f.prop === '__unidad') {
     const want = (f.values ?? String(f.value ?? '').split(';')).map(String).filter((k) => UNIDADES[k]);
     const cond = `(${unidadSql(type, want, binds)})`;

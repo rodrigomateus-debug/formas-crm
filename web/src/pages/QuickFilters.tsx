@@ -57,8 +57,17 @@ export function presetFilter(prop: string, key: string): Filter | null {
   }
 }
 
-export function quickFilters(owners: string[] | undefined, dates: Record<string, string> | undefined, tags?: string[], unidades?: string[]): Filter[] {
+// Tipo de relación de contactos y empresas (relacion.ts): sin elegir, solo clientes y prospectos; [] = todos.
+export const RELACION_OPCIONES: Array<{ key: string; label: string }> = [
+  { key: 'cliente', label: 'Clientes y prospectos' }, { key: 'proveedor', label: 'Proveedores' }, { key: 'equipo', label: 'Equipo Formas' }, { key: 'otro', label: 'Otros' },
+];
+export const conRelacion = (type: ObjectType) => type === 'contact' || type === 'company';
+export const relacionDe = (type: ObjectType, relacion: string[] | undefined) => (conRelacion(type) ? relacion ?? ['cliente'] : []);
+const relacionDefault = (r: string[]) => r.length === 1 && r[0] === 'cliente';
+
+export function quickFilters(owners: string[] | undefined, dates: Record<string, string> | undefined, tags?: string[], unidades?: string[], relacion?: string[]): Filter[] {
   const out: Filter[] = [];
+  if (relacion?.length && relacion.length < RELACION_OPCIONES.length) out.push({ prop: '__relacion', op: 'in', values: relacion });
   if (unidades?.length) out.push({ prop: '__unidad', op: 'in', values: unidades });
   if (tags?.length) out.push({ prop: '__tag', op: 'in', values: tags });
   if (owners?.length) out.push(owners.length === 1 && owners[0] === 'none' ? { prop: 'owner_id', op: 'unknown' } : { prop: 'owner_id', op: 'in', values: owners });
@@ -102,19 +111,50 @@ export function UnidadFilter({ value, onChange }: { value: string[]; onChange: (
   );
 }
 
-export function QuickFilterBar({ type, owners, dates, tags, unidades, onOwners, onDates, onTags, onUnidades, onClear, extra }: {
-  type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[]; unidades: string[];
-  onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onUnidades: (u: string[]) => void; onClear: () => void; extra?: boolean;
+// Contactos y empresas: con quién es la relación. Arranca en «Clientes y prospectos» (los proveedores, el equipo de Formas
+// y los otros no se mezclan); se pueden elegir varios o «Todos».
+export function RelacionFilter({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const todos = !value.length;
+  const sel = RELACION_OPCIONES.filter((o) => value.includes(o.key));
+  const label = todos ? 'Relación: todos' : sel.map((o) => o.label).join(', ');
+  return (
+    <Pop label={label} on={!relacionDefault(value)}>
+      {() => (
+        <div className="stack" style={{ gap: 0 }}>
+          {RELACION_OPCIONES.map((o) => (
+            <label key={o.key} className="opt"><input type="checkbox" checked={todos || value.includes(o.key)}
+              onChange={() => {
+                const base = todos ? RELACION_OPCIONES.map((x) => x.key) : value;
+                const next = base.includes(o.key) ? base.filter((x) => x !== o.key) : [...base, o.key];
+                onChange(next.length === RELACION_OPCIONES.length ? [] : next.length ? next : ['cliente']);
+              }} />{o.label}</label>
+          ))}
+          <div className="row" style={{ gap: 4, marginTop: 4 }}>
+            {!todos && <button className="btn sm ghost" onClick={() => onChange([])}>Todos</button>}
+            {!relacionDefault(value) && <button className="btn sm ghost" onClick={() => onChange(['cliente'])}>Solo clientes</button>}
+          </div>
+        </div>
+      )}
+    </Pop>
+  );
+}
+
+export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, onOwners, onDates, onTags, onUnidades, onRelacion, onClear, extra }: {
+  type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[]; unidades: string[]; relacion?: string[];
+  onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onUnidades: (u: string[]) => void;
+  onRelacion?: (r: string[]) => void; onClear: () => void; extra?: boolean;
 }) {
   const { meta } = useMeta();
   const name = (v: string) => (v === 'me' ? 'Yo' : v === 'none' ? 'Sin asignar' : meta.users.find((u) => String(u.id) === v)?.name ?? v);
   const ownerLabel = owners.length ? `Propietario: ${owners.slice(0, 2).map(name).join(', ')}${owners.length > 2 ? ` +${owners.length - 2}` : ''}` : 'Propietario';
   const toggle = (v: string) => onOwners(owners.includes(v) ? owners.filter((x) => x !== v) : [...owners, v]);
-  const any = owners.length > 0 || Object.keys(dates).length > 0 || tags.length > 0 || unidades.length > 0 || extra;
+  const rel = relacionDe(type, relacion);
+  const any = owners.length > 0 || Object.keys(dates).length > 0 || tags.length > 0 || unidades.length > 0 || extra || (conRelacion(type) && !relacionDefault(rel));
   const typeTags = meta.tags?.filter((t) => t.object_type === type) ?? [];
   const tagName = (v: string) => typeTags.find((t) => String(t.id) === v)?.name ?? v;
   return (
     <>
+      {conRelacion(type) && onRelacion && <RelacionFilter value={rel} onChange={onRelacion} />}
       <UnidadFilter value={unidades} onChange={onUnidades} />
       <Pop label={ownerLabel} on={owners.length > 0}>
         {() => (

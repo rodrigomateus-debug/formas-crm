@@ -25,6 +25,9 @@ const LIFECYCLE: Opt[] = [
   ['customer', 'Activo ventas'],
 ];
 
+// Tipo de relación de contactos y empresas (relacion.ts): vacío = cliente. Las listas muestran por defecto solo clientes.
+export const RELACION: Opt[] = [['cliente', 'Cliente / prospecto'], ['proveedor', 'Proveedor'], ['equipo', 'Equipo Formas'], ['otro', 'Otro']];
+
 const LEAD_STATUS: Opt[] = [
   ['NEW', 'Nuevo'], ['OPEN', 'Abierto'], ['IN_PROGRESS', 'En curso'], ['OPEN_DEAL', 'Negocio abierto'],
   ['UNQUALIFIED', 'No calificado'], ['ATTEMPTED_TO_CONTACT', 'Intento de contacto'], ['CONNECTED', 'Conectado'],
@@ -139,6 +142,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['company', 'Nombre de la empresa (texto)', 'string', 'Información del contacto', [], CORE],
     ['owner_id', 'Propietario', 'owner', 'Información del contacto', [], { ...CORE, ...FORM }],
     ['lifecyclestage', 'Etapa del ciclo de vida', 'enum', 'Información del contacto', LIFECYCLE, { ...CORE, ...FORM }],
+    ['tipo_de_relacion', 'Tipo de relación', 'enum', 'Información del contacto', RELACION, CORE],
     ['hs_lead_status', 'Estado del lead', 'enum', 'Información del contacto', LEAD_STATUS, CORE],
     ['tipo_de_cliente', 'Tipo de cliente', 'enum', 'Información del contacto', ['Particular', 'Empresa', 'Agencia']],
     ['website', 'Sitio web', 'url', 'Información del contacto', [], CORE],
@@ -178,6 +182,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['email', 'Email', 'email', 'Información de la empresa'],
     ['owner_id', 'Propietario', 'owner', 'Información de la empresa', [], { ...CORE, ...FORM }],
     ['lifecyclestage', 'Etapa del ciclo de vida', 'enum', 'Información de la empresa', LIFECYCLE, { ...CORE, ...FORM }],
+    ['tipo_de_relacion', 'Tipo de relación', 'enum', 'Información de la empresa', RELACION, CORE],
     ['hs_lead_status', 'Estado del lead', 'enum', 'Información de la empresa', LEAD_STATUS.slice(0, 8), CORE],
     ['type', 'Tipo', 'enum', 'Información de la empresa', [['PROSPECT', 'Prospecto'], ['PARTNER', 'Socio'], ['RESELLER', 'Revendedor'], ['VENDOR', 'Proveedor'], ['OTHER', 'Otro']], CORE],
     ['industry', 'Industria', 'enum', 'Información de la empresa', INDUSTRIAS, { ...CORE, ...FORM }],

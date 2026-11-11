@@ -46,7 +46,9 @@ function slim(base: string, r: ReturnType<typeof rowToRecord>, props?: string[])
 const TOOLS: Tool[] = [
   {
     name: 'search_records',
-    description: 'Busca contactos, empresas, negocios o pedidos. Texto libre (nombre, mail, dominio, teléfono, id) y/o filtros por propiedad. Devuelve total y registros con link al CRM. Para ver qué propiedades existen usá list_properties.',
+    description: 'Busca contactos, empresas, negocios o pedidos. Texto libre (nombre, mail, dominio, teléfono, id) y/o filtros por propiedad. Devuelve total y registros con link al CRM. Para ver qué propiedades existen usá list_properties. '
+      + 'Contactos y empresas tienen tipo_de_relacion: cliente (o vacío), proveedor, equipo (gente de Formas) u otro. Para clientes y prospectos (prospectar, '
+      + 'seguimientos, listados comerciales) filtrá con { prop: "__relacion", op: "in", values: ["cliente"] }: los proveedores y el equipo no son clientes.',
     readOnly: true,
     inputSchema: {
       type: 'object',

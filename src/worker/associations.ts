@@ -1,6 +1,7 @@
 import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { getRow, rowToRecord, refreshActivityDates, type RecordRow } from './records';
+import { heredarRelacion } from './relacion';
 
 // Cada asociación se guarda en los dos sentidos (A→B y B→A) para leer rápido desde cualquier lado.
 export async function associate(db: D1Database, ctx: Ctx, aId: number, bId: number, opts: { label?: string | null; primary?: boolean } = {}) {
@@ -41,6 +42,10 @@ export async function associate(db: D1Database, ctx: Ctx, aId: number, bId: numb
     .bind(a.id, `${b.object_type}:${b.id}`, ts, ctx.user.id, ctx.source));
   await db.batch(stmts);
   await refreshActivityDates(db, [a.id, b.id]);
+  // Un contacto con su empresa principal: si no tiene tipo de relación, hereda el de la empresa (proveedor, equipo…).
+  if (primary && (a.object_type === 'contact' || b.object_type === 'contact') && (a.object_type === 'company' || b.object_type === 'company')) {
+    await heredarRelacion(db, ctx, a.object_type === 'contact' ? a : b, a.object_type === 'company' ? a : b);
+  }
 }
 
 export async function dissociate(db: D1Database, ctx: Ctx, aId: number, bId: number) {

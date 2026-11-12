@@ -198,3 +198,33 @@ export function mandarRemito(f: FotoParaMandar, alSubir: (parte: number) => void
     x.send(datos);
   });
 }
+
+// ---------- El recorrido del día (Cronograma del CRM) ----------
+export type ParadaChofer = {
+  clave: string; nombre: string; direccion: string | null; lat: number | null; lng: number | null; horario: [number, number] | null;
+  visita: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null } | null;
+  movimientos: Array<{ id: string; tipo: string; npdv: string | null; cliente: string | null; articulo: string; cantidad: number | null; hecho: boolean }>;
+};
+export type RecorridoChofer = { n: number; salida: number; base: { nombre: string; direccion: string; lat: number | null; lng: number | null }; paradas: ParadaChofer[] };
+
+/** El recorrido que Logística le armó a este chofer para hoy (vacío si todavía no le asignaron ninguno). */
+export async function pedirRuta(): Promise<RecorridoChofer[]> {
+  const { recorridos } = await pedir<{ recorridos: RecorridoChofer[] }>('/ruta');
+  return Array.isArray(recorridos) ? recorridos : [];
+}
+
+/** El chofer marca una parada: la hizo, no se pudo (con el motivo) o la deja para después. Sin `resultado`, lo borra. */
+export async function marcarParada(clave: string, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string): Promise<void> {
+  if (!tokenEnMemoria) throw new LinkInvalido();
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 30_000);
+  let r: Response;
+  try {
+    r = await fetch(`${API}/ruta/parada`, {
+      method: 'POST', headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clave, resultado, motivo, nota }), signal: corte.signal,
+    });
+  } catch { throw new SinSenal(); } finally { clearTimeout(reloj); }
+  if (r.status === 401) throw new LinkInvalido();
+  if (!r.ok) throw new Rechazo(r.status);
+}

@@ -362,6 +362,12 @@ function Asignados({ ids, personas, editable, onChange, label }: { ids: number[]
   );
 }
 const primerNombre = (n: string) => n.split(' ')[0];
+// En la fila del PDV: los que tienen algún artículo pero no el PDV («+ Sole en artículos»).
+function OtrosEnArticulos({ p, personas }: { p: Pdv; personas: Persona[] }) {
+  const otros = p.asignados_todos.filter((id) => !p.asignados.includes(id)).map((id) => personas.find((x) => x.clickup_id === id)).filter((x): x is Persona => !!x);
+  if (!otros.length) return null;
+  return <span className="small muted ellipsis" title={`También en artículos: ${otros.map((x) => x.nombre).join(', ')}`}>+ {otros.map((x) => primerNombre(x.nombre)).join(', ')} en artículos</span>;
+}
 
 // ---------- Celdas ----------
 
@@ -544,11 +550,14 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
             {p.total > 0 && <span className={`prod-avance${listo ? ' ok' : ''}`} title={`${p.listos} de ${p.total} artículos listos`}>{p.listos}/{p.total}</span>}
           </div>
         </td>
-        <td><Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} /></td>
+        {/* Quién tiene el PDV (editable ahí mismo); si algún artículo lo tiene otra persona, se aclara al lado. */}
+        <td>{ed ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+          <Asignados ids={p.asignados} personas={v.personas} editable label={`PDV ${p.npdv}`} onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} />
+          <OtrosEnArticulos p={p} personas={v.personas} />
+        </span> : <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />}</td>
         <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>
         <td><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /></td>
         <td colSpan={6} className="small muted">
-          {ed && <span className="row" style={{ gap: 6 }}>Asignado al PDV: <Asignados ids={p.asignados} personas={v.personas} editable label={`Asignado al PDV ${p.npdv}`} onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} /></span>}
           {!ed && !p.editable && <span>Se trabaja en ClickUp</span>}
         </td>
         <td>{p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir PDV ${p.npdv} en ClickUp`}><Icon name="external" size={14} /></a>}</td>

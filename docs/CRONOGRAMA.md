@@ -70,8 +70,9 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 - **Horario de recepción** («9 a 13», propiedad nueva de la empresa): si el orden deja una parada fuera de horario,
   queda en rojo.
 - **Mapa**: OpenStreetMap. El dibujo y la distancia por calles salen del servicio público de OSRM; si no contesta, el
-  recorrido se ve en línea recta y los tiempos son estimados (dice cuál de los dos es). Un punto mal ubicado se arrastra
-  a su lugar y queda ahí.
+  recorrido se ve en línea recta y los tiempos son estimados (dice cuál de los dos es). Los números del mapa no se arrastran. Para corregir un punto mal
+  ubicado: «Corregir ubicación» en su parada, se arrastra solo ese número y se guarda con «Guardar ubicación» (vale para
+  esa dirección en todas las rutas). «Volver a buscar en el mapa» saca la corrección.
 
 ### Direcciones
 

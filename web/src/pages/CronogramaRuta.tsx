@@ -53,6 +53,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [reales, setReales] = useState<Record<string, Real>>({});
   const [caliente, setCaliente] = useState<string | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
+  // La parada a la que se le está corrigiendo la ubicación en el mapa (solo ese número se puede arrastrar) y dónde se soltó.
+  const [ubicando, setUbicando] = useState<{ clave: string; lat?: number; lng?: number } | null>(null);
   const arrastre = useRef<string | null>(null);
   const [sobre, setSobre] = useState<string | null>(null);
   const pedido = useRef(0);
@@ -164,9 +166,17 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     } catch (e) { toast((e as Error).message, true); }
     void cargar(); onCambio();
   }
-  async function fijar(p: Parada, lat: number, lng: number) {
-    if (!p.direccion) return;
-    try { await http('PUT', '/cronograma/punto', { direccion: p.direccion, lat, lng }); toast(`${p.nombre}: el punto quedó donde lo dejaste.`); } catch (e) { toast((e as Error).message, true); }
+  // Corregir dónde queda una parada en el mapa: se guarda recién con «Guardar ubicación», y vale para esa dirección en
+  // todas las rutas. «Volver a buscar» saca la corrección y la ubica de nuevo por su dirección.
+  async function fijar(p: Parada) {
+    if (!p.direccion || ubicando?.lat == null || ubicando.lng == null) return;
+    try { await http('PUT', '/cronograma/punto', { direccion: p.direccion, lat: ubicando.lat, lng: ubicando.lng }); toast(`${p.nombre}: ubicación guardada.`); } catch (e) { toast((e as Error).message, true); }
+    setUbicando(null);
+    void cargar();
+  }
+  async function rebuscar(p: Parada) {
+    try { await http('DELETE', `/cronograma/punto${qs({ direccion: p.direccion })}`); toast(`${p.nombre}: se vuelve a buscar en el mapa por su dirección.`); } catch (e) { toast((e as Error).message, true); }
+    setUbicando(null);
     void cargar();
   }
   async function sugerencia(p: Parada, aceptar: boolean) {
@@ -241,7 +251,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             const entregas = [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
             return [
               <Tramo key={`t${p.clave}`} t={s.tramo} />,
-              <li key={p.clave} className={`cr-parada${todo ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${sobre === p.clave ? ' sobre' : ''}`} draggable={puede && editando !== p.clave}
+              <li key={p.clave} className={`cr-parada${todo ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${sobre === p.clave ? ' sobre' : ''}`} draggable={puede && editando !== p.clave && ubicando?.clave !== p.clave}
                 style={{ '--c': act.color } as React.CSSProperties}
                 onMouseEnter={() => setCaliente(p.clave)} onMouseLeave={() => setCaliente((c) => (c === p.clave ? null : c))}
                 onDragStart={(e) => { arrastre.current = p.clave; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', p.clave); } catch { /* no hace falta */ } }}
@@ -288,6 +298,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   {p.visita?.resultado === 'hecho' && <span className="cr-tag">Lo marcó {p.visita.chofer ?? 'el chofer'} a las {horaDe(p.visita.at)}</span>}
                   {puede && <button type="button" className="cr-link" onClick={() => marcar(p)}>{todo ? 'Volver a pendiente' : 'Marcar hecho'}</button>}
                   {puede && (p.company_id || entregas.length > 0) && <button type="button" className="cr-link" onClick={() => setEditando(editando === p.clave ? null : p.clave)}>{p.direccion ? 'Corregir dirección' : 'Cargar dirección'}</button>}
+                  {puede && p.direccion && p.lat != null && ubicando?.clave !== p.clave && <button type="button" className="cr-link" onClick={() => { setUbicando({ clave: p.clave }); setCaliente(p.clave); }}>Corregir ubicación</button>}
                   {p.lat != null && <a className="cr-link" href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Cómo llegar</a>}
                   <span className="grow" />
                   {puede && rutas.length > 1 && (
@@ -298,6 +309,16 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   )}
                   {puede && <span className="cr-flechas"><button type="button" aria-label="Subir" disabled={i === 0} onClick={() => mover(p.clave, i - 1)}>↑</button><button type="button" aria-label="Bajar" disabled={i === act.paradas.length - 1} onClick={() => mover(p.clave, i + 1)}>↓</button></span>}
                 </div>
+                {ubicando?.clave === p.clave && (
+                  <div className="cr-ubicar">
+                    <span>Arrastrá el número <b>{i + 1}</b> en el mapa hasta donde queda de verdad. Vale para esta dirección en todas las rutas.{p.punto_manual ? ' Ya tiene una ubicación corregida a mano.' : ''}</span>
+                    <div className="row" style={{ flexWrap: 'wrap' }}>
+                      <button type="button" className="btn sm primary" disabled={ubicando.lat == null} onClick={() => fijar(p)}>Guardar ubicación</button>
+                      <button type="button" className="btn sm ghost" onClick={() => setUbicando(null)}>Cancelar</button>
+                      {p.punto_manual && <button type="button" className="btn sm ghost" onClick={() => rebuscar(p)}>Volver a buscar en el mapa</button>}
+                    </div>
+                  </div>
+                )}
                 {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
               </li>,
             ];
@@ -308,10 +329,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
         <div className="cr-ruta-lado">
           <div className="cr-mapa-caja">
-            <Mapa armadas={armadas} activa={act.i} bases={datos.bases} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} onMover={fijar} />
+            <Mapa armadas={armadas} activa={act.i} bases={datos.bases} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
             <div className="cr-mapa-pie small">
               <span>{act.real ? 'Recorrido por calles.' : 'Recorrido en línea recta (estimado).'} Tiempos con tránsito moderado según la hora, sin el tránsito del momento.</span>
-              {puede && <span>Si un punto quedó mal, arrastralo a su lugar.</span>}
+              {puede && <span>Si un punto quedó mal, usá «Corregir ubicación» en su parada.</span>}
               <Libreta puede={puede} onCambio={() => void cargar()} />
             </div>
           </div>
@@ -397,16 +418,16 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
 // ---------- El mapa ----------
 
 type Armada = { r: Recorrido; i: number; base: BaseGeo | null; paradas: Parada[]; real?: Real; sim: Simulacion; color: string };
-function Mapa({ armadas, activa, bases, caliente, puede, onPin, onMover }: {
-  armadas: Armada[]; activa: number; bases: BaseGeo[]; caliente: string | null; puede: boolean; onPin: (clave: string, ruta: number) => void; onMover: (p: Parada, lat: number, lng: number) => void;
+function Mapa({ armadas, activa, bases, caliente, puede, onPin, ubicando, onUbicar }: {
+  armadas: Armada[]; activa: number; bases: BaseGeo[]; caliente: string | null; puede: boolean; onPin: (clave: string, ruta: number) => void; ubicando: { clave: string; lat?: number; lng?: number } | null; onUbicar: (lat: number, lng: number) => void;
 }) {
   const caja = useRef<HTMLDivElement>(null);
   const mapa = useRef<L.Map | null>(null);
   const capa = useRef<L.LayerGroup | null>(null);
   const encuadre = useRef('');
   const pines = useRef(new Map<string, L.Marker>());
-  const cb = useRef({ onPin, onMover });
-  cb.current = { onPin, onMover };
+  const cb = useRef({ onPin, onUbicar });
+  cb.current = { onPin, onUbicar };
 
   useEffect(() => {
     const m = L.map(caja.current!, { zoomControl: true, attributionControl: true, scrollWheelZoom: true }).setView([-34.6, -58.45], 11);
@@ -444,22 +465,24 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, onMover }: {
         if (p.lat == null || p.lng == null) return;
         todos.push([p.lat, p.lng]);
         const s = a.sim.paradas[i], hecha = p.movimientos.every((x) => x.hecho);
-        const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: 'cr-pin-wrap', html: `<span class="cr-pin${act ? '' : ' apagado'}${hecha ? ' hecha' : ''}${s.tarde || (p.visita && p.visita.resultado === 'no_se_pudo') ? ' tarde' : ''}" style="--c:${a.color}">${hecha ? '✓' : i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
-          zIndexOffset: act ? 1000 : 0, draggable: puede && act, keyboard: false,
+        // Los números no se arrastran, salvo el de la parada a la que se le está corrigiendo la ubicación.
+        const mio = ubicando?.clave === p.clave;
+        const mk = L.marker(mio && ubicando.lat != null && ubicando.lng != null ? [ubicando.lat, ubicando.lng] : [p.lat, p.lng], {
+          icon: L.divIcon({ className: 'cr-pin-wrap', html: `<span class="cr-pin${act ? '' : ' apagado'}${mio ? ' ubicando' : ''}${hecha ? ' hecha' : ''}${s.tarde || (p.visita && p.visita.resultado === 'no_se_pudo') ? ' tarde' : ''}" style="--c:${a.color}">${hecha ? '✓' : i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
+          zIndexOffset: mio ? 4000 : act ? 1000 : 0, draggable: puede && mio, keyboard: false,
         }).bindTooltip(esc(`${p.nombre} · ${hhmm(s.llega)}`), { direction: 'top', offset: [0, -14] }).addTo(g);
         pines.current.set(p.clave, mk);
         mk.on('click', () => cb.current.onPin(p.clave, a.i));
-        mk.on('dragend', () => { const ll = mk.getLatLng(); cb.current.onMover(p, ll.lat, ll.lng); });
+        mk.on('dragend', () => { const ll = mk.getLatLng(); cb.current.onUbicar(ll.lat, ll.lng); });
       });
     }
     // Se vuelve a encuadrar solo cuando cambian los puntos, no al reordenar.
     const firma = [...pines.current.keys()].sort().join('|');
     if (todos.length && firma !== encuadre.current) { encuadre.current = firma; m.fitBounds(L.latLngBounds(todos).pad(0.15), { maxZoom: 15, animate: false }); }
-  }, [armadas, activa, bases, puede]);
+  }, [armadas, activa, bases, puede, ubicando]);
   // La parada sobre la que está el mouse: se resalta su pin sin rehacer el mapa.
   useEffect(() => {
-    for (const [clave, mk] of pines.current) { mk.getElement()?.querySelector('.cr-pin')?.classList.toggle('caliente', clave === caliente); mk.setZIndexOffset(clave === caliente ? 3000 : 1000); }
+    for (const [clave, mk] of pines.current) { mk.getElement()?.querySelector('.cr-pin')?.classList.toggle('caliente', clave === caliente); mk.setZIndexOffset(clave === ubicando?.clave ? 4000 : clave === caliente ? 3000 : 1000); }
   }, [caliente, armadas, activa]);
 
   return <div ref={caja} className="cr-mapa" role="application" aria-label="Mapa del recorrido" />;

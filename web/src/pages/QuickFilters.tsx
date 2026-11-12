@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useMeta, propOf, UNIDADES, type Filter, type ObjectType } from '../lib';
+import { useMeta, propOf, UNIDADES, Icon, type Filter, type ObjectType } from '../lib';
 import { Avatar, UnidadBadge } from '../components';
 
 // Filtros rápidos, como los de HubSpot: propietarios (varios a la vez) y fechas con rangos listos.
@@ -90,6 +90,43 @@ function Pop({ label, on, children }: { label: ReactNode; on: boolean; children:
       <button className={`btn qf-btn${on ? ' on' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}>{label}<span className="caret" aria-hidden="true">▾</span></button>
       {open && <div className="popover qf-pop" role="dialog">{children(() => setOpen(false))}</div>}
     </div>
+  );
+}
+
+// Cobro de los pedidos (saldo pendiente de Finnegans, con IVA): «Saldo pendiente» (queda algo por cobrar) y «Pagado» (nada
+// por cobrar), con los mismos colores que las tarjetas. Va como un filtro más de la vista sobre el saldo: mayor que 0, 0 o
+// menos, o con dato (las dos). Los pedidos sin dato de Finnegans no entran en ninguna.
+export type Cobro = 'pendiente' | 'pagado';
+export const SALDO = 'saldo_pendiente_de_pago_mxn';
+export const esFiltroCobro = (f: Filter) => f.prop === SALDO && ['gt', 'lte', 'known'].includes(f.op);
+export function cobroDe(groups: Filter[][]): Cobro[] {
+  const f = groups.flat().find(esFiltroCobro);
+  return !f ? [] : f.op === 'gt' ? ['pendiente'] : f.op === 'lte' ? ['pagado'] : ['pendiente', 'pagado'];
+}
+export function conCobro(groups: Filter[][], cobro: Cobro[]): Filter[][] {
+  const sin = groups.map((g) => g.filter((f) => !esFiltroCobro(f))).filter((g) => g.length);
+  if (!cobro.length) return sin;
+  const f: Filter = cobro.length === 2 ? { prop: SALDO, op: 'known' } : cobro[0] === 'pendiente' ? { prop: SALDO, op: 'gt', value: 0 } : { prop: SALDO, op: 'lte', value: 0 };
+  return sin.length ? sin.map((g) => [...g, f]) : [[f]];
+}
+export const CobroPill = ({ k }: { k: Cobro }) => (k === 'pagado'
+  ? <span className="saldo pago"><Icon name="check" size={13} />Pagado</span>
+  : <span className="saldo debe">Saldo pendiente</span>);
+export function CobroFilter({ value, onChange }: { value: Cobro[]; onChange: (v: Cobro[]) => void }) {
+  const opciones: Cobro[] = ['pendiente', 'pagado'];
+  return (
+    <Pop label={value.length ? <>Cobro{value.map((k) => <CobroPill key={k} k={k} />)}</> : 'Cobro'} on={value.length > 0}>
+      {() => (
+        <div className="stack" style={{ gap: 0 }}>
+          {opciones.map((k) => (
+            <label key={k} className="opt"><input type="checkbox" checked={value.includes(k)}
+              onChange={() => onChange(value.includes(k) ? value.filter((x) => x !== k) : opciones.filter((x) => x === k || value.includes(x)))} /><CobroPill k={k} /></label>
+          ))}
+          <div className="small muted" style={{ padding: '4px 10px', maxWidth: 240 }}>Según el saldo de Finnegans (con IVA). Los pedidos sin ese dato no entran.</div>
+          {value.length > 0 && <button className="btn sm ghost" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => onChange([])}>Cualquiera</button>}
+        </div>
+      )}
+    </Pop>
   );
 }
 

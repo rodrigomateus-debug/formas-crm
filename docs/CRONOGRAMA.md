@@ -75,7 +75,8 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 
 ### Direcciones
 
-- **Proveedores e impresores**: la dirección de la ficha de su empresa. Se carga una vez, desde la parada.
+- **Proveedores e impresores**: la dirección de la ficha de su empresa; si no tiene, la de la libreta de direcciones
+  cuando hay un lugar que se llama igual (ver abajo).
 - **Entregas**, en este orden: las direcciones de la tarjeta «Entrega» del pedido (validadas con Google Maps; con
   varias, **una parada por dirección**, ver [REMITOS.md](REMITOS.md#dirección-de-entrega-pedido-de-rodrigo-del-12112026));
   la del pedido de venta de Finnegans; la de la última entrega a ese cliente; la de la ficha de la empresa. Las validadas
@@ -87,6 +88,26 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 - Cada dirección se busca en el mapa una sola vez (Nominatim de OpenStreetMap, de a pocas por vez).
 - Buscar afuera (Finnegans, el mapa, Claude) lo dispara solo quien edita el cronograma al abrir la ruta. Quien solo
   mira, «Ver como» y la app del chofer usan lo que ya está guardado.
+
+### La libreta de direcciones
+
+Los lugares a los que se va siempre (proveedores, impresores, depósitos y oficinas de clientes: unos 2.500), con su
+dirección, horario, teléfono, contacto y observaciones. Es una copia de la planilla de Logística publicada como CSV
+(columnas PROVEEDOR, DIRECCION, H. ATENCION, TELEFONO, LOCALIDAD, ZONA, CONTACTO 1 y 2, OBSERVACIONES y los datos de
+coordinación). La planilla sigue siendo donde se cargan y corrigen los lugares.
+
+- **Se copia sola una vez por día**, cuando alguien que edita abre la ruta, y con «Actualizar» al pie del mapa. Si la
+  planilla no se puede leer, queda la copia anterior. De qué planilla se copia lo cambia un administrador
+  (`PUT /api/cronograma/lugares/planilla`).
+- **Una parada sin dirección** usa la de la libreta si hay un lugar que se llama igual («SOLSPORT»; «MAD / DIMILITO» es
+  Dimilito; «ZECAT (DEPOSITO)» es Zecat) y es uno solo, todos son la misma dirección o uno solo es el depósito. Con el
+  nombre parecido pero no igual («NESTLE ARGENTINA S.A.» tiene más de veinte lugares) no se usa ninguno solo: se elige.
+- **«Corregir dirección»** en la parada tiene el buscador de la libreta: muestra primero los lugares de ese cliente o
+  proveedor y busca por nombre, calle o localidad. Elegir uno lo guarda en el pedido (entregas) o en la ficha de la
+  empresa (proveedores e impresores).
+- **Lo que dice la libreta del lugar** aparece en la parada cuando reconoce la calle y la altura, aunque estén escritas
+  distinto: horario (cuenta para avisar si se llega tarde), contacto, teléfono y observaciones. También en la app del
+  chofer. Cómo se coordina la entrega (turnos, seguros) lo ve solo quien edita.
 
 ## La app del chofer
 
@@ -110,6 +131,7 @@ vuelve, como siempre.
 | Qué | Dónde |
 |---|---|
 | Correcciones de la revisión: qué marcó el chofer en cada parada, a nombre de quién, feriados que faltaban | `migrations/0046_cronograma_chofer.sql` |
+| La libreta de direcciones: tablas `lugares` y `lugares_claves`, y de qué planilla se copia (settings `lugares`) | `migrations/0047_lugares.sql` |
 | Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0045_cronograma.sql` |
 | Movimientos, mover, marcar, notas, feriados, direcciones, ruta, chofer | `src/worker/cronograma.ts` |
 | API `/api/cronograma…` | `src/worker/api.ts` |

@@ -3,7 +3,7 @@ import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { Budget } from './budget';
 import { norm } from './clickup';
-import { CERRADOS, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
+import { CERRADOS, claveProveedor, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
 import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
@@ -497,12 +497,14 @@ export async function fijarPunto(db: D1Database, ctx: Ctx, b: { direccion?: unkn
 // ---------- La ruta del día ----------
 
 export interface Parada {
-  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | null;
+  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | null;
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
   company_id: number | null; record_id: number | null; movimientos: Movimiento[];
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: Visita | null;   // lo que marcó el chofer en la app
+  lugar?: LugarInfo | null; // lo que dice la libreta de direcciones de ese lugar
 }
+export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
 interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[] }
 
@@ -538,6 +540,9 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   const puedeConsultar = () => buscar && consultas++ < 3;
   const revisadas = new Map<number, Parada['sugerencia']>();   // una vez por pedido, no por artículo
 
+  await actualizarLugares(env, buscar);
+  const libreta = await lugaresPara(db, [...new Set(viajes.map((m) => (m.tipo === 'entrega' ? m.cliente : m.lugar)).filter((x): x is string => !!x))]);
+
   const paradas = new Map<string, Parada>();
   const puntoGoogle = new Map<string, { lat: number; lng: number }>();
   for (const m of viajes) {
@@ -566,6 +571,9 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
       } else if (previas.length) { direccion = previas[0].direccion; origen = 'ultima_entrega'; }
       else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
     } else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
+    // Sin dirección: la de la libreta, si ese nombre tiene un solo lugar (o todos sus lugares son la misma dirección).
+    let delLugar: Lugar | null = null;
+    if (!direccion) { delLugar = unicoLugar(libreta.get(nombre)?.exactos ?? []); if (delLugar) { direccion = direccionLugar(delLugar); origen = 'libreta'; } }
     // La clave no depende de la dirección: corregirla no saca la parada del recorrido guardado ni pierde lo que marcó el
     // chofer. Una entrega es la de su PDV; un retiro o un egreso, el de esa empresa. Un pedido que va a varias direcciones
     // (tarjeta «Entrega») tiene una parada por dirección: la primera con la clave del PDV y las otras con su número (:2, :3…).
@@ -574,7 +582,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     for (const [i, dir] of [direccion, ...otras].entries()) {
       const clave = i ? `${base}:${i + 1}` : base;
       const par = paradas.get(clave) ?? { clave, nombre, direccion: dir, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
-        company_id: companyId, record_id: recordId, movimientos: [], sugerencia: null };
+        company_id: companyId, record_id: recordId, movimientos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null };
       par.movimientos.push(m);
       if (sugerencia && !par.sugerencia) par.sugerencia = sugerencia;
       if (!par.horario && horarioDe(horarioTexto)) { par.horario = horarioDe(horarioTexto); par.horario_texto = horarioTexto; }
@@ -583,6 +591,13 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   }
 
   const lista_ = [...paradas.values()];
+  // Lo que dice la libreta del lugar al que se va (horario, contacto, observaciones), reconocido por calle y altura.
+  const porDir = await lugaresPorDireccion(db, lista_.filter((p) => p.direccion && !p.lugar).map((p) => p.direccion!));
+  for (const p of lista_) {
+    if (!p.lugar && p.direccion) { const l = porDir.get(claveCalle(p.direccion)); if (l) p.lugar = infoLugar(l); }
+    if (p.lugar && !p.horario && horarioDe(p.lugar.horario)) { p.horario = horarioDe(p.lugar.horario); p.horario_texto = p.lugar.horario; }
+    if (p.lugar && !buscar) p.lugar.coordinacion = null;
+  }
   const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)], buscar);
   for (const p of lista_) {
     const g = p.direccion ? geo.get(claveDireccion(p.direccion)) : null;
@@ -647,6 +662,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
           clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
+          lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
           movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.cantidad, hecho: m.hecho })),
         })),
       };
@@ -704,4 +720,158 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
       .bind(fecha, clave, resultado, motivo, nota, chofer, ctx.tokenId ?? null, JSON.stringify(marcados), now()).run();
   } else await db.prepare('DELETE FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave).run();
   return { ok: true, entrega };
+}
+
+// ---------- La libreta de direcciones ----------
+
+interface Lugar { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
+const infoLugar = (l: Lugar): LugarInfo => ({ nombre: l.nombre, horario: l.horario, telefono: l.telefono, contacto: l.contacto, observaciones: l.observaciones, coordinacion: l.coordinacion });
+
+// La dirección completa de un lugar: la calle, la localidad y, si es del conurbano, la provincia.
+export function direccionLugar(l: { direccion: string | null; localidad: string | null; zona: string | null }) {
+  const dir = String(l.direccion ?? '').replace(/\s+/g, ' ').trim();
+  const loc = String(l.localidad ?? '').replace(/\s+/g, ' ').trim(), zona = norm(String(l.zona ?? ''));
+  const partes = [dir];
+  if (loc && !norm(dir).includes(norm(loc))) partes.push(loc);
+  const caba = zona === 'caba' || norm(loc) === 'caba';
+  if (caba && !/\bcaba\b/i.test(partes.join(' '))) partes.push('CABA');
+  else if (!caba && ['norte', 'oeste', 'sur', 'noroeste'].includes(zona)) partes.push('Buenos Aires');
+  return partes.filter(Boolean).join(', ');
+}
+// Calle y altura, para reconocer la misma dirección escrita distinto: sin localidad, artículos, piso ni puntuación
+// («Av. Del Libertador 1855, Vicente López» y «AV LIBERTADOR 1855» dan lo mismo). Vacío si no tiene altura.
+export function claveCalle(direccion: string) {
+  const k = claveDireccion(direccion.split(',')[0]).replace(/\b(del|de|la|las|los|el|cp)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  const m = k.match(/^(.*?\D)\s*(\d{1,6})\b/);
+  return m && m[1].trim().length > 2 ? `${m[1].trim()} ${m[2]}` : '';
+}
+// Los nombres con los que se reconoce un lugar o una empresa: entero, sin lo que está entre paréntesis o después de un
+// guion, cada parte de «A / B», y la primera palabra si es larga («NESTLE ARGENTINA S.A.» también es «nestle»). La
+// primera palabra va además con «~» adelante: así se guarda en la libreta («NESTLE FLORENCIA» es «~nestle») sin que
+// cuente como llamarse igual.
+export function clavesDeNombre(nombre: string, conPrimera = false) {
+  const out = new Set<string>();
+  const base = nombre.replace(/\(.*?\)|\(.*$/g, ' ').split(/\s+-\s+/)[0];
+  for (const parte of [nombre, base, ...base.split('/')]) { const k = claveProveedor(parte); if (k.length > 2) out.add(k); }
+  if (conPrimera) { const p = norm(base).split(/[^a-z0-9]+/).filter(Boolean)[0] ?? ''; if (p.length >= 5) { out.add(p); out.add(`~${p}`); } }
+  return [...out];
+}
+// De varios lugares con el mismo nombre, el que se usa solo: si hay uno, ese; si todos son la misma dirección, el primero;
+// si uno solo es el depósito, ese. Si no, ninguno (se elige a mano en la parada).
+function unicoLugar(ls: Lugar[]): Lugar | null {
+  const con = ls.filter((l) => l.direccion && claveCalle(l.direccion));
+  if (!con.length) return null;
+  if (new Set(con.map((l) => claveCalle(l.direccion!))).size === 1) return con[0];
+  const depo = con.filter((l) => /dep[oó]sito/i.test(l.nombre));
+  return depo.length === 1 ? depo[0] : null;
+}
+// Los lugares de la libreta para cada nombre. `exactos`: se llaman igual (sirven para usar la dirección sola).
+// `parecidos`: además los que empiezan con la misma palabra («NESTLE ARGENTINA S.A.» → todos los «NESTLE…»): solo se
+// ofrecen para elegir, nunca se usan solos.
+async function lugaresPara(db: D1Database, nombres: string[]) {
+  const out = new Map<string, { exactos: Lugar[]; parecidos: Lugar[] }>();
+  const claves = new Map(nombres.map((n) => [n, { exactas: clavesDeNombre(n), todas: clavesDeNombre(n, true) }]));
+  const todas = [...new Set([...claves.values()].flatMap((c) => c.todas))];
+  if (!todas.length) return out;
+  const { results } = await db.prepare(`SELECT c.clave, l.* FROM lugares_claves c JOIN lugares l ON l.id = c.lugar_id WHERE c.clave IN (SELECT value FROM json_each(?))`)
+    .bind(JSON.stringify(todas)).all<Lugar & { clave: string }>();
+  const sinRepetir = (ls: Lugar[]) => [...new Map(ls.map((r) => [r.id, r])).values()];
+  for (const [n, k] of claves) out.set(n, { exactos: sinRepetir(results.filter((r) => k.exactas.includes(r.clave))), parecidos: sinRepetir(results.filter((r) => k.todas.includes(r.clave))) });
+  return out;
+}
+async function lugaresPorDireccion(db: D1Database, direcciones: string[]) {
+  const claves = [...new Set(direcciones.map(claveCalle).filter(Boolean))];
+  const out = new Map<string, Lugar>();
+  if (!claves.length) return out;
+  const { results } = await db.prepare('SELECT * FROM lugares WHERE clave_dir IN (SELECT value FROM json_each(?)) ORDER BY (horario IS NOT NULL) + (observaciones IS NOT NULL) DESC')
+    .bind(JSON.stringify(claves)).all<Lugar & { clave_dir: string }>();
+  for (const l of results) if (!out.has(l.clave_dir)) out.set(l.clave_dir, l);
+  return out;
+}
+
+// Buscar en la libreta, para elegir la dirección de una parada. Primero los lugares de ese cliente o proveedor.
+export async function buscarLugares(db: D1Database, q: string, de = '') {
+  const texto = norm(q).replace(/[%_]/g, ' ').trim();
+  const sugeridos = de ? (await lugaresPara(db, [de])).get(de)?.parecidos ?? [] : [];
+  const encontrados = texto.length >= 2 ? (await db.prepare(`SELECT * FROM lugares WHERE direccion IS NOT NULL AND (lower(nombre) LIKE ?1 OR lower(direccion) LIKE ?1 OR lower(COALESCE(localidad, '')) LIKE ?1)
+      ORDER BY (lower(nombre) LIKE ?2) DESC, nombre LIMIT 25`).bind(`%${texto}%`, `${texto}%`).all<Lugar>()).results : [];
+  const vistos = new Set<number>();
+  return { lugares: [...(texto ? [] : sugeridos), ...encontrados, ...(texto ? sugeridos : [])].filter((l) => l.direccion && !vistos.has(l.id) && (vistos.add(l.id), true)).slice(0, 25)
+    .map((l) => ({ id: l.id, nombre: l.nombre, direccion: direccionLugar(l), horario: l.horario, contacto: l.contacto, observaciones: l.observaciones })) };
+}
+
+// CSV con comillas, comas y saltos de línea dentro de una celda.
+export function leerCsv(texto: string): string[][] {
+  const filas: string[][] = [];
+  let fila: string[] = [], celda = '', comillas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (comillas) {
+      if (c === '"' && texto[i + 1] === '"') { celda += '"'; i++; } else if (c === '"') comillas = false; else celda += c;
+    } else if (c === '"') comillas = true;
+    else if (c === ',') { fila.push(celda); celda = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && texto[i + 1] === '\n') i++; fila.push(celda); celda = ''; filas.push(fila); fila = []; }
+    else celda += c;
+  }
+  if (celda || fila.length) { fila.push(celda); filas.push(fila); }
+  return filas;
+}
+
+interface LugaresConfig { url: string; at: number; filas: number; error?: string | null }
+export async function lugaresConfig(db: D1Database): Promise<LugaresConfig> {
+  const r = await db.prepare("SELECT value FROM settings WHERE key = 'lugares'").first<{ value: string }>();
+  try { const c = r ? JSON.parse(r.value) : {}; return { url: String(c.url ?? ''), at: Number(c.at) || 0, filas: Number(c.filas) || 0, error: c.error ?? null }; } catch { return { url: '', at: 0, filas: 0 }; }
+}
+// La planilla tiene que ser una hoja de Google publicada como CSV.
+const urlValida = (env: Env, url: string) => /^https:\/\/docs\.google\.com\/spreadsheets\/.+output=csv/.test(url) || (!!env.LUGARES_CSV_URL && url === env.LUGARES_CSV_URL);
+
+// Copia la planilla a la libreta (la reemplaza entera). `forzar`: ahora; si no, una vez por día, y solo cuando abre la
+// ruta alguien que edita. Si la planilla no se puede leer o viene vacía, queda la copia anterior.
+export async function actualizarLugares(env: Env, puede: boolean, forzar = false) {
+  const db = env.DB;
+  const cfg = await lugaresConfig(db);
+  const url = env.LUGARES_CSV_URL || cfg.url;
+  if (!url || (!forzar && (!puede || Date.now() - cfg.at < 86_400_000))) return cfg;
+  const guardar = (c: LugaresConfig) => db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('lugares', ?)").bind(JSON.stringify(c)).run().then(() => c);
+  try {
+    if (!urlValida(env, url)) throw new Error('La dirección tiene que ser la de una hoja de Google publicada como CSV.');
+    const res = await fetch(url, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`La planilla contestó HTTP ${res.status}.`);
+    const filas = leerCsv(await res.text());
+    const cab = (filas.shift() ?? []).map((h) => norm(h));
+    const col = (re: RegExp) => cab.findIndex((h) => re.test(h));
+    const I = { nombre: col(/proveedor|nombre|lugar|cliente/), direccion: col(/direcc/), horario: col(/atencion|horario/), telefono: col(/telefono/), localidad: col(/localidad/), zona: col(/zona/),
+      c1: col(/contacto 1|^contacto/), c2: col(/contacto 2/), obs: col(/observ/), coord: col(/coordinac/) };
+    if (I.nombre < 0 || I.direccion < 0) throw new Error('La planilla no tiene las columnas PROVEEDOR y DIRECCION.');
+    const t = (f: string[], i: number, max = 600) => (i < 0 ? null : String(f[i] ?? '').replace(/\s+/g, ' ').trim().slice(0, max) || null);
+    const lugares = filas.map((f) => ({ nombre: t(f, I.nombre, 160), direccion: t(f, I.direccion, 300), localidad: t(f, I.localidad, 80), zona: t(f, I.zona, 40), horario: t(f, I.horario, 160),
+      telefono: t(f, I.telefono, 60), contacto: [t(f, I.c1, 80), t(f, I.c2, 80)].filter(Boolean).join(' / ') || null, observaciones: t(f, I.obs), coordinacion: t(f, I.coord, 1200) })).filter((l) => l.nombre);
+    if (lugares.length < 1) throw new Error('La planilla vino vacía.');
+    const stmts: D1PreparedStatement[] = [db.prepare('DELETE FROM lugares_claves'), db.prepare('DELETE FROM lugares')];
+    // De a varias filas por consulta (hasta 100 valores cada una): son miles de lugares.
+    const filasL = lugares.map((l, i) => [i + 1, l.nombre, l.direccion, l.localidad, l.zona, l.horario, l.telefono, l.contacto, l.observaciones, l.coordinacion, l.direccion ? claveCalle(l.direccion) || null : null]);
+    for (let i = 0; i < filasL.length; i += 9) {
+      const t9 = filasL.slice(i, i + 9);
+      stmts.push(db.prepare(`INSERT INTO lugares (id, nombre, direccion, localidad, zona, horario, telefono, contacto, observaciones, coordinacion, clave_dir) VALUES ${t9.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`).bind(...t9.flat()));
+    }
+    const pares = lugares.flatMap((l, i) => [...new Set([...clavesDeNombre(l.nombre!), ...clavesDeNombre(l.nombre!, true).filter((x) => x.startsWith('~'))])].map((k) => [k, i + 1] as [string, number]));
+    for (let i = 0; i < pares.length; i += 45) {
+      const t45 = pares.slice(i, i + 45);
+      stmts.push(db.prepare(`INSERT OR IGNORE INTO lugares_claves (clave, lugar_id) VALUES ${t45.map(() => '(?, ?)').join(', ')}`).bind(...t45.flat()));
+    }
+    // Todo junto: si algo falla, queda la libreta como estaba.
+    await db.batch(stmts);
+    return await guardar({ url: cfg.url, at: Date.now(), filas: lugares.length, error: null });
+  } catch (e) {
+    console.error('cronograma: libreta', (e as Error).message);
+    // Se anota el intento: no se reintenta en cada apertura de la ruta, sino en una hora.
+    return await guardar({ ...cfg, at: forzar ? cfg.at : Date.now() - 82_800_000, error: (e as Error).message.slice(0, 200) });
+  }
+}
+export async function guardarLugaresConfig(env: Env, b: { url?: unknown }) {
+  const url = String(b.url ?? '').trim();
+  if (!urlValida(env, url)) throw new HttpError(400, 'Pegá el link de la hoja de Google publicada como CSV (Archivo → Compartir → Publicar en la web → CSV).');
+  const cfg = await lugaresConfig(env.DB);
+  await env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('lugares', ?)").bind(JSON.stringify({ ...cfg, url })).run();
+  return actualizarLugares(env, true, true);
 }

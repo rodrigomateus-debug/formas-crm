@@ -23,3 +23,5 @@ SESSION_SECRET=clave-de-prueba-para-firmar-la-sesion
 GOOGLE_OAUTH_TOKEN_URL=http://localhost:8795/google/token
 # Cronograma (test/cronograma.test.mjs): el buscador de direcciones del mapa, simulado.
 GEOCODER_URL=http://localhost:8797/geo
+# La libreta de direcciones del cronograma: la planilla publicada como CSV, simulada.
+LUGARES_CSV_URL=http://localhost:8797/lugares.csv

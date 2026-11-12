@@ -46,6 +46,8 @@ export interface Env {
   ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado
   // Solo para pruebas: el buscador de direcciones del mapa (cronograma.ts), simulado. Por defecto, Nominatim de OpenStreetMap.
   GEOCODER_URL?: string;
+  // Solo para pruebas: la planilla de la libreta de direcciones (cronograma.ts), simulada.
+  LUGARES_CSV_URL?: string;
 }
 
 // Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; Comercial es el perfil

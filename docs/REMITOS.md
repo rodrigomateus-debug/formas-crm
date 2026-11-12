@@ -139,7 +139,7 @@ Una lectura es una llamada a Claude con una foto: del orden de 5 centavos de dó
 ## Dirección de entrega (pedido de Rodrigo del 12/11/2026)
 
 Arriba de la tarjeta «Entrega» del pedido está la dirección de entrega (`src/worker/direcciones.ts`,
-`web/src/pages/Direcciones.tsx`, migración 0047):
+`web/src/pages/Direcciones.tsx`, migración 0048):
 
 - **Una dirección** por defecto: todo el pedido va ahí. Se elige de las sugerencias de **Google Maps** y queda
   «Validada en Google Maps», con «Ver en el mapa». Si Google la ubica sin altura (solo la calle o el barrio), avisa
@@ -155,7 +155,7 @@ Arriba de la tarjeta «Entrega» del pedido está la dirección de entrega (`src
 - **Cronograma** ([CRONOGRAMA.md](CRONOGRAMA.md)): la ruta del día usa estas direcciones (una parada por dirección, con el
   punto de Google en el mapa). Cambiar la dirección desde la parada pasa por acá (`direccionDesdeRuta`): con una sola, la
   reemplaza (sin validar); con varias, pide hacerlo en la tarjeta. Las direcciones que ya estaban cargadas en el pedido
-  pasaron a la tarjeta con la migración 0047.
+  pasaron a la tarjeta con la migración 0048.
 - Sin dirección cargada, sugiere la del pedido de venta de Finnegans y, si no hay, la de la empresa.
 - Lo cargan quienes pueden editar el pedido (también la vendedora, en sus pedidos).
 

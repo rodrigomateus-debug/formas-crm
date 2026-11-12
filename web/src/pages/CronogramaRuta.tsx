@@ -11,9 +11,10 @@ import { carrilDe, cantidad, diaCorto, diaLargo, sumar, type Mov, type Tipo } fr
 // son los de un día de tránsito moderado según la hora (ruta.ts); todavía no usan el tránsito del momento.
 
 interface Parada {
-  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | null;
+  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | null;
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
   company_id: number | null; record_id: number | null; movimientos: Mov[];
+  lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
 }
@@ -29,7 +30,7 @@ const COLORES = ['#3b5bdb', '#c2410c', '#0b7285', '#862e9c', '#2b7a39', '#a61e4d
 // Los nombres vienen de ClickUp y de las fichas: al mapa van como texto, nunca como HTML.
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const TANDA = 25;   // el servidor acepta de a 25 artículos por vez
-const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedido', finnegans: 'Del pedido en Finnegans', ultima_entrega: 'De la última entrega a este cliente', empresa: 'De la ficha de la empresa' };
+const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedido', finnegans: 'Del pedido en Finnegans', ultima_entrega: 'De la última entrega a este cliente', empresa: 'De la ficha de la empresa', libreta: 'De la libreta de direcciones' };
 const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
 
@@ -253,6 +254,14 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ?? 'Sin dirección cargada'}</div>
                 </div>
                 <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></div>
+                {p.lugar && (p.lugar.contacto || p.lugar.telefono || p.lugar.observaciones || p.lugar.coordinacion || (p.lugar.horario && !p.horario)) && (
+                  <div className="cr-libreta" title={`De la libreta de direcciones: ${p.lugar.nombre}`}>
+                    {p.lugar.horario && !p.horario && <span><b>Horario</b>{p.lugar.horario}</span>}
+                    {(p.lugar.contacto || p.lugar.telefono) && <span><b>Contacto</b>{[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</span>}
+                    {p.lugar.observaciones && <span><b>Ojo</b>{p.lugar.observaciones}</span>}
+                    {p.lugar.coordinacion && <details><summary>Cómo se coordina la entrega</summary>{p.lugar.coordinacion}</details>}
+                  </div>
+                )}
                 <div className="cr-p-movs">
                   {p.movimientos.map((m) => (
                     <div key={m.id} className={`cr-k-${carrilDe(m.tipo).k}${m.hecho ? ' ok' : ''}`}>
@@ -303,6 +312,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             <div className="cr-mapa-pie small">
               <span>{act.real ? 'Recorrido por calles.' : 'Recorrido en línea recta (estimado).'} Tiempos con tránsito moderado según la hora, sin el tránsito del momento.</span>
               {puede && <span>Si un punto quedó mal, arrastralo a su lugar.</span>}
+              <Libreta puede={puede} onCambio={() => void cargar()} />
             </div>
           </div>
           <section className="cr-llegan cr-k-I">
@@ -320,6 +330,25 @@ function Tramo({ t }: { t: Simulacion['vuelta'] }) {
   return <li className={`cr-tramo ${t.nivel}`}>{t.sinUbicar ? <span>Tramo sin calcular: falta ubicar una dirección</span> : <span className="num">{duracion(t.min)} · {t.km.toFixed(1).replace('.', ',')} km{t.estimado ? ' aprox.' : ''} · tránsito <b>{t.nivel}</b></span>}</li>;
 }
 
+// La libreta de direcciones: cuántos lugares tiene, de cuándo es la copia y «Actualizar» (la trae de nuevo de la planilla).
+function Libreta({ puede, onCambio }: { puede: boolean; onCambio: () => void }) {
+  const toast = useToast();
+  const [e, setE] = useState<{ at: number; filas: number; error: string | null } | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => { http<typeof e>('GET', '/cronograma/lugares/estado').then(setE, () => undefined); }, []);
+  if (!e) return null;
+  const actualizar = async () => {
+    setOcupado(true);
+    try { const r = await http<NonNullable<typeof e>>('POST', '/cronograma/lugares/actualizar'); setE(r); toast(r.error ? `No se pudo actualizar la libreta: ${r.error}` : `Libreta actualizada: ${r.filas} lugares.`, !!r.error); onCambio(); }
+    catch (err) { toast((err as Error).message, true); }
+    setOcupado(false);
+  };
+  return (
+    <span className="cr-libreta-pie">Libreta de direcciones: {e.filas ? `${e.filas} lugares` : 'sin copiar todavía'}{e.at && e.filas ? `, copiada el ${new Date(e.at).toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' })}` : ''}{e.error ? ` (${e.error})` : ''}
+      {puede && <button type="button" className="cr-link" disabled={ocupado} onClick={actualizar}>{ocupado ? 'Actualizando…' : 'Actualizar'}</button>}</span>
+  );
+}
+
 // Corregir la dirección de la parada: la de entrega de sus pedidos, o la de la empresa (con su horario de recepción).
 function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]; onListo: () => void }) {
   const toast = useToast();
@@ -327,6 +356,14 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
   const [horario, setHorario] = useState(p.horario_texto ?? '');
   const [guardando, setGuardando] = useState(false);
   const esEntrega = pedidos.length > 0;
+  // La libreta: al abrir, los lugares de ese cliente o proveedor; al escribir, lo que coincida.
+  const [buscar, setBuscar] = useState('');
+  const [lugares, setLugares] = useState<Array<{ id: number; nombre: string; direccion: string; horario: string | null }>>([]);
+  useEffect(() => {
+    let vivo = true;
+    const t = window.setTimeout(() => { http<{ lugares: typeof lugares }>('GET', `/cronograma/lugares${qs({ q: buscar, de: p.nombre })}`).then((r) => { if (vivo) setLugares(r.lugares); }, () => undefined); }, buscar ? 250 : 0);
+    return () => { vivo = false; window.clearTimeout(t); };
+  }, [buscar, p.nombre]);
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setGuardando(true);
@@ -341,6 +378,16 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
     <form className="cr-editar" onSubmit={guardar}>
       <label>{esEntrega ? 'Dirección de entrega de este pedido' : 'Dirección de la empresa'}
         <input className="input sm" autoFocus value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" /></label>
+      <label>Buscar en la libreta de direcciones
+        <input className="input sm" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar, calle o localidad" /></label>
+      {lugares.length > 0 && (
+        <ul className="cr-lugares">
+          {lugares.map((l) => (
+            <li key={l.id}><button type="button" onClick={() => { setDireccion(l.direccion); if (p.company_id && !horario && l.horario && /\d\s*(a|-|hasta)\s*\d/i.test(l.horario)) setHorario(l.horario); }}>
+              <b>{l.nombre}</b><span>{l.direccion}{l.horario ? ` · ${l.horario}` : ''}</span></button></li>
+          ))}
+        </ul>
+      )}
       {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
       <div className="row"><button type="submit" className="btn sm primary" disabled={guardando}>Guardar</button><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button></div>
     </form>

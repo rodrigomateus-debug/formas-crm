@@ -1,6 +1,6 @@
-# Formas CRM
+# Formas Hub
 
-CRM propio de Formas Publicitarias para reemplazar HubSpot: contactos, empresas, negocios y pedidos, con su
+**Formas Hub** (antes «Formas CRM»; en `hub.formas.ar`, ver [docs/DOMINIO.md](docs/DOMINIO.md)): el sistema propio de Formas Publicitarias, nacido como CRM para reemplazar HubSpot: contactos, empresas, negocios y pedidos, con su
 actividad (notas, mails, llamadas, reuniones, WhatsApp y tareas), pipelines, tablero de negocios, integración con
 Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan andando.
 

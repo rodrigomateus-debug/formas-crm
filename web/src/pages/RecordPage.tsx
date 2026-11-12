@@ -212,8 +212,8 @@ function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; r
           {type === 'deal' && <ChatDarwin url={record.props.link_a_darwin} />}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
           {type !== 'order' && (
-            <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas CRM para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
-              href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} del CRM de Formas). Usá la herramienta preparar_reunion del conector Formas CRM y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
+            <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas Hub para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
+              href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} de Formas Hub). Usá la herramienta preparar_reunion del conector Formas Hub y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
               target="_blank" rel="noreferrer">Preparar reunión con Claude</a>
           )}
           <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>

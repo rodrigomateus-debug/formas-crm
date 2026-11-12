@@ -39,7 +39,7 @@ export default function App() {
   return (
     <div className="shell">
       <nav className={`sidebar${menu ? ' open' : ''}`} aria-label="Menú principal">
-        <div className="brand"><img src="/formas-logo-white.png" alt="Formas" /><span>CRM</span></div>
+        <div className="brand"><img src="/formas-logo-white.png" alt="Formas" /><span>Hub</span></div>
         <NavLink to="/" end className="nav-link"><Icon name="home" />Inicio</NavLink>
         <NavLink to="/tasks" className="nav-link"><Icon name="task" />Tareas{tasks ? <span className="count">{tasks}</span> : null}</NavLink>
         <NavLink to="/conversaciones" className="nav-link"><Icon name="chat" />Conversaciones

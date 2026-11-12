@@ -5,7 +5,7 @@ import { authenticate, newToken, sha256 } from './auth';
 
 // «Conectar con Claude» (pedido de Rodrigo del 12/11/2026): cada usuario conecta su Claude con el CRM como se conectan
 // HubSpot o ClickUp, con OAuth 2.1 (lo que piden los conectores remotos de Claude):
-//   1. En Claude se agrega el conector «Formas CRM» con la dirección del CRM (/mcp). Un administrador lo puede agregar
+//   1. En Claude se agrega el conector «Formas Hub» con la dirección del CRM (/mcp). Un administrador lo puede agregar
 //      una vez para toda la organización; después cada uno solo toca «Conectar».
 //   2. Claude pide /mcp sin token → 401 con dónde está la autorización (RFC 9728) → lee los datos del servidor de
 //      autorización (RFC 8414) → se registra solo (RFC 7591) → manda a la persona a /conectar/autorizar.
@@ -44,7 +44,7 @@ export function vueltaPermitida(uri: string) {
 
 const recurso = (req: Request) => ({
   resource: `${base(req)}/mcp`, authorization_servers: [base(req)], bearer_methods_supported: ['header'],
-  resource_name: 'Formas CRM', resource_documentation: `${base(req)}/`,
+  resource_name: 'Formas Hub', resource_documentation: `${base(req)}/`,
 });
 const servidor = (req: Request) => ({
   issuer: base(req),
@@ -128,7 +128,7 @@ conectar.get('/conectar/autorizar', async (c) => {
   if ('error' in v) return pagina({ titulo: 'No se puede conectar', texto: v.error }, 400);
   const u = await quien(c);
   if (u instanceof Response) return u;
-  return pagina({ titulo: `Conectar ${v.cliente} con Formas CRM`, usuario: u, cliente: v.cliente, pedido: v.pedido, host: new URL(v.pedido.redirect_uri).host });
+  return pagina({ titulo: `Conectar ${v.cliente} con Formas Hub`, usuario: u, cliente: v.cliente, pedido: v.pedido, host: new URL(v.pedido.redirect_uri).host });
 });
 
 conectar.post('/conectar/autorizar', async (c) => {
@@ -218,7 +218,7 @@ function pagina(d: { titulo: string; texto?: string; usuario?: User; cliente?: s
   const ocultos = d.pedido ? Object.entries(d.pedido).map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}" />`).join('') : '';
   const html = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${esc(d.titulo)} · Formas CRM</title><meta name="robots" content="noindex" /><meta name="color-scheme" content="light dark" />
+<title>${esc(d.titulo)} · Formas Hub</title><meta name="robots" content="noindex" /><meta name="color-scheme" content="light dark" />
 <link rel="icon" href="/formas-favicon.svg" type="image/svg+xml" />
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>

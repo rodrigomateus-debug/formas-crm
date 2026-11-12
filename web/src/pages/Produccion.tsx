@@ -226,7 +226,9 @@ export default function ProduccionPage() {
   const soloLectura = v && !v.puede_editar;
 
   return (
-    <div className="content prod-page">
+    // En lista, como Pedidos y Tareas (list-fixed): la tabla ocupa el resto de la pantalla y se desplaza adentro, con las
+    // barras (también la de los costados) siempre a la vista.
+    <div className={`content prod-page${modo === 'lista' ? ' list-fixed' : ''}`}>
       <div className="page-head">
         <h1>Producción {v && <span className="muted small">{filtrados.length} PDV · {articulos} artículos</span>}</h1>
         <div className="seg" role="group" aria-label="Vista">

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { http, useAsync, useToast, fmtDate, Icon, type ObjectType } from '../lib';
+import { http, useAsync, useToast, fmtDate, Icon, type ObjectType, cabecerasVerComo } from '../lib';
 import { Modal } from '../components';
 import { Select } from '../Select';
 
@@ -81,7 +81,7 @@ async function subir(type: ObjectType, recordId: number, file: File, producto: s
   if (producto) fd.append('producto', producto);
   if (productoNombre) fd.append('producto_nombre', productoNombre);
   fd.append('tipo', tipo);
-  const res = await fetch(`/api/records/${type}/${recordId}/bocetos`, { method: 'POST', body: fd, credentials: 'same-origin' });
+  const res = await fetch(`/api/records/${type}/${recordId}/bocetos`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
   const data = (await res.json().catch(() => null)) as (Boceto & { error?: string }) | null;
   if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
   return data as Boceto;

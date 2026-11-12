@@ -100,13 +100,35 @@ export async function authenticate(env: Env, req: Request, pathToken?: string, o
   if (jwt && env.ACCESS_AUD && env.ACCESS_TEAM_DOMAIN) {
     const email = await verifyAccessJwt(env, jwt);
     if (!email) throw new HttpError(401, 'No se pudo verificar la sesión de Cloudflare Access.');
-    return { user: await userByEmail(env, email), source: 'crm' };
+    return verComo(env, req, { user: await userByEmail(env, email), source: 'crm' });
   }
   if (env.DEV_USER_EMAIL) {
     const email = req.headers.get('x-dev-user') || env.DEV_USER_EMAIL;
-    return { user: await userByEmail(env, email), source: 'crm' };
+    return verComo(env, req, { user: await userByEmail(env, email), source: 'crm' });
   }
   throw new HttpError(401, 'Falta iniciar sesión (Cloudflare Access) o un token.');
+}
+
+// Superadmin: un administrador con la marca (Configuración → Usuarios) o el administrador principal (ADMIN_EMAIL).
+export function esSuperadmin(env: Env, u: User) {
+  return u.role === 'admin' && (!!u.superadmin || (!!env.ADMIN_EMAIL && u.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()));
+}
+
+// «Ver como» (pedido de Rodrigo del 12/11/2026): un superadmin, desde su sesión, mira el CRM como lo ve otro usuario
+// (sus pipelines, sus tareas, sus conversaciones, lo que puede y no puede hacer). La pantalla manda el id en la cabecera
+// x-ver-como en cada pedido. Solo con la sesión de Cloudflare Access (nunca con un token) y solo para mirar: cualquier
+// cambio se rechaza (api.ts), así nada queda hecho a nombre del otro.
+async function verComo(env: Env, req: Request, ctx: Ctx): Promise<Ctx> {
+  const v = req.headers.get('x-ver-como');
+  if (!v) return ctx;
+  const invalido = (msg: string) => new HttpError(403, msg, { ver_como_invalido: true });
+  if (!esSuperadmin(env, ctx.user)) throw invalido('Solo un superadmin puede ver el CRM como otro usuario.');
+  const id = Number(v);
+  if (id === ctx.user.id) return ctx;
+  const otro = Number.isInteger(id) && id > 0
+    ? await env.DB.prepare('SELECT * FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL').bind(id).first<User>() : null;
+  if (!otro) throw invalido('Ese usuario ya no está activo: volvés a tu usuario.');
+  return { ...ctx, user: otro, realUser: ctx.user };
 }
 
 export function requireRole(ctx: Ctx, ...roles: User['role'][]) {

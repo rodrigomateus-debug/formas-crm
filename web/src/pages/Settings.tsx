@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon, verComo } from '../lib';
 import { Avatar, FilterRow, Modal, MultiPick, UserChip, describeFilter, filterableProps, opsFor, userOption } from '../components';
 import { Select } from '../Select';
 
@@ -79,17 +79,26 @@ function Users() {
           <tr key={u.id}>
             <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
             <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }))}</td>
-            <td>{u.role === 'admin' ? <span className="small muted">Todo</span> : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
+            <td>{u.role === 'admin'
+              ? <span className="row small" style={{ gap: 8, flexWrap: 'nowrap' }}><span className="muted">Todo</span>
+                {meta.superadmin
+                  ? <label className="row" style={{ gap: 4 }} title={u.principal ? 'Administrador principal del CRM (ADMIN_EMAIL): es superadmin siempre.' : 'Superadmin: puede «Ver como» otro usuario y dar este permiso.'}>
+                    <input type="checkbox" checked={!!u.superadmin} disabled={u.principal} onChange={(e) => patch(u.id, { superadmin: e.target.checked })} aria-label={`Superadmin: ${u.name}`} />Superadmin</label>
+                  : u.superadmin ? <span className="tag">Superadmin</span> : null}</span>
+              : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
             <td style={{ minWidth: 190, maxWidth: 240, overflow: 'visible' }}>{teamsPick(teamsOf(u).map(String), (v) => patch(u.id, { teams: v.map(Number) }))}</td>
             <td className="small" style={{ maxWidth: 150, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
             <td><input type="checkbox" checked={!!u.avisos_mail} onChange={(e) => patch(u.id, { avisos_mail: e.target.checked })} aria-label={`Avisos por mail para ${u.name}`} /></td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
-            <td>{u.id !== meta.me.id && <button className="btn sm ghost icon danger" title={`Eliminar a ${u.name}`} aria-label={`Eliminar a ${u.name}`} onClick={() => setBorrar(u)}><Icon name="trash" size={14} /></button>}</td>
+            <td style={{ whiteSpace: 'nowrap' }}>{meta.superadmin && u.active && u.id !== meta.me.id && <button className="btn sm ghost icon" title={`Ver el CRM como ${u.name} (solo para mirar)`}
+              aria-label={`Ver como ${u.name}`} onClick={() => verComo(u.id)}><Icon name="eye" size={14} /></button>}
+              {u.id !== meta.me.id && <button className="btn sm ghost icon danger" title={`Eliminar a ${u.name}`} aria-label={`Eliminar a ${u.name}`} onClick={() => setBorrar(u)}><Icon name="trash" size={14} /></button>}</td>
           </tr>
         ))}</tbody>
       </table></div>
       <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial, Producción y Logística por ahora también ven todo; más adelante cada perfil va a ver lo suyo.
         Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.
+        Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito, o su menú abajo a la izquierda), solo para mirar, y dar o sacar este permiso.
         Avisos por mail: el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega. Arranca apagado; solo les llega a los que lo tienen prendido.</p>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
         try { await http('POST', '/users', { ...f, teams: f.teams.map(Number) }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
@@ -106,7 +115,8 @@ function Users() {
   );
 }
 
-type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number };
+type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
+  superadmin: number; principal: boolean };
 type Uso = { registros: Record<ObjectType, number>; tareas_abiertas: number; tokens: number; choferes: number };
 
 // Eliminar un usuario: antes dice qué tiene a su nombre y a quién se le pasa (src/worker/api.ts, DELETE /users/:id).

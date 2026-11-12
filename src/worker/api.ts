@@ -1,9 +1,9 @@
 import { procesarSalidaClickup } from './clickup';
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
-import type { Ctx, Env, ObjectType } from './env';
+import type { Ctx, Env, ObjectType, User } from './env';
 import { assertType, HttpError, now, OBJECT_TYPES, PROFILES } from './env';
-import { requireRole, canWrite, newToken, sha256 } from './auth';
+import { requireRole, canWrite, esSuperadmin, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
   archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
@@ -27,6 +27,15 @@ import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, rec
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
+
+// Mirando como otro usuario («Ver como», auth.ts) no se cambia nada: ni datos, ni lo leído, ni lo que sigue.
+api.use('*', async (c, next) => {
+  const ctx = c.get('ctx');
+  if (ctx.realUser && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    throw new HttpError(403, `Estás viendo el CRM como ${ctx.user.name}: es solo para mirar. Volvé a tu usuario para hacer cambios.`, { ver_como: true });
+  }
+  await next();
+});
 
 async function hiddenPipelines(db: D1Database, ctx: Ctx) {
   const meta = new Meta(db);
@@ -58,13 +67,19 @@ function parseSearch(q: Record<string, string>): SearchParams {
 
 api.get('/me', (c) => c.json(c.get('ctx').user));
 
+// Quién es superadmin y, si está mirando como otro, quién es en realidad (para el cartel de arriba y el menú).
+const quienSoy = (env: Env, ctx: Ctx) => ({
+  superadmin: esSuperadmin(env, ctx.realUser ?? ctx.user),
+  ...(ctx.realUser ? { real_user: { id: ctx.realUser.id, name: ctx.realUser.name, email: ctx.realUser.email, photo_url: ctx.realUser.photo_url ?? null } } : {}),
+});
+
 api.get('/meta', async (c) => {
   const db = c.env.DB;
   const meta = new Meta(db);
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
-    db.prepare('SELECT id, email, name, role, team_id, extra_teams, active, photo_url, deleted_at FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -75,6 +90,7 @@ api.get('/meta', async (c) => {
   ]);
   const pipelines = (await meta.pipelines()).filter((p) => canSee(me, p));
   return c.json({
+    ...quienSoy(c.env, c.get('ctx')),
     me: { ...me, deal_pipelines: (mine.results as Array<{ pipeline_id: string }>).map((r) => r.pipeline_id).filter((id) => pipelines.some((p) => p.id === id)) },
     properties: await meta.properties(),
     pipelines,
@@ -1248,8 +1264,10 @@ api.delete('/pipelines/:id', async (c) => {
 });
 
 api.get('/users', async (c) => {
-  const { results } = await c.env.DB.prepare('SELECT * FROM users WHERE deleted_at IS NULL ORDER BY active DESC, name').all();
-  return c.json(results);
+  const { results } = await c.env.DB.prepare('SELECT * FROM users WHERE deleted_at IS NULL ORDER BY active DESC, name').all<User>();
+  // Superadmin: con la marca o el administrador principal (ADMIN_EMAIL), que lo es siempre (no se le puede sacar).
+  const principal = (c.env.ADMIN_EMAIL ?? '').toLowerCase();
+  return c.json(results.map((u) => ({ ...u, superadmin: esSuperadmin(c.env, u) ? 1 : 0, principal: !!principal && u.email.toLowerCase() === principal })));
 });
 
 // Equipos de un usuario: en la pantalla es una sola lista; se guarda como el principal (el primero, con el que arranca
@@ -1312,9 +1330,17 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
+  // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
+  if (b.superadmin !== undefined) {
+    if (!esSuperadmin(c.env, c.get('ctx').user)) throw new HttpError(403, 'Solo un superadmin puede dar o sacar el permiso de superadmin.');
+    if (!b.superadmin && c.env.ADMIN_EMAIL && String(cur.email).toLowerCase() === c.env.ADMIN_EMAIL.toLowerCase()) {
+      throw new HttpError(400, 'Es el administrador principal del CRM (ADMIN_EMAIL): es superadmin siempre.');
+    }
+    await c.env.DB.prepare('UPDATE users SET superadmin = ? WHERE id = ?').bind(b.superadmin ? 1 : 0, cur.id).run();
+  }
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();

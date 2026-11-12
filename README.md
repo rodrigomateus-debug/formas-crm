@@ -84,6 +84,12 @@ revocan sus tokens y sale de la lista y de los desplegables, pero las notas, los
 Si se lo vuelve a agregar con el mismo mail, vuelve. Los equipos de cada usuario son una sola lista: el primero es el principal
 (Negocios arranca en su pipeline). La migración trae a los propietarios de HubSpot con su equipo.
 
+**Superadmin y «Ver como»:** el administrador principal (`ADMIN_EMAIL`) es superadmin siempre, y puede darle ese permiso a
+otros administradores (Configuración → Usuarios, columna Permisos). Un superadmin puede mirar el CRM como lo ve otra persona
+desde su misma sesión: menú del usuario (abajo a la izquierda) → «Ver como…», o el ojito en su fila de Usuarios. Ve sus
+pipelines, sus tareas, sus conversaciones y lo que puede hacer, con un cartel arriba para volver a su usuario. Es solo para
+mirar: mientras tanto el CRM rechaza cualquier cambio (`src/worker/auth.ts`, cabecera `x-ver-como`; nunca con un token).
+
 ## Migrar desde HubSpot
 
 Necesita el token de la app privada de HubSpot (el mismo `HUBSPOT_TOKEN` de los tableros sirve si tiene permiso de

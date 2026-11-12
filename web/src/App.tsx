@@ -10,6 +10,7 @@ import Tasks from './pages/Tasks';
 import Settings from './pages/Settings';
 import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
+import CronogramaPage from './pages/Cronograma';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 
@@ -47,6 +48,7 @@ export default function App() {
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
         <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>
         <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>
+        <NavLink to="/cronograma" className="nav-link"><Icon name="calendar" />Cronograma</NavLink>
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
           {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
@@ -67,6 +69,7 @@ export default function App() {
           <Route path="/conversaciones" element={<ConversacionesPage />} />
           <Route path="/entregas" element={<RemitosPage />} />
           <Route path="/produccion" element={<ProduccionPage />} />
+          <Route path="/cronograma" element={<CronogramaPage />} />
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={<ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />

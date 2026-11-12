@@ -10,6 +10,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Remitos (ClickUp, ficha del pedido y app del chofer), lectura con Claude y qué falta entregar: [docs/REMITOS.md](docs/REMITOS.md).
 - Producción (la vista de ClickUp de Ceci y Sole en el CRM, editable; arranca con Formas Shop): [docs/PRODUCCION.md](docs/PRODUCCION.md).
 - Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
+- Cronograma (reemplaza la planilla semanal de Logística: entregas, ingresos, retiros y egresos por día, la ruta del día en el mapa por chofer y el recorrido en la app del chofer): [docs/CRONOGRAMA.md](docs/CRONOGRAMA.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
 
 ## Cómo está hecho

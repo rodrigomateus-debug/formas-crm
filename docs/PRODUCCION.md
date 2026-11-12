@@ -127,8 +127,7 @@ hay que actualizarlo ahí. Para leer, también se reconoce por el nombre.
 
 ## Lo que sigue
 
-- **Calendario de producción** (segunda etapa, pedido de Rodrigo): qué hay que hacer hoy (retiros de proveedores e
-  impresores, egresos, entregas), armado solo con estas fechas.
+- El calendario ya está: es la pestaña Cronograma ([CRONOGRAMA.md](CRONOGRAMA.md)).
 - Si se suma Corporate: tildarlo en «Qué se edita acá».
 
 ## Vistas, filtros por columna y fechas

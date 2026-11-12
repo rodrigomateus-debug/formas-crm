@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
@@ -1040,6 +1040,10 @@ api.post('/choferes', async (c) => {
   const { name } = await c.req.json<{ name?: string }>();
   const nombre = String(name ?? '').trim();
   if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre del chofer.');
+  // El recorrido del día se le asigna por nombre (cronograma.ts): dos links activos con el mismo nombre verían lo mismo.
+  const activos = (await c.env.DB.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0").all<{ name: string }>()).results;
+  const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  if (activos.some((a) => igual(a.name) === igual(nombre))) throw new HttpError(409, `Ya hay un link activo para «${nombre}». Dalo de baja primero, o usá otro nombre.`);
   const token = newToken();
   const r = await c.env.DB.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source, chofer_token) VALUES (?, ?, ?, 'chofer', ?) RETURNING id")
     .bind(nombre.slice(0, 80), await sha256(token), ctx.user.id, token).first<{ id: number }>();
@@ -1168,7 +1172,11 @@ api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.
 api.patch('/cronograma/notas/:id', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 api.delete('/cronograma/notas/:id', async (c) => c.json(await borrarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
 api.put('/cronograma/feriados', async (c) => c.json(await guardarFeriado(c.env.DB, c.get('ctx'), await c.req.json())));
-api.get('/cronograma/ruta', async (c) => c.json(await rutaDelDia(c.env, c.get('ctx').user, String(c.req.query('fecha') ?? ''))));
+// Buscar direcciones afuera (Finnegans, el mapa, Claude) es solo para quien edita el cronograma, y no en «Ver como».
+api.get('/cronograma/ruta', async (c) => {
+  const ctx = c.get('ctx');
+  return c.json(await rutaDelDia(c.env, ctx.user, String(c.req.query('fecha') ?? ''), { buscar: puedeEditarCronograma(ctx.user) && !ctx.realUser }));
+});
 api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
 api.put('/cronograma/punto', async (c) => c.json(await fijarPunto(c.env.DB, c.get('ctx'), await c.req.json())));
 api.put('/cronograma/direccion', async (c) => c.json(await guardarDireccion(c.env, c.get('ctx'), await c.req.json())));

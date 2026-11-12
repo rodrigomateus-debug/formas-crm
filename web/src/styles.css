@@ -1289,7 +1289,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-mini { width: 22px; height: 22px; border-radius: 50%; border: 0; background: none; padding: 0; display: grid; place-items: center; color: var(--k, var(--ui-ink-2)); cursor: pointer; opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
 .cr-tarjeta:hover .cr-mini, .cr-mini:focus-visible, .cr-mini[aria-expanded="true"], .cr-feriado .cr-mini { opacity: 1; }
 .cr-mini:hover { background: var(--ui-surface); }
-@media (hover: none) { .cr-mini { opacity: 1; } }
+@media (hover: none) { .cr-mini, .cr-agregar.feriado { opacity: 1; } }
 .cr-check { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--k); background: var(--ui-surface); padding: 0; display: grid; place-items: center; color: transparent; cursor: pointer; }
 .cr-check:hover { color: var(--k); }
 .cr-check.on { background: var(--ok-fill); border-color: var(--ok-fill); color: var(--on-ok-fill); }
@@ -1368,7 +1368,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-pin-wrap { background: none; border: 0; }
 .cr-pin { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: var(--c); color: #fff; font: 600 12px var(--font); border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(18, 20, 58, .35); transition: transform var(--dur) var(--ease-out); }
 .cr-pin.apagado { opacity: .55; transform: scale(.82); }
-.cr-pin.hecha { background: var(--ok-fill); }
+.cr-pin.hecha { background: var(--ok-fill); color: var(--on-ok-fill); }
 .cr-pin.tarde { box-shadow: 0 0 0 3px var(--ui-negative), 0 2px 6px rgba(18, 20, 58, .35); }
 .cr-pin.caliente { transform: scale(1.28); }
 .cr-pin.base { background: #12143a; border-radius: 8px; font-size: 14px; }

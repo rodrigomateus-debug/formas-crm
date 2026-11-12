@@ -517,8 +517,9 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   await db.prepare(`UPDATE produccion SET ${cols.map((k) => `${k} = ?`).join(', ')}, leido_at = ? WHERE task_id = ?`).bind(...cols.map((k) => local[k] ?? null), now(), taskId).run();
   // El cambio de estado, en la conversación del pedido, a nombre de quien lo hizo.
   if (c === 'estado' && fila.record_id && local.estado !== fila.estado) {
-    await db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, 'crm')`)
-      .bind(fila.record_id, taskId, fila.nombre, fila.es_pdv, fila.estado, local.estado, ctx.user.id).run();
+    // Si lo hizo otro por el usuario (el chofer, desde su app: ctx.actor), queda a nombre de quien lo hizo.
+    await db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, actor, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, ?, 'crm')`)
+      .bind(fila.record_id, taskId, fila.nombre, fila.es_pdv, fila.estado, local.estado, ctx.actor ? ctx.actor.userId : ctx.user.id, ctx.actor && !ctx.actor.userId ? ctx.actor.name : null).run();
   }
   // El estado (o la fecha real de entrega) del PDV cambia el pedido: se relee el PDV y se actualiza ya, sin esperar la
   // sincronización. Si falla, queda para la próxima corrida.
@@ -532,7 +533,7 @@ export async function refrescarPdv(env: Env, ctx: Ctx, pdvTask: string) {
   const b = Budget.of(env);
   const t = await cu<CuTask>(env, `/task/${encodeURIComponent(pdvTask)}`, { include_subtasks: 'true' }, b);
   await guardarTareas(env.DB, [t, ...(t.subtasks ?? []).map((s) => ({ ...s, parent: s.parent ?? t.id }))]);
-  await upsertPdv(env, { ...ctx, source: 'clickup', sourceDetail: 'Producción (CRM)' }, t, null, b, { name: ctx.user.name, userId: ctx.user.id });
+  await upsertPdv(env, { ...ctx, source: 'clickup', sourceDetail: 'Producción (CRM)' }, t, null, b, ctx.actor ?? { name: ctx.user.name, userId: ctx.user.id });
 }
 
 // ---------- En otras pantallas ----------

@@ -329,7 +329,7 @@ hooks.get('/chofer/api/yo', async (c) => {
 // El recorrido del día de este chofer (cronograma.ts): el que Logística armó con su nombre.
 hooks.get('/chofer/api/ruta', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
-  return c.json(await rutaDelChofer(c.env, ctx.user, ctx.sourceDetail ?? '', String(c.req.query('fecha') ?? '')));
+  return c.json(await rutaDelChofer(c.env, ctx.user, ctx.sourceDetail ?? ''));
 });
 // El chofer marca una parada: hecha, no se pudo (con el motivo) o la deja para más tarde.
 hooks.post('/chofer/api/ruta/parada', async (c) => {

@@ -414,6 +414,38 @@ async function alcanceVentas(tool: string, a: Record<string, any>, ctx: Ctx, env
   if (tool === 'get_activity' || tool === 'update_activity') await assertActividadVisible(env.DB, ctx.user, Number(a.id));
 }
 
+// Desde Claude, cada uno edita solo lo suyo (pedido de Rodrigo del 12/11/2026): los registros de los que es propietario o
+// que no tienen propietario (para poder tomarlos), y sus tareas y actividades. Ver sigue como en la pantalla (incluido el
+// perfil Ventas). Los administradores, todo. Combinar registros y el alta inteligente (que completa registros que ya
+// existen, sean de quien sean) quedan para los administradores.
+const EDITA: Record<string, (a: Record<string, any>) => unknown[]> = {
+  update_record: (a) => [a.id], associate_records: (a) => [a.from_id], log_activity: (a) => a.record_ids ?? [],
+  create_task: (a) => a.record_ids ?? [], update_activity: (a) => a.record_ids ?? [], create_record: (a) => a.associate_with ?? [],
+};
+async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: Env) {
+  const me = ctx.user.id;
+  if (tool === 'merge_records' || tool === 'upsert_bundle') {
+    throw new HttpError(403, `Desde Claude, ${tool === 'merge_records' ? 'combinar registros' : 'el alta inteligente (upsert_bundle)'} es solo para administradores. Buscá con search_records y creá con create_record.`);
+  }
+  // Asignar a otra persona, no: desde Claude cada uno se asigna a sí mismo (o lo deja sin propietario).
+  const owner = tool === 'create_record' || tool === 'update_record' ? a.properties?.owner_id : a.owner_id;
+  if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me) {
+    throw new HttpError(403, 'Desde Claude solo podés asignarte cosas a vos. Para asignarle algo a otra persona, hacelo en el CRM.');
+  }
+  for (const id of EDITA[tool]?.(a) ?? []) {
+    const row = await getRow(env.DB, Number(id));
+    // Asociar algo tuyo con una empresa o un contacto ajeno se puede (solo se toca lo tuyo); el resto, solo si es tuyo.
+    if (row.owner_id != null && Number(row.owner_id) !== me) {
+      const de = (await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(row.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
+      throw new HttpError(403, `«${row.name}» es de ${de}: desde Claude solo podés cambiar lo tuyo (o lo que no tiene propietario).`);
+    }
+  }
+  if (tool === 'update_activity') {
+    const act = await env.DB.prepare('SELECT owner_id, created_by FROM activities WHERE id = ?').bind(Number(a.id)).first<{ owner_id: number | null; created_by: number | null }>();
+    if (act && act.owner_id !== me && act.created_by !== me) throw new HttpError(403, 'Desde Claude solo podés cambiar tus tareas y actividades.');
+  }
+}
+
 type RpcReq = { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: Record<string, any> };
 
 async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
@@ -427,7 +459,8 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
         serverInfo: { name: 'formas-crm', title: 'Formas CRM', version: '1.0.0' },
         instructions: 'CRM propio de Formas Publicitarias (reemplazo de HubSpot). Objetos: contact, company, deal, order. '
           + 'Antes de crear, buscá (search_records) para no duplicar, o usá upsert_bundle. Usá list_properties para nombres internos y opciones válidas, '
-          + 'list_pipelines para etapas y list_users para propietarios. Todo lo que hagas queda en el historial con origen "mcp".',
+          + 'list_pipelines para etapas y list_users para propietarios. Todo lo que hagas queda en el historial con origen "mcp". '
+          + 'Salvo los administradores, cada usuario puede cambiar desde acá solo lo suyo (lo que tiene de propietario o sin propietario, y sus tareas).',
       });
     case 'ping':
       return ok({});
@@ -444,6 +477,7 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
       try {
         if (!tool.readOnly && ctx.user.role === 'viewer') throw new HttpError(403, 'El usuario del token es de solo lectura.');
         if (esVentas(ctx.user)) await alcanceVentas(tool.name, msg.params?.arguments ?? {}, ctx, env);
+        if (!tool.readOnly && ctx.user.role !== 'admin') await soloLoSuyo(tool.name, msg.params?.arguments ?? {}, ctx, env);
         const result = await tool.run(msg.params?.arguments ?? {}, ctx, env, base);
         return ok({ content: [{ type: 'text', text: JSON.stringify(result, null, 1) }], structuredContent: Array.isArray(result) ? { results: result } : result });
       } catch (e) {

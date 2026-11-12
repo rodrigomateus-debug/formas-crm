@@ -1504,6 +1504,20 @@ api.delete('/users/:id', async (c) => {
   return c.json({ ok: true, reasignado_a: to, ...uso });
 });
 
+// «Conectar con Claude» (conectar.ts): las conexiones hechas desde Claude de quien pregunta, y desconectarlas. Cada uno ve
+// y desconecta solo las suyas. Los tokens de integración (Cowork, scripts), que crea un administrador, no aparecen acá:
+// siguen en Configuración → Integraciones, así nadie corta una integración sin querer.
+api.get('/claude/conexiones', async (c) => {
+  const { results } = await c.env.DB.prepare(`SELECT id, name, client_id, created_at, last_used_at, expires_at, refresh_expira FROM api_tokens
+    WHERE user_id = ? AND source = 'mcp' AND client_id IS NOT NULL AND revoked = 0 AND refresh_expira > ? ORDER BY id DESC`)
+    .bind(c.get('ctx').user.id, new Date().toISOString()).all();
+  return c.json({ conexiones: results.map((r) => ({ ...r, tipo: 'oauth' })), mcp: `${new URL(c.req.url).origin}/mcp` });
+});
+api.delete('/claude/conexiones/:id', async (c) => {
+  await c.env.DB.prepare("UPDATE api_tokens SET revoked = 1 WHERE id = ? AND user_id = ? AND source = 'mcp' AND client_id IS NOT NULL").bind(Number(c.req.param('id')), c.get('ctx').user.id).run();
+  return c.json({ ok: true });
+});
+
 api.get('/tokens', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   const { results } = await c.env.DB.prepare(

@@ -128,12 +128,14 @@ test('quién ve cada pipeline: por equipo (principal o extra); los administrador
   const p = await api('POST', '/pipelines', { label: `Solo Corporate ${RUN}`, team_id: 58079782 });
   const def = (await api('GET', '/meta')).data.pipelines.find((x) => x.id === p.data.id);
   await api('PUT', `/pipelines/${p.data.id}`, { label: def.label, team_id: 58079782, config: { visible_teams: [58079782] }, stages: def.stages });
-  const comp = await api('POST', '/records/company', { props: { name: `Visible ${RUN}`, domain: `visible-${RUN}.com.ar` } });
-  const deal = await api('POST', '/records/deal', { props: { dealname: `Oculto ${RUN}`, pipeline: p.data.id }, associations: [comp.data.id] });
+  // Una vendedora de Shop: la empresa y el negocio son de ella (si no, el perfil Ventas tampoco se los muestra, alcance.ts);
+  // acá lo que la deja afuera es el pipeline.
+  const shop = await api('POST', '/users', { email: `shop.${RUN}@formas.ar`, name: `Shop ${RUN}`, role: 'member', team_id: 57132078 });
+  const comp = await api('POST', '/records/company', { props: { name: `Visible ${RUN}`, domain: `visible-${RUN}.com.ar`, owner_id: shop.data.id } });
+  const deal = await api('POST', '/records/deal', { props: { dealname: `Oculto ${RUN}`, pipeline: p.data.id, owner_id: shop.data.id }, associations: [comp.data.id] });
   assert.equal(deal.status, 201, JSON.stringify(deal.data));
   await api('POST', '/activities', { type: 'note', body: `nota del negocio oculto ${RUN}`, links: [deal.data.id] });
 
-  const shop = await api('POST', '/users', { email: `shop.${RUN}@formas.ar`, name: `Shop ${RUN}`, role: 'member', team_id: 57132078 });
   asUser = `shop.${RUN}@formas.ar`;
   const meta = (await api('GET', '/meta')).data;
   assert.ok(!meta.pipelines.some((x) => x.id === p.data.id), 'no aparece en su lista de pipelines');

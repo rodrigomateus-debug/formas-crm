@@ -1,4 +1,5 @@
-import type { Ctx, ObjectType } from './env';
+import type { Ctx, ObjectType, User } from './env';
+import { visibleSql } from './alcance';
 import { HttpError, now } from './env';
 import { getRow, rowToRecord, refreshActivityDates, type RecordRow } from './records';
 import { heredarRelacion } from './relacion';
@@ -57,10 +58,13 @@ export async function dissociate(db: D1Database, ctx: Ctx, aId: number, bId: num
   ]);
 }
 
-export async function associationsOf(db: D1Database, id: number, hiddenPipelines: string[] = []) {
+// `user`: quien mira; en el perfil Ventas, solo los asociados que ve (por ejemplo, en una empresa, sus negocios y no los
+// de otra vendedora; alcance.ts).
+export async function associationsOf(db: D1Database, id: number, hiddenPipelines: string[] = [], user?: User) {
   const { results } = await db.prepare(
     `SELECT r.*, a.label AS assoc_label, a.is_primary AS assoc_primary FROM associations a JOIN records r ON r.id = a.to_id
      WHERE a.from_id = ? AND r.archived = 0 AND (r.pipeline_id IS NULL OR r.pipeline_id NOT IN (SELECT value FROM json_each(?)))
+       AND ${user ? visibleSql('r', user) : '1'}
      ORDER BY a.is_primary DESC, r.updated_at DESC LIMIT 500`,
   ).bind(id, JSON.stringify(hiddenPipelines)).all<RecordRow & { assoc_label: string | null; assoc_primary: number }>();
   const out: Record<ObjectType, Array<ReturnType<typeof rowToRecord> & { label: string | null; primary: boolean }>> = {

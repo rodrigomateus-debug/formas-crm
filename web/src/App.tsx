@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
-import { Avatar, CreateRecord, Modal } from './components';
+import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
+import { Avatar, CreateRecord, Modal, UserChip } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
 import RecordPage from './pages/RecordPage';
@@ -26,9 +26,11 @@ export default function App() {
   }, [loc.pathname]);
   // Remitos para revisar (bandeja de Logística, pestaña «Entregas»).
   const [remitos, setRemitos] = useState<number | null>(null);
+  const ventas = esVentas(meta.me);
   useEffect(() => {
+    if (ventas) { setRemitos(null); return; }
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
-  }, [loc.pathname]);
+  }, [loc.pathname, ventas]);
 
   // Mensajes sin leer en las conversaciones que sigue (y si lo mencionaron).
   const sinLeer = useNoLeidas();
@@ -45,8 +47,9 @@ export default function App() {
         <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>
         <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
-        <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>
-        <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>
+        {/* Perfil Ventas: sin Producción ni Entregas. */}
+        {!ventas && <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>}
+        {!ventas && <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>}
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
           {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
@@ -65,8 +68,8 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/conversaciones" element={<ConversacionesPage />} />
-          <Route path="/entregas" element={<RemitosPage />} />
-          <Route path="/produccion" element={<ProduccionPage />} />
+          {!ventas && <Route path="/entregas" element={<RemitosPage />} />}
+          {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={<ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />
@@ -77,6 +80,8 @@ export default function App() {
 }
 
 // En el buscador se encuentra todo; los que no son clientes llevan su marca (tipo de relación, relacion.ts).
+// En el perfil Ventas, los contactos y empresas de otra vendedora vienen marcados «ajeno» (solo el nombre y de quién es).
+type Encontrado = CrmRecord & { ajeno?: boolean };
 const RELACION_MARCA: Record<string, string> = { proveedor: 'Proveedor', equipo: 'Equipo Formas', otro: 'Otro' };
 
 function GlobalSearch() {
@@ -101,13 +106,14 @@ function GlobalSearch() {
     return () => { document.removeEventListener('mousedown', h); window.removeEventListener('keydown', k); };
   }, []);
   const go = (t: ObjectType, id: number) => { setOpen(false); setQ(''); navigate(recordUrl(t, id)); };
-  const all = res ? (Object.entries(res) as Array<[ObjectType, CrmRecord[]]>).filter(([, l]) => l.length) : [];
+  const all = res ? (Object.entries(res) as Array<[ObjectType, Encontrado[]]>).filter(([, l]) => l.length) : [];
+  const primero = all.flatMap(([t, l]) => l.filter((r) => !r.ajeno).map((r) => [t, r.id] as const))[0];
   return (
     <div className="gsearch" ref={ref}>
       <div className="search"><Icon name="search" />
         <input ref={input} className="input" placeholder="Buscar contactos, empresas, negocios… (Ctrl+K)" value={q}
           onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && all[0]) go(all[0][0], all[0][1][0].id); }} />
+          onKeyDown={(e) => { if (e.key === 'Enter' && primero) go(primero[0], primero[1]); }} />
       </div>
       {open && res && (
         <div className="popover">
@@ -115,7 +121,14 @@ function GlobalSearch() {
           {all.map(([t, list]) => (
             <div key={t}>
               <div className="grp">{OBJECTS[t].plural}</div>
-              {list.map((r) => (
+              {list.map((r) => r.ajeno ? (
+                // Perfil Ventas: ya existe, pero es de otra vendedora. No se abre; sirve para no cargarlo de nuevo.
+                <div key={r.id} className="opt ajeno" aria-disabled="true" title="Ya existe y es de otra vendedora: pedile a un administrador que te lo pase.">
+                  <Avatar name={r.name} type={t} />
+                  <div className="grow"><div className="ellipsis">{r.name}</div>
+                    <div className="small muted ellipsis row" style={{ gap: 4 }}>Ya existe · es de <UserChip id={r.props.owner_id} size="xs" /></div></div>
+                </div>
+              ) : (
                 <div key={r.id} className="opt" onClick={() => go(t, r.id)}>
                   <Avatar name={r.name} type={t} />
                   <div className="grow"><div className="ellipsis">{r.name}{RELACION_MARCA[String(r.props.tipo_de_relacion ?? '')] && <span className="tag" style={{ marginLeft: 6 }}>{RELACION_MARCA[String(r.props.tipo_de_relacion)]}</span>}</div>

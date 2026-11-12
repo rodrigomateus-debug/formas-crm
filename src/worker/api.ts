@@ -23,6 +23,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
+import { assertActividadVisible, assertVisible, esVentas, sinVentas } from './alcance';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -33,6 +34,24 @@ api.use('*', async (c, next) => {
   const ctx = c.get('ctx');
   if (ctx.realUser && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
     throw new HttpError(403, `Estás viendo el CRM como ${ctx.user.name}: es solo para mirar. Volvé a tu usuario para hacer cambios.`, { ver_como: true });
+  }
+  await next();
+});
+
+// Perfil Ventas (alcance.ts): sin Producción, Entregas, importar ni exportar; y cualquier ruta de un registro
+// (/records/<tipo>/<id>/…: la ficha, su historial, actividad, conversación, archivos, bocetos, productos, datos para
+// facturar, cambios, clonar, combinar, restaurar) solo si el registro es de ella, no tiene propietario o está asociado a lo suyo.
+const SIN_VENTAS: Array<[RegExp, string]> = [
+  [/\/produccion(\/|$)/, 'Producción'], [/\/(remitos|entrega|choferes)(\/|$)/, 'Entregas'], [/\/(import|export)\//, 'Importar y exportar listas'],
+];
+const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order)\/(\d+)(?:\/|$)/;
+api.use('*', async (c, next) => {
+  const ctx = c.get('ctx');
+  if (esVentas(ctx.user)) {
+    const sin = SIN_VENTAS.find(([re]) => re.test(c.req.path));
+    if (sin) sinVentas(ctx, sin[1]);
+    const m = RUTA_REGISTRO.exec(c.req.path);
+    if (m) await registroVisible(c, Number(m[1]));
   }
   await next();
 });
@@ -180,6 +199,7 @@ api.post('/records/:type', async (c) => {
     : { results: [] as Array<{ id: number; object_type: ObjectType; name: string }> };
   const falta = assoc.find((id) => !otros.some((o) => o.id === id));
   if (falta !== undefined) throw new HttpError(400, `No existe el registro ${falta} para asociar.`);
+  for (const o of otros) await registroVisible(c, o.id);
   if (type !== 'company' && otros.some((o) => o.object_type === type)) throw new HttpError(400, `No se asocian dos registros de tipo ${type}.`);
   // Un pedido va en un solo negocio (associations.ts).
   if (type === 'order' && otros.filter((o) => o.object_type === 'deal').length > 1) {
@@ -234,9 +254,9 @@ api.get('/records/:type/:id', async (c) => {
   const tags = (await tagsFor(c.env.DB, c.get('ctx'), type, [row.id])).get(row.id) ?? [];
   // Pedidos: quién lo tiene en producción y cuántos artículos están listos, para la cabecera de la ficha y de la vista
   // previa (lo mismo que la tarjeta del tablero de pedidos).
-  const prod = type === 'order' ? await produccionDePedido(c.env.DB, row.id) : null;
+  const prod = type === 'order' && !esVentas(c.get('ctx').user) ? await produccionDePedido(c.env.DB, row.id) : null;
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
-  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx'))), ...(produccion ? { produccion } : {}) });
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
 });
 
 api.patch('/records/:type/:id', async (c) => {
@@ -285,6 +305,7 @@ api.post('/records/:type/batch', async (c) => {
   if (ids.length > 200) throw new HttpError(400, 'Mandá hasta 200 registros por vez.');
   if (body.archive) {
     requireRole(ctx, 'admin', 'manager');
+    for (const id of ids) await registroVisible(c, id);
     return c.json({ archived: await archiveRecords(c.env.DB, ctx, ids), failed: [] });
   }
   const failed: Array<{ id: number; name?: string; error: string; missing?: string[] }> = [];
@@ -294,14 +315,14 @@ api.post('/records/:type/batch', async (c) => {
     try {
       if (body.task) {
         const row = await getRow(c.env.DB, id, type);
-        if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, row.pipeline_id);
+        await registroVisible(c, id);
         await createActivity(c.env.DB, ctx, {
           type: 'task', subject: body.task.subject.replace('{nombre}', row.name), body: body.task.body ?? '', due_at: body.task.due_at, task_type: body.task.task_type ?? 'todo',
           priority: (body.task.priority as ActivityInput['priority']) ?? 'none', owner_id: body.task.owner === 'me' ? ctx.user.id : row.owner_id ?? ctx.user.id, links: [id],
         });
         tasks++;
       } else {
-        if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, id, type)).pipeline_id);
+        if ((await registroVisible(c, id)).object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
         await updateRecord(c.env.DB, ctx, type, id, body.props ?? {});
         updated++;
       }
@@ -346,6 +367,7 @@ api.post('/records/:type/:id/merge', async (c) => {
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
   const { other_id } = await c.req.json<{ other_id: number }>();
+  await registroVisible(c, Number(other_id));
   const row = await mergeRecords(c.env.DB, ctx, type, Number(c.req.param('id')), Number(other_id));
   // Dos empresas proveedoras combinadas: las opciones de ClickUp de la que se va pasan a la que queda (produccion.ts).
   if (type === 'company') await opcionesAEmpresa(c.env.DB, [Number(other_id)], row.id);
@@ -372,6 +394,7 @@ api.get('/records/:type/:id/timeline', async (c) => {
     before: q.before,
     q: q.q,
     owner: num(q.owner),
+    user: c.get('ctx').user,
   }));
 });
 
@@ -434,6 +457,18 @@ api.get('/search', async (c) => {
   const out: Record<string, unknown> = {};
   const found = await Promise.all(OBJECT_TYPES.map((t) => searchRecords(c.env.DB, ctx, t, { q, limit: 6, noCount: true })));
   OBJECT_TYPES.forEach((t, i) => { out[t] = found[i].results; });
+  // Perfil Ventas: los contactos y empresas que ya existen pero son de otra vendedora aparecen igual, sin abrirse y sin
+  // sus datos (solo el nombre y de quién es), para que no los carguen de nuevo.
+  if (esVentas(ctx.user)) {
+    const admin: Ctx = { ...ctx, user: { ...ctx.user, profile: 'admin' as const } };
+    for (const t of ['contact', 'company'] as const) {
+      const todos = await searchRecords(c.env.DB, admin, t, { q, limit: 6, noCount: true });
+      const propios = new Set((out[t] as CrmRecord[]).map((r) => r.id));
+      const ajenos = todos.results.filter((r) => !propios.has(r.id)).slice(0, 3)
+        .map((r) => ({ id: r.id, object_type: t, name: r.name, props: { owner_id: r.props.owner_id ?? null }, ajeno: true }));
+      out[t] = [...(out[t] as CrmRecord[]), ...ajenos];
+    }
+  }
   return c.json(out);
 });
 
@@ -443,6 +478,8 @@ api.post('/associations', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const b = await c.req.json<{ from_id: number; to_id: number; label?: string; primary?: boolean }>();
+  await registroVisible(c, Number(b.from_id));
+  await registroVisible(c, Number(b.to_id));
   await associate(c.env.DB, ctx, Number(b.from_id), Number(b.to_id), { label: b.label, primary: b.primary });
   // Un pedido que se suma a un negocio le pone su total al monto (montos.ts).
   await montosDesdePedidos(c.env.DB, [Number(b.from_id), Number(b.to_id)], ctx);
@@ -453,6 +490,8 @@ api.delete('/associations', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const b = await c.req.json<{ from_id: number; to_id: number }>();
+  await registroVisible(c, Number(b.from_id));
+  await registroVisible(c, Number(b.to_id));
   await dissociate(c.env.DB, ctx, Number(b.from_id), Number(b.to_id));
   await montosDesdePedidos(c.env.DB, [Number(b.from_id), Number(b.to_id)], ctx);
   return c.json({ ok: true });
@@ -460,28 +499,44 @@ api.delete('/associations', async (c) => {
 
 // ---------- Actividades y tareas ----------
 
+// Perfil Ventas (alcance.ts): solo en registros que ve, y solo actividades suyas o de esos registros.
+async function linksVisibles(c: { env: Env; get: (k: 'ctx') => Ctx }, links: unknown) {
+  if (Array.isArray(links)) for (const id of links) await registroVisible(c, Number(id));
+}
+
 api.post('/activities', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
-  return c.json(await createActivity(c.env.DB, ctx, await c.req.json<ActivityInput>()), 201);
+  const input = await c.req.json<ActivityInput>();
+  await linksVisibles(c, input.links);
+  return c.json(await createActivity(c.env.DB, ctx, input), 201);
 });
 
-api.get('/activities/:id', async (c) => c.json(await getActivity(c.env.DB, Number(c.req.param('id')))));
+api.get('/activities/:id', async (c) => {
+  await assertActividadVisible(c.env.DB, c.get('ctx').user, Number(c.req.param('id')));
+  return c.json(await getActivity(c.env.DB, Number(c.req.param('id'))));
+});
 
 api.patch('/activities/:id', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
-  return c.json(await updateActivity(c.env.DB, ctx, Number(c.req.param('id')), await c.req.json()));
+  await assertActividadVisible(c.env.DB, ctx.user, Number(c.req.param('id')));
+  const input = await c.req.json<Partial<ActivityInput>>();
+  await linksVisibles(c, input.links);
+  return c.json(await updateActivity(c.env.DB, ctx, Number(c.req.param('id')), input));
 });
 
 api.delete('/activities/:id', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
+  await assertActividadVisible(c.env.DB, ctx.user, Number(c.req.param('id')));
   return c.json(await updateActivity(c.env.DB, ctx, Number(c.req.param('id')), { archived: true }));
 });
 
 api.delete('/activities/:id/links/:record', async (c) => {
   canWrite(c.get('ctx'));
+  await assertActividadVisible(c.env.DB, c.get('ctx').user, Number(c.req.param('id')));
+  await registroVisible(c, Number(c.req.param('record')));
   await unlinkActivity(c.env.DB, Number(c.req.param('id')), Number(c.req.param('record')));
   return c.json({ ok: true });
 });
@@ -668,7 +723,8 @@ api.get('/board-prop/:type', async (c) => {
 api.get('/dashboard', async (c) => {
   const db = c.env.DB;
   const ctx = c.get('ctx');
-  const owner = c.req.query('owner');
+  // Perfil Ventas: Inicio con sus números, no los del equipo (alcance.ts).
+  const owner = esVentas(ctx.user) ? 'me' : c.req.query('owner');
   const ownerId = owner === 'all' ? null : owner ? Number(owner === 'me' ? ctx.user.id : owner) : null;
   const month = new Date(); month.setUTCDate(1); month.setUTCHours(3, 0, 0, 0);
   const m = month.toISOString();
@@ -874,8 +930,7 @@ api.get('/records/order/:id/products', async (c) => {
 api.get('/files/:id', async (c) => {
   const f = await c.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(Number(c.req.param('id'))).first<{ name: string; mime: string | null; source: string; source_ref: string; data: ArrayBuffer | null; record_id: number }>();
   if (!f) throw new HttpError(404, 'No existe el archivo.');
-  const rec = await getRow(c.env.DB, f.record_id);
-  if (rec.object_type === 'deal') await assertDealVisible(new Meta(c.env.DB), c.get('ctx').user, rec.pipeline_id);
+  await registroVisible(c, f.record_id);
   const disposition = `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`;
   // D1 devuelve los BLOB como lista de números: se pasan a bytes.
   if (f.data) return new Response(f.data instanceof ArrayBuffer ? f.data : new Uint8Array(f.data as unknown as number[]), { headers: { 'content-type': f.mime ?? 'application/octet-stream', 'content-disposition': disposition, 'cache-control': 'private, max-age=3600' } });
@@ -994,9 +1049,11 @@ api.delete('/choferes/:id', async (c) => {
 
 // ---------- Bocetos de producción (bocetos.ts, drive.ts) ----------
 
+// El registro existe y quien pide lo puede ver: pipelines por equipo y, en el perfil Ventas, que sea suyo, sin propietario
+// o asociado a lo suyo (alcance.ts).
 async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
   const rec = await getRow(c.env.DB, id);
-  if (rec.object_type === 'deal') await assertDealVisible(new Meta(c.env.DB), c.get('ctx').user, rec.pipeline_id);
+  await assertVisible(c.env.DB, new Meta(c.env.DB), c.get('ctx').user, rec);
   return rec;
 }
 

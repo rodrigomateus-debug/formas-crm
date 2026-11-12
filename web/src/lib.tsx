@@ -22,6 +22,10 @@ export interface User { id: number; email: string; name: string; role: string; p
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
+// Perfil Ventas (perfil Comercial que no es administrador): ve lo suyo, lo sin propietario y lo asociado a lo suyo; no ve
+// Producción, Entregas ni el ranking del equipo, y no importa ni exporta. Lo controla el servidor (src/worker/alcance.ts);
+// la pantalla solo esconde lo que no va a poder abrir.
+export const esVentas = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'comercial' && u.role !== 'admin';
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
 export interface Meta {

@@ -15,8 +15,8 @@ async function call(method, path, body, headers = {}) {
 
 test('conversación del pedido: mensajes, menciones, no leídos y actividad', async () => {
   const yo = (await call('GET', '/meta')).data.me;
-  const ceci = (await call('POST', '/users', { email: `ceci.${RUN}@formas.ar`, name: `Ceci ${RUN}`, role: 'member' })).data;
-  const sole = (await call('POST', '/users', { email: `sole.${RUN}@formas.ar`, name: `Sole ${RUN}`, role: 'member' })).data;
+  const ceci = (await call('POST', '/users', { email: `ceci.${RUN}@formas.ar`, name: `Ceci ${RUN}`, profile: 'produccion', role: 'member' })).data;
+  const sole = (await call('POST', '/users', { email: `sole.${RUN}@formas.ar`, name: `Sole ${RUN}`, profile: 'produccion', role: 'member' })).data;
   const tok = (await call('POST', '/tokens', { name: `Ceci ${RUN}`, source: 'api', user_id: ceci.id })).data.token;
   const C = { authorization: `Bearer ${tok}` };
   const pedido = (await call('POST', '/records/order', { props: { hs_order_name: `PDV ${RUN} · Crockett`, owner_id: yo.id } })).data;

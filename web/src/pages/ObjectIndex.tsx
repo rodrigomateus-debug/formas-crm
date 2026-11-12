@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips, vuelveALaLista,
+  http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips, vuelveALaLista,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -426,8 +426,9 @@ function IndexFor({ type }: { type: ObjectType }) {
             <button type="button" className={mode === 'board' ? 'on' : ''} aria-pressed={mode === 'board'} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
           </div>
         )}
-        <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>
-        <button className="btn" onClick={exportCsv}><Icon name="download" size={16} />Exportar</button>
+        {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). */}
+        {!esVentas(meta.me) && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
+        {!esVentas(meta.me) && <button className="btn" onClick={exportCsv}><Icon name="download" size={16} />Exportar</button>}
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 

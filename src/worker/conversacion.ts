@@ -1,6 +1,7 @@
 import type { Ctx } from './env';
 import { HttpError, now } from './env';
 import { estadosPec } from './produccion';
+import { visibleSql } from './alcance';
 
 // Conversación de un pedido (o de un negocio), como los comentarios de una tarea de ClickUp (pedido de Rodrigo del
 // 12/11/2026): un chat grupal entre el vendedor, producción y logística, con @menciones, que queda registrado. Entre los
@@ -248,7 +249,7 @@ export async function bandeja(db: D1Database, ctx: Ctx, opts: { noLeidas?: boole
       (SELECT COUNT(*) FROM mensajes m, json_each(m.menciones) j WHERE m.record_id = p.record_id AND m.id > p.leido_hasta AND m.borrado_at IS NULL AND j.value = p.user_id) AS menciones,
       (SELECT MAX(m.id) FROM mensajes m WHERE m.record_id = p.record_id AND m.borrado_at IS NULL) AS ultimo_id
     FROM conversacion_participantes p JOIN records r ON r.id = p.record_id AND r.archived = 0
-    WHERE p.user_id = ? AND p.siguiendo = 1) WHERE ultimo_id IS NOT NULL ${opts.noLeidas ? 'AND no_leidos > 0' : ''}
+    WHERE p.user_id = ? AND p.siguiendo = 1 AND ${visibleSql('r', ctx.user)}) WHERE ultimo_id IS NOT NULL ${opts.noLeidas ? 'AND no_leidos > 0' : ''}
     ORDER BY ultimo_id DESC LIMIT ?`).bind(ctx.user.id, lim)
     .all<{ record_id: number; object_type: string; name: string; leido_hasta: number; no_leidos: number; menciones: number; ultimo_id: number }>();
   const ultimos = results.length ? new Map((await db.prepare('SELECT id, user_id, body, created_at FROM mensajes WHERE id IN (SELECT value FROM json_each(?))')

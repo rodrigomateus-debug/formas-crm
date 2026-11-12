@@ -11,6 +11,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Producción (la vista de ClickUp de Ceci y Sole en el CRM, editable; arranca con Formas Shop): [docs/PRODUCCION.md](docs/PRODUCCION.md).
 - Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
+- Perfiles y qué ve cada uno (el perfil Ventas ve lo suyo): [docs/PERFILES.md](docs/PERFILES.md).
 
 ## Cómo está hecho
 

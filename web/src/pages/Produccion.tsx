@@ -33,7 +33,7 @@ const CERRADOS = ['entregados', 'anulado'];
 
 // Preferencias de cada uno en este navegador (vista, unidades, filtro de persona). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
-function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string } {
+function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean } {
   try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; }
 }
 function guardarPref(p: object) { try { localStorage.setItem(PREF, JSON.stringify({ ...leerPref(), ...p })); } catch { /* sin almacenamiento */ } }
@@ -64,7 +64,11 @@ export default function ProduccionPage() {
   const [v, setV] = useState<Vista | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
-  const [cerradosPdv, setCerradosPdv] = useState<Set<string>>(new Set());
+  // Colapsar o expandir todo (queda guardado; por defecto, expandido). Cada PDV se puede abrir o cerrar aparte: esas
+  // excepciones duran mientras se está en la pantalla.
+  const [colapsado, setColapsado] = useState(!!pref.colapsado);
+  const [excepciones, setExcepciones] = useState<Set<string>>(new Set());
+  const cambiarColapsado = (c: boolean) => { setColapsado(c); setExcepciones(new Set()); guardarPref({ colapsado: c }); };
 
   const cargar = async () => {
     setCargando(true);
@@ -139,6 +143,12 @@ export default function ProduccionPage() {
           </Select>
         </div>
         <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={cerrados} onChange={(e) => setCerrados(e.target.checked)} />Ver entregados (30 días)</label>
+        {modo === 'lista' && (
+          <button type="button" className="btn sm" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
+            title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
+            <Flecha abierto={!colapsado} />{colapsado ? 'Expandir todo' : 'Colapsar todo'}
+          </button>
+        )}
         <span className="grow" />
         {meta.me.role === 'admin' && v && <ConfigUnidades config={v.config} onGuardado={cargar} />}
       </div>
@@ -150,8 +160,9 @@ export default function ProduccionPage() {
         <div className="empty plain">{v.pdvs.length ? 'Ningún PDV con esos filtros.' : 'No hay PDV en producción para estas unidades. Si recién se instaló, la primera lectura de ClickUp tarda unas corridas (cada 10 minutos).'}</div>
       )}
       {v && filtrados.length > 0 && (modo === 'lista'
-        ? <Lista pdvs={filtrados} v={v} editar={editar} cerrados={cerradosPdv} onToggle={(id) => setCerradosPdv((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
-            onTodos={(abrir) => setCerradosPdv(abrir ? new Set() : new Set(filtrados.map((p) => p.task_id)))} />
+        ? <Lista pdvs={filtrados} v={v} editar={editar} abierto={(id) => colapsado === excepciones.has(id)}
+            onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+            onTodos={(abrir) => cambiarColapsado(!abrir)} />
         : <Tablero pdvs={filtrados} v={v} editar={editar} verCerrados={cerrados} />)}
     </div>
   );
@@ -358,12 +369,15 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
 
 // ---------- Lista: el PDV y abajo sus artículos ----------
 
-function Lista({ pdvs, v, editar, cerrados, onToggle, onTodos }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; cerrados: Set<string>; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void;
+// La flecha de abrir y cerrar, como en ClickUp: para abajo si está abierto, para la derecha si está cerrado.
+const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
+
+function Lista({ pdvs, v, editar, abierto, onToggle, onTodos }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void;
 }) {
   const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}>{o.label}</option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
   const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}>{o.label}</option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
-  const todosAbiertos = !pdvs.some((p) => cerrados.has(p.task_id));
+  const todosAbiertos = pdvs.every((p) => abierto(p.task_id));
   return (
     <div className="table-wrap prod-wrap">
       <table className="grid prod-grid">
@@ -371,7 +385,7 @@ function Lista({ pdvs, v, editar, cerrados, onToggle, onTodos }: {
           <tr>
             <th className="nosort prod-nombre">
               <button type="button" className="btn ghost xs" onClick={() => onTodos(!todosAbiertos)} aria-label={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'} title={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'}>
-                <Icon name={todosAbiertos ? 'down' : 'chevron'} size={14} /></button>
+                <Flecha abierto={todosAbiertos} /></button>
               PDV / artículo</th>
             <th className="nosort">Estado</th>
             <th className="nosort">Asignado</th>
@@ -387,7 +401,7 @@ function Lista({ pdvs, v, editar, cerrados, onToggle, onTodos }: {
           </tr>
         </thead>
         <tbody>
-          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={!cerrados.has(p.task_id)} onToggle={() => onToggle(p.task_id)} provs={provs} imps={imps} />)}
+          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={() => onToggle(p.task_id)} provs={provs} imps={imps} />)}
         </tbody>
       </table>
     </div>
@@ -408,7 +422,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         <td className="prod-nombre">
           <div className="row" style={{ gap: 6, minWidth: 0 }}>
             <button type="button" className="btn ghost xs" onClick={onToggle} aria-expanded={abierto} aria-label={`${abierto ? 'Cerrar' : 'Abrir'} PDV ${p.npdv}`}>
-              <Icon name={abierto ? 'down' : 'chevron'} size={14} /></button>
+              <Flecha abierto={abierto} /></button>
             <Icon name="order" size={15} />
             <div className="prod-pdv-t">
               <div className="ellipsis">
@@ -441,7 +455,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
       {abierto && p.articulos.map((a) => (
         <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={12} className="small muted" style={{ paddingLeft: 52 }}>Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={12} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });

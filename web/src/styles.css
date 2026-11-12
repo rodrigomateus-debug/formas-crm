@@ -827,7 +827,13 @@ table.prod-grid tr:hover td.prod-nombre { background: var(--row-hover); }
 table.prod-grid tr.prod-pdv td { background: var(--ui-surface-sunken); height: 48px; border-top: 1px solid var(--ui-line); }
 table.prod-grid tr.prod-pdv:hover td { background: color-mix(in srgb, var(--ui-surface-sunken) 70%, var(--row-hover)); }
 .prod-pdv-t { min-width: 0; line-height: 1.3; }
-.prod-art-t { display: flex; align-items: center; gap: 6px; padding-left: 34px; color: var(--ui-ink); }
+.prod-art-t { display: flex; align-items: center; gap: 6px; padding-left: 54px; color: var(--ui-ink); }
+/* Los artículos van corridos a la derecha, como las subtareas en ClickUp, con una línea que baja desde el PDV y un
+   trazo hasta cada artículo: así se ve de qué PDV es cada uno. */
+table.prod-grid tr.prod-art td.prod-nombre::before { content: ''; position: absolute; left: 45px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); }
+table.prod-grid tr.prod-art:has(+ tr.prod-pdv) td.prod-nombre::before, table.prod-grid tr.prod-art:last-child td.prod-nombre::before { bottom: 50%; }
+table.prod-grid tr.prod-art td.prod-nombre::after { content: ''; position: absolute; left: 45px; top: 50%; width: 11px; border-top: 1.5px solid var(--ui-line-strong); }
+.prod-vacio { padding-left: 58px !important; }
 .prod-art-t svg { color: var(--ui-ink-3); flex: none; }
 tr.prod-art.cerrado td { opacity: .6; }
 .prod-avance { font-size: 12px; font-weight: 600; color: var(--ui-ink-2); font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: var(--r-pill); background: var(--ui-surface); border: 1px solid var(--ui-line); line-height: 20px; }
@@ -878,3 +884,5 @@ table.prod-grid .st-select { min-width: 190px; }
 .fecha-btn:hover, .fecha-btn:focus-visible { border-color: var(--ui-line-strong); background: var(--ui-surface); }
 .fecha-btn.fecha-alerta { color: var(--ui-negative-ink); }
 .fecha-input { width: 140px; padding: 0 6px; }
+.flecha { display: inline-grid; place-items: center; transition: transform var(--dur) var(--ease); }
+.flecha.cerrada { transform: rotate(-90deg); }

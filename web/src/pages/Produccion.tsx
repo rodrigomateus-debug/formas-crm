@@ -13,6 +13,7 @@ interface Articulo {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
+  foto?: string | null;
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
@@ -33,7 +34,7 @@ const CERRADOS = ['entregados', 'anulado'];
 
 // Preferencias de cada uno en este navegador (vista, unidades, filtro de persona). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
-function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string } {
+function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean } {
   try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; }
 }
 function guardarPref(p: object) { try { localStorage.setItem(PREF, JSON.stringify({ ...leerPref(), ...p })); } catch { /* sin almacenamiento */ } }
@@ -64,7 +65,11 @@ export default function ProduccionPage() {
   const [v, setV] = useState<Vista | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cargando, setCargando] = useState(true);
-  const [cerradosPdv, setCerradosPdv] = useState<Set<string>>(new Set());
+  // Colapsar o expandir todo (queda guardado; por defecto, expandido). Cada PDV se puede abrir o cerrar aparte: esas
+  // excepciones duran mientras se está en la pantalla.
+  const [colapsado, setColapsado] = useState(!!pref.colapsado);
+  const [excepciones, setExcepciones] = useState<Set<string>>(new Set());
+  const cambiarColapsado = (c: boolean) => { setColapsado(c); setExcepciones(new Set()); guardarPref({ colapsado: c }); };
 
   const cargar = async () => {
     setCargando(true);
@@ -139,6 +144,12 @@ export default function ProduccionPage() {
           </Select>
         </div>
         <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={cerrados} onChange={(e) => setCerrados(e.target.checked)} />Ver entregados (30 días)</label>
+        {modo === 'lista' && (
+          <button type="button" className="btn sm" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
+            title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
+            <Flecha abierto={!colapsado} />{colapsado ? 'Expandir todo' : 'Colapsar todo'}
+          </button>
+        )}
         <span className="grow" />
         {meta.me.role === 'admin' && v && <ConfigUnidades config={v.config} onGuardado={cargar} />}
       </div>
@@ -150,8 +161,9 @@ export default function ProduccionPage() {
         <div className="empty plain">{v.pdvs.length ? 'Ningún PDV con esos filtros.' : 'No hay PDV en producción para estas unidades. Si recién se instaló, la primera lectura de ClickUp tarda unas corridas (cada 10 minutos).'}</div>
       )}
       {v && filtrados.length > 0 && (modo === 'lista'
-        ? <Lista pdvs={filtrados} v={v} editar={editar} cerrados={cerradosPdv} onToggle={(id) => setCerradosPdv((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
-            onTodos={(abrir) => setCerradosPdv(abrir ? new Set() : new Set(filtrados.map((p) => p.task_id)))} />
+        ? <Lista pdvs={filtrados} v={v} editar={editar} abierto={(id) => colapsado === excepciones.has(id)}
+            onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+            onTodos={(abrir) => cambiarColapsado(!abrir)} />
         : <Tablero pdvs={filtrados} v={v} editar={editar} verCerrados={cerrados} />)}
     </div>
   );
@@ -263,8 +275,11 @@ function EstadoPec({ estado, estados }: { estado: string; estados: Estado[] }) {
 }
 
 function EstadoCelda({ a, v, editable, onChange }: { a: Articulo; v: Vista; editable: boolean; onChange: (s: string) => void }) {
-  const opciones = useOpcionesEstado(v.estados);
+  const lista = useOpcionesEstado(v.estados);
   if (!editable) return <EstadoPec estado={a.estado} estados={v.estados} />;
+  // Un estado que no está en la lista (la sacaron o se sumó en ClickUp después de leerla) se ve igual, no el primero.
+  const conocido = v.estados.some((x) => x.status === a.estado);
+  const opciones = conocido ? lista : <>{lista}<option value={a.estado}><EstadoClickup estado={a.estado} color={null} /></option></>;
   // El desplegable también va pintado del color del estado, como en ClickUp.
   return <Select value={a.estado} onChange={(e) => onChange(e.target.value)} className="input sm st-select" style={estiloEstado(v.estados.find((x) => x.status === a.estado)?.color)}
     aria-label={`Estado de ${a.nombre}`}>{opciones}</Select>;
@@ -355,12 +370,15 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
 
 // ---------- Lista: el PDV y abajo sus artículos ----------
 
-function Lista({ pdvs, v, editar, cerrados, onToggle, onTodos }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; cerrados: Set<string>; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void;
+// La flecha de abrir y cerrar, como en ClickUp: para abajo si está abierto, para la derecha si está cerrado.
+const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
+
+function Lista({ pdvs, v, editar, abierto, onToggle, onTodos }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void;
 }) {
   const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}>{o.label}</option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
   const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}>{o.label}</option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
-  const todosAbiertos = !pdvs.some((p) => cerrados.has(p.task_id));
+  const todosAbiertos = pdvs.every((p) => abierto(p.task_id));
   return (
     <div className="table-wrap prod-wrap">
       <table className="grid prod-grid">
@@ -368,7 +386,7 @@ function Lista({ pdvs, v, editar, cerrados, onToggle, onTodos }: {
           <tr>
             <th className="nosort prod-nombre">
               <button type="button" className="btn ghost xs" onClick={() => onTodos(!todosAbiertos)} aria-label={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'} title={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'}>
-                <Icon name={todosAbiertos ? 'down' : 'chevron'} size={14} /></button>
+                <Flecha abierto={todosAbiertos} /></button>
               PDV / artículo</th>
             <th className="nosort">Estado</th>
             <th className="nosort">Asignado</th>
@@ -384,7 +402,7 @@ function Lista({ pdvs, v, editar, cerrados, onToggle, onTodos }: {
           </tr>
         </thead>
         <tbody>
-          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={!cerrados.has(p.task_id)} onToggle={() => onToggle(p.task_id)} provs={provs} imps={imps} />)}
+          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={() => onToggle(p.task_id)} provs={provs} imps={imps} />)}
         </tbody>
       </table>
     </div>
@@ -405,7 +423,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         <td className="prod-nombre">
           <div className="row" style={{ gap: 6, minWidth: 0 }}>
             <button type="button" className="btn ghost xs" onClick={onToggle} aria-expanded={abierto} aria-label={`${abierto ? 'Cerrar' : 'Abrir'} PDV ${p.npdv}`}>
-              <Icon name={abierto ? 'down' : 'chevron'} size={14} /></button>
+              <Flecha abierto={abierto} /></button>
             <Icon name="order" size={15} />
             <div className="prod-pdv-t">
               <div className="ellipsis">
@@ -438,7 +456,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
       {abierto && p.articulos.map((a) => (
         <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={12} className="small muted" style={{ paddingLeft: 52 }}>Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={12} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
@@ -451,7 +469,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo }: {
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
     <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}`}>
-      <td className="prod-nombre"><div className="prod-art-t ellipsis" title={a.nombre}><Icon name="task" size={14} />{a.nombre}</div></td>
+      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
@@ -464,6 +482,21 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo }: {
       <td><FechaCelda valor={a.retiro_impresor} editable={ed} onChange={set('retiro_impresor')} label={`Retiro del impresor de ${a.nombre}`} /></td>
       <td>{a.url && <a href={a.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir ${a.nombre} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
     </tr>
+  );
+}
+
+// La foto del producto a la izquierda del nombre, como en los productos del pedido (la misma foto). Un clic la abre
+// grande; sin foto, el ícono de producto.
+const fotosRotas = new Set<string>();
+function FotoProducto({ url, nombre, grande }: { url?: string | null; nombre: string; grande?: boolean }) {
+  const [rota, setRota] = useState(() => !url || fotosRotas.has(url));
+  useEffect(() => { setRota(!url || fotosRotas.has(url)); }, [url]);
+  const cls = `prod-foto${grande ? ' grande' : ''}`;
+  if (rota || !url) return <span className={`${cls} vacia`} aria-hidden><Icon name="order" size={grande ? 18 : 14} /></span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className={cls} title={`Ver la foto de ${nombre}`} onClick={(e) => e.stopPropagation()} draggable={false}>
+      <img src={url} alt="" loading="lazy" draggable={false} onError={() => { fotosRotas.add(url); setRota(true); }} />
+    </a>
   );
 }
 
@@ -498,7 +531,7 @@ function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; edit
                   <div key={a.task_id} className={`card${drag?.a.task_id === a.task_id ? ' dragging' : ''}`} draggable={ed}
                     style={{ cursor: ed ? 'grab' : 'default' }}
                     onDragStart={(e) => { setDrag({ pdv: p, a }); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDrag(null)}>
-                    <div className="t ellipsis" title={a.nombre}>{a.nombre}</div>
+                    <div className="row" style={{ gap: 8, minWidth: 0 }}><FotoProducto url={a.foto} nombre={a.nombre} grande /><div className="t ellipsis" title={a.nombre}>{a.nombre}</div></div>
                     <div className="small muted ellipsis">
                       {p.record_id ? <Link to={recordUrl('order', p.record_id)}>PDV {p.npdv}</Link> : `PDV ${p.npdv}`} · {p.cliente ?? '—'}
                     </div>

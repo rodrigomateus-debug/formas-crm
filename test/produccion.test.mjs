@@ -29,6 +29,7 @@ const OP_IMP = [{ id: `imp-fyr-${RUN}`, name: `FYR ${RUN} SA`, orderindex: 0 }, 
 const OP_UNIDAD = [{ id: 'u-shop', name: 'FORMAS SHOP', orderindex: 0 }, { id: 'u-corp', name: 'CORPORATE ', orderindex: 1 }];
 const dd = (id, name, value, options) => ({ id, name, type: 'drop_down', value, type_config: { options } });
 const fecha = (id, name, dia) => ({ id, name, type: 'date', value: dia ? String(Date.parse(`${dia}T15:00:00Z`)) : null });
+const FOTO_NEC = `https://example.com/necessaire-${RUN}.jpg`;
 const CECI = { id: 9001, username: `Ceci ${RUN}`, email: `ceci.${RUN}@formas.ar`, initials: 'CE', color: '#7b68ee', profilePicture: null };
 const SOLE = { id: 9002, username: `Sole ${RUN}`, email: `sole.${RUN}@formas.ar`, initials: 'SO', color: '#e5484d', profilePicture: 'https://example.com/sole.png' };
 
@@ -56,7 +57,7 @@ function articulo(pdvId, i, unidad, base) {
 }
 const ARTS = {
   shop: [
-    { nombre: `Necessaire ${RUN}`, codigo: 'NEC_1', cantidad: 600, status: 'en revision', proveedor: OP_PROV[0].id, impresor: OP_IMP[0].id, assignees: [CECI], ingresoProv: '2026-11-10', updated: 0 },
+    { nombre: `Necessaire ${RUN}`, codigo: `NEC_${RUN}`, cantidad: 600, status: 'en revision', proveedor: OP_PROV[0].id, impresor: OP_IMP[0].id, assignees: [CECI], ingresoProv: '2026-11-10', updated: 0 },
     { nombre: `Pelota ${RUN}`, codigo: 'PEL_1', cantidad: 600, status: 'listo para entergar', proveedor: OP_PROV[1].id, impresor: OP_IMP[1].id, assignees: [SOLE], updated: 0 },
     { nombre: `Set pinturas ${RUN}`, codigo: 'SET_1', cantidad: 250, status: 'listo para entergar', proveedor: OP_PROV[0].id, assignees: [], updated: 0 },
     { nombre: `Taza anulada ${RUN}`, codigo: 'TAZ_1', cantidad: 10, status: 'anulado', updated: 0 },
@@ -116,6 +117,9 @@ before(async () => {
       // Finnegans: el pedido sin renglones, así los productos salen de los artículos de ClickUp.
       if (p === '/fin/oauth/token') { res.setHeader('content-type', 'application/json'); return res.end('"token-de-prueba"'); }
       if (p.startsWith('/fin/pedidoVenta/')) return send({ Items: [] });
+      // La ficha del Necessaire tiene foto: es la que se ve en el pedido y en Producción.
+      if (p === `/fin/producto/NEC_${RUN}`) return send({ Nombre: 'Necessaire', ProductoImagen: FOTO_NEC });
+      if (p.startsWith('/fin/producto/')) return send({ Nombre: 'Producto' });
       const t = PDVS().find((x) => x.id === tarea);
       if (t) return send(t);
       return send({ err: 'no' }, 404);
@@ -273,6 +277,10 @@ test('producción: la vendedora ve quién lo tiene asignado, en la tarjeta y en 
   assert.ok(prods.items.some((i) => i.status === 'listo para entergar' && i.status_color === '#008844'), 'cada producto con el color de su estado');
   const conAsignado = prods.items.filter((i) => i.asignados?.length);
   assert.ok(conAsignado.length, 'cada producto con quien lo tiene');
+  // En Producción, cada artículo con la foto de su producto en el pedido.
+  const conFoto = pdvDe(await vista(), PDV).articulos;
+  assert.equal(conFoto.find((a) => a.nombre.startsWith('Necessaire')).foto, FOTO_NEC, 'la misma foto que en el pedido');
+  assert.equal(conFoto.find((a) => a.nombre.startsWith('Pelota')).foto, null, 'sin foto, sin foto');
   // La tarjeta del tablero de pedidos.
   const tablero = (await api('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${PDV}`)).data;
   const card = tablero.columns.flatMap((c) => c.records).find((r) => r.id === pdv.record_id);

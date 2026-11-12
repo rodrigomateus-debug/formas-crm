@@ -356,14 +356,14 @@ export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
       FROM records r WHERE r.id IN (SELECT id FROM ids)) WHERE n > 0 OR n_stp > 0 OR n_items > 0`).bind(...binds),
     db.prepare(`${conIds}
         SELECT 'li' AS k, li.record_id, li.position AS pos, li.code, li.description, li.quantity, li.name AS li_name, p.name,
-          so.image_url AS foto_cot, p.image_url AS foto_fin, sk.image_url AS foto_sku, NULL AS cantidades
+          so.image_url AS foto_cot, p.image_url AS foto_fin, sk.image_url AS foto_sku, NULL AS cantidades, li.clickup_task
           FROM line_items li JOIN records r ON r.id = li.record_id LEFT JOIN products p ON p.code = li.code ${FOTO_STP(PEDIDO_DE_R)}
           WHERE li.record_id IN (SELECT id FROM ids)
         UNION ALL
-        SELECT 'it', r.id, s.pos, s.sku, NULL, NULL, NULL, s.nombre, s.image_url, NULL, NULL, s.cantidades
+        SELECT 'it', r.id, s.pos, s.sku, NULL, NULL, NULL, s.nombre, s.image_url, NULL, NULL, s.cantidades, NULL
           FROM records r JOIN stp_items s ON s.pedido = ${PEDIDO_DE_R} WHERE r.id IN (SELECT id FROM ids)
         UNION ALL
-        SELECT 'so', r.id, 0, s.sku, NULL, NULL, NULL, NULL, s.image_url, NULL, NULL, NULL
+        SELECT 'so', r.id, 0, s.sku, NULL, NULL, NULL, NULL, s.image_url, NULL, NULL, NULL, NULL
           FROM records r JOIN stp_imagenes s ON s.pedido = ${PEDIDO_DE_R} WHERE r.id IN (SELECT id FROM ids)
         ORDER BY 2, 1, 3`).bind(...binds),
   ];
@@ -395,6 +395,53 @@ export function armarAdjuntos(rows: unknown[]) {
     const produccion = prod_total || asignados.length ? { asignados, listos: prod_listos, total: prod_total } : undefined;
     return [record_id, { ...a, ...(produccion ? { produccion } : {}) } as Adjuntos];
   }));
+}
+
+// La foto de cada artículo de ClickUp (vista de Producción): la misma que tiene su producto en el pedido (fotosDeRenglones,
+// como el panel de productos y la tarjeta). Va por el renglón del pedido atado a ese artículo; si el artículo no quedó
+// atado a ningún renglón, por las palabras del nombre (primero los renglones del pedido, después los productos de su
+// cotización del STP) y, si el pedido tiene un solo artículo sin foto y un solo producto con foto libre, esa.
+export async function fotosDeArticulos(db: D1Database, arts: Array<{ task_id: string; record_id: number | null; nombre: string; cantidad: number | null }>) {
+  const out = new Map<string, string>();
+  const ids = [...new Set(arts.map((a) => a.record_id).filter((x): x is number => x != null))];
+  if (!ids.length) return out;
+  type Fila = RenglonFoto & { k: 'li' | 'it' | 'so'; record_id: number; cantidades: string | null; clickup_task: string | null; foto_cot: string | null };
+  const filas = (await fotosSql(db, 'SELECT value FROM json_each(?)', [JSON.stringify(ids)])[1].all<Fila>()).results;
+  const de = new Map<number, Fila[]>();
+  for (const f of filas) { const l = de.get(f.record_id) ?? []; l.push(f); de.set(f.record_id, l); }
+  const porPedido = new Map<number, typeof arts>();
+  for (const a of arts) if (a.record_id != null) { const l = porPedido.get(a.record_id) ?? []; l.push(a); porPedido.set(a.record_id, l); }
+  for (const [rid, suyos] of porPedido) {
+    const fs = de.get(rid) ?? [];
+    const lineas = fs.filter((f) => f.k === 'li');
+    const items: StpItem[] = fs.filter((f) => f.k === 'it').map((f) => ({ sku: f.code ?? '', nombre: f.name ?? '', cantidades: f.cantidades ?? '[]', image_url: f.foto_cot ?? '' }));
+    const { fotos } = lineas.length ? fotosDeRenglones(lineas, items) : { fotos: [] as Array<string | null> };
+    // Lo que se puede asignar: cada renglón con su foto y, si no hay renglones, los productos de la cotización.
+    const libres = [
+      ...lineas.map((l, i) => ({ task: l.clickup_task, pal: palabras(l.description, l.li_name, l.name), url: fotos[i] })),
+      ...(lineas.length ? [] : items.map((it) => ({ task: null as string | null, pal: palabras(it.nombre), url: it.image_url }))),
+    ].filter((x): x is { task: string | null; pal: Set<string>; url: string } => !!x.url);
+    const usadas = new Set<number>();
+    for (const a of suyos) {
+      const k = libres.findIndex((x) => x.task === a.task_id);
+      if (k >= 0) { out.set(a.task_id, libres[k].url); usadas.add(k); }
+    }
+    const faltan = suyos.filter((a) => !out.has(a.task_id));
+    for (const a of faltan) {
+      const pal = palabras(a.nombre);
+      let mejor = -1, comunes = 0;
+      libres.forEach((x, k) => {
+        if (usadas.has(k) || x.task) return;
+        const c = [...x.pal].filter((w) => pal.has(w)).length;
+        if (c > comunes) { comunes = c; mejor = k; }
+      });
+      if (mejor >= 0) { out.set(a.task_id, libres[mejor].url); usadas.add(mejor); }
+    }
+    const sinFoto = suyos.filter((a) => !out.has(a.task_id));
+    const sueltas = libres.filter((x, k) => !usadas.has(k) && !x.task);
+    if (sinFoto.length === 1 && sueltas.length === 1) out.set(sinFoto[0].task_id, sueltas[0].url);
+  }
+  return out;
 }
 
 // Fotos y adjuntos de una tanda de pedidos (las tarjetas que se suman con «Cargar más»).

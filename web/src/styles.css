@@ -151,6 +151,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-ink); w
 .me-menu .opt .check { margin-left: auto; color: var(--accent-ink); }
 .me-menu .sep { height: 1px; background: var(--ui-line); margin: 6px 4px; }
 .me-menu a.opt { color: inherit; text-decoration: none; }
+.me-menu a.opt.salir { color: var(--ui-negative-ink); font-weight: 500; }
+.me-menu a.opt.salir:hover { background: var(--ui-negative-soft); }
 .main { display: flex; flex-direction: column; min-width: 0; height: 100%; overflow: hidden; }
 .topbar { flex: none; display: flex; align-items: center; gap: 12px; height: var(--topbar-h); padding: 0 var(--gutter); background: var(--ui-surface); border-bottom: 1px solid var(--ui-line); }
 .content { flex: 1; overflow: auto; padding: 24px var(--gutter) 40px; }

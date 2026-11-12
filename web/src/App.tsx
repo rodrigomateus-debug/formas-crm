@@ -216,7 +216,7 @@ function UserMenu({ name, email, photo, superadmin, mirando }: { name: string; e
       {/* Fuera del menú lateral: si no, hereda su letra blanca. */}
       {elegirUsuario && createPortal(<VerComoModal onClose={() => setElegirUsuario(false)} />, document.body)}
       {open && (
-        <div className="popover me-menu" role="menu" aria-label="Tema">
+        <div className="popover me-menu" role="menu" aria-label="Tu usuario">
           {superadmin && <>
             <div className="grp">Superadmin</div>
             <div className="opt" role="menuitem" tabIndex={0} onClick={() => { setOpen(false); setElegirUsuario(true); }}
@@ -232,11 +232,12 @@ function UserMenu({ name, email, photo, superadmin, mirando }: { name: string; e
               {tema === k && <span className="check"><Icon name="check" size={16} /></span>}
             </div>
           ))}
+          {/* Cerrar sesión (login con Google, login.ts): borra la sesión y vuelve a la pantalla de ingreso. */}
           <div className="sep" role="separator" />
-          <a className="opt" role="menuitem" href="/auth/salir"><Icon name="external" size={16} />Salir</a>
+          <a className="opt salir" role="menuitem" href="/auth/salir"><Icon name="logout" size={16} />Cerrar sesión</a>
         </div>
       )}
-      <button type="button" className="me" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title="Tema y usuario">
+      <button type="button" className="me" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title="Tu usuario: tema y cerrar sesión">
         <Avatar name={name} photo={photo} /><div><b>{name}</b>{email}</div><Icon name="updown" size={16} />
       </button>
     </div>

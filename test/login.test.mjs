@@ -53,7 +53,7 @@ test('login con Google: la página, la sesión y los rechazos', async () => {
   assert.equal(pagina.status, 200);
   const html = await pagina.text();
   assert.match(html, /Ingresar con Google/);
-  assert.match(html, /\/login\/hero\.gif/);
+  assert.match(html, /\/login\/hero\.webp/);
   assert.doesNotMatch(html, /todavía no está configurado/, 'con las variables de prueba está configurado');
 
   // Un usuario del CRM entra y la sesión lo identifica (no al usuario de desarrollo).

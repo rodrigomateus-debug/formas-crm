@@ -4,7 +4,7 @@ import { HttpError } from './env';
 import { COOKIE_SESION, DIAS_SESION, firmar, leerCookie, leerFirmado, nuevaSesion, userByEmail } from './auth';
 
 // Login propio del CRM (pedido de Rodrigo del 12/11/2026): una pantalla con el Design System de Formas, la imagen
-// animada a un lado y «Ingresar con Google» al otro, en lugar de la pantalla genérica de Cloudflare Access. Se entra
+// (productos con el logo de Formas) a un lado y «Ingresar con Google» al otro, en lugar de la pantalla genérica de Cloudflare Access. Se entra
 // solo con Google: el mail tiene que ser de un dominio de Formas (LOGIN_DOMINIOS) y estar como usuario activo en
 // Configuración → Usuarios (userByEmail). La sesión es una cookie firmada (auth.ts). Puesta en marcha: docs/LOGIN.md.
 
@@ -143,9 +143,12 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
     -webkit-font-smoothing: antialiased; }
   .login { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(400px, 1fr); min-height: 100vh; }
   /* El lado de la imagen: el GIF sobre el azul de Formas, con el logo y una frase. */
-  .hero { position: relative; overflow: hidden; background: #04095e; color: #fff; }
-  .hero img.anim { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 30%; }
-  .hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(4, 9, 94, .6) 0%, rgba(4, 9, 94, 0) 22%, rgba(4, 9, 94, 0) 52%, rgba(3, 6, 70, .82) 74%, rgba(2, 4, 52, .96) 100%); }
+  .hero { position: relative; overflow: hidden; background: #00046a; color: #fff; }
+  /* La imagen entera, entre el logo y la frase: los productos (con su logo) no quedan debajo del texto. El fondo es el
+     mismo azul de los bordes de la imagen, así no se nota dónde termina. */
+  .hero img.foto { position: absolute; top: 96px; bottom: 200px; left: 24px; right: 24px; width: calc(100% - 48px); height: calc(100% - 296px);
+    object-fit: contain; object-position: center; }
+  .hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(90% 60% at 50% 45%, rgba(0, 4, 106, 0) 60%, rgba(0, 2, 70, .55) 100%); }
   .hero-top, .hero-bottom { position: absolute; left: 48px; right: 48px; z-index: 1; }
   .hero-top { top: 40px; display: flex; align-items: center; gap: 12px; }
   .hero-top img { height: 40px; width: auto; display: block; }
@@ -178,8 +181,8 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
   .pie i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; }
   @media (max-width: 900px) {
     .login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-    .hero { min-height: 260px; }
-    .hero::after { background: linear-gradient(180deg, rgba(4, 9, 94, .7) 0%, rgba(4, 9, 94, 0) 40%); }
+    .hero { min-height: 340px; }
+    .hero img.foto { top: 64px; bottom: 8px; left: 16px; right: 16px; width: calc(100% - 32px); height: calc(100% - 72px); }
     .hero-top { top: 24px; left: 24px; right: 24px; }
     .hero-top img { height: 32px; }
     .hero-bottom { display: none; }
@@ -192,7 +195,7 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
 <body>
 <main class="login">
   <section class="hero" aria-hidden="true">
-    <picture><source srcset="/login/hero.png" media="(prefers-reduced-motion: reduce)" /><img class="anim" src="/login/hero.gif" alt="" /></picture>
+    <img class="foto" src="/login/hero.webp" alt="" />
     <div class="hero-top"><img src="/formas-logo-white.png" alt="" /><span>CRM</span></div>
     <div class="hero-bottom">
       <h2>Clientes, pedidos y producción, <b>en un solo lugar.</b></h2>

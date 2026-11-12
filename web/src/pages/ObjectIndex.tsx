@@ -12,7 +12,7 @@ import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
 import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, UserChip, WhatsAppLink, useColumnResize } from '../components';
 import { BulkBar } from './Bulk';
-import { QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
+import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { SaveView, ViewMenu } from '../vistas';
 
@@ -381,6 +381,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       <div className="qf"><button className={`btn qf-btn${sinNegocio ? ' on' : ''}`} aria-pressed={sinNegocio} onClick={toggleSinNegocio}
         title="Pedidos que no están en ningún negocio (para control)">Sin negocio</button></div>
     )}
+    {type === 'order' && <CobroFilter value={cobroDe(cfg.groups)} onChange={(v) => setCfg((c) => ({ ...c, groups: conCobro(c.groups, v) }))} />}
     {type === 'order' && (
       <div className="qf"><button className={`btn qf-btn${faltanEntregas ? ' on' : ''}`} aria-pressed={faltanEntregas} onClick={toggleFaltan}
         title="Pedidos a los que les falta entregar algo según sus remitos, con diferencias, o entregados sin remito">Faltan entregas</button></div>

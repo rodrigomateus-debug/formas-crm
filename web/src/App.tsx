@@ -13,6 +13,7 @@ import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
+import { BotonConectarClaude } from './ConectarClaude';
 
 export default function App() {
   const { meta } = useMeta();
@@ -55,6 +56,8 @@ export default function App() {
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
           {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
+          {/* Arriba del nombre: conectar Claude con el CRM (ConectarClaude.tsx). */}
+          <BotonConectarClaude />
         </div>
         <UserMenu name={meta.me.name} email={meta.me.email} photo={meta.me.photo_url} superadmin={!!meta.superadmin} mirando={!!meta.real_user} />
       </nav>

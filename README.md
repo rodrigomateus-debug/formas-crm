@@ -74,7 +74,7 @@ La prueba de Gmail necesita las variables de `node test/gmail-dev-vars.mjs` (y r
 
 3. Cloudflare Access (Zero Trust → Access → Applications): una aplicación «Formas CRM» sobre el dominio del CRM con
    la misma política de mails que el tablero, y estas rutas **sin** Access (Bypass), porque entran con token propio:
-   `/mcp*`, `/hooks/*` (también la app del chofer, `/hooks/chofer/`), `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. El «Application Audience (AUD) Tag» va en
+   `/mcp*`, `/.well-known/*` (Conectar con Claude), `/hooks/*` (también la app del chofer, `/hooks/chofer/`), `/crm/*`, `/oauth/*`, `/hubspot/*`, `/health`. El «Application Audience (AUD) Tag» va en
    `ACCESS_AUD` dentro de `wrangler.jsonc` (no es secreto), junto con `ACCESS_TEAM_DOMAIN` (el equipo de Access que usa
    Formas Studio). Si se recrea la aplicación de Access, cambia el AUD y hay que actualizarlo ahí.
 4. Entrar con el mail de `ADMIN_EMAIL`: queda como administrador.
@@ -117,7 +117,7 @@ con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, ta
 
 | Quién | Hoy | En el CRM |
 |---|---|---|
-| Claude / Cowork (prospección diaria, cargas) | Conector de HubSpot | Conector personalizado en claude.ai con la URL `https://<crm>/mcp/<token>` (token tipo «Claude (MCP)»). |
+| Claude / Cowork (prospección diaria, cargas) | Conector de HubSpot | Cada uno: «Conectar con Claude» (abajo a la izquierda), con OAuth como HubSpot o ClickUp y editando solo lo suyo ([docs/CLAUDE.md](docs/CLAUDE.md)). Integraciones automáticas: `https://<crm>/mcp/<token>` (token tipo «Claude (MCP)»). |
 | Darwin (WhatsApp) | Workflow de Darwin con 3 pasos de HubSpot (vía Pipedream) | Un solo paso `http-request` del workflow → `POST https://<crm>/hooks/darwin` con el evento entero. Y al ganar un negocio el CRM le avisa a Darwin. Paso a paso en [docs/DARWIN.md](docs/DARWIN.md). |
 | Prospección por LinkedIn | Zapier → HubSpot (~300 leads por mes, con perfiles duplicados) | La herramienta de LinkedIn → `POST https://<crm>/hooks/linkedin` directo, con token tipo «LinkedIn». Deduplica por URL del perfil. Zapier se da de baja. |
 | Cualquier otra | — | `POST https://<crm>/hooks/bundle` con `{ contact, company, deal, note, task, owner_email }`. |

@@ -22,8 +22,8 @@ export async function userFromToken(env: Env, token: string): Promise<{ user: Us
   const hash = await sha256(token);
   const row = await env.DB.prepare(
     `SELECT t.id AS token_id, t.source, t.name AS token_name, u.* FROM api_tokens t JOIN users u ON u.id = t.user_id
-     WHERE t.token_hash = ? AND t.revoked = 0 AND u.active = 1`,
-  ).bind(hash).first<User & { token_id: number; source: string; token_name: string }>();
+     WHERE t.token_hash = ? AND t.revoked = 0 AND u.active = 1 AND (t.expires_at IS NULL OR t.expires_at > ?)`,
+  ).bind(hash, new Date().toISOString()).first<User & { token_id: number; source: string; token_name: string }>();
   if (!row) return null;
   await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').bind(new Date().toISOString(), row.token_id).run();
   const { token_id, source, token_name, ...user } = row;

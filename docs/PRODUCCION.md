@@ -36,6 +36,9 @@ se edita desde ahí.
 
 - Las fechas se ven como «mié 18/11» (el día de la semana sirve para ver qué es de esta semana). Se guardan al
   mediodía de Buenos Aires, así no cambian de día por el huso. En rojo, las que ya pasaron y todavía no están listas.
+- **Cada artículo con la foto de su producto**, a la izquierda del nombre: la misma que en los productos del pedido
+  (cotización del STP, ficha de Finnegans o SKU, `fotosDeRenglones`). Va por el renglón del pedido atado a ese artículo
+  y, si no quedó atado, por las palabras del nombre (`fotosDeArticulos` en `productos.ts`). Sin foto, el ícono.
 - **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero tiene una
   columna por estado y una tarjeta por artículo.
 - **Filtros:** unidad de negocio, asignado (yo, cada persona, sin asignar), búsqueda por PDV, cliente o producto, y

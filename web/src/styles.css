@@ -832,7 +832,7 @@ table.prod-grid tr.prod-pdv:hover td { background: color-mix(in srgb, var(--ui-s
    trazo hasta cada artículo: así se ve de qué PDV es cada uno. */
 table.prod-grid tr.prod-art td.prod-nombre::before { content: ''; position: absolute; left: 45px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); }
 table.prod-grid tr.prod-art:has(+ tr.prod-pdv) td.prod-nombre::before, table.prod-grid tr.prod-art:last-child td.prod-nombre::before { bottom: 50%; }
-table.prod-grid tr.prod-art td.prod-nombre::after { content: ''; position: absolute; left: 45px; top: 50%; width: 11px; border-top: 1.5px solid var(--ui-line-strong); }
+table.prod-grid tr.prod-art td.prod-nombre::after { content: ''; position: absolute; left: 45px; top: 50%; width: 15px; border-top: 1.5px solid var(--ui-line-strong); }
 .prod-vacio { padding-left: 58px !important; }
 .prod-art-t svg { color: var(--ui-ink-3); flex: none; }
 tr.prod-art.cerrado td { opacity: .6; }
@@ -886,3 +886,11 @@ table.prod-grid .st-select { min-width: 190px; }
 .fecha-input { width: 140px; padding: 0 6px; }
 .flecha { display: inline-grid; place-items: center; transition: transform var(--dur) var(--ease); }
 .flecha.cerrada { transform: rotate(-90deg); }
+/* La foto de cada producto en Producción, a la izquierda del nombre (como en los productos del pedido). */
+.prod-foto { flex: none; width: 30px; height: 30px; border-radius: 6px; overflow: hidden; display: grid; place-items: center; background: var(--image-well, var(--ui-surface-sunken));
+  border: 1px solid var(--ui-line); }
+.prod-foto img { width: 100%; height: 100%; object-fit: contain; }
+.prod-foto.vacia { color: var(--ui-ink-3); background: var(--ui-surface-sunken); }
+.prod-foto.grande { width: 40px; height: 40px; }
+a.prod-foto:hover { border-color: var(--accent-ink); }
+.prod-art-t .ellipsis { min-width: 0; }

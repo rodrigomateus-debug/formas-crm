@@ -13,6 +13,7 @@ interface Articulo {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
+  foto?: string | null;
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
@@ -468,7 +469,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo }: {
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
     <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}`}>
-      <td className="prod-nombre"><div className="prod-art-t ellipsis" title={a.nombre}><Icon name="task" size={14} />{a.nombre}</div></td>
+      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
@@ -481,6 +482,21 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo }: {
       <td><FechaCelda valor={a.retiro_impresor} editable={ed} onChange={set('retiro_impresor')} label={`Retiro del impresor de ${a.nombre}`} /></td>
       <td>{a.url && <a href={a.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir ${a.nombre} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
     </tr>
+  );
+}
+
+// La foto del producto a la izquierda del nombre, como en los productos del pedido (la misma foto). Un clic la abre
+// grande; sin foto, el ícono de producto.
+const fotosRotas = new Set<string>();
+function FotoProducto({ url, nombre, grande }: { url?: string | null; nombre: string; grande?: boolean }) {
+  const [rota, setRota] = useState(() => !url || fotosRotas.has(url));
+  useEffect(() => { setRota(!url || fotosRotas.has(url)); }, [url]);
+  const cls = `prod-foto${grande ? ' grande' : ''}`;
+  if (rota || !url) return <span className={`${cls} vacia`} aria-hidden><Icon name="order" size={grande ? 18 : 14} /></span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className={cls} title={`Ver la foto de ${nombre}`} onClick={(e) => e.stopPropagation()} draggable={false}>
+      <img src={url} alt="" loading="lazy" draggable={false} onError={() => { fotosRotas.add(url); setRota(true); }} />
+    </a>
   );
 }
 
@@ -515,7 +531,7 @@ function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; edit
                   <div key={a.task_id} className={`card${drag?.a.task_id === a.task_id ? ' dragging' : ''}`} draggable={ed}
                     style={{ cursor: ed ? 'grab' : 'default' }}
                     onDragStart={(e) => { setDrag({ pdv: p, a }); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDrag(null)}>
-                    <div className="t ellipsis" title={a.nombre}>{a.nombre}</div>
+                    <div className="row" style={{ gap: 8, minWidth: 0 }}><FotoProducto url={a.foto} nombre={a.nombre} grande /><div className="t ellipsis" title={a.nombre}>{a.nombre}</div></div>
                     <div className="small muted ellipsis">
                       {p.record_id ? <Link to={recordUrl('order', p.record_id)}>PDV {p.npdv}</Link> : `PDV ${p.npdv}`} · {p.cliente ?? '—'}
                     </div>

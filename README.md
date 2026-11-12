@@ -118,15 +118,17 @@ con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, ta
 
 Salen por Gmail con la misma cuenta de servicio, de la casilla de quien los recibe a sí misma (o de `desde`, si se
 configura). Necesitan sumar el permiso `https://www.googleapis.com/auth/gmail.send` al Client ID de la cuenta en la
-delegación de todo el dominio. Dos avisos:
+delegación de todo el dominio. Los avisos:
 
 - **Resumen de la mañana** (días hábiles, desde las 8): las tareas para hoy y las vencidas más recientes.
 - **Asignaciones:** cuando alguien le asigna a otra persona un registro o una tarea desde la pantalla o desde Claude,
   le llega un mail en los 10 minutos siguientes (lo que mueven las integraciones no avisa).
+- **Faltantes de entrega** (a Logística y a los administradores): ver `docs/REMITOS.md`.
 
-Solo les llegan a las personas de `users` (al principio, el administrador; `"todos"` para todo el equipo). Con token de
-administrador: `GET /hooks/avisos` (configuración y estado), `PUT /hooks/avisos` (por ejemplo
-`{"users": ["alguien@formas.ar"], "hora": 8}`) y `POST /hooks/avisos/enviar` (`?resumen=1` manda el resumen ya).
+Solo les llegan a los usuarios con **«Avisos por mail»** prendido (Configuración → Usuarios, columna «Avisos por mail»;
+`users.avisos_mail`, migración 0038). Arranca **apagado** para todos, también para los usuarios nuevos: se prende por
+persona. Con token de administrador: `GET /hooks/avisos` (configuración y estado), `PUT /hooks/avisos` (por ejemplo
+`{"hora": 8}`) y `POST /hooks/avisos/enviar` (`?resumen=1` manda el resumen ya).
 
 ## Después de cada entrega
 

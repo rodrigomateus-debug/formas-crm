@@ -6,13 +6,13 @@ import { Budget, OutOfBudget } from './budget';
 // - Resumen del día: a la mañana (días hábiles), las tareas que vencen hoy y las vencidas de cada persona.
 // - Asignaciones: cuando alguien le asigna a otra persona un registro o una tarea, le llega un mail en la próxima corrida
 //   (cada 10 minutos, junta todo lo que se acumuló).
+// - Faltantes de entrega (remitos.ts): a Logística y a los administradores.
 // Cada mail sale de la casilla de quien lo recibe, a sí misma, salvo que se configure `desde` (una casilla del dominio).
-// Solo les llega a las personas de `users` (o a todos con 'todos'), así se puede probar antes de abrirlo al equipo.
+// Solo les llegan a los usuarios con «Avisos por mail» prendido (users.avisos_mail, Configuración → Usuarios), que está
+// apagado por defecto. Antes era una lista de mails en esta configuración (`users`): ya no se usa.
 
-export interface AvisosConfig { enabled: boolean; resumen: boolean; asignaciones: boolean; hora: number; desde: string; users: string[] | 'todos' }
-export const DEFAULT_AVISOS = (env: Env): AvisosConfig => ({
-  enabled: true, resumen: true, asignaciones: true, hora: 8, desde: '', users: env.ADMIN_EMAIL ? [env.ADMIN_EMAIL] : [],
-});
+export interface AvisosConfig { enabled: boolean; resumen: boolean; asignaciones: boolean; hora: number; desde: string }
+export const DEFAULT_AVISOS = (): AvisosConfig => ({ enabled: true, resumen: true, asignaciones: true, hora: 8, desde: '' });
 const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const APP_URL = (env: Env) => (env.APP_URL ?? 'https://formas-crm.rodrigo-mateus.workers.dev').replace(/\/$/, '');
 const ART = -3 * 3600_000;   // Buenos Aires
@@ -20,10 +20,9 @@ const PATHS: Record<string, string> = { contact: 'contacts', company: 'companies
 
 export async function avisosConfig(env: Env): Promise<AvisosConfig> {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'avisos'").first<{ value: string }>();
-  return { ...DEFAULT_AVISOS(env), ...(row ? JSON.parse(row.value) : {}) };
+  const { users: _lista, ...cfg } = { ...DEFAULT_AVISOS(), ...(row ? JSON.parse(row.value) : {}) } as AvisosConfig & { users?: unknown };
+  return cfg;
 }
-
-const recibe = (cfg: AvisosConfig, email: string) => cfg.users === 'todos' || cfg.users.map((u) => u.toLowerCase()).includes(email.toLowerCase());
 
 // Se anota cuando una persona le asigna algo a otra desde la pantalla o desde Claude (no lo que mueven las integraciones).
 export async function avisarAsignacion(db: D1Database, ctx: Ctx, to: number | null | undefined, ref: { recordId?: number; activityId?: number }) {
@@ -100,11 +99,11 @@ async function resumenes(env: Env, cfg: AvisosConfig, b: Budget, now: Date, forc
   if (!force && (!habil || local.getUTCHours() < cfg.hora)) return { resumenes: 0 };
   const listos = st.fecha === hoy && !force ? st.listos : [];
   const finDelDia = new Date(Date.parse(`${hoy}T23:59:59.999Z`) - ART).toISOString();
-  const { results: users } = await db.prepare('SELECT * FROM users WHERE active = 1 ORDER BY id').all<User>();
+  const { results: users } = await db.prepare('SELECT * FROM users WHERE active = 1 AND avisos_mail = 1 AND deleted_at IS NULL ORDER BY id').all<User>();
   let n = 0;
   try {
     for (const u of users) {
-      if (listos.includes(u.id) || !recibe(cfg, u.email)) continue;
+      if (listos.includes(u.id)) continue;
       const inicioDelDia = new Date(Date.parse(`${hoy}T00:00:00Z`) - ART).toISOString();
       const abiertas = `${TAREA_SELECT} WHERE a.type = 'task' AND a.archived = 0 AND a.status != 'COMPLETED' AND a.owner_id = ?`;
       const { results: deHoy } = await db.prepare(`${abiertas} AND a.due_at >= ? AND a.due_at <= ? ORDER BY a.due_at LIMIT 30`)
@@ -135,13 +134,13 @@ async function resumenes(env: Env, cfg: AvisosConfig, b: Budget, now: Date, forc
 // Asignaciones pendientes: un mail por persona con todo lo que le asignaron desde la corrida anterior.
 async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
   const db = env.DB;
-  const { results } = await db.prepare(`SELECT v.id, v.user_id, v.kind, v.record_id, v.activity_id, v.created_at, u.email, u.name AS user_name,
+  const { results } = await db.prepare(`SELECT v.id, v.user_id, v.kind, v.record_id, v.activity_id, v.created_at, u.email, u.name AS user_name, u.avisos_mail,
       p.name AS by_name, r.name AS rec_name, r.object_type AS rec_type, a.subject AS act_subject, a.due_at AS act_due,
       json_extract(r.props, '$.estado_entrega') AS entrega, json_extract(r.props, '$.falta_entregar') AS falta
     FROM avisos v JOIN users u ON u.id = v.user_id AND u.active = 1 LEFT JOIN users p ON p.id = v.by_user
     LEFT JOIN records r ON r.id = v.record_id LEFT JOIN activities a ON a.id = v.activity_id
     WHERE v.sent_at IS NULL ORDER BY v.user_id, v.id LIMIT 200`).all<{ id: number; user_id: number; kind: string; record_id: number | null; activity_id: number | null;
-      created_at: string; email: string; user_name: string; by_name: string | null; rec_name: string | null; rec_type: string | null; act_subject: string | null; act_due: string | null;
+      created_at: string; email: string; user_name: string; avisos_mail: number; by_name: string | null; rec_name: string | null; rec_type: string | null; act_subject: string | null; act_due: string | null;
       entrega: string | null; falta: string | null }>();
   const porPersona = new Map<number, typeof results>();
   for (const r of results) porPersona.set(r.user_id, [...(porPersona.get(r.user_id) ?? []), r]);
@@ -151,9 +150,8 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     // Faltantes de entrega (remitos.ts): si el pedido ya se completó o se finalizó, no se avisa.
     const resueltas = todas.filter((r) => r.kind === 'entrega' && r.entrega !== 'parcial' && r.entrega !== 'diferencias').map((r) => r.id);
     if (resueltas.length) await marcar(resueltas, 'ya no falta nada');
-    // Los faltantes de entrega les llegan siempre a Logística y a los administradores (no dependen de la lista `users`,
-    // que es para ir abriendo los otros avisos de a poco).
-    const fuera = todas.filter((r) => r.kind !== 'entrega' && !recibe(cfg, r.email)).map((r) => r.id);
+    // Solo a quien tiene «Avisos por mail» prendido (lo de los demás se marca y no sale).
+    const fuera = todas.filter((r) => !r.avisos_mail && !resueltas.includes(r.id)).map((r) => r.id);
     if (fuera.length) await marcar(fuera, 'sin avisos por mail');
     const rows = todas.filter((r) => !resueltas.includes(r.id) && !fuera.includes(r.id));
     if (!rows.length) continue;

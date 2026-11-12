@@ -44,6 +44,8 @@ export interface Env {
   // API de Claude (Anthropic): lee los remitos (remitos.ts). Sin la clave, los remitos se guardan igual y esperan.
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado
+  // Solo para pruebas: el buscador de direcciones del mapa (cronograma.ts), simulado. Por defecto, Nominatim de OpenStreetMap.
+  GEOCODER_URL?: string;
 }
 
 // Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; Comercial es el perfil

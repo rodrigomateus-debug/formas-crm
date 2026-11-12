@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { RutaHoy } from './Ruta';
 import {
   LinkInvalido, Rechazo, corregirPdv, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
@@ -481,6 +482,8 @@ export default function App() {
         {!hayFoco && <TarjetaInstalar />}
 
         {!hayFoco && <Consejos />}
+
+        {!hayFoco && <RutaHoy enLinea={enLinea} alEntregar={() => abrirCamara()} />}
 
         <section className="hoy" aria-labelledby="titulo-hoy">
           <h2 id="titulo-hoy">Hoy {filas.length > 0 && <span className="cuenta">{filas.length}</span>}</h2>

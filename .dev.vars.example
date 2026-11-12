@@ -21,3 +21,5 @@ GOOGLE_OAUTH_CLIENT_ID=prueba-login.apps.googleusercontent.com
 GOOGLE_OAUTH_CLIENT_SECRET=prueba
 SESSION_SECRET=clave-de-prueba-para-firmar-la-sesion
 GOOGLE_OAUTH_TOKEN_URL=http://localhost:8795/google/token
+# Cronograma (test/cronograma.test.mjs): el buscador de direcciones del mapa, simulado.
+GEOCODER_URL=http://localhost:8797/geo

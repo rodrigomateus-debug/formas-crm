@@ -1,6 +1,7 @@
 import type { Ctx, Env } from './env';
 import { HttpError, now } from './env';
 import { getRow, updateRecord } from './records';
+import { claveDireccion } from './cronograma';
 
 // Direcciones de entrega del pedido (pedido de Rodrigo del 12/11/2026), en la tarjeta «Entrega».
 //
@@ -12,6 +13,9 @@ import { getRow, updateRecord } from './records';
 //   clave de Google Maps (GOOGLE_MAPS_API_KEY), o si se carga a mano, queda «sin validar».
 //
 // Los productos son los renglones del pedido (Finnegans, o los artículos de ClickUp), los mismos de «Entrega».
+//
+// El cronograma (cronograma.ts) arma la ruta del día con estas direcciones: una parada por dirección, y las validadas van al
+// mapa con el punto de Google. Cambiar la dirección desde la parada también pasa por acá (direccionDesdeRuta).
 
 const PLACES = (env: Env) => env.GOOGLE_PLACES_API_URL ?? 'https://places.googleapis.com/v1';
 export const mapsConfigurado = (env: Env) => !!env.GOOGLE_MAPS_API_KEY;
@@ -106,9 +110,16 @@ export async function direccionesDe(env: Env, orderId: number) {
     const asignado = varias ? cantidades.filter((c) => c.clave === p.clave).reduce((s, c) => s + c.cantidad, 0) : p.total ?? 0;
     return { ...p, asignado, quedan: p.total == null ? null : Math.max(0, p.total - asignado) };
   });
-  // Sugerencia para la primera carga: la dirección de la empresa del pedido (hay que confirmarla con Google).
+  // Sugerencia para la primera carga (hay que confirmarla con Google): la del pedido de venta de Finnegans y, si no, la de la
+  // empresa del pedido.
   let sugerida: string | null = null;
   if (!direcciones.length) {
+    const props = JSON.parse(pedido.props) as Record<string, unknown>;
+    const fin = (await db.prepare('SELECT direccion FROM direcciones_finnegans WHERE record_id = ?').bind(orderId).first<{ direccion: string | null }>())?.direccion
+      ?? (typeof props.direccion_entrega_finnegans === 'string' ? props.direccion_entrega_finnegans : null);
+    if (fin?.trim()) sugerida = fin.trim();
+  }
+  if (!direcciones.length && !sugerida) {
     const emp = await db.prepare(`SELECT json_extract(r.props, '$.address') AS calle, json_extract(r.props, '$.city') AS ciudad, json_extract(r.props, '$.state') AS prov
       FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0 WHERE a.from_id = ? AND a.to_type = 'company' ORDER BY a.is_primary DESC LIMIT 1`)
       .bind(orderId).first<{ calle: string | null; ciudad: string | null; prov: string | null }>();
@@ -190,10 +201,46 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(base + i, orderId, i, d.direccion, d.detalle, d.place_id, d.lat, d.lng, d.precisa, d.localidad, d.provincia, d.codigo_postal, ctx.user.id, ts));
   });
   for (const f of filas) stmts.push(db.prepare('INSERT INTO entrega_cantidades (direccion_id, clave, cantidad) VALUES (?, ?, ?)').bind(base + f.direccion, f.clave, f.cantidad));
+  // El punto de Google va al mapa de la ruta del cronograma (geocodigos), salvo que alguien ya haya corrido el punto a mano.
+  for (const d of nuevas) {
+    if (d.place_id && d.lat != null && d.lng != null && claveDireccion(d.direccion)) {
+      stmts.push(db.prepare(`INSERT INTO geocodigos (clave, direccion, lat, lng, ok, manual, at) VALUES (?, ?, ?, ?, 1, 0, ?)
+        ON CONFLICT (clave) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, ok = 1, at = excluded.at WHERE geocodigos.manual = 0`)
+        .bind(claveDireccion(d.direccion), d.direccion, d.lat, d.lng, ts));
+    }
+  }
   await db.batch(stmts);
 
   // El resumen en el pedido (queda en el historial como cualquier cambio).
   const resumen = !nuevas.length ? null : nuevas.length === 1 ? nuevas[0].direccion : `${nuevas.length} direcciones: ${nuevas.map((d) => d.direccion).join(' · ')}`.slice(0, 500);
   await updateRecord(db, ctx, 'order', orderId, { direccion_entrega: resumen }, { system: true, strict: false });
   return direccionesDe(env, orderId);
+}
+
+// Desde la parada del cronograma: una sola dirección, escrita (queda sin validar, salvo que sea la misma que ya estaba).
+// Si el pedido va a varias direcciones, se cambian en la tarjeta «Entrega» del pedido, donde está el reparto.
+export async function direccionDesdeRuta(env: Env, ctx: Ctx, orderId: number, texto: string | null) {
+  const actuales = (await env.DB.prepare('SELECT id, direccion, detalle, place_id FROM entrega_direcciones WHERE record_id = ? ORDER BY position, id').bind(orderId)
+    .all<{ id: number; direccion: string; detalle: string | null; place_id: string | null }>()).results;
+  if (actuales.length > 1) throw new HttpError(409, 'Este pedido se entrega en varias direcciones: cambialas en la tarjeta «Entrega» del pedido.');
+  const t = texto?.trim() ?? '';
+  const misma = actuales[0] && actuales[0].direccion.trim().toLowerCase() === t.toLowerCase();
+  return guardarDirecciones(env, ctx, orderId, {
+    direcciones: !t ? [] : [misma ? { id: actuales[0].id, place_id: actuales[0].place_id, direccion: actuales[0].direccion, detalle: actuales[0].detalle } : { direccion: t, detalle: actuales[0]?.detalle ?? null }],
+  });
+}
+
+// Las direcciones guardadas de varios pedidos (para la ruta del cronograma), en orden.
+export async function direccionesDePedidos(db: D1Database, ids: number[]) {
+  const out = new Map<number, Array<{ direccion: string; detalle: string | null; lat: number | null; lng: number | null; validada: boolean }>>();
+  if (!ids.length) return out;
+  const { results } = await db.prepare(`SELECT record_id, direccion, detalle, lat, lng, place_id FROM entrega_direcciones
+    WHERE record_id IN (SELECT value FROM json_each(?)) ORDER BY record_id, position, id`).bind(JSON.stringify(ids))
+    .all<{ record_id: number; direccion: string; detalle: string | null; lat: number | null; lng: number | null; place_id: string | null }>();
+  for (const r of results) {
+    const l = out.get(r.record_id) ?? [];
+    l.push({ direccion: r.direccion, detalle: r.detalle, lat: r.lat, lng: r.lng, validada: !!r.place_id });
+    out.set(r.record_id, l);
+  }
+  return out;
 }

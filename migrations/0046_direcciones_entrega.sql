@@ -30,7 +30,13 @@ CREATE TABLE entrega_cantidades (
   PRIMARY KEY (direccion_id, clave)
 );
 
--- Resumen en el pedido (para las listas, las columnas y Claude): la dirección, o «3 direcciones: …».
-INSERT OR IGNORE INTO properties (object_type, name, label, type, options, group_name, description, display_order, system, read_only, in_create_form, required)
-VALUES ('order', 'direccion_entrega', 'Dirección de entrega', 'string', '[]', 'Pedido',
-  'Se carga en la tarjeta «Entrega» del pedido, validada con Google Maps. Con varias direcciones, dice cuántas y la primera.', 12, 1, 1, 0, 0);
+-- «Dirección de entrega» del pedido (la creó el cronograma, 0045): ahora es el resumen de estas direcciones y se cambia
+-- desde la tarjeta «Entrega» (o desde la parada del cronograma, que pasa por direcciones.ts).
+UPDATE properties SET read_only = 1,
+  description = 'Se carga en la tarjeta «Entrega» del pedido, validada con Google Maps. Con varias direcciones dice cuántas y cuáles. Si está vacía, el cronograma usa la del pedido en Finnegans.'
+WHERE object_type = 'order' AND name = 'direccion_entrega';
+
+-- Las que ya estaban cargadas a mano en el pedido pasan a ser su dirección de entrega (sin validar, hasta elegirla de Google).
+INSERT INTO entrega_direcciones (record_id, position, direccion, precisa)
+SELECT id, 0, trim(json_extract(props, '$.direccion_entrega')), 0 FROM records
+WHERE object_type = 'order' AND trim(COALESCE(json_extract(props, '$.direccion_entrega'), '')) != '';

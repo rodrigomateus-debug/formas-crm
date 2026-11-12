@@ -108,12 +108,26 @@ test('direcciones de entrega: una con todo el pedido, o varias repartiendo sin p
   assert.equal((await call('PUT', url, { direcciones: dos, cantidades: [{ direccion: 0, clave: 'GOR1', cantidad: -3 }] })).status, 400);
   assert.equal((await call('PUT', url, { direcciones: [dos[0], dos[0]] })).status, 400, 'la misma dirección dos veces, sin detalle que las distinga');
 
+  // Desde la parada del cronograma: con varias direcciones, se cambian en la tarjeta del pedido.
+  const ruta = await call('PUT', '/cronograma/direccion', { record_id: pedido.id, direccion: 'Av. Mitre 500, Avellaneda' });
+  assert.equal(ruta.status, 409);
+  assert.match(ruta.data.error, /varias direcciones/);
+
   // Volver a una sola: todo a esa, sin reparto guardado.
   d = (await call('PUT', url, { direcciones: [{ id: d.direcciones[1].id, place_id: 'ChIJ_corrientes_1234', detalle: 'Piso 3' }] })).data;
   assert.deepEqual([d.varias, d.cantidades.length, d.productos.every((p) => p.quedan === 0)], [false, 0, true]);
   const llamadas = pedidosGoogle.length;
   await call('PUT', url, { direcciones: [{ id: d.direcciones[0].id, place_id: 'ChIJ_corrientes_1234', detalle: 'Piso 4' }] });
   assert.equal(pedidosGoogle.length, llamadas, 'la misma dirección ya validada no se vuelve a pedir a Google');
+
+  // Con una sola, cambiarla desde la parada la cambia en la tarjeta (escrita: queda sin validar, con el mismo detalle).
+  assert.equal((await call('PUT', '/cronograma/direccion', { record_id: pedido.id, direccion: 'Av. Mitre 500, Avellaneda' })).status, 200);
+  d = (await call('GET', url)).data;
+  assert.deepEqual(d.direcciones.map((x) => [x.direccion, x.validada, x.detalle]), [['Av. Mitre 500, Avellaneda', false, 'Piso 4']]);
+  assert.equal((await call('GET', `/records/order/${pedido.id}`)).data.record.props.direccion_entrega, 'Av. Mitre 500, Avellaneda');
+  // El campo del pedido es de solo lectura: se cambia desde la tarjeta.
+  await call('PATCH', `/records/order/${pedido.id}`, { props: { direccion_entrega: 'Otra cosa 123' } });
+  assert.equal((await call('GET', `/records/order/${pedido.id}`)).data.record.props.direccion_entrega, 'Av. Mitre 500, Avellaneda');
 
   // Una vendedora: en sus pedidos sí; en los de otra, no.
   const vera = (await call('POST', '/users', { email: `vera.dir.${RUN}@formas.ar`, name: `Vera Dir ${RUN}`, profile: 'comercial', role: 'member' })).data;

@@ -826,6 +826,10 @@ table.prod-grid th.prod-nombre .btn { margin-right: 4px; vertical-align: middle;
 table.prod-grid tr:hover td.prod-nombre { background: var(--row-hover); }
 table.prod-grid tr.prod-pdv td { background: var(--ui-surface-sunken); height: 48px; border-top: 1px solid var(--ui-line); }
 table.prod-grid tr.prod-pdv:hover td { background: color-mix(in srgb, var(--ui-surface-sunken) 70%, var(--row-hover)); }
+/* Un clic en el renglón abre la vista previa del pedido; el PDV abierto queda marcado (el PDV y sus artículos). */
+table.prod-grid tr.abre { cursor: pointer; }
+table.prod-grid tr.prod-pdv.sel td, table.prod-grid tr.prod-art.sel td { background: var(--row-sel); }
+table.prod-grid tr.prod-pdv.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent-ink); }
 .prod-pdv-t { min-width: 0; line-height: 1.3; }
 .prod-art-t { display: flex; align-items: center; gap: 6px; padding-left: 54px; color: var(--ui-ink); }
 /* Los artículos van corridos a la derecha, como las subtareas en ClickUp, con una línea que baja desde el PDV y un
@@ -841,26 +845,45 @@ tr.prod-art.cerrado td { opacity: .6; }
 table.prod-grid .input.sm { height: 30px; font-size: 13px; }
 table.prod-grid td.opcion-cell { min-width: 170px; max-width: 220px; }
 table.prod-grid td.opcion-cell .input { width: 100%; }
+/* Importadores VIP (proveedores.tsx): su isotipo y su color, como en el seguimiento de importados del tablero de Formas Shop. */
+.prov-marca { color: var(--prov-ink); font-weight: 600; }
+[data-theme="dark"] .prov-marca { color: var(--prov-ink-dark); }
+[data-theme="contrast"] .prov-marca { color: inherit; }
+.prov-logo { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; padding: 2px; margin-right: 6px;
+  border-radius: 4px; border: 1px solid var(--ui-line); vertical-align: middle; overflow: hidden; flex: none; }
+.prov-logo.ancho { width: 40px; }
+.prov-logo img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.prod-card-provs .prov-logo { width: 18px; height: 16px; padding: 1px; margin-right: 4px; }
+.prod-card-provs .prov-logo.ancho { width: 34px; }
 .fecha-cell input[type="date"] { width: 138px; padding: 0 6px; }
 .fecha-alerta, .fecha-alerta input { color: var(--ui-negative-ink); font-weight: 600; }
-/* Estado de ClickUp: un punto del color de ClickUp sobre la pastilla, que se lee en los tres temas. */
-.st-pec { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 7px; border-radius: 4px; font-size: 11px; font-weight: 700;
-  letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-  background: var(--e); color: var(--e-ink); }
-/* El circulito de ClickUp: un aro del color de la letra. */
-.st-pec::before { content: ''; width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; flex: none; opacity: .9; }
+/* Estado de ClickUp: una pastilla suave del color del estado (el ícono en el color pleno), como la etapa del PDV, para
+   que el PDV y sus artículos se lean parejos. Se lee en los tres temas. */
+.st-pec { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px 0 8px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  line-height: 1; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle;
+  color: color-mix(in srgb, var(--e) 58%, var(--ui-ink)); background: color-mix(in srgb, var(--e) 13%, var(--ui-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e) 22%, transparent); }
+/* El circulito de ClickUp, para un estado sin ícono. */
+.st-pec::before { content: ''; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--e); box-sizing: border-box; flex: none; }
 .st-pec.con-icono::before { display: none; }
-.st-ic { flex: none; }
-.input.st-select .st-ic { margin-right: 1px; }
-[data-theme="contrast"] .st-pec { box-shadow: 0 0 0 1px var(--ui-ink); }
-/* El desplegable del estado, lleno del color del estado. */
-.input.st-select { background: var(--e); color: var(--e-ink); border-color: transparent; font-weight: 700; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
-.input.st-select:hover, .input.st-select.open { border-color: var(--ui-ink); }
-.input.st-select .st-pec { padding: 0; background: none; height: auto; }
-.input.st-select svg { color: var(--e-ink); }
+.st-ic { flex: none; color: var(--e); }
+[data-theme="dark"] .st-pec { color: color-mix(in srgb, var(--e) 45%, #fff); background: color-mix(in srgb, var(--e) 22%, var(--ui-surface)); box-shadow: none; }
+[data-theme="dark"] .st-ic { color: color-mix(in srgb, var(--e) 70%, #fff); }
+[data-theme="contrast"] .st-pec { color: color-mix(in srgb, var(--e) 50%, #000); box-shadow: inset 0 0 0 1px currentColor; }
+[data-theme="contrast"] .st-ic { color: currentColor; }
+/* El desplegable del estado es la misma pastilla con su flechita adentro: del ancho del texto, no una barra. */
+.input.st-select { width: auto; max-width: 100%; height: 26px; padding: 0 26px 0 0; border: 0; border-radius: 6px;
+  background: color-mix(in srgb, var(--e) 13%, var(--ui-surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e) 22%, transparent); }
+.input.st-select .select-value { display: inline-flex; min-width: 0; }
+.input.st-select .st-pec { background: none; box-shadow: none; padding-right: 2px; }
+.input.st-select::after { right: 8px; width: 14px; height: 14px; margin-top: -7px; mask-size: 14px; -webkit-mask-size: 14px; background: color-mix(in srgb, var(--e) 58%, var(--ui-ink)); }
+.input.st-select:hover:not(:disabled):not(:focus), .input.st-select.open, .input.st-select:focus-visible { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--e) 70%, var(--ui-ink)); }
+.input.st-select:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+[data-theme="dark"] .input.st-select { background: color-mix(in srgb, var(--e) 22%, var(--ui-surface)); box-shadow: none; }
+[data-theme="dark"] .input.st-select::after { background: color-mix(in srgb, var(--e) 45%, #fff); }
+[data-theme="contrast"] .input.st-select { box-shadow: inset 0 0 0 1px var(--ui-ink); }
+[data-theme="contrast"] .input.st-select .st-pec { box-shadow: none; }
 .select-text .st-pec { vertical-align: middle; }
-.col-head.st-col { border-top: 3px solid var(--e); border-radius: var(--r-panel) var(--r-panel) 0 0; }
-table.prod-grid .st-select { min-width: 190px; }
 /* Quién lo tiene: las fotos superpuestas. */
 .asignados { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 160px; }
 .avatar-stack { display: inline-flex; flex: none; }
@@ -868,10 +891,28 @@ table.prod-grid .st-select { min-width: 190px; }
 .avatar-stack .avatar + .avatar { margin-left: -4px; }
 .asignados-btn { border: 1px solid transparent; background: none; padding: 2px 6px 2px 2px; border-radius: var(--r-pill); cursor: pointer; color: inherit; font: inherit; display: inline-flex; max-width: 170px; }
 .asignados-btn:hover, .asignados-btn:focus-visible { border-color: var(--ui-line-strong); background: var(--ui-surface); }
-.prod-board .card { cursor: default; }
-.prod-board .card .t { font-weight: 600; font-size: 13px; }
-.prod-card-estado .input { width: 100%; }
+/* Tablero de producción: una tarjeta por PDV, con sus artículos como hijos (con la línea del árbol, como en la lista). */
+.prod-board .col { flex-basis: 300px; }
+.prod-board .card { cursor: default; padding: 0; gap: 0; contain-intrinsic-size: auto 260px; }
+.prod-board .card.abre { cursor: pointer; }
+.prod-pdv-card-head { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 9px; }
+.prod-npdv { font-weight: 700; font-size: 13px; color: var(--accent-ink); }
+.prod-cliente { font-weight: 600; font-size: 13px; color: var(--ui-ink); line-height: 1.3; }
+.prod-hijos { border-top: 1px solid var(--ui-line); padding: 6px 10px 8px 12px; display: flex; flex-direction: column; background: color-mix(in srgb, var(--ui-surface-sunken) 45%, var(--ui-surface));
+  border-radius: 0 0 var(--r-panel) var(--r-panel); }
+.prod-hijo { position: relative; padding: 7px 0 7px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.prod-hijo + .prod-hijo { border-top: 1px dashed var(--ui-line); }
+.prod-hijo::before { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); opacity: .5; }
+.prod-hijo::after { content: ''; position: absolute; left: 2px; top: 22px; width: 8px; border-top: 1.5px solid var(--ui-line-strong); opacity: .5; }
+.prod-hijo:last-of-type::before { bottom: calc(100% - 22px); }
+.prod-hijo.cerrado { opacity: .6; }
+.prod-hijo-t { font-size: 12.5px; font-weight: 500; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.prod-hijo-pie { gap: 8px; justify-content: space-between; min-width: 0; }
+.prod-hijo-pie .asignados { max-width: 110px; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; }
+.prod-hijo-pie .input.st-select, .prod-hijo-pie > .st-pec { flex: 0 0 auto; max-width: 75%; }
+.prod-mas { align-self: flex-start; margin: 4px 0 0 12px; }
 /* Pedidos: quién lo tiene en producción (tarjeta del tablero y productos del pedido). */
+.rec-prod { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 6px; }
 .prod-quien { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-ink-2); min-width: 0; }
 @media (max-width: 700px) {
   table.prod-grid th.prod-nombre, table.prod-grid td.prod-nombre { min-width: 200px; max-width: 220px; }
@@ -924,7 +965,7 @@ a.prod-foto:hover { border-color: var(--accent-ink); }
 .conv-ev.ev-boceto .ev-ic, .conv-ev.ev-articulo .ev-ic { background: var(--accent-soft); color: var(--accent-ink); }
 .conv-ev time { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 11px; padding-top: 1px; }
 .conv-ev b { color: var(--ui-ink); font-weight: 600; }
-.conv-ev .st-pec { font-size: 10px; vertical-align: 1px; }
+.conv-ev .st-pec { font-size: 11px; height: 20px; padding: 0 7px 0 6px; vertical-align: 1px; }
 .ev-detalle { margin-top: 4px; padding: 6px 10px; border-left: 2px solid var(--ui-line); color: var(--ui-ink-2); white-space: pre-wrap; max-height: 3.2em; overflow: hidden; cursor: pointer; }
 .ev-detalle.abierto { max-height: none; cursor: auto; }
 

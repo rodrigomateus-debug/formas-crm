@@ -39,8 +39,19 @@ se edita desde ahí.
 - **Cada artículo con la foto de su producto**, a la izquierda del nombre: la misma que en los productos del pedido
   (cotización del STP, ficha de Finnegans o SKU, `fotosDeRenglones`). Va por el renglón del pedido atado a ese artículo
   y, si no quedó atado, por las palabras del nombre (`fotosDeArticulos` en `productos.ts`). Sin foto, el ícono.
-- **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero tiene una
-  columna por estado y una tarjeta por artículo.
+- **Un clic en un renglón o una tarjeta abre la vista previa del pedido**, la misma de Pedidos: datos, productos,
+  comentarios y actividad de ese PDV (pedido de Rodrigo del 12/11/2026). Los clics en lo que se edita ahí mismo
+  (estado, asignados, fechas, proveedor, impresor, links) no la abren. El PDV abierto queda marcado.
+- **Estados como pastilla suave**, del color de ClickUp con su ícono, del ancho del texto y con mayúscula solo al
+  principio, igual que la etapa del PDV. Las erratas de los nombres de ClickUp se corrigen solo a la vista
+  («listo para entergar» se ve «Listo para entregar»; `nombreEstado` en `components.tsx`).
+- **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero (pedido de
+  Rodrigo del 12/11/2026) tiene **una tarjeta por PDV**, en la columna de su etapa general (la misma de la lista y de
+  Pedidos: Esperando boceto o confirmación, En producción, Listo para entregar…), con sus productos adentro como
+  hijos: foto, nombre, cantidad, proveedor e impresor, y su estado y asignado, que se cambian ahí mismo. Muestra
+  hasta 4 productos y el resto con «+ N productos más». Las tres etapas de producción se ven siempre; las demás,
+  solo si tienen algún PDV. Como el PDV cambia de etapa solo según sus artículos, no se arrastra: se cambia el
+  estado de cada producto.
 - **Filtros:** unidad de negocio, asignado (yo, cada persona, sin asignar), búsqueda por PDV, cliente o producto, y
   «Ver entregados (30 días)». Lo elegido queda guardado en el navegador de cada una.
 - Sin «Ver entregados» se muestran los PDV con algún artículo abierto, y en ellos los artículos que no están
@@ -65,10 +76,15 @@ En el historial del pedido el cambio queda a nombre de quien lo hizo.
 
 ## Lo que ven las vendedoras
 
+- **Cabecera de la ficha y de la vista previa del pedido** (pedido de Rodrigo del 12/11/2026): la etapa y
+  «Producción:» con quién lo tiene (foto y nombre) y cuántos artículos están listos, lo mismo que la tarjeta del tablero
+  de pedidos. Lo trae `GET /api/records/order/:id` (`produccion`, con `produccionDePedido`). La vista previa que se
+  abre desde Producción es la misma de Pedidos, con la conversación del pedido.
+
 - **Tarjeta del tablero de pedidos:** mientras se produce, quién lo tiene en producción (foto y nombre) y cuántos
   artículos están listos (`adjuntosSql` en `productos.ts`, con `PRODUCCION_TARJETA_SQL`).
-- **Productos del pedido** (ficha y vista previa): «En producción:» con quién lo tiene, y en cada producto su estado y
-  quién tiene ese artículo.
+- **Productos del pedido** (ficha y vista previa): en cada producto su estado (la misma pastilla que en Producción y en
+  la conversación) y quién tiene ese artículo.
 
 ## Proveedores e impresores: empresas del CRM
 
@@ -85,7 +101,12 @@ Las opciones de los desplegables PROVEEDOR e IMPRESOR de ClickUp quedan atadas a
 4. «STOCK», «SIN LOGO» e «IMPRESOR A DEFINIR» no son empresas: quedan como opción suelta.
 
 En la pantalla, cada empresa aparece una sola vez en el desplegable; al elegirla se escribe en ClickUp su primera
-opción. La ficha de cada proveedor muestra **«En producción»**: los artículos abiertos que tiene, con sus fechas.
+opción. Los importadores VIP (Zecat, Promoproductos, Nuevas Formas, Stocksur/CDO, X-Trade, Irion y Bello) se ven con su
+logo y su color, como en el seguimiento de importados del tablero de Formas Shop, en el desplegable, en la celda y en
+la tarjeta del tablero (pedido de Rodrigo del 12/11/2026). Se reconocen por el nombre, también con su razón social
+(«IMPROM S.A.» es Promoproductos, «ENE FORMAS» es Nuevas Formas); la lista y los colores están en
+`web/src/proveedores.tsx` y los isotipos, recortados de los de `formas-shop-tablero/assets/proveedores`, en
+`web/public/proveedores/`. Si un importador aparece con otro nombre, se agrega en `alias`. La ficha de cada proveedor muestra **«En producción»**: los artículos abiertos que tiene, con sus fechas.
 
 ## Cómo está hecho
 

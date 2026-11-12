@@ -11,7 +11,7 @@ import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
-interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number }
+interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
 
 const RELATED: Record<ObjectType, ObjectType[]> = {
   contact: ['company', 'deal', 'order'],
@@ -35,7 +35,7 @@ export default function RecordPage() {
   return (
     <div className="content flush record-wrap">
       <div className="record">
-        <aside className="left"><LeftPanel type={type} record={record} onChange={refresh} /></aside>
+        <aside className="left"><LeftPanel type={type} record={record} onChange={refresh} produccion={data.data.produccion} /></aside>
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
@@ -153,7 +153,7 @@ function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r:
   return r.props.pdv_finnegans ? `PDV ${r.props.pdv_finnegans}` : '';
 }
 
-function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRecord; onChange: () => void }) {
+function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; record: CrmRecord; onChange: () => void; produccion?: Loaded['produccion'] }) {
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
@@ -191,6 +191,13 @@ function LeftPanel({ type, record, onChange }: { type: ObjectType; record: CrmRe
             {type === 'deal'
               ? <div className="muted small rec-valor"><ValorEditable record={record} onSaved={onChange} />{stageOf(meta, record.props.dealstage) ? ` · ${stageOf(meta, record.props.dealstage)!.stage.label}` : ''}</div>
               : <div className="muted small">{subtitle(meta, type, record)}</div>}
+            {/* Pedidos: la etapa y quién lo tiene en producción, igual que en la vista previa y en la tarjeta del tablero. */}
+            {type === 'order' && (record.props.hs_pipeline_stage || produccion) && (
+              <div className="rec-prod">
+                {record.props.hs_pipeline_stage && <EtapaPedido value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} />}
+                {produccion && <QuienProduce {...produccion} />}
+              </div>
+            )}
             <TagChips meta={meta} ids={record.tags} /></div></div>
         <div className="rec-actions">
           {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
@@ -624,7 +631,6 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
         {puedeSubir && items.length > 0 && <BotonArchivos onArchivos={sub.elegir} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
       </div>
       {/* Quién lo tiene en producción (asignado en ClickUp), con su foto: a quién preguntarle cómo viene. */}
-      {d?.produccion && <div className="panel-body" style={{ paddingTop: 0 }}><span className="small muted" style={{ marginRight: 8 }}>En producción:</span><QuienProduce {...d.produccion} /></div>}
       {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
       {shown.map((it, i) => (
         <div key={i} className="assoc-item product-item">
@@ -946,6 +952,8 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   ] : [
     ['Total sin IVA', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
     ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],
+    // Quién lo tiene en producción (asignados en ClickUp), como en la tarjeta del tablero y en la ficha.
+    ...(data.data?.produccion ? [['Producción', <QuienProduce key="prod" {...data.data.produccion} />] as [string, ReactNode]] : []),
     ['Tipo', record.props.tipo_de_pedido || '—'],
     ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
     ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],

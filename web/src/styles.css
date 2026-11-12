@@ -843,23 +843,24 @@ table.prod-grid td.opcion-cell { min-width: 170px; max-width: 220px; }
 table.prod-grid td.opcion-cell .input { width: 100%; }
 .fecha-cell input[type="date"] { width: 138px; padding: 0 6px; }
 .fecha-alerta, .fecha-alerta input { color: var(--ui-negative-ink); font-weight: 600; }
-/* Estado de ClickUp: un punto del color de ClickUp sobre la pastilla, que se lee en los tres temas. */
-.st-pec { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 7px; border-radius: 4px; font-size: 11px; font-weight: 700;
-  letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
-  background: var(--e); color: var(--e-ink); }
-/* El circulito de ClickUp: un aro del color de la letra. */
-.st-pec::before { content: ''; width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; flex: none; opacity: .9; }
-.st-pec.con-icono::before { display: none; }
-.st-ic { flex: none; }
-.input.st-select .st-ic { margin-right: 1px; }
-[data-theme="contrast"] .st-pec { box-shadow: 0 0 0 1px var(--ui-ink); }
-/* El desplegable del estado, lleno del color del estado. */
-.input.st-select { background: var(--e); color: var(--e-ink); border-color: transparent; font-weight: 700; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
-.input.st-select:hover, .input.st-select.open { border-color: var(--ui-ink); }
-.input.st-select .st-pec { padding: 0; background: none; height: auto; }
-.input.st-select svg { color: var(--e-ink); }
-.select-text .st-pec { vertical-align: middle; }
-.col-head.st-col { border-top: 3px solid var(--e); border-radius: var(--r-panel) var(--r-panel) 0 0; }
+/* Estado de ClickUp: como las etapas de pedido (.etapa) — tinte suave del color de ClickUp (--e), texto oscuro, ícono
+   en el color y mayúscula solo inicial. */
+.st-pec { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 7px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500;
+  line-height: 1; white-space: nowrap; vertical-align: middle; max-width: 100%; min-width: 0;
+  color: color-mix(in srgb, var(--e) 62%, var(--ui-ink)); background: color-mix(in srgb, var(--e) 12%, var(--ui-surface)); }
+.st-pec .st-txt { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.st-ic { flex: none; color: color-mix(in srgb, var(--e) 85%, var(--ui-ink)); }
+.st-punto { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--e); }
+/* Sin pastilla: el ícono del color y el nombre con la letra de siempre. */
+.st-pec.plano { background: none; padding: 0; height: auto; color: inherit; font-size: inherit; font-weight: inherit; }
+[data-theme="dark"] .st-pec:not(.plano) { color: color-mix(in srgb, var(--e) 45%, #fff); background: color-mix(in srgb, var(--e) 22%, var(--ui-surface)); }
+[data-theme="dark"] .st-ic { color: color-mix(in srgb, var(--e) 65%, #fff); }
+[data-theme="contrast"] .st-pec:not(.plano) { color: color-mix(in srgb, var(--e) 55%, #000); box-shadow: inset 0 0 0 1px currentColor; }
+[data-theme="contrast"] .st-ic { color: color-mix(in srgb, var(--e) 55%, #000); }
+/* El desplegable del estado: un desplegable más del CRM, con el estado adentro. */
+.input.st-select { font-size: 13px; }
+.input.st-select .st-pec { font-weight: 500; }
+.select-text .st-pec, .select-value .st-pec { vertical-align: middle; }
 table.prod-grid .st-select { min-width: 190px; }
 /* Quién lo tiene: las fotos superpuestas. */
 .asignados { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 160px; }

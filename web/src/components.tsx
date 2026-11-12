@@ -676,12 +676,14 @@ export function tintaSobre(color: string) {
   const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return Number.isFinite(l) && l > 0.4 ? '#1f2328' : '#ffffff';
 }
+// El color de ClickUp de cada estado queda como matiz (--e), con el mismo tratamiento que las etapas de pedido (.etapa):
+// tinte suave de fondo, texto oscuro y el ícono en el color. Así se reconoce el estado sin pintar bloques llenos.
 export const estiloEstado = (color: string | null | undefined) => {
   const e = color && /^#[0-9a-f]{3,8}$/i.test(color) ? color : '#87909e';
-  return { ['--e' as string]: e, ['--e-ink' as string]: tintaSobre(e) } as CSSProperties;
+  return { ['--e' as string]: e } as CSSProperties;
 };
 // Un iconito para cada estado de la lista PEC (trazos de 24 × 24, del color de la letra), para reconocerlos de un
-// vistazo. Un estado nuevo de ClickUp que no está acá lleva el circulito de ClickUp.
+// vistazo. Un estado nuevo de ClickUp que no está acá lleva un punto del color.
 const ICONOS_ESTADO: Record<string, string> = {
   'ingreso de pedido': 'M4 13h4.5l1.5 2.5h4l1.5-2.5H20M4 13l2.5-8h11L20 13v6H4zM12 4.5v6M9.5 8 12 10.5 14.5 8',   // bandeja que entra
   pdv: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',                                                   // la orden
@@ -701,12 +703,20 @@ const ICONOS_ESTADO: Record<string, string> = {
   'anulado': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.6 5.6l12.8 12.8',                                         // prohibido
 };
 const iconoEstado = (estado: string) => ICONOS_ESTADO[estado.toLowerCase().trim()] ?? ICONOS_ESTADO[estado.toLowerCase().trim().replace('listo para entregar', 'listo para entergar')];
-export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
+// Cómo se lee un estado de ClickUp (vienen en minúscula, y uno con un error de tipeo): con mayúscula inicial.
+export function nombreEstado(estado: string) {
+  const t = (estado || 'sin estado').trim().replace(/^listo para entergar$/i, 'listo para entregar').replace(/^articulo con logo$/i, 'artículo con logo')
+    .replace(/^en revision$/i, 'en revisión').replace(/\/ stock$/i, ' / stock').replace(/\bpdv\b/gi, 'PDV');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+// `plano`: solo el ícono y el nombre, sin la pastilla (encabezado de columna, adentro del desplegable).
+export function EstadoClickup({ estado, color, plano }: { estado: string; color: string | null | undefined; plano?: boolean }) {
   const d = iconoEstado(estado ?? '');
   return (
-    <span className={`st-pec${d ? ' con-icono' : ''}`} style={estiloEstado(color)}>
-      {d && <svg className="st-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>}
-      {estado || 'sin estado'}
+    <span className={`st-pec${plano ? ' plano' : ''}`} style={estiloEstado(color)} title={nombreEstado(estado)}>
+      {d ? <svg className="st-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
+        : <span className="st-punto" aria-hidden="true" />}
+      <span className="st-txt">{nombreEstado(estado)}</span>
     </span>
   );
 }

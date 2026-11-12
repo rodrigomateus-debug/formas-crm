@@ -103,6 +103,15 @@ before(async () => {
         }
         return send({ id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: JSON.stringify(l) }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 100, output_tokens: 50 } });
       }
+      // La planilla de la libreta de direcciones, publicada como CSV (con comillas, comas y un salto de línea adentro).
+      if (p === '/lugares.csv') {
+        res.setHeader('content-type', 'text/csv');
+        return res.end(['PROVEEDOR,DIRECCION,H. ATENCION,TELEFONO,LOCALIDAD,ZONA,CONTACTO 1,CONTACTO 2,OBSERVACIONES,Datps Coordinación,Datos de Entrega',
+          `ZECAT ${RUN} (DEPOSITO),JOSE INGENIEROS ${PDV},9 A 17,11-5555-0000,RICARDO ROJAS ,NORTE,NATALIA,,"Tocar el timbre del ""portón"" gris, al fondo",,`,
+          `Nestle ${RUN} SARANDI," Nicaragua ${PDV_V}, CP:1872",8 a 12,,SARANDI,SUR,,,,"Pedir turno por mail.\nVa palletizado",ACTUALIZADO`,
+          `IMPREFAS ${RUN},CALLE 23 Y DIAGONAL 78,,,SAN ANDRES,NORTE,,,,,`,
+          ',,,,,,,,,,'].join('\r\n'));
+      }
       if (p === '/geo') {
         consultasGeo++;
         const q = url.searchParams.get('q') ?? '';
@@ -111,6 +120,7 @@ before(async () => {
         if (/Matienzo 1308/.test(q)) return send([{ lat: '-34.5345', lon: '-58.5170' }]);
         if (q.includes(`Libertador ${PDV}`)) return send([{ lat: '-34.5270', lon: '-58.4760' }]);
         if (q.includes(`Nicaragua ${PDV_V}`)) return send([{ lat: '-34.6790', lon: '-58.3460' }]);
+        if (q.includes(`JOSE INGENIEROS ${PDV}`)) return send([{ lat: '-34.5140', lon: '-58.4970' }]);
         if (q.includes(`Cnel. Sayos ${PDV}`)) return send([{ lat: '-34.6990', lon: '-58.3930' }]);
         return send([]);
       }
@@ -377,4 +387,49 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.deepEqual(escrito.filter((e) => e.body?.status).map((e) => [e.task, e.body.status]), [[G, 'en el impresor']]);
   hoy = (await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data;
   assert.equal(hoy.paradas.find((p) => p.clave === gorra.clave).visita, null);
+});
+
+test('cronograma: la libreta de direcciones se copia de la planilla y completa las paradas', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  const act = await api('POST', '/cronograma/lugares/actualizar');
+  assert.equal(act.status, 200, JSON.stringify(act.data));
+  assert.deepEqual([act.data.filas, act.data.error], [3, null], 'tres lugares (la fila vacía no cuenta)');
+  // Buscar un lugar para una parada: por calle, y los de ese proveedor aunque no se escriba nada.
+  let b = (await api('GET', '/cronograma/lugares?q=ingenieros')).data.lugares;
+  const zecat = b.find((l) => l.nombre === `ZECAT ${RUN} (DEPOSITO)`);
+  assert.equal(zecat.direccion, `JOSE INGENIEROS ${PDV}, RICARDO ROJAS, Buenos Aires`);
+  b = (await api('GET', `/cronograma/lugares?de=${encodeURIComponent(`ZECAT ${RUN}`)}`)).data.lugares;
+  assert.deepEqual(b.map((l) => l.nombre), [`ZECAT ${RUN} (DEPOSITO)`]);
+  // El cliente «Nestle … S.A.» no se llama igual que «Nestle … SARANDI»: se ofrece para elegir, pero no se usa solo.
+  b = (await api('GET', `/cronograma/lugares?de=${encodeURIComponent(CLIENTE)}`)).data.lugares;
+  assert.ok(b.some((l) => l.nombre === `Nestle ${RUN} SARANDI`));
+
+  // El proveedor no tiene dirección en su ficha: la parada usa la de la libreta, con su horario, contacto y observación.
+  let r = (await api('GET', '/cronograma/ruta?fecha=2026-11-17')).data;
+  for (let i = 0; i < 6 && r.buscando > 0; i++) r = (await api('GET', '/cronograma/ruta?fecha=2026-11-17')).data;
+  const prov = r.paradas.find((p) => p.movimientos.some((m) => m.npdv === PDV && m.tipo === 'retiro_proveedor'));
+  assert.equal(prov.direccion, `JOSE INGENIEROS ${PDV}, RICARDO ROJAS, Buenos Aires`);
+  assert.equal(prov.origen, 'libreta');
+  assert.deepEqual(prov.horario, [540, 1020]);
+  assert.equal(prov.lugar.contacto, 'NATALIA');
+  assert.equal(prov.lugar.observaciones, 'Tocar el timbre del "portón" gris, al fondo');
+  assert.equal(prov.lat, -34.514);
+  // La entrega va a Nicaragua (la dirección cargada en el pedido): la libreta reconoce la calle y suma el horario y cómo
+  // se coordina, aunque esté escrita distinto.
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  const ent = r.paradas.find((p) => p.movimientos.some((m) => m.tipo === 'entrega' && m.npdv === PDV));
+  assert.equal(ent.origen, 'pedido');
+  assert.equal(ent.lugar.nombre, `Nestle ${RUN} SARANDI`);
+  assert.deepEqual(ent.horario, [480, 720]);
+  assert.equal(ent.lugar.coordinacion, 'Pedir turno por mail. Va palletizado');
+  // Quien solo mira no ve cómo se coordina la entrega ni puede actualizar la libreta.
+  await api('POST', '/users', { email: `mira.${RUN}@formas.ar`, name: `Mira ${RUN}`, profile: 'produccion', role: 'viewer' });
+  asUser = `mira.${RUN}@formas.ar`;
+  const mira = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  if (mira.puede_editar === false) {
+    assert.equal(mira.paradas.find((p) => p.movimientos.some((m) => m.tipo === 'entrega' && m.npdv === PDV)).lugar.coordinacion, null);
+    assert.equal((await api('POST', '/cronograma/lugares/actualizar')).status, 403);
+  }
+  asUser = null;
 });

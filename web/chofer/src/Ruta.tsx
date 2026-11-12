@@ -94,7 +94,9 @@ function Detalle({ p, tarde, hecha, enLinea, alCambiar, alEntregar }: { p: Parad
         {p.movimientos.map((m) => <li key={m.id} className={m.hecho ? 'hecho' : ''}><strong>{TIPO[m.tipo] ?? m.tipo}</strong> PDV {m.npdv ?? '—'}{m.cliente ? ` ${m.cliente}` : ''}
           {m.articulo ? ` · ${m.cantidad != null ? `${num.format(m.cantidad)} ` : ''}${m.articulo}` : ''}</li>)}
       </ul>
-      {p.horario && <p className={tarde ? 'ruta-tarde' : ''}>Reciben de {hhmm(p.horario[0])} a {hhmm(p.horario[1])}{tarde ? ': vas justo' : ''}</p>}
+      {p.horario ? <p className={tarde ? 'ruta-tarde' : ''}>Reciben de {hhmm(p.horario[0])} a {hhmm(p.horario[1])}{tarde ? ': vas justo' : ''}</p> : p.lugar?.horario ? <p>Horario: {p.lugar.horario}</p> : null}
+      {(p.lugar?.contacto || p.lugar?.telefono) && <p>Preguntá por {[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</p>}
+      {p.lugar?.observaciones && <p>{p.lugar.observaciones}</p>}
       {(p.lat != null || p.direccion) && (
         <a className="boton chico" target="_blank" rel="noreferrer"
           href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat != null ? `${p.lat},${p.lng}` : encodeURIComponent(p.direccion!)}`}>Cómo llegar</a>

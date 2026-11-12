@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
@@ -1183,6 +1183,19 @@ api.put('/cronograma/direccion', async (c) => c.json(await guardarDireccion(c.en
 api.post('/cronograma/sugerencia', async (c) => {
   const b = await c.req.json<{ record_id?: number; aceptar?: boolean }>();
   return c.json(await resolverSugerencia(c.env, c.get('ctx'), Number(b.record_id), !!b.aceptar));
+});
+// La libreta de direcciones: buscar un lugar para una parada, y de qué planilla se copia.
+api.get('/cronograma/lugares', async (c) => c.json(await buscarLugares(c.env.DB, String(c.req.query('q') ?? ''), String(c.req.query('de') ?? ''))));
+api.get('/cronograma/lugares/estado', async (c) => { const x = await lugaresConfig(c.env.DB); return c.json({ at: x.at, filas: x.filas, error: x.error ?? null, url: c.get('ctx').user.role === 'admin' ? x.url : undefined }); });
+api.post('/cronograma/lugares/actualizar', async (c) => {
+  if (!puedeEditarCronograma(c.get('ctx').user)) throw new HttpError(403, 'La libreta la actualizan Logística, Producción y los administradores.');
+  const x = await actualizarLugares(c.env, true, true);
+  return c.json({ at: x.at, filas: x.filas, error: x.error ?? null });
+});
+api.put('/cronograma/lugares/planilla', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const x = await guardarLugaresConfig(c.env, await c.req.json());
+  return c.json({ at: x.at, filas: x.filas, error: x.error ?? null });
 });
 api.get('/cronograma/config', async (c) => c.json(await cronogramaConfig(c.env.DB)));
 api.put('/cronograma/config', async (c) => {

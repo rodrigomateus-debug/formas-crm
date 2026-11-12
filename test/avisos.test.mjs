@@ -47,12 +47,21 @@ test('avisos por mail: asignaciones de otra persona y resumen de tareas del día
   const estado = (await call('GET', '/hooks/avisos', undefined, H)).data;
   if (!estado.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba'); return; }
   const otra = (await call('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vera ${RUN}`, role: 'member' })).data;
-  await call('PUT', '/hooks/avisos', { enabled: true, users: [me, otra.email], hora: 8 }, H);
+  // «Avisos por mail» arranca apagado: solo les llega a los que lo tienen prendido (Configuración → Usuarios).
+  const sinAvisos = (await call('POST', '/users', { email: `sin.avisos.${RUN}@formas.ar`, name: `Sergio ${RUN}`, role: 'member' })).data;
+  assert.equal(sinAvisos.avisos_mail, 0, 'arranca apagado');
+  const yo = (await call('GET', '/meta')).data.me;
+  for (const u of [yo, otra]) assert.equal((await call('PATCH', `/users/${u.id}`, { avisos_mail: true })).status, 200);
+  assert.equal((await call('GET', '/users')).data.find((u) => u.id === otra.id).avisos_mail, 1);
+  await call('PUT', '/hooks/avisos', { enabled: true, hora: 8 }, H);
+  assert.equal((await call('GET', '/hooks/avisos', undefined, H)).data.config.users, undefined, 'ya no hay lista de mails');
   await call('POST', '/hooks/avisos/enviar', undefined, H);   // vacía lo que haya quedado de otras pruebas
   sent.length = 0;
 
-  // Rodrigo (el usuario de desarrollo) le asigna una empresa y una tarea a Vera; una tarea propia no avisa.
+  // Rodrigo (el usuario de desarrollo) le asigna una empresa y una tarea a Vera; una tarea propia no avisa. A Sergio
+  // también le asigna una, pero no le llega (no tiene los avisos prendidos).
   const emp = (await call('POST', '/records/company', { props: { name: `Asignada ${RUN}`, owner_id: otra.id } })).data;
+  await call('POST', '/records/company', { props: { name: `Para Sergio ${RUN}`, owner_id: sinAvisos.id } });
   await call('POST', '/activities', { type: 'task', subject: `Llamar ${RUN}`, owner_id: otra.id, due_at: new Date().toISOString(), links: [emp.id] });
   // Vencida a las 23:59 de ayer (hora de Buenos Aires): la vencida más reciente, sale primera en el resumen.
   const inicioHoy = Date.parse(`${new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10)}T03:00:00Z`);
@@ -62,6 +71,7 @@ test('avisos por mail: asignaciones de otra persona y resumen de tareas del día
   const asign = sent.find((m) => m.raw.includes(`<${otra.email}>`));
   assert.ok(asign, 'el mail de asignación le llega a Vera');
   assert.ok(asign.auth.includes(`tok:${otra.email}:https://www.googleapis.com/auth/gmail.send`), 'sale de su casilla, con permiso de envío');
+  assert.ok(!sent.some((m) => m.raw.includes(`<${sinAvisos.email}>`)), 'a quien no tiene los avisos prendidos no le llega');
   const txt = decode(asign.raw);
   assert.match(txt, new RegExp(`Asignada ${RUN}`));
   assert.match(txt, new RegExp(`Llamar ${RUN}`));
@@ -79,5 +89,11 @@ test('avisos por mail: asignaciones de otra persona y resumen de tareas del día
   const deRodrigo = decode(sent.find((m) => m.raw.includes(`<${me}>`)).raw);
   assert.match(deRodrigo, /Vencidas/);
   assert.match(deRodrigo, new RegExp(`Mía ${RUN}`));
-  await call('PUT', '/hooks/avisos', { users: [me] }, H);
+  assert.ok(!sent.some((m) => m.raw.includes(`<${sinAvisos.email}>`)), 'sin resumen para quien no los tiene prendidos');
+  // Apagado otra vez: no le llega más nada.
+  await call('PATCH', `/users/${otra.id}`, { avisos_mail: false });
+  sent.length = 0;
+  await call('POST', '/hooks/avisos/enviar?resumen=1', undefined, H);
+  assert.ok(!sent.some((m) => m.raw.includes(`<${otra.email}>`)), 'apagado, no le llega el resumen');
+  await call('PATCH', `/users/${yo.id}`, { avisos_mail: false });
 });

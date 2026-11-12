@@ -48,6 +48,7 @@ export interface User {
   extra_teams?: string;
   active: number;
   photo_url?: string | null;   // foto de su cuenta de Google (fotos.ts)
+  avisos_mail?: number;        // 1: recibe los avisos por mail (avisos.ts); apagado por defecto
   deleted_at?: string | null;  // eliminado en Configuración → Usuarios (no entra, no aparece; el historial conserva su nombre)
 }
 

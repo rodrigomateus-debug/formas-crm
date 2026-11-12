@@ -49,7 +49,7 @@ function Users() {
     if (!sees.length) return 'Ninguno';
     return hidden.length <= sees.length ? `Todos menos: ${hidden.map((p) => p.label).join(', ')}` : sees.map((p) => p.label).join(', ');
   };
-  const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', teams: [] as string[] });
+  const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', teams: [] as string[], avisos_mail: false });
   // Equipos: una sola lista. El primero es el principal (Negocios arranca en su pipeline); al sumar uno va al final.
   const teamsPick = (values: string[], onChange: (v: string[]) => void, small = true) => (
     <MultiPick small={small} options={meta.teams.map((t) => ({ value: String(t.id), label: t.name }))} values={values} onChange={onChange} />
@@ -74,7 +74,7 @@ function Users() {
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       {fotos.data?.error && <p className="small danger-text" style={{ marginTop: 0 }}>Fotos de Google: {fotos.data.error}</p>}
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
+        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos por mail</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
             <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
@@ -82,13 +82,15 @@ function Users() {
             <td>{u.role === 'admin' ? <span className="small muted">Todo</span> : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
             <td style={{ minWidth: 190, maxWidth: 240, overflow: 'visible' }}>{teamsPick(teamsOf(u).map(String), (v) => patch(u.id, { teams: v.map(Number) }))}</td>
             <td className="small" style={{ maxWidth: 150, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
+            <td><input type="checkbox" checked={!!u.avisos_mail} onChange={(e) => patch(u.id, { avisos_mail: e.target.checked })} aria-label={`Avisos por mail para ${u.name}`} /></td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
             <td>{u.id !== meta.me.id && <button className="btn sm ghost icon danger" title={`Eliminar a ${u.name}`} aria-label={`Eliminar a ${u.name}`} onClick={() => setBorrar(u)}><Icon name="trash" size={14} /></button>}</td>
           </tr>
         ))}</tbody>
       </table></div>
       <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial, Producción y Logística por ahora también ven todo; más adelante cada perfil va a ver lo suyo.
-        Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.</p>
+        Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.
+        Avisos por mail: el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega. Arranca apagado; solo les llega a los que lo tienen prendido.</p>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
         try { await http('POST', '/users', { ...f, teams: f.teams.map(Number) }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
       }}>Agregar</button>}>
@@ -97,13 +99,14 @@ function Users() {
         <label className="field">Perfil{profileSelect(f.profile, (v) => setF({ ...f, profile: v }), 'input')}</label>
         {f.profile !== 'admin' && <label className="field">Permisos{roleSelect(f.role, (v) => setF({ ...f, role: v }), 'input')}</label>}
         <label className="field">Equipos{teamsPick(f.teams, (v) => setF({ ...f, teams: v }), false)}</label>
+        <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={f.avisos_mail} onChange={(e) => setF({ ...f, avisos_mail: e.target.checked })} />Recibe avisos por mail</label>
       </Modal>}
       {borrar && <EliminarUsuario u={borrar} onClose={() => setBorrar(null)} onDone={() => { setBorrar(null); users.reload(); reload(); }} />}
     </>
   );
 }
 
-type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; hs_owner_id: string | null; photo_url: string | null };
+type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number };
 type Uso = { registros: Record<ObjectType, number>; tareas_abiertas: number; tokens: number; choferes: number };
 
 // Eliminar un usuario: antes dice qué tiene a su nombre y a quién se le pasa (src/worker/api.ts, DELETE /users/:id).

@@ -808,8 +808,8 @@ export async function recalcularEntrega(env: Env, orderId: number, opts: { ctx?:
 }
 
 async function avisarLogistica(db: D1Database, orderId: number, ctx: Ctx | null) {
-  // A Logística y a los administradores (que ven todo).
-  const { results } = await db.prepare("SELECT id FROM users WHERE active = 1 AND (profile = 'logistica' OR role = 'admin')").all<{ id: number }>();
+  // A Logística y a los administradores (que ven todo), si tienen «Avisos por mail» prendido (Configuración → Usuarios).
+  const { results } = await db.prepare("SELECT id FROM users WHERE active = 1 AND avisos_mail = 1 AND (profile = 'logistica' OR role = 'admin')").all<{ id: number }>();
   const stmts = results.map((u) => db.prepare(`INSERT INTO avisos (user_id, kind, record_id, by_user)
     SELECT ?, 'entrega', ?, ? WHERE NOT EXISTS (SELECT 1 FROM avisos WHERE user_id = ? AND kind = 'entrega' AND record_id = ? AND sent_at IS NULL)`)
     .bind(u.id, orderId, ctx?.user.id ?? null, u.id, orderId));

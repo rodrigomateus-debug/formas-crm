@@ -63,8 +63,8 @@ leídos). El pedido queda con «Estado de entrega»:
 «Falta entregar» dice qué falta. Si ClickUp dice «Entregado» y los remitos no cubren todo, la ficha lo avisa. En la
 lista y el tablero de pedidos, el botón **«Faltan entregas»** filtra los que tienen faltantes, diferencias o falta el
 remito. Cuando un remito nuevo deja un pedido con faltantes o diferencias, les llega un mail a los usuarios con perfil
-**Logística** y a los **administradores** (siempre: no hace falta sumarlos a la lista de avisos por mail). Si el pedido
-se completa o se finaliza antes de que salga el mail, no se manda.
+**Logística** y a los **administradores** que tienen **«Avisos por mail»** prendido (Configuración → Usuarios; arranca
+apagado). Si el pedido se completa o se finaliza antes de que salga el mail, no se manda.
 
 ### Un renglón del remito con otro nombre: asignarlo a mano
 

@@ -239,6 +239,12 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const compB = (await api('POST', '/records/company', { props: { name: `Cliente B ${RUN} SRL`, cuit: CUIT_B } })).data;
   const logi = (await api('POST', '/users', { email: `logistica.${RUN}@formas.ar`, name: `Logística ${RUN}`, profile: 'logistica', role: 'member' })).data;
   await api('POST', '/users', { email: `vende.rem.${RUN}@formas.ar`, name: `Vende ${RUN}`, role: 'member' });
+  // Los mails de faltantes: solo a Logística y a los administradores que tienen «Avisos por mail» prendido (arranca
+  // apagado). Logística y el administrador de desarrollo lo prenden; la otra persona de Logística, no.
+  const logi2 = (await api('POST', '/users', { email: `logistica2.${RUN}@formas.ar`, name: `Logística dos ${RUN}`, profile: 'logistica', role: 'member' })).data;
+  assert.equal(logi2.avisos_mail, 0, 'arranca apagado');
+  const adminDev = (await api('GET', '/meta')).data.me;
+  for (const u of [logi, adminDev]) assert.equal((await api('PATCH', `/users/${u.id}`, { avisos_mail: true })).status, 200);
   assert.ok(!(await api('POST', '/integrations/clickup/sync', { full: true })).data.error);
   const A = await pedidoDe(PDV);
   const B = await pedidoDe(PDV_B);
@@ -526,16 +532,17 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   // A un pedido completo no se le «finaliza con faltante».
   assert.equal((await api('POST', `/records/order/${A.id}/entrega/finalizar`, { motivo: 'nada' })).status, 400);
 
-  // El mail de faltantes: a Logística y a los administradores (como el usuario de desarrollo), aunque no estén en la
-  // lista de avisos (que acá tiene a otra persona). El de A no sale: se completó antes de que saliera.
+  // El mail de faltantes: a Logística y a los administradores (como el usuario de desarrollo) con los avisos prendidos;
+  // a la otra persona de Logística, no. El de A no sale: se completó antes de que saliera.
   const tokA = (await api('POST', '/tokens', { name: `Avisos ${RUN}`, source: 'api' })).data.token;
   const HA = { authorization: `Bearer ${tokA}` };
   if ((await api('GET', '/hooks/avisos', undefined, HA)).data.has_credentials) {
     const admin = (await api('GET', '/meta')).data.me;
     assert.equal(admin.role, 'admin');
-    await api('PUT', '/hooks/avisos', { enabled: true, users: [`nadie.${RUN}@formas.ar`] }, HA);
+    await api('PUT', '/hooks/avisos', { enabled: true }, HA);
     await api('POST', '/hooks/avisos/enviar', undefined, HA);
     const para = (email) => mails.filter((m) => m.includes(`<${email}>`)).map(textoDe);
+    assert.equal(para(logi2.email).length, 0, 'sin los avisos prendidos no le llega');
     for (const lista of [para(logi.email), para(admin.email)]) {
       const m = lista.find((x) => x.includes(B.name));
       assert.ok(m, 'le llegó el faltante del pedido B');
@@ -543,6 +550,8 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
       assert.ok(!lista.some((x) => x.includes(A.name)), 'el pedido A ya está completo');
     }
   }
+
+  await api('PATCH', `/users/${adminDev.id}`, { avisos_mail: false });
 
   // 9. Lo que ve el chofer: sus remitos, el más nuevo primero, con el mensaje de cada uno.
   const mios = (await api('GET', '/hooks/chofer/api/remitos', undefined, H)).data.remitos;

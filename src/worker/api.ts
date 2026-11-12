@@ -1212,8 +1212,9 @@ function profileAndRole(b: { profile?: string; role?: string }, cur: { profile: 
 
 api.post('/users', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null; teams?: number[] }>();
+  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null; teams?: number[]; avisos_mail?: boolean }>();
   const { profile, role } = profileAndRole(b, { profile: 'comercial', role: 'member' });
+  const avisos = b.avisos_mail ? 1 : 0;   // los avisos por mail arrancan apagados
   const email = String(b.email ?? '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Falta un mail válido.');
   const name = String(b.name ?? '').trim() || email;
@@ -1222,10 +1223,10 @@ api.post('/users', async (c) => {
   const prev = await c.env.DB.prepare('SELECT id, deleted_at FROM users WHERE email = ?').bind(email).first<{ id: number; deleted_at: string | null }>();
   if (prev && !prev.deleted_at) throw new HttpError(400, `Ya hay un usuario con ese mail (${email}).`);
   const row = prev
-    ? await c.env.DB.prepare(`UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = 1, deleted_at = NULL
-        WHERE id = ? RETURNING *`).bind(name, role, profile, team_id, extra_teams, prev.id).first<{ id: number }>()
-    : await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id, extra_teams) VALUES (?, ?, ?, ?, ?, ?) RETURNING *')
-      .bind(email, name, role, profile, team_id, extra_teams).first<{ id: number }>();
+    ? await c.env.DB.prepare(`UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, avisos_mail = ?, active = 1, deleted_at = NULL
+        WHERE id = ? RETURNING *`).bind(name, role, profile, team_id, extra_teams, avisos, prev.id).first<{ id: number }>()
+    : await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id, extra_teams, avisos_mail) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *')
+      .bind(email, name, role, profile, team_id, extra_teams, avisos).first<{ id: number }>();
   // Su foto de Google, ya (si no se puede, la trae el cron).
   if (c.env.GOOGLE_SA_JSON) c.executionCtx.waitUntil(actualizarFotos(c.env, Budget.of(c.env), { ids: [row!.id] }).catch((e) => console.error((e as Error).message)));
   return c.json(row, 201);
@@ -1243,7 +1244,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
@@ -1252,8 +1253,9 @@ api.patch('/users/:id', async (c) => {
     if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
   }
   const { team_id, extra_teams } = equiposDe(b, cur);
-  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ? WHERE id = ?')
-    .bind(b.name ?? cur.name, role, profile, team_id, extra_teams, b.active === undefined ? cur.active : b.active ? 1 : 0, cur.id).run();
+  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ?, avisos_mail = ? WHERE id = ?')
+    .bind(b.name ?? cur.name, role, profile, team_id, extra_teams, b.active === undefined ? cur.active : b.active ? 1 : 0,
+      b.avisos_mail === undefined ? cur.avisos_mail : b.avisos_mail ? 1 : 0, cur.id).run();
   return c.json({ ok: true });
 });
 

@@ -236,8 +236,19 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
   const max = Math.max(1, ...semanas.flatMap((s) => [0, 1, 2, 3, 4].map((i) => dias[sumar(s, i)]?.total ?? 0)));
   const estaSemana = lunesDe(hoy);
   useEffect(() => {
-    const el = caja.current?.querySelector<HTMLElement>('[aria-current="true"]') ?? caja.current?.querySelector<HTMLElement>(`[data-s="${centro}"]`);
-    if (el && caja.current) caja.current.scrollTo({ left: el.offsetLeft - caja.current.clientWidth / 2 + el.clientWidth / 2, behavior: 'smooth' });
+    const c = caja.current;
+    const el = c?.querySelector<HTMLElement>('[aria-current="true"]') ?? c?.querySelector<HTMLElement>(`[data-s="${centro}"]`);
+    if (!el || !c) return;
+    const base = c.getBoundingClientRect().left - c.scrollLeft;
+    const izq = (x: HTMLElement) => x.getBoundingClientRect().left - base;
+    let left = izq(el) - c.clientWidth / 2 + el.clientWidth / 2;
+    // La semana actual queda a la vista junto con la elegida, si entran las dos.
+    const hoyEl = c.querySelector<HTMLElement>('.cr-sem.actual');
+    if (hoyEl && hoyEl !== el && Math.abs(izq(hoyEl) - izq(el)) + el.clientWidth + 40 < c.clientWidth) {
+      left = Math.min(left, izq(hoyEl) - 32);
+      left = Math.max(left, izq(hoyEl) + hoyEl.clientWidth + 32 - c.clientWidth);
+    }
+    c.scrollTo({ left, behavior: 'smooth' });
   }, [semana, centro]);
   const meses: Array<{ mes: string; semanas: string[] }> = [];
   for (const s of semanas) {
@@ -264,6 +275,7 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
                   <button key={s} type="button" data-s={s} className={`cr-sem${s === semana ? ' on' : ''}${s === estaSemana ? ' actual' : ''}${s < estaSemana ? ' pasada' : ''}`} aria-current={s === semana}
                     title={`${s === estaSemana ? 'Esta semana. ' : ''}Semana del ${a.getDate()}/${a.getMonth() + 1} al ${b.getDate()}/${b.getMonth() + 1}: ${tot} movimientos, ${pend} pendientes${atr ? `, ${atr} atrasados` : ''}`}
                     onClick={(e) => { if (tiro.current?.movio) { e.preventDefault(); return; } onElegir(s); }}>
+                    {s === estaSemana && <span className="cr-sem-actual">Esta semana</span>}
                     <span className="cr-sem-rango num">{a.getDate()}–{b.getDate()}{a.getMonth() !== b.getMonth() ? `/${b.getMonth() + 1}` : ''}</span>
                     <span className="cr-sem-barras" aria-hidden="true">
                       {ds.slice(0, 5).map((d, i) => <i key={i} className={d?.atrasados ? 'atr' : d?.pendientes ? 'pend' : d?.total ? 'ok' : ''} style={{ height: `${d?.total ? Math.max(18, (d.total / max) * 100) : 6}%` }} />)}
@@ -277,7 +289,8 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
         ))}
       </div>
       <button type="button" className="btn ghost icon sm cr-der" aria-label="Un mes después" onClick={() => onCentro(sumar(centro, 28))}><Icon name="chevron" size={16} /></button>
-      <button type="button" className="btn sm" onClick={onHoy}>Hoy</button>
+      <button type="button" className={`btn sm cr-ir-hoy${semana === estaSemana ? ' on' : ''}`} onClick={onHoy} title="Ir a la semana actual">
+        <i aria-hidden="true" />Esta semana<span className="num">{D(estaSemana).getDate()}–{D(sumar(estaSemana, 4)).getDate()}/{D(sumar(estaSemana, 4)).getMonth() + 1}</span></button>
     </div>
   );
 }

@@ -140,7 +140,9 @@ test('pedidos desde ClickUp: alta, regla de la vendedora, estado por artículos,
   // 2. La vendedora lo mueve antes de producción (anticipo, boceto digital, listo para producción); el resto lo mueve ClickUp.
   const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
   const BOCETO_DIGITAL = 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9';
-  await api('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vende ${RUN}`, role: 'member' });
+  // La vendedora es la de los pedidos: en el perfil Ventas solo toca lo suyo (alcance.ts).
+  const vende = (await api('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vende ${RUN}`, role: 'member' })).data;
+  for (const p of [o, c]) assert.equal((await api('PATCH', `/records/order/${p.id}`, { props: { owner_id: vende.id } })).status, 200);
   asUser = `vende.${RUN}@formas.ar`;
   assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '1237498994' } })).status, 403, 'no a En producción');
   assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: ANTICIPO } })).status, 200, 'a Pendiente de Anticipo');

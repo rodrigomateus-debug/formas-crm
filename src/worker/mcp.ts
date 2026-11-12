@@ -6,7 +6,8 @@ import { associate, associationsOf, dissociate, primaryCompanyId } from './assoc
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
-import { assertDealVisible, canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
+import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
+import { assertActividadVisible, assertVisible, esVentas, puedeVer, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -84,12 +85,12 @@ const TOOLS: Tool[] = [
     run: async (a, ctx, env, base) => {
       const row = await getRow(env.DB, Number(a.id));
       const meta = new Meta(env.DB);
-      if (row.object_type === 'deal') await assertDealVisible(meta, ctx.user, row.pipeline_id);
+      await assertVisible(env.DB, meta, ctx.user, row);
       const visible = await visiblePipelineIds(meta, ctx.user);
       const hidden = visible ? (await meta.pipelines()).map((p) => p.id).filter((id) => !visible.includes(id)) : [];
-      const assoc = await associationsOf(env.DB, row.id, hidden);
+      const assoc = await associationsOf(env.DB, row.id, hidden, ctx.user);
       const lim = a.activity_limit ?? 15;
-      const tl = lim ? await timeline(env.DB, row.id, { limit: lim, hiddenPipelines: hidden }) : null;
+      const tl = lim ? await timeline(env.DB, row.id, { limit: lim, hiddenPipelines: hidden, user: ctx.user }) : null;
       return {
         ...slim(base, rowToRecord(row)),
         archived: !!row.archived,
@@ -143,7 +144,7 @@ const TOOLS: Tool[] = [
     },
     run: async (a, ctx, env, base) => {
       const cur = await getRow(env.DB, Number(a.id));
-      if (cur.object_type === 'deal') await assertDealVisible(new Meta(env.DB), ctx.user, cur.pipeline_id);
+      await assertVisible(env.DB, new Meta(env.DB), ctx.user, cur);
       return slim(base, rowToRecord(await updateRecord(env.DB, ctx, cur.object_type, cur.id, a.properties ?? {})));
     },
   },
@@ -324,11 +325,13 @@ const TOOLS: Tool[] = [
       const db = env.DB;
       const meta = new Meta(db);
       const first = await getRow(db, Number(a.id));
+      await assertVisible(db, meta, ctx.user, first);
       const companyId = first.object_type === 'company' ? first.id : await primaryCompanyId(db, first.id);
-      const row = companyId ? await getRow(db, companyId) : first;
+      const company = companyId ? await getRow(db, companyId) : null;
+      const row = company && await puedeVer(db, ctx.user, company) ? company : first;
       const visible = await visiblePipelineIds(meta, ctx.user);
       const hidden = visible ? (await meta.pipelines()).map((p) => p.id).filter((id) => !visible.includes(id)) : [];
-      const assoc = await associationsOf(db, row.id, hidden);
+      const assoc = await associationsOf(db, row.id, hidden, ctx.user);
       const rec = rowToRecord(row);
       const p = rec.props as Record<string, unknown>;
       const orderStage = new Map(((await meta.property('order', 'hs_pipeline_stage'))?.options ?? []).map((o) => [o.value, o.label]));
@@ -338,7 +341,7 @@ const TOOLS: Tool[] = [
         return { id: d.id, name: d.name, url: link(base, 'deal', d.id), etapa: await stageLabel(d.props.dealstage), abierto: !st?.is_closed, ganado: !!st?.is_won,
           monto: d.props.amount ?? null, cierre: d.props.closedate ?? null, ultimo_contacto: d.props.notes_last_contacted ?? null };
       }));
-      const tl = await timeline(db, row.id, { limit: 25, hiddenPipelines: hidden });
+      const tl = await timeline(db, row.id, { limit: 25, hiddenPipelines: hidden, user: ctx.user });
       const COMPRAS = ['estado_cliente', 'fecha_ultima_compra', 'fecha_primera_compra', 'cantidad_de_compras', 'compra_12m_usd', 'compra_historica_usd',
         'ticket_promedio_usd', 'cada_cuanto_compra', 'saldo_pendiente', 'saldo_vencido', 'vendedora_finnegans', 'unidad_finnegans'];
       return {
@@ -375,7 +378,7 @@ export async function report(db: D1Database, ctx: Ctx, type: ObjectType, groupBy
   }
   const sumExpr = sumProp ? (await sqlFor(meta, type, sumProp)).expr : type === 'deal' || type === 'order' ? 'r.amount' : null;
   const ids = await searchRecords(db, ctx, type, { filters, limit: 1 });
-  const where: string[] = ['r.object_type = ?', 'r.archived = 0'];
+  const where: string[] = ['r.object_type = ?', 'r.archived = 0', visibleSql('r', ctx.user)];
   const binds: unknown[] = [type];
   // Reutiliza el armado de filtros de la búsqueda: subconsulta por ids que cumplen.
   if (filters.length) {
@@ -393,6 +396,22 @@ export async function report(db: D1Database, ctx: Ctx, type: ObjectType, groupBy
     group_by: groupBy,
     groups: results.map((r) => ({ keys: cols.map((_, i) => r[`g${i}`]), count: r.count, ...(sumExpr ? { sum: r.sum } : {}) })),
   };
+}
+
+// Perfil Ventas (alcance.ts): con Claude, igual que en la pantalla, solo los registros que ve la vendedora. Las búsquedas,
+// las tareas y los reportes ya vienen recortados; acá se revisan los ids que recibe cada herramienta.
+const REGISTROS_DE: Record<string, (a: Record<string, any>) => unknown[]> = {
+  get_record: (a) => [a.id], update_record: (a) => [a.id], preparar_reunion: (a) => [a.id], property_history: (a) => [a.id],
+  associate_records: (a) => [a.from_id, a.to_id], merge_records: (a) => [a.primary_id, a.secondary_id],
+  create_record: (a) => a.associate_with ?? [], log_activity: (a) => a.record_ids ?? [], create_task: (a) => a.record_ids ?? [],
+  update_activity: (a) => a.record_ids ?? [], list_tasks: (a) => (a.record_id != null ? [a.record_id] : []),
+};
+async function alcanceVentas(tool: string, a: Record<string, any>, ctx: Ctx, env: Env) {
+  // El alta inteligente busca y completa registros existentes por mail, teléfono o dominio, sean de quien sean.
+  if (tool === 'upsert_bundle') throw new HttpError(403, 'El alta inteligente (upsert_bundle) no está en el perfil Ventas: buscá con search_records y creá con create_record.');
+  const meta = new Meta(env.DB);
+  for (const id of REGISTROS_DE[tool]?.(a) ?? []) await assertVisible(env.DB, meta, ctx.user, await getRow(env.DB, Number(id)));
+  if (tool === 'get_activity' || tool === 'update_activity') await assertActividadVisible(env.DB, ctx.user, Number(a.id));
 }
 
 type RpcReq = { jsonrpc: '2.0'; id?: string | number | null; method: string; params?: Record<string, any> };
@@ -424,6 +443,7 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
       if (!tool) return fail(-32602, `Herramienta desconocida: ${msg.params?.name}`);
       try {
         if (!tool.readOnly && ctx.user.role === 'viewer') throw new HttpError(403, 'El usuario del token es de solo lectura.');
+        if (esVentas(ctx.user)) await alcanceVentas(tool.name, msg.params?.arguments ?? {}, ctx, env);
         const result = await tool.run(msg.params?.arguments ?? {}, ctx, env, base);
         return ok({ content: [{ type: 'text', text: JSON.stringify(result, null, 1) }], structuredContent: Array.isArray(result) ? { results: result } : result });
       } catch (e) {

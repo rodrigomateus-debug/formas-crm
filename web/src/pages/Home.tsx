@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
-import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
+import { http, qs, useMeta, esVentas, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 
@@ -15,7 +15,9 @@ interface Dash {
 
 export default function Home() {
   const { meta } = useMeta();
-  const [owner, setOwner] = useState(meta.me.role === 'admin' || meta.me.role === 'manager' ? 'all' : 'me');
+  // Perfil Ventas: siempre sus números (el servidor no le da los del equipo).
+  const ventas = esVentas(meta.me);
+  const [owner, setOwner] = useState(!ventas && (meta.me.role === 'admin' || meta.me.role === 'manager') ? 'all' : 'me');
   const [unidades, setUnidades] = useState<string[]>([]);
   const u = unidades.length ? unidades.join(',') : undefined;
   const dash = useAsync(() => http<Dash>('GET', `/dashboard${qs({ owner, unidades: u })}`), [owner, u]);
@@ -40,11 +42,11 @@ export default function Home() {
       <div className="page-head">
         <h1>Hola, {meta.me.name.split(' ')[0]}</h1>
         <UnidadFilter value={unidades} onChange={setUnidades} />
-        <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
+        {!ventas && <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
           <option value="me">Mis números</option>
           <option value="all">Todo el equipo</option>
           {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
-        </Select>
+        </Select>}
       </div>
       <div className="kpis">
         <div className="panel kpi"><div className="label">Tareas vencidas</div><div className={`value${d?.tasks.overdue ? ' overdue' : ''}`}>{d?.tasks.overdue ?? '–'}</div><Link className="small" to="/tasks">Ver tareas</Link></div>
@@ -97,7 +99,7 @@ export default function Home() {
           </div>
         </div>
         <div className="panel">
-          <div className="panel-head"><h2>Ganado en {month} por vendedora</h2></div>
+          <div className="panel-head"><h2>Ganado en {month}{ventas ? '' : ' por vendedora'}</h2></div>
           <div className="panel-body stack">
             {Object.entries((d?.won ?? []).reduce<Record<string, { n: number; amount: number }>>((acc, w) => {
               const k = String(w.owner_id); acc[k] = { n: (acc[k]?.n ?? 0) + w.n, amount: (acc[k]?.amount ?? 0) + w.amount }; return acc;

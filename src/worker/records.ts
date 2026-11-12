@@ -4,6 +4,7 @@ import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
 import { emitDealEvent } from './events';
+import { esVentas, visibleSql } from './alcance';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 import { RELACIONES, propagarRelacion, relacionSola } from './relacion';
 
@@ -340,14 +341,15 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     await checkCreate(meta, ctx, (await meta.pipelineOf(stage.id))!, stage, props);
   }
   if (type === 'company' && !props.domain && props.website) props.domain = normDomain(props.website);
-  if (props.owner_id == null && ctx.source === 'crm' && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
+  // Lo que crea una vendedora queda a su nombre también si lo crea con Claude: si no, quedaría sin propietario, a la vista de todas.
+  if (props.owner_id == null && (ctx.source === 'crm' || (ctx.source === 'mcp' && esVentas(ctx.user))) && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
   if (type === 'contact' && props.email && !opts.skipDedupe) {
-    const dup = await db.prepare("SELECT id FROM records WHERE object_type = 'contact' AND email = ? AND archived = 0").bind(props.email).first<{ id: number }>();
-    if (dup) throw new HttpError(409, `Ya existe un contacto con ${props.email} (id ${dup.id}).`);
+    const dup = await db.prepare("SELECT r.id, u.name AS duenio FROM records r LEFT JOIN users u ON u.id = r.owner_id WHERE r.object_type = 'contact' AND r.email = ? AND r.archived = 0").bind(props.email).first<{ id: number; duenio: string | null }>();
+    if (dup) throw new HttpError(409, `Ya existe un contacto con ${props.email} (id ${dup.id}${dup.duenio ? `, de ${dup.duenio}` : ''}).`);
   }
   if (type === 'company' && props.domain && !opts.skipDedupe) {
-    const dup = await db.prepare("SELECT id FROM records WHERE object_type = 'company' AND domain = ? AND archived = 0").bind(normDomain(props.domain)).first<{ id: number }>();
-    if (dup) throw new HttpError(409, `Ya existe una empresa con el dominio ${props.domain} (id ${dup.id}).`);
+    const dup = await db.prepare("SELECT r.id, u.name AS duenio FROM records r LEFT JOIN users u ON u.id = r.owner_id WHERE r.object_type = 'company' AND r.domain = ? AND r.archived = 0").bind(normDomain(props.domain)).first<{ id: number; duenio: string | null }>();
+    if (dup) throw new HttpError(409, `Ya existe una empresa con el dominio ${props.domain} (id ${dup.id}${dup.duenio ? `, de ${dup.duenio}` : ''}).`);
   }
   // Contacto o empresa de Formas (por el mail o el dominio): «Equipo Formas» solo, si no se eligió otro tipo (relacion.ts).
   if ((type === 'contact' || type === 'company') && (props.tipo_de_relacion == null || props.tipo_de_relacion === '')) {
@@ -673,6 +675,8 @@ export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params:
     const visible = await visiblePipelineIds(meta, ctx.user);
     if (visible) { where.push('r.pipeline_id IN (SELECT value FROM json_each(?))'); binds.push(JSON.stringify(visible)); }
   }
+  // Perfil Ventas: lo suyo, lo sin propietario y lo asociado a lo suyo (alcance.ts).
+  if (esVentas(ctx.user)) where.push(visibleSql('r', ctx.user));
   if (!params.includeArchived) where.push('r.archived = 0');
   if (params.q?.trim()) {
     const q = params.q.trim();

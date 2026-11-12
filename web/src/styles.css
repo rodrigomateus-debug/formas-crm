@@ -558,6 +558,9 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
 .popover .opt { min-height: 32px; padding: 6px 10px; border-radius: var(--r-control); cursor: pointer; display: flex; gap: 8px; align-items: center; transition: background var(--dur-fast) var(--ease); }
 .popover .opt:hover, .popover .opt.on { background: var(--ui-surface-sunken); }
 .popover .opt.muted { cursor: default; }
+/* Perfil Ventas: ya existe y es de otra vendedora (el buscador lo muestra para no duplicar, pero no se abre). */
+.popover .opt.ajeno { cursor: default; opacity: .72; }
+.popover .opt.ajeno:hover { background: none; }
 .popover .opt.muted:hover { background: none; }
 .popover .grp, .gsearch .grp { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); padding: 10px 10px 4px; }
 /* Aviso (Toast del DS): superficie invertida, con el ícono del tono. */

@@ -855,7 +855,8 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 
 /* ---------- Producción (pages/Produccion.tsx): el PDV con sus artículos abajo, como la vista de ClickUp ---------- */
 .btn.xs { height: 24px; width: 24px; padding: 0; justify-content: center; flex: none; }
-.prod-wrap { max-height: calc(100vh - 230px); }
+/* El alto lo da list-fixed (la tabla ocupa el resto de la pantalla); sin eso (celular), la página se desplaza entera. */
+.content.list-fixed > .prod-wrap { max-height: none; }
 table.prod-grid td { height: 40px; padding: 0 8px; max-width: none; overflow: visible; }
 table.prod-grid th { padding-left: 8px; padding-right: 8px; }
 table.prod-grid th.prod-nombre, table.prod-grid td.prod-nombre { position: sticky; left: 0; z-index: 2; background: var(--ui-surface); min-width: 300px; max-width: 360px; overflow: hidden; }

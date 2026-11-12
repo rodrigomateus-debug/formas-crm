@@ -9,6 +9,7 @@ import Tasks from './pages/Tasks';
 import Settings from './pages/Settings';
 import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
+import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 
 export default function App() {
@@ -28,12 +29,16 @@ export default function App() {
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
   }, [loc.pathname]);
 
+  // Mensajes sin leer en las conversaciones que sigue (y si lo mencionaron).
+  const sinLeer = useNoLeidas();
   return (
     <div className="shell">
       <nav className={`sidebar${menu ? ' open' : ''}`} aria-label="Menú principal">
         <div className="brand"><img src="/formas-logo-white.png" alt="Formas" /><span>CRM</span></div>
         <NavLink to="/" end className="nav-link"><Icon name="home" />Inicio</NavLink>
         <NavLink to="/tasks" className="nav-link"><Icon name="task" />Tareas{tasks ? <span className="count">{tasks}</span> : null}</NavLink>
+        <NavLink to="/conversaciones" className="nav-link"><Icon name="chat" />Conversaciones
+          {sinLeer.no_leidos ? <span className={`count badge${sinLeer.menciones ? ' mencion' : ''}`} title={sinLeer.menciones ? `${sinLeer.no_leidos} sin leer · te mencionaron` : `${sinLeer.no_leidos} sin leer`}>{sinLeer.menciones ? '@ ' : ''}{sinLeer.no_leidos}</span> : null}</NavLink>
         <div className="nav-group">CRM</div>
         <NavLink to="/contacts" className="nav-link"><Icon name="contact" />Contactos</NavLink>
         <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>
@@ -57,6 +62,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/tasks" element={<Tasks />} />
+          <Route path="/conversaciones" element={<ConversacionesPage />} />
           <Route path="/entregas" element={<RemitosPage />} />
           <Route path="/produccion" element={<ProduccionPage />} />
           <Route path="/settings/*" element={<Settings />} />

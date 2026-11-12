@@ -79,7 +79,7 @@ export async function bocetoPorId(db: D1Database, id: number) {
 }
 
 // Cambiar estado (aprobado o no), tipo o producto. Aprobar uno en un pedido lo deja listo para ClickUp.
-export async function actualizarBoceto(db: D1Database, id: number, cambios: { estado?: string; tipo?: string; producto?: string | null; producto_nombre?: string | null }) {
+export async function actualizarBoceto(db: D1Database, id: number, cambios: { estado?: string; tipo?: string; producto?: string | null; producto_nombre?: string | null }, userId: number | null = null) {
   const b = await bocetoPorId(db, id);
   if (cambios.estado !== undefined && !ESTADOS.includes(cambios.estado as (typeof ESTADOS)[number])) throw new HttpError(400, `Estado desconocido: ${cambios.estado}.`);
   if (cambios.tipo !== undefined && !TIPOS.includes(cambios.tipo as (typeof TIPOS)[number])) throw new HttpError(400, `Tipo desconocido: ${cambios.tipo}.`);
@@ -90,6 +90,11 @@ export async function actualizarBoceto(db: D1Database, id: number, cambios: { es
     .bind(cambios.estado ?? b.estado, cambios.tipo ?? b.tipo, producto,
       cambios.producto_nombre === undefined ? (otroProducto ? producto : b.producto_nombre) : cambios.producto_nombre?.trim() || producto,
       otroProducto ? await siguienteVersion(db, b.record_id, producto) : b.version, otroProducto ? 1 : 0, otroProducto ? 1 : 0, id).run();
+  // Quién lo aprobó y cuándo (la conversación del pedido lo muestra); al volverlo a «para aprobar», se borra.
+  if (cambios.estado && cambios.estado !== b.estado) {
+    await db.prepare('UPDATE bocetos SET aprobado_at = ?, aprobado_por = ? WHERE id = ?')
+      .bind(cambios.estado === 'aprobado' ? new Date().toISOString() : null, cambios.estado === 'aprobado' ? userId : null, id).run();
+  }
   return bocetoPorId(db, id);
 }
 

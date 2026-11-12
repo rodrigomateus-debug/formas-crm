@@ -875,3 +875,106 @@ table.prod-grid .st-select { min-width: 190px; }
 .fecha-btn:hover, .fecha-btn:focus-visible { border-color: var(--ui-line-strong); background: var(--ui-surface); }
 .fecha-btn.fecha-alerta { color: var(--ui-negative-ink); }
 .fecha-input { width: 140px; padding: 0 6px; }
+
+/* ---------- Conversación del pedido (Conversacion.tsx): chat con @menciones y la actividad entremezclada ---------- */
+.seg { display: inline-flex; border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; flex: none; }
+.seg button { border: 0; background: none; padding: 4px 10px; font-size: 12px; font-weight: 500; color: var(--ui-ink-2); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--ui-line); }
+.seg button.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+
+.conv { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--ui-surface); position: relative; }
+.conv-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--ui-line); flex: none; color: var(--ui-ink); }
+.conv-head h3 { margin: 0; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-head > svg { flex: none; }
+.conv-head .btn.on { color: var(--accent-ink); background: var(--accent-soft); }
+.conv-siguen { display: inline-flex; }
+.conv-siguen .avatar { box-shadow: 0 0 0 2px var(--ui-surface); }
+.conv-siguen .avatar + .avatar { margin-left: -5px; }
+.conv-lista { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 16px 12px; overflow-wrap: anywhere; overscroll-behavior: contain; }
+.conv-vacio { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; color: var(--text-3); padding: 40px 16px; }
+.conv-vacio p { margin: 0; font-size: 13px; line-height: 1.5; max-width: 300px; }
+.conv-vacio b { color: var(--ui-ink-2); }
+.conv-dia { display: flex; align-items: center; gap: 10px; margin: 14px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.conv-dia::before, .conv-dia::after, .conv-nuevos::before, .conv-nuevos::after { content: ''; flex: 1; border-top: 1px solid var(--ui-line); }
+.conv-nuevos { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ui-negative); }
+.conv-nuevos::before, .conv-nuevos::after { border-color: var(--ui-negative); opacity: .5; }
+
+/* Eventos: una línea chica y gris, con la hora a la derecha. */
+.conv-ev { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: start; padding: 4px 0 4px 6px; font-size: 12px; color: var(--ui-ink-2); line-height: 1.5; }
+.conv-ev .ev-ic { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-surface-sunken); color: var(--text-3); margin-top: -1px; }
+.conv-ev.ev-boceto .ev-ic, .conv-ev.ev-articulo .ev-ic { background: var(--accent-soft); color: var(--accent-ink); }
+.conv-ev time { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 11px; padding-top: 1px; }
+.conv-ev b { color: var(--ui-ink); font-weight: 600; }
+.conv-ev .st-pec { font-size: 10px; vertical-align: 1px; }
+.ev-detalle { margin-top: 4px; padding: 6px 10px; border-left: 2px solid var(--ui-line); color: var(--ui-ink-2); white-space: pre-wrap; max-height: 3.2em; overflow: hidden; cursor: pointer; }
+.ev-detalle.abierto { max-height: none; cursor: auto; }
+
+/* Mensajes */
+.conv-msg { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding: 8px 8px 6px; margin: 2px -8px 0; border-radius: var(--r-control); position: relative;
+  transition: background var(--dur) var(--ease); }
+.conv-msg.cont { padding-top: 1px; margin-top: 0; }
+.conv-msg:hover { background: var(--ui-surface-sunken); }
+.conv-msg.mencionado { background: var(--ui-warning-soft); }
+.conv-msg.destello { background: var(--accent-soft); }
+.conv-msg .msg-av .avatar { width: 32px; height: 32px; font-size: 12px; }
+.msg-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; margin-bottom: 1px; }
+.msg-head b { color: var(--ui-ink); }
+.msg-head time { color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.msg-head .tag { font-size: 10px; }
+.msg-body { font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--ui-ink); }
+.mencion { color: var(--accent-ink); background: var(--accent-soft); border-radius: 4px; padding: 0 3px; font-weight: 600; }
+.mencion.yo { background: var(--ui-warning-soft); color: var(--ui-warning-ink); box-shadow: inset 0 0 0 1px currentColor; }
+.msg-cita { display: flex; gap: 6px; align-items: baseline; max-width: 100%; margin: 2px 0 4px; padding: 3px 8px; border: 0; border-left: 3px solid var(--ui-line-strong, var(--ui-line));
+  background: var(--ui-surface-sunken); border-radius: 0 6px 6px 0; font-size: 12px; color: var(--ui-ink-2); cursor: pointer; text-align: left; }
+.msg-cita b { flex: none; white-space: nowrap; }
+.msg-cita .ellipsis { min-width: 0; }
+/* En la ficha la pestaña ya dice «Conversación». */
+.conv.en-ficha .conv-head > svg, .conv.en-ficha .conv-head h3 { display: none; }
+.msg-pie { display: flex; gap: 10px; font-size: 11px; margin-top: 2px; }
+.msg-acciones { position: absolute; right: 6px; top: -10px; display: none; align-items: center; gap: 2px; background: var(--ui-surface); border: 1px solid var(--ui-line);
+  border-radius: var(--r-control); box-shadow: var(--shadow-pop); padding: 2px; }
+.msg-acciones .msg-hora { font-size: 11px; color: var(--text-3); padding: 0 6px; font-variant-numeric: tabular-nums; }
+.conv-msg:hover .msg-acciones, .conv-msg:focus-within .msg-acciones { display: flex; }
+.conv-msg.borrado { font-style: italic; }
+.conv-hay-nuevos { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); box-shadow: var(--shadow-pop); z-index: 2; }
+
+/* Escribir */
+.conv-escribir { flex: none; border-top: 1px solid var(--ui-line); padding: 10px 12px 12px; background: var(--ui-surface); }
+.conv-msg .conv-escribir { border: 0; padding: 4px 0 0; background: none; }
+.conv-respondiendo { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-ink-2); padding: 0 2px 6px; }
+.conv-caja { position: relative; display: flex; gap: 6px; align-items: flex-end; }
+.conv-caja textarea { flex: 1; resize: none; min-height: 38px; max-height: 220px; line-height: 1.45; padding-top: 8px; padding-bottom: 8px; }
+.conv-enviar { height: 38px; min-width: 38px; justify-content: center; }
+.conv-menciones { left: 0; bottom: calc(100% + 6px); min-width: 260px; max-width: 100%; }
+.conv-solo-mira { padding: 12px 16px; border-top: 1px solid var(--ui-line); }
+
+/* En la vista previa: a la izquierda del panel, del mismo alto. */
+.drawer-aside { pointer-events: auto; width: min(420px, 40vw); height: 100%; border-left: 1px solid var(--ui-line); box-shadow: var(--shadow-float); animation: drawer-in var(--dur-slow) var(--ease-out);
+  cursor: auto; display: flex; z-index: 1; overflow: hidden; }
+.drawer-aside .conv { flex: 1; min-width: 0; }
+.drawer-head .conv-abrir .count, .centro-tabs .count.nuevo { background: var(--ui-negative); color: var(--ui-surface); }
+.drawer-head .conv-abrir .count { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: var(--r-pill); margin-left: 2px; }
+.count.mencion { background: var(--ui-warning-soft) !important; color: var(--ui-warning-ink) !important; }
+.centro-tabs .tab { display: inline-flex; align-items: center; gap: 6px; }
+/* En la ficha: ocupa el centro, con su propio scroll. */
+.conv.en-ficha { height: calc(100vh - 170px); min-height: 460px; border: 1px solid var(--ui-line); border-radius: var(--r-panel); overflow: hidden; }
+@media (max-width: 1100px) {
+  /* Angosta: la conversación se abre encima de la vista previa, a todo el ancho del panel. */
+  .overlay.clear .drawer-aside { position: fixed; right: 0; top: 0; bottom: 0; width: min(440px, 100%); z-index: 2; }
+}
+
+/* En el menú y en la tarjeta del tablero */
+.nav-link .count.badge { color: var(--ui-surface); background: var(--ui-negative); padding: 1px 7px; border-radius: var(--r-pill); }
+.nav-link .count.badge.mencion { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.card-adj .adj.chat.ok { color: var(--ui-ink-2); }
+.card-adj .adj.chat.nuevo { opacity: 1; color: var(--ui-negative); }
+
+/* Bandeja de conversaciones */
+.conv-bandeja { display: flex; flex-direction: column; padding: 4px; }
+.conv-bandeja:empty { display: none; }
+.conv-fila { display: flex; gap: 12px; align-items: center; width: 100%; padding: 10px 12px; border: 0; background: none; border-radius: var(--r-control); text-align: left; cursor: pointer; color: var(--ui-ink); }
+.conv-fila:hover { background: var(--ui-surface-sunken); }
+.conv-fila + .conv-fila { border-top: 1px solid var(--ui-line); }
+.conv-fila .conv-ultimo { color: var(--ui-ink-2); margin-top: 2px; }
+.conv-fila.sin-leer .conv-ultimo { color: var(--ui-ink); }
+.conv-fila .count { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); background: var(--ui-negative); color: var(--ui-surface); }

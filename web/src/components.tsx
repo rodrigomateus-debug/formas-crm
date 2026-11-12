@@ -127,7 +127,9 @@ function scrollBehind(e: React.WheelEvent<HTMLDivElement>) {
   }
 }
 
-export function Drawer({ title, onClose, children, footer, clear }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; clear?: boolean }) {
+// `aside`: un panel pegado a la izquierda del lateral (la conversación del pedido en la vista previa). `actions`: botones
+// en la cabecera, antes de la cruz.
+export function Drawer({ title, onClose, children, footer, clear, aside, actions }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; clear?: boolean; aside?: ReactNode; actions?: ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
@@ -138,8 +140,9 @@ export function Drawer({ title, onClose, children, footer, clear }: { title: str
     // un círculo con una cruz. La rueda sigue moviendo la lista o el tablero de atrás.
     <div className={`overlay drawer-overlay${clear ? ' clear' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       onWheel={clear ? (e) => { if (e.target === e.currentTarget) scrollBehind(e) } : undefined}>
+      {aside && <div className="drawer-aside">{aside}</div>}
       <div className="drawer" role="dialog" aria-label={title}>
-        <div className="drawer-head"><h2>{title}</h2><button className="btn ghost icon" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={18} /></button></div>
+        <div className="drawer-head"><h2>{title}</h2>{actions}<button className="btn ghost icon" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={18} /></button></div>
         <div className="drawer-body">{children}</div>
         {footer && <div className="drawer-foot">{footer}</div>}
       </div>

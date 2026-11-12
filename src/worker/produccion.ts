@@ -146,6 +146,9 @@ export async function guardarTareas(db: D1Database, tasks: CuTask[]) {
     else if (/PDV/i.test(t.name ?? '')) filas.push(filaDe(t, t.id));
   }
   if (!filas.length) return 0;
+  // Cómo estaban antes, para anotar los cambios de estado en la conversación del pedido (conversacion.ts).
+  const antes = new Map((await db.prepare('SELECT task_id, estado, actualizado, record_id FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(filas.map((f) => f.task_id))).all<{ task_id: string; estado: string; actualizado: number; record_id: number | null }>()).results.map((r) => [r.task_id, r]));
   const stmts: D1PreparedStatement[] = [];
   for (const f of filas) {
     const set = (f.campos ? COLS.filter((c) => c !== 'task_id' && c !== 'pdv_task' && c !== 'es_pdv') : SIEMPRE).map((c) => `${c} = excluded.${c}`);
@@ -158,7 +161,23 @@ export async function guardarTareas(db: D1Database, tasks: CuTask[]) {
   await guardarPersonas(db, tasks);
   await guardarOpciones(db, tasks);
   await enlazarPedidos(db, [...new Set(filas.map((f) => f.pdv_task))]);
+  const cambios = filas.filter((f) => { const a = antes.get(f.task_id); return a && a.record_id && f.estado && a.estado !== f.estado && f.actualizado >= a.actualizado; });
+  if (cambios.length) await anotarCambiosDeEstado(db, cambios.map((f) => ({ ...f, record_id: antes.get(f.task_id)!.record_id!, antes: antes.get(f.task_id)!.estado })));
   return filas.length;
+}
+
+// Los cambios de estado que vinieron de ClickUp, a nombre de quien tiene asignada la tarea (como el historial del pedido).
+async function anotarCambiosDeEstado(db: D1Database, cambios: Array<Fila & { record_id: number; antes: string }>) {
+  const ids = [...new Set(cambios.flatMap((c) => lista(c.asignados).map(Number)))];
+  const personas = new Map(ids.length ? (await db.prepare('SELECT clickup_id, nombre, user_id FROM clickup_personas WHERE clickup_id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(ids)).all<{ clickup_id: number; nombre: string; user_id: number | null }>()).results.map((p) => [p.clickup_id, p]) : []);
+  const ts = now();
+  await db.batch(cambios.map((c) => {
+    const quien = lista(c.asignados).map((x) => personas.get(Number(x))).find(Boolean);
+    return db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, actor, source, at)
+      VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, ?, 'clickup', ?)`).bind(c.record_id, c.task_id, c.nombre, c.es_pdv, c.antes, c.estado,
+      quien?.user_id ?? null, quien && !quien.user_id ? quien.nombre : null, ts);
+  }));
 }
 
 // Cada PDV con su pedido del CRM (por el link de ClickUp del pedido), y sus artículos también.
@@ -487,6 +506,11 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   }
   const cols = Object.keys(local);
   await db.prepare(`UPDATE produccion SET ${cols.map((k) => `${k} = ?`).join(', ')}, leido_at = ? WHERE task_id = ?`).bind(...cols.map((k) => local[k] ?? null), now(), taskId).run();
+  // El cambio de estado, en la conversación del pedido, a nombre de quien lo hizo.
+  if (c === 'estado' && fila.record_id && local.estado !== fila.estado) {
+    await db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, 'crm')`)
+      .bind(fila.record_id, taskId, fila.nombre, fila.es_pdv, fila.estado, local.estado, ctx.user.id).run();
+  }
   // El estado (o la fecha real de entrega) del PDV cambia el pedido: se relee el PDV y se actualiza ya, sin esperar la
   // sincronización. Si falla, queda para la próxima corrida.
   if (c === 'estado' || (c === 'entrega_real' && fila.es_pdv)) {

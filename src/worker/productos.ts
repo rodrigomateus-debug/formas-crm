@@ -372,6 +372,7 @@ export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
 // productos tienen al menos uno; el boceto va atado al código del producto o, si no tiene, a su nombre).
 export interface Adjuntos {
   facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number;
+  mensajes: number;   // de la conversación del pedido (conversacion.ts)
   // Producción (produccion.ts): quién lo tiene asignado en ClickUp y cuántos artículos están listos.
   produccion?: { asignados: Persona[]; listos: number; total: number };
 }
@@ -382,7 +383,8 @@ export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
       (SELECT COUNT(*) FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0) AS bocetos,
       (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id
         AND EXISTS (SELECT 1 FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0 AND b.producto IN (li.code, li.name, p.name))) AS con_boceto,
-      (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS productos${PRODUCCION_TARJETA_SQL}
+      (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS productos,
+      (SELECT COUNT(*) FROM mensajes ms WHERE ms.record_id = r.id AND ms.borrado_at IS NULL) AS mensajes${PRODUCCION_TARJETA_SQL}
     FROM records r WHERE r.id IN (SELECT id FROM ids)`).bind(...binds);
 }
 type FilaAdjuntos = Omit<Adjuntos, 'produccion'> & { record_id: number; prod_asignados: string | null; prod_total: number; prod_listos: number };

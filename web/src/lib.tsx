@@ -375,6 +375,11 @@ const paths: Record<string, string> = {
   updown: 'M8 9l4-4 4 4M8 15l4 4 4-4',
   theme: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 3v18M12 3a9 9 0 0 1 0 18',
   timer: 'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z',
+  chat: 'M4 5h16v11H10l-5 4v-4H4z',
+  reply: 'M9 15l-5-5 5-5M4 10h10a6 6 0 0 1 6 6v3',
+  send: 'M4 12l16-8-6 16-2.5-6.5z',
+  at: 'M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1',
+  bell: 'M6 16V11a6 6 0 1 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
 };
 export function Icon({ name, size }: { name: keyof typeof paths | string; size?: number }) {
   return (

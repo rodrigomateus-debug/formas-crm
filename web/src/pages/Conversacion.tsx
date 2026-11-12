@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue, propOf, fmtDate, fmtRelative, userOf, type Meta, type ObjectType, type User } from '../lib';
+import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue, propOf, fmtDate, fmtRelative, userOf, type Meta, type ObjectType, type User, cabecerasVerComo } from '../lib';
 import { Avatar, EstadoClickup, UserAvatar } from '../components';
 import { RecordPreview } from './RecordPage';
 
@@ -221,7 +221,7 @@ function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCanc
         fd.append('archivo', chica, f.name || 'captura.png');
         const m = await medidas(chica);
         if (m.ancho) { fd.append('ancho', String(m.ancho)); fd.append('alto', String(m.alto)); }
-        const res = await fetch(`/api${subirA}`, { method: 'POST', body: fd, credentials: 'same-origin' });
+        const res = await fetch(`/api${subirA}`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
         const data = await res.json().catch(() => null) as (Adjunto & { error?: string }) | null;
         if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
         return data as Adjunto;

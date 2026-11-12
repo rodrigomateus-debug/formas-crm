@@ -18,13 +18,16 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 // photo_url: la foto de su cuenta de Google (la trae el CRM, src/worker/fotos.ts); sin foto, se ven sus iniciales.
-export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; photo_url?: string | null; deleted_at?: string | null }
+export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
-export interface Meta { me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }>; tags: Tag[]; key_props?: Partial<Record<ObjectType, string[]>>;
+export interface Meta {
+  // superadmin: quien está en la sesión puede «Ver como»; real_user: mirando como otro, quién es en realidad.
+  superadmin?: boolean; real_user?: { id: number; name: string; email: string; photo_url: string | null };
+  me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }>; tags: Tag[]; key_props?: Partial<Record<ObjectType, string[]>>;
   orden_vistas?: Partial<Record<ObjectType, Array<number | string>>> }
 export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean; tags?: number[] }
 export interface Activity {
@@ -64,17 +67,34 @@ export function registrarRuta(p: string) {
 // ¿Se está volviendo a la lista que se dejó (pasando solo por fichas)?
 export const vuelveALaLista = () => rutas.volver;
 
+// ---------- «Ver como» (superadmin) ----------
+
+// El usuario como el que se está mirando el CRM (auth.ts, verComo). Queda guardado en el navegador hasta «Volver a mi
+// usuario»; cada pedido al servidor lo manda en la cabecera x-ver-como. Es solo para mirar.
+const VER_COMO = 'crm:ver-como';
+export function verComoId(): number | null {
+  try { const v = Number(localStorage.getItem(VER_COMO)); return Number.isInteger(v) && v > 0 ? v : null; } catch { return null; }
+}
+export const cabecerasVerComo = (): Record<string, string> => { const id = verComoId(); return id ? { 'x-ver-como': String(id) } : {}; };
+// Cambiar de usuario recarga la página: así no queda nada en memoria del anterior (listas, sin leer, tableros).
+export function verComo(id: number | null) {
+  try { if (id) localStorage.setItem(VER_COMO, String(id)); else localStorage.removeItem(VER_COMO); } catch { /* sin memoria: no se puede */ }
+  window.location.reload();
+}
+
 // ---------- HTTP ----------
 
 export async function http<T = any>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo() },
     body: body === undefined ? undefined : JSON.stringify(body),
     credentials: 'same-origin',
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : null;
+  // El usuario que se estaba mirando ya no está (o se perdió el permiso): vuelve al propio.
+  if (res.status === 403 && data?.ver_como_invalido && verComoId()) { verComo(null); throw new Error(data.error); }
   if (!res.ok) {
     const err = new Error(data?.error ?? `Error ${res.status}`) as Error & { data?: any };
     err.data = data;
@@ -376,6 +396,7 @@ const paths: Record<string, string> = {
   theme: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 3v18M12 3a9 9 0 0 1 0 18',
   timer: 'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z',
   chat: 'M4 5h16v11H10l-5 4v-4H4z',
+  eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   image: 'M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15.5 9.5h.01',
   reply: 'M9 15l-5-5 5-5M4 10h10a6 6 0 0 1 6 6v3',
   send: 'M4 12l16-8-6 16-2.5-6.5z',

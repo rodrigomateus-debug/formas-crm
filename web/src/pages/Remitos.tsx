@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, useToast, userName, Icon, type CrmRecord } from '../lib';
+import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, useToast, userName, Icon, type CrmRecord, cabecerasVerComo } from '../lib';
 import { EstadoEntrega, Modal } from '../components';
 import { BotonArchivos } from './Bocetos';
 import { Select } from '../Select';
@@ -48,7 +48,7 @@ const origenDe = (r: Remito) => (r.origen === 'clickup' ? 'De ClickUp' : r.orige
 async function subirRemito(orderId: number, f: File) {
   const fd = new FormData();
   fd.append('archivo', await achicarImagen(f));
-  const res = await fetch(`/api/records/order/${orderId}/remitos`, { method: 'POST', body: fd, credentials: 'same-origin' });
+  const res = await fetch(`/api/records/order/${orderId}/remitos`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
   const data = await res.json().catch(() => ({})) as { error?: string };
   if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
   return data as unknown as { remito: Remito; entrega: Entrega };

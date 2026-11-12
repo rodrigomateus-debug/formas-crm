@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, type CrmRecord, type ObjectType } from './lib';
-import { Avatar, CreateRecord } from './components';
+import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
+import { Avatar, CreateRecord, Modal } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
 import RecordPage from './pages/RecordPage';
@@ -50,9 +51,10 @@ export default function App() {
         <div className="nav-bottom">
           {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
         </div>
-        <UserMenu name={meta.me.name} email={meta.me.email} photo={meta.me.photo_url} />
+        <UserMenu name={meta.me.name} email={meta.me.email} photo={meta.me.photo_url} superadmin={!!meta.superadmin} mirando={!!meta.real_user} />
       </nav>
       <div className="main">
+        {meta.real_user && <VerComoCartel />}
         <header className="topbar">
           <button className="btn ghost icon menu-btn" onClick={() => setMenu(!menu)} aria-label="Abrir menú"><Icon name="menu" size={20} /></button>
           <GlobalSearch />
@@ -153,9 +155,53 @@ function CreateMenu() {
 }
 
 // Usuario, abajo en el menú: desde acá cada uno elige el tema (Automático, Claro, Oscuro o Alto contraste).
-function UserMenu({ name, email, photo }: { name: string; email: string; photo?: string | null }) {
+// Mirando como otro usuario: arriba de todo, siempre a la vista, quién es y cómo volver.
+function VerComoCartel() {
+  const { meta } = useMeta();
+  const u = meta.me;
+  return (
+    <div className="ver-como-cartel" role="status">
+      <Icon name="eye" size={16} />
+      <span className="grow">Estás viendo el CRM como <b>{u.name}</b> <span className="ver-como-quien">({PROFILE_LABEL[u.profile] ?? u.profile}{u.role !== 'admin' ? ` · ${ROLE_LABEL[u.role] ?? u.role}` : ''})</span>.
+        {' '}Es solo para mirar: no se puede cambiar nada.</span>
+      <button className="btn sm" onClick={() => verComo(null)}>Volver a {meta.real_user?.name.split(' ')[0] ?? 'mi usuario'}</button>
+    </div>
+  );
+}
+
+// Elegir a quién mirar: los usuarios activos, buscando por nombre, mail, perfil o equipo.
+function VerComoModal({ onClose }: { onClose: () => void }) {
+  const { meta } = useMeta();
+  const [q, setQ] = useState('');
+  const yo = meta.real_user?.id ?? meta.me.id;
+  const norm = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const equipo = (u: User) => meta.teams.find((t) => t.id === u.team_id)?.name ?? '';
+  const lista = meta.users.filter((u) => u.active && !u.deleted_at && u.id !== yo)
+    .filter((u) => !q || norm(`${u.name} ${u.email} ${PROFILE_LABEL[u.profile] ?? ''} ${equipo(u)}`).includes(norm(q)));
+  return (
+    <Modal title="Ver el CRM como…" onClose={onClose}>
+      <p className="muted small" style={{ margin: 0 }}>Ves lo mismo que ve esa persona (sus pipelines, sus tareas, sus conversaciones y lo que puede hacer), sin salir de tu sesión.
+        Es solo para mirar: mientras tanto no se puede cambiar nada. Arriba queda el botón para volver a tu usuario.</p>
+      <input className="input" autoFocus placeholder="Buscar por nombre, mail, perfil o equipo…" value={q} onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && lista.length === 1) verComo(lista[0].id); }} />
+      <div className="ver-como-lista">
+        {lista.map((u) => (
+          <button key={u.id} type="button" className="ver-como-fila" onClick={() => verComo(u.id)}>
+            <Avatar name={u.name} photo={u.photo_url} />
+            <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{u.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{u.email}</span></span>
+            <span className="small muted">{[PROFILE_LABEL[u.profile] ?? u.profile, equipo(u)].filter(Boolean).join(' · ')}</span>
+          </button>
+        ))}
+        {!lista.length && <div className="muted small" style={{ padding: 12 }}>Nadie coincide con «{q}».</div>}
+      </div>
+    </Modal>
+  );
+}
+
+function UserMenu({ name, email, photo, superadmin, mirando }: { name: string; email: string; photo?: string | null; superadmin: boolean; mirando: boolean }) {
   const { tema, elegir } = useTema();
   const [open, setOpen] = useState(false);
+  const [elegirUsuario, setElegirUsuario] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -167,8 +213,17 @@ function UserMenu({ name, email, photo }: { name: string; email: string; photo?:
   }, [open]);
   return (
     <div className="me-wrap" ref={ref}>
+      {/* Fuera del menú lateral: si no, hereda su letra blanca. */}
+      {elegirUsuario && createPortal(<VerComoModal onClose={() => setElegirUsuario(false)} />, document.body)}
       {open && (
         <div className="popover me-menu" role="menu" aria-label="Tema">
+          {superadmin && <>
+            <div className="grp">Superadmin</div>
+            <div className="opt" role="menuitem" tabIndex={0} onClick={() => { setOpen(false); setElegirUsuario(true); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { setOpen(false); setElegirUsuario(true); } }}><Icon name="eye" size={16} />{mirando ? 'Ver como otro usuario…' : 'Ver como…'}</div>
+            {mirando && <div className="opt" role="menuitem" tabIndex={0} onClick={() => verComo(null)} onKeyDown={(e) => { if (e.key === 'Enter') verComo(null); }}>
+              <Icon name="x" size={16} />Volver a mi usuario</div>}
+          </>}
           <div className="grp">Tema</div>
           {TEMAS.map(([k, l]) => (
             <div key={k} className={`opt${tema === k ? ' on' : ''}`} role="menuitemradio" aria-checked={tema === k} tabIndex={0}

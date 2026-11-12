@@ -49,6 +49,7 @@ export interface User {
   active: number;
   photo_url?: string | null;   // foto de su cuenta de Google (fotos.ts)
   avisos_mail?: number;        // 1: recibe los avisos por mail (avisos.ts); apagado por defecto
+  superadmin?: number;         // 1: puede «Ver como» otro usuario (auth.ts); el de ADMIN_EMAIL lo es siempre
   deleted_at?: string | null;  // eliminado en Configuración → Usuarios (no entra, no aparece; el historial conserva su nombre)
 }
 
@@ -61,13 +62,16 @@ export interface Ctx {
   // Quién hizo el cambio afuera, cuando no es el usuario de la sincronización: en ClickUp, quien tiene asignado el PDV.
   // El historial lo guarda a su nombre (userId: su usuario del CRM, si lo tiene). Lo demás sigue siendo de `user`.
   actor?: { name: string; userId: number | null };
+  // «Ver como» (auth.ts): un superadmin mirando el CRM como `user`. Es solo para mirar: no se puede cambiar nada.
+  realUser?: User;
 }
 
 export type ObjectType = 'contact' | 'company' | 'deal' | 'order';
 export const OBJECT_TYPES: ObjectType[] = ['contact', 'company', 'deal', 'order'];
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  // `extra`: datos que acompañan el error en la respuesta (por ejemplo, para que la pantalla sepa qué hacer).
+  constructor(public status: number, message: string, public extra?: Record<string, unknown>) {
     super(message);
   }
 }

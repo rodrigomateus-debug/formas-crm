@@ -105,13 +105,33 @@ test('perfil Ventas: lo suyo, lo sin dueño y lo asociado; nada de otra vendedor
   assert.equal((await call('GET', '/dashboard?owner=all', undefined, V)).status, 200);
 
   // Pantallas que no tiene: Producción, Entregas, importar y exportar.
-  for (const [m, p] of [['GET', '/produccion'], ['GET', '/remitos/revisar'], ['GET', '/remitos/revisar/cuantos'], ['GET', `/records/order/${pedVera.id}/remitos`],
+  for (const [m, p] of [['GET', '/produccion'], ['GET', '/remitos/revisar'], ['GET', '/remitos/revisar/cuantos'], ['POST', `/records/order/${pedVera.id}/entrega/finalizar`],
     ['GET', '/export/company'], ['POST', '/import/company'], ['GET', '/choferes']]) {
     const r = await call(m, p, m === 'POST' ? { rows: [] } : undefined, V);
     assert.equal(r.status, 403, `${m} ${p}`);
     assert.match(r.data.error, /no está en el perfil Ventas/);
   }
   assert.equal((await call('GET', `/records/order/${pedVera.id}`, undefined, V)).data.produccion, undefined, 'tampoco quién lo tiene en producción');
+
+  // Los remitos de sus pedidos sí: los ve y los baja para mandárselos al cliente. Cargarlos y revisarlos es de Logística.
+  const subir = async (pedido) => {
+    const f = new FormData();
+    f.append('archivo', new Blob([`\xff\xd8\xff\xe0 remito ${pedido} ${RUN}`], { type: 'image/jpeg' }), `remito-${pedido}.jpg`);
+    const r = await fetch(`${CRM}/api/records/order/${pedido}/remitos`, { method: 'POST', body: f });
+    assert.ok(r.ok, await r.text());
+    return (await (await fetch(`${CRM}/api/records/order/${pedido}/remitos`)).json()).remitos.find((x) => x.record_id === pedido);
+  };
+  const remVera = await subir(pedVera.id);
+  const remOlga = await subir(pedOlga.id);
+  const susRemitos = (await call('GET', `/records/order/${pedVera.id}/remitos`, undefined, V)).data;
+  assert.ok(ids(susRemitos.remitos).includes(remVera.id), 've los remitos de su pedido');
+  assert.equal(susRemitos.puede_finalizar, false);
+  const bajada = await fetch(`${CRM}/api/remitos/${remVera.id}/archivo?descargar=1`, { headers: V });
+  assert.equal(bajada.status, 200);
+  assert.match(bajada.headers.get('content-disposition'), /^attachment/);
+  assert.equal((await fetch(`${CRM}/api/remitos/${remOlga.id}/archivo`, { headers: V })).status, 403, 'no el de un pedido de otra');
+  assert.equal((await call('GET', `/records/order/${pedOlga.id}/remitos`, undefined, V)).status, 403);
+  assert.equal((await call('POST', `/remitos/${remVera.id}/revisar`, { accion: 'descartar' }, V)).status, 403, 'revisar es de Logística');
 
   // Producción (y los administradores) siguen viendo todo.
   assert.equal((await call('GET', `/records/deal/${negOlga.id}`, undefined, { 'x-dev-user': pia.email })).status, 200);

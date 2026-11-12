@@ -26,7 +26,7 @@ export default function RecordPage() {
   const navigate = useNavigate();
   const data = useAsync(() => http<Loaded>('GET', `/records/${type}/${id}`), [type, id]);
   const [tlKey, setTlKey] = useState(0);
-  // Perfil Ventas: sin Entregas (remitos) ni Producción.
+  // Perfil Ventas: sin Producción (los remitos de sus pedidos sí, solo para ver y bajar).
   const ventas = esVentas(useMeta().meta.me);
   const [peek, setPeek] = useState<{ type: ObjectType; id: number } | null>(null);
   useEffect(() => { if (data.data?.redirect) navigate(recordUrl(type, data.data.redirect), { replace: true }); }, [data.data, navigate, type]);
@@ -53,7 +53,7 @@ export default function RecordPage() {
           {type === 'deal' && <FacturarCard record={record} />}
           {type === 'deal' && <BocetosNegocioCard dealId={record.id} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
-          {!ventas && type === 'order' && <RemitosCard record={record} onChange={refresh} />}
+          {type === 'order' && <RemitosCard record={record} onChange={refresh} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
@@ -999,8 +999,8 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {!esVentas(meta.me) && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} />}
-        {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). Ventas no los ve. */}
-        {!esVentas(meta.me) && type === 'order' && <RemitosCard record={record} onChange={changed} />}
+        {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}
+        {type === 'order' && <RemitosCard record={record} onChange={changed} />}
         {type === 'order' && <FilesCard recordId={id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
         {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}

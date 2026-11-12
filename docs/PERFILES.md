@@ -29,11 +29,14 @@ Una vendedora (perfil Comercial que no es administradora) ve:
 - **Tareas, actividad y conversaciones**: las suyas y las de los registros que ve (aunque las haya cargado otra persona).
   En la ficha de una empresa no se suma la actividad de los negocios que no son suyos.
 - **Saldo y deuda del cliente** (Finnegans), en la empresa y en el pedido.
+- **Remitos de sus pedidos**: la tarjeta «Entrega» del pedido (qué se entregó y qué falta) y cada remito para ver o
+  descargar, para mandárselo al cliente si tiene una duda. Cargarlos, revisarlos, asignarlos y cerrar la entrega es de
+  Logística.
 - **Inicio**: sus números; no el ranking «Ganado por vendedora» ni los números de otras.
 
 No ve ni hace:
 
-- **Producción** ni **Entregas** (tampoco los remitos del pedido ni quién lo tiene en producción).
+- **Producción** (tampoco quién tiene el pedido en producción) ni la pantalla **Entregas** (la bandeja de Logística).
 - **Importar** ni **exportar** listas (cuida la base de clientes; si necesita una lista, se la baja un administrador).
 - Abrir lo de otra vendedora: si lo busca, el buscador le muestra los **contactos y empresas** que ya existen con
   «Ya existe · es de Fulana» (solo el nombre y de quién es) para que no los cargue de nuevo; abrirlos le dice de quién es y

@@ -12,8 +12,8 @@ import { assertDealVisible } from './pipelines';
 //   - lo asociado a lo suyo: la empresa y los contactos de sus negocios, contactos y empresas; los pedidos de sus negocios.
 //   Un negocio de otra vendedora no se ve nunca por estar asociado a algo suyo (por ejemplo, a una empresa de ella).
 //   Encima de esto siguen los pipelines por equipo (pipelines.ts).
-// Pantallas: no ve Producción ni Entregas (ni los remitos, ni quién tiene el pedido en producción), ni el ranking del
-// equipo en Inicio. Sí ve el saldo y la deuda del cliente (Finnegans).
+// Pantallas: no ve Producción (ni quién tiene el pedido en producción), la bandeja de Entregas ni el ranking del equipo en
+// Inicio. Sí ve el saldo y la deuda del cliente (Finnegans) y los remitos de sus pedidos, para verlos y descargarlos.
 // No exporta ni importa listas.
 // Tareas, actividad y conversaciones: las suyas y las de los registros que ve.
 //

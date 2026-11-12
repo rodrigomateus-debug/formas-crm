@@ -96,7 +96,7 @@ function Users() {
           </tr>
         ))}</tbody>
       </table></div>
-      <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial (ventas) ve sus contactos, empresas, negocios y pedidos, lo que no tiene propietario (para tomarlo) y lo asociado a lo suyo, con sus tareas y conversaciones; ve el saldo y la deuda del cliente, pero no Producción, Entregas ni el ranking del equipo, y no importa ni exporta listas. Producción y Logística por ahora ven todo.
+      <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial (ventas) ve sus contactos, empresas, negocios y pedidos, lo que no tiene propietario (para tomarlo) y lo asociado a lo suyo, con sus tareas y conversaciones; ve el saldo y la deuda del cliente y los remitos de sus pedidos (para ver y descargar), pero no Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta listas. Producción y Logística por ahora ven todo.
         Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.
         Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito, o su menú abajo a la izquierda), solo para mirar, y dar o sacar este permiso.
         Avisos por mail: el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega. Arranca apagado; solo les llega a los que lo tienen prendido.</p>

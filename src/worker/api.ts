@@ -23,7 +23,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
-import { assertActividadVisible, assertVisible, esVentas, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, esVentas, idsVisibles, sinVentas } from './alcance';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -38,17 +38,20 @@ api.use('*', async (c, next) => {
   await next();
 });
 
-// Perfil Ventas (alcance.ts): sin Producción, Entregas, importar ni exportar; y cualquier ruta de un registro
+// Perfil Ventas (alcance.ts): sin Producción, Entregas, importar ni exportar (los remitos de sus pedidos sí los ve y los
+// baja, para mandárselos al cliente; revisarlos, cargarlos y cerrar entregas es de Logística); y cualquier ruta de un registro
 // (/records/<tipo>/<id>/…: la ficha, su historial, actividad, conversación, archivos, bocetos, productos, datos para
 // facturar, cambios, clonar, combinar, restaurar) solo si el registro es de ella, no tiene propietario o está asociado a lo suyo.
 const SIN_VENTAS: Array<[RegExp, string]> = [
   [/\/produccion(\/|$)/, 'Producción'], [/\/(remitos|entrega|choferes)(\/|$)/, 'Entregas'], [/\/(import|export)\//, 'Importar y exportar listas'],
 ];
 const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order)\/(\d+)(?:\/|$)/;
+const REMITOS_VENTAS = [/\/records\/order\/\d+\/remitos$/, /\/remitos\/\d+\/archivo$/];
 api.use('*', async (c, next) => {
   const ctx = c.get('ctx');
   if (esVentas(ctx.user)) {
-    const sin = SIN_VENTAS.find(([re]) => re.test(c.req.path));
+    const verRemitos = c.req.method === 'GET' && REMITOS_VENTAS.some((re) => re.test(c.req.path));
+    const sin = verRemitos ? undefined : SIN_VENTAS.find(([re]) => re.test(c.req.path));
     if (sin) sinVentas(ctx, sin[1]);
     const m = RUTA_REGISTRO.exec(c.req.path);
     if (m) await registroVisible(c, Number(m[1]));
@@ -950,7 +953,8 @@ api.get('/files/:id', async (c) => {
 api.get('/records/order/:id/remitos', async (c) => {
   const id = Number(c.req.param('id'));
   await getRow(c.env.DB, id, 'order');
-  const remitos = await remitosDelPedido(c.env.DB, id);
+  // Perfil Ventas: solo los remitos de este pedido (no los «puede ser de este» de otros pedidos, que revisa Logística).
+  const remitos = (await remitosDelPedido(c.env.DB, id)).filter((r) => !esVentas(c.get('ctx').user) || r.record_id === id || (r.pedidos ?? []).some((p) => p.id === id));
   const sinLeer = remitos.filter((r) => r.estado === 'sin_leer' && r.record_id === id).slice(0, 2);
   if (sinLeer.length && c.env.ANTHROPIC_API_KEY) {
     c.executionCtx.waitUntil((async () => { const b = Budget.of(c.env); for (const r of sinLeer) await leerRemito(c.env, r.id, { budget: b }).catch((e) => console.error('remito', r.id, (e as Error).message)); })());
@@ -973,9 +977,17 @@ api.post('/records/order/:id/remitos', async (c) => {
 });
 api.get('/remitos/:id/archivo', async (c) => {
   const id = Number(c.req.param('id'));
+  // Perfil Ventas: el remito de alguno de sus pedidos (el principal o los otros del mismo remito).
+  if (esVentas(c.get('ctx').user)) {
+    const { results } = await c.env.DB.prepare('SELECT record_id FROM remitos WHERE id = ?1 AND record_id IS NOT NULL UNION SELECT record_id FROM remito_pedidos WHERE remito_id = ?1')
+      .bind(id).all<{ record_id: number }>();
+    if (!(await idsVisibles(c.env.DB, c.get('ctx').user, results.map((r) => r.record_id))).size) throw new HttpError(403, 'Este remito es de pedidos de otra vendedora.', { ajeno: true });
+  }
   const a = await archivoDeRemito(c.env, id);
   if (!a) throw new HttpError(404, 'No se pudo traer el archivo del remito (si es de ClickUp, abrilo desde el PDV).');
-  return new Response(a.bytes, { headers: { 'content-type': a.mime, 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(a.nombre)}`, 'cache-control': 'private, max-age=3600' } });
+  // ?descargar=1: se baja como archivo (para mandárselo al cliente); si no, se abre en el navegador.
+  const como = c.req.query('descargar') ? 'attachment' : 'inline';
+  return new Response(a.bytes, { headers: { 'content-type': a.mime, 'content-disposition': `${como}; filename*=UTF-8''${encodeURIComponent(a.nombre)}`, 'cache-control': 'private, max-age=3600' } });
 });
 // Revisión: asignarlo a un pedido, confirmarlo (cuenta para la entrega), descartarlo o leerlo de nuevo.
 api.post('/remitos/:id/revisar', async (c) => {

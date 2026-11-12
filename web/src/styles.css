@@ -1144,3 +1144,25 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .fcol-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 12px; }
 .fcol-chip { padding: 0 4px 0 10px; max-width: 420px; }
 .fcol-chip button:first-child { display: inline-flex; gap: 4px; min-width: 0; max-width: 360px; font: inherit; color: inherit; }
+
+/* Archivos en la conversación (PDF, planillas, documentos…): tarjetas con la miniatura del PDF o la extensión. */
+.msg-archivos { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; max-width: 360px; }
+.msg-archivo { display: flex; align-items: center; gap: 4px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface); padding: 6px 6px 6px 6px; }
+.msg-archivo:hover { border-color: var(--ui-line-strong); }
+.arch-abrir { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left; font: inherit; color: var(--ui-ink); cursor: pointer; text-decoration: none; }
+.arch-mini { flex: none; width: 44px; height: 52px; border-radius: 6px; overflow: hidden; display: grid; place-items: center; background: var(--ui-surface-sunken); border: 1px solid var(--ui-line); }
+.arch-mini img { width: 100%; height: 100%; object-fit: cover; object-position: top; background: #fff; }
+.arch-mini.pdf .arch-ext { color: var(--ui-negative-ink); }
+.arch-ext { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--ui-ink-2); }
+.arch-info { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.arch-nombre { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arch-peso { font-size: 11px; color: var(--text-3); }
+.conv-pend.archivo { width: 150px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px 26px 6px 8px; background: var(--ui-surface); }
+.conv-pend .pend-ext { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--accent-ink); }
+.conv-pend .pend-nombre { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink); }
+.conv-pend .pend-peso { font-size: 11px; color: var(--text-3); }
+.conv-pend.archivo .pend-x { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
+.conv-pend.archivo.subiendo .spinner { left: auto; right: 6px; top: auto; bottom: 6px; margin: 0; width: 14px; height: 14px; }
+/* El PDF en el visor: las páginas en una columna blanca que se desplaza. */
+.visor-pdf { width: min(920px, 100%); height: 100%; overflow: auto; background: var(--ui-surface-sunken); border-radius: 6px; padding: 12px; cursor: auto; }
+.visor-pdf .boceto-paginas canvas { display: block; margin: 0 auto 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, .25); background: #fff; max-width: 100%; height: auto !important; }

@@ -181,7 +181,8 @@ export function BotonArchivos({ children, onArchivos, multiple = true, className
 // ---------- Mostrar ----------
 
 // El PDF dibujado con pdf.js (se ve igual en todos los navegadores, también en el celular): hasta 6 páginas, al ancho del visor.
-function VistaPdf({ url }: { url: string }) {
+// También lo usa la conversación del pedido (archivos PDF en los mensajes), con sus textos.
+export function VistaPdf({ url, paginas = 6, cargando = 'Cargando el boceto…', ayuda = 'Descargalo o abrilo en Drive.' }: { url: string; paginas?: number; cargando?: string; ayuda?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -196,7 +197,7 @@ function VistaPdf({ url }: { url: string }) {
         const caja = ref.current;
         if (!caja || !vivo) return;
         caja.innerHTML = '';
-        for (let n = 1; n <= Math.min(doc.numPages, 6) && vivo; n++) {
+        for (let n = 1; n <= Math.min(doc.numPages, paginas) && vivo; n++) {
           const page = await doc.getPage(n);
           const base = page.getViewport({ scale: 1 });
           const escala = Math.min(2.5, ((caja.clientWidth || 700) - 24) / base.width) * (window.devicePixelRatio || 1);
@@ -212,8 +213,8 @@ function VistaPdf({ url }: { url: string }) {
     })();
     return () => { vivo = false; };
   }, [url]);
-  return error ? <div className="muted small" style={{ padding: 16 }}>No se pudo mostrar el PDF: {error}. Descargalo o abrilo en Drive.</div>
-    : <div ref={ref} className="boceto-paginas"><span className="muted small">Cargando el boceto…</span></div>;
+  return error ? <div className="muted small" style={{ padding: 16 }}>No se pudo mostrar el PDF: {error}. {ayuda}</div>
+    : <div ref={ref} className="boceto-paginas"><span className="muted small">{cargando}</span></div>;
 }
 
 // Las fichitas de los bocetos de un producto: versión, tipo y estado; un clic abre el visor.

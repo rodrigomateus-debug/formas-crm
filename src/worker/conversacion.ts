@@ -22,8 +22,7 @@ import { estadosPec } from './produccion';
 const MENCION = /@\[([^\]\n]{1,80})\]\((\d{1,15})\)/g;
 const MAX = 5000;
 // Imágenes: achicadas en el navegador (lado mayor 2000 px); acá, el tope de una fila de D1 y cuántas por mensaje.
-const IMAGEN_MAX = 1_900_000;
-const IMAGENES_POR_MENSAJE = 10;
+const IMAGENES_POR_MENSAJE = 10;   // imágenes y archivos
 const MIMES_IMAGEN = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export function mencionesDe(body: string) {
@@ -220,6 +219,7 @@ export async function borrarMensaje(db: D1Database, ctx: Ctx, id: number) {
   // Las imágenes de un mensaje borrado no se ven más: se borran (y liberan lugar en la base).
   await db.batch([
     db.prepare('UPDATE mensajes SET borrado_at = ? WHERE id = ?').bind(now(), id),
+    borrarPartes(db, 'mensaje_id = ?', id),
     db.prepare('DELETE FROM mensaje_adjuntos WHERE mensaje_id = ?').bind(id),
   ]);
   return { ok: true };
@@ -255,7 +255,7 @@ export async function bandeja(db: D1Database, ctx: Ctx, opts: { noLeidas?: boole
     .bind(JSON.stringify(results.map((r) => r.ultimo_id))).all<{ id: number; user_id: number | null; body: string; created_at: string }>()).results.map((m) => [m.id, m])) : new Map();
   const conversaciones = results.map((r) => {
     const u = ultimos.get(r.ultimo_id);
-    return { ...r, ultimo: u ? { ...u, body: textoPlano(u.body).slice(0, 240) || '📷 Imagen' } : null };
+    return { ...r, ultimo: u ? { ...u, body: textoPlano(u.body).slice(0, 240) || '📎 Adjunto' } : null };
   });
   return {
     no_leidos: conversaciones.reduce((s, c) => s + c.no_leidos, 0),
@@ -264,43 +264,85 @@ export async function bandeja(db: D1Database, ctx: Ctx, opts: { noLeidas?: boole
   };
 }
 
-// ---------- Imágenes ----------
+// ---------- Imágenes y archivos ----------
 
 const esGif = (b: Uint8Array) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46;
 const esJpeg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
 const esPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
 const esWebp = (b: Uint8Array) => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45;
+const esPdf = (b: Uint8Array) => b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;   // %PDF
 
-// Sube una imagen para el próximo mensaje (queda sin mensaje hasta que se manda). Se mira el contenido, no solo lo que dice
-// el navegador: solo JPG, PNG, WebP o GIF (se sirven tal cual en el CRM).
-export async function subirImagen(db: D1Database, ctx: Ctx, recordId: number, archivo: File, medidas: { ancho?: unknown; alto?: unknown } = {}) {
+// Hasta 20 MB por archivo, en pedazos de 1,5 MB (una fila de D1 no puede pasar de 2 MB).
+const ARCHIVO_MAX = 20 * 1024 * 1024;
+const PEDAZO = 1_500_000;
+// Los demás archivos que se pueden adjuntar (se descargan; no se abren en el CRM): planillas, documentos, presentaciones,
+// texto, comprimidos y archivos de diseño.
+const OTROS: Record<string, string> = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel', csv: 'text/csv', ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword', odt: 'application/vnd.oasis.opendocument.text', rtf: 'application/rtf',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ppt: 'application/vnd.ms-powerpoint', txt: 'text/plain',
+  zip: 'application/zip', rar: 'application/vnd.rar', '7z': 'application/x-7z-compressed',
+  ai: 'application/postscript', eps: 'application/postscript', psd: 'image/vnd.adobe.photoshop', cdr: 'application/vnd.corel-draw', svg: 'image/svg+xml',
+  dxf: 'image/vnd.dxf', heic: 'image/heic', tif: 'image/tiff', tiff: 'image/tiff', mp4: 'video/mp4', mov: 'video/quicktime',
+};
+// Lo que se muestra en el CRM (el resto se descarga).
+export const seVe = (mime: string) => MIMES_IMAGEN.includes(mime) || mime === 'application/pdf';
+
+const borrarPartes = (db: D1Database, where: string, ...binds: unknown[]) =>
+  db.prepare(`DELETE FROM mensaje_adjunto_partes WHERE adjunto_id IN (SELECT id FROM mensaje_adjuntos WHERE ${where})`).bind(...binds);
+
+// Sube un archivo para el próximo mensaje (queda sin mensaje hasta que se manda). Se mira el contenido, no solo lo que dice
+// el navegador: una imagen o un PDF tienen que serlo de verdad; lo demás va por la extensión y se baja como archivo.
+export async function subirAdjunto(db: D1Database, ctx: Ctx, recordId: number, archivo: File, medidas: { ancho?: unknown; alto?: unknown } = {}) {
   await registro(db, recordId);
   const bytes = new Uint8Array(await archivo.arrayBuffer());
-  if (!bytes.length) throw new HttpError(400, 'La imagen está vacía.');
-  if (bytes.length > IMAGEN_MAX) throw new HttpError(413, 'La imagen es muy pesada (más de 1,9 MB). Probá con una captura o una foto más chica.');
-  const mime = esJpeg(bytes) ? 'image/jpeg' : esPng(bytes) ? 'image/png' : esWebp(bytes) ? 'image/webp' : esGif(bytes) ? 'image/gif' : null;
-  if (!mime || !MIMES_IMAGEN.includes(mime)) throw new HttpError(415, 'Solo imágenes JPG, PNG, WebP o GIF (las fotos HEIC del iPhone, pasalas a JPG).');
+  if (!bytes.length) throw new HttpError(400, 'El archivo está vacío.');
+  if (bytes.length > ARCHIVO_MAX) throw new HttpError(413, 'El archivo es muy pesado (más de 20 MB). Comprimilo o compartí el link de Drive.');
+  const ext = (archivo.name.match(/\.([a-z0-9]{1,5})$/i)?.[1] ?? '').toLowerCase();
+  const mime = esJpeg(bytes) ? 'image/jpeg' : esPng(bytes) ? 'image/png' : esWebp(bytes) ? 'image/webp' : esGif(bytes) ? 'image/gif'
+    : esPdf(bytes) ? 'application/pdf' : OTROS[ext] ?? null;
+  if (!mime) throw new HttpError(415, `No se pueden adjuntar archivos .${ext || 'sin extensión'}. Van imágenes, PDF, planillas, documentos, ZIP y archivos de diseño.`);
   const dim = (v: unknown) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n > 0 && n < 20000 ? n : null; };
-  const nombre = (archivo.name || 'imagen').replace(/[\r\n]/g, ' ').slice(0, 120);
-  // De paso, las que alguien subió y nunca mandó (de hace más de un día).
-  await db.prepare('DELETE FROM mensaje_adjuntos WHERE user_id = ? AND mensaje_id IS NULL AND created_at < ?')
-    .bind(ctx.user.id, new Date(Date.now() - 86_400_000).toISOString()).run();
+  const nombre = (archivo.name || (mime === 'application/pdf' ? 'documento.pdf' : 'imagen')).replace(/[\r\n]/g, ' ').slice(0, 160);
+  // De paso, los que alguien subió y nunca mandó (de hace más de un día).
+  const viejo = new Date(Date.now() - 86_400_000).toISOString();
+  await db.batch([
+    borrarPartes(db, 'user_id = ? AND mensaje_id IS NULL AND created_at < ?', ctx.user.id, viejo),
+    db.prepare('DELETE FROM mensaje_adjuntos WHERE user_id = ? AND mensaje_id IS NULL AND created_at < ?').bind(ctx.user.id, viejo),
+  ]);
   const row = await db.prepare(`INSERT INTO mensaje_adjuntos (record_id, user_id, nombre, mime, size, ancho, alto, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    RETURNING ${COLS_ADJUNTO}`).bind(recordId, ctx.user.id, nombre, mime, bytes.length, dim(medidas.ancho), dim(medidas.alto), bytes).first<Adjunto>();
+    RETURNING ${COLS_ADJUNTO}`).bind(recordId, ctx.user.id, nombre, mime, bytes.length, MIMES_IMAGEN.includes(mime) ? dim(medidas.ancho) : null,
+    MIMES_IMAGEN.includes(mime) ? dim(medidas.alto) : null, bytes.subarray(0, PEDAZO)).first<Adjunto>();
+  for (let n = 1; n * PEDAZO < bytes.length; n++) {
+    await db.prepare('INSERT INTO mensaje_adjunto_partes (adjunto_id, n, data) VALUES (?, ?, ?)').bind(row!.id, n, bytes.subarray(n * PEDAZO, (n + 1) * PEDAZO)).run();
+  }
   return row!;
 }
 
-// Sacar una imagen subida que todavía no se mandó.
-export async function quitarImagen(db: D1Database, ctx: Ctx, id: number) {
-  await db.prepare('DELETE FROM mensaje_adjuntos WHERE id = ? AND user_id = ? AND mensaje_id IS NULL').bind(id, ctx.user.id).run();
+// Sacar un archivo subido que todavía no se mandó.
+export async function quitarAdjunto(db: D1Database, ctx: Ctx, id: number) {
+  await db.batch([
+    borrarPartes(db, 'id = ? AND user_id = ? AND mensaje_id IS NULL', id, ctx.user.id),
+    db.prepare('DELETE FROM mensaje_adjuntos WHERE id = ? AND user_id = ? AND mensaje_id IS NULL').bind(id, ctx.user.id),
+  ]);
   return { ok: true };
 }
 
-// El archivo, para verlo: el de un mensaje (no borrado) o, mientras no se mandó, solo para quien lo subió.
-export async function imagen(db: D1Database, ctx: Ctx, id: number) {
-  const a = await db.prepare(`SELECT a.record_id, a.mensaje_id, a.user_id, a.nombre, a.mime, a.data FROM mensaje_adjuntos a
+// El archivo entero (los pedazos, en orden): el de un mensaje (no borrado) o, mientras no se mandó, solo para quien lo subió.
+export async function adjunto(db: D1Database, ctx: Ctx, id: number) {
+  const a = await db.prepare(`SELECT a.record_id, a.mensaje_id, a.user_id, a.nombre, a.mime, a.size, a.data FROM mensaje_adjuntos a
       LEFT JOIN mensajes m ON m.id = a.mensaje_id WHERE a.id = ? AND (a.mensaje_id IS NULL OR m.borrado_at IS NULL)`)
-    .bind(id).first<{ record_id: number; mensaje_id: number | null; user_id: number | null; nombre: string; mime: string; data: ArrayBuffer | number[] }>();
-  if (!a || (a.mensaje_id == null && a.user_id !== ctx.user.id)) throw new HttpError(404, 'No existe la imagen.');
-  return { ...a, bytes: a.data instanceof ArrayBuffer ? a.data : new Uint8Array(a.data).buffer };
+    .bind(id).first<{ record_id: number; mensaje_id: number | null; user_id: number | null; nombre: string; mime: string; size: number; data: ArrayBuffer | number[] }>();
+  if (!a || (a.mensaje_id == null && a.user_id !== ctx.user.id)) throw new HttpError(404, 'No existe el archivo.');
+  const aBytes = (d: ArrayBuffer | number[]) => (d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d));
+  const primero = aBytes(a.data);
+  let bytes = primero;
+  if (a.size > primero.length) {
+    const { results } = await db.prepare('SELECT data FROM mensaje_adjunto_partes WHERE adjunto_id = ? ORDER BY n').bind(id).all<{ data: ArrayBuffer | number[] }>();
+    bytes = new Uint8Array(a.size);
+    bytes.set(primero, 0);
+    let pos = primero.length;
+    for (const r of results) { const p = aBytes(r.data); bytes.set(p, pos); pos += p.length; }
+  }
+  return { record_id: a.record_id, nombre: a.nombre, mime: a.mime, bytes };
 }

@@ -18,9 +18,12 @@ que queda registrado, con @menciones y la actividad del pedido entremezclada.
 - Escribir (Enter manda, Shift+Enter baja de línea) y mencionar con `@` (lista de usuarios activos).
 - Responder a un mensaje (queda citado; clic en la cita lleva al original), editar los propios y borrar los propios
   (un administrador borra cualquiera). Queda «(editado)» y «Mensaje borrado».
-- Adjuntar imágenes (hasta 10 por mensaje, el mensaje puede ir sin texto): con el botón de la imagen, pegando una captura
-  con Ctrl+V o arrastrándolas sobre la conversación. Se ven en el mensaje (una sola, grande; varias, en grilla) y con un
-  clic a pantalla completa, con flechas para pasar a las otras de la conversación, «Descargar» y «Abrir».
+- Adjuntar archivos (hasta 10 por mensaje y 20 MB cada uno; el mensaje puede ir sin texto): con el clip, pegando con
+  Ctrl+V (una captura o un archivo copiado) o arrastrándolos sobre la conversación. Imágenes, PDF, planillas, documentos,
+  presentaciones, ZIP y archivos de diseño (AI, EPS, PSD, CDR, SVG…). Las imágenes se ven en el mensaje (una sola,
+  grande; varias, en grilla); los demás, como tarjetas (el PDF con la miniatura de su primera página). Imágenes y PDF se
+  abren a pantalla completa (el PDF con pdf.js, igual en todos los navegadores), con flechas, «Descargar» y «Abrir»; lo
+  demás se descarga.
 - «Todo» muestra los mensajes con la actividad; «Mensajes», solo el chat.
 - La campanita: seguir o dejar de seguir la conversación.
 - «Visto por» abajo del último mensaje y la raya de «Nuevos» desde donde había leído.
@@ -47,9 +50,11 @@ del registro (`activities`).
 - `src/worker/conversacion.ts` y las rutas `/api/records/:type/:id/conversacion` (GET con `desde` para las novedades,
   POST para escribir, `/leido`, `/seguir`), `/api/mensajes/:id` (PATCH, DELETE) y `/api/conversaciones` (la bandeja).
 - Las menciones van en el texto como `@[Nombre](id)`.
-- Imágenes (`migrations/0042_mensajes_imagenes.sql`, tabla `mensaje_adjuntos`): como las fotos de los remitos, se achican
-  en el navegador (lado mayor 2000 px, menos de 1,8 MB) y se guardan en la base. Se suben al elegirlas
-  (`POST …/conversacion/imagenes`) y quedan del mensaje al mandarlo (`adjuntos: [ids]`); se sirven en
+- Archivos (`mensaje_adjuntos`, migraciones 0042 y 0044): se guardan en la base, en pedazos de 1,5 MB (una fila de D1 no
+  puede pasar de 2 MB: el primero en `mensaje_adjuntos.data` y el resto en `mensaje_adjunto_partes`). Las imágenes se
+  achican antes en el navegador (lado mayor 2000 px). Una imagen o un PDF se reconocen por su contenido; lo demás, por la
+  extensión, y se sirve como descarga. Se suben al elegirlas
+  (`POST …/conversacion/adjuntos`) y quedan del mensaje al mandarlo (`adjuntos: [ids]`); se sirven en
   `/api/mensaje-adjuntos/:id`. Solo JPG, PNG, WebP o GIF (se mira el contenido del archivo). Las que se subieron y no se
   mandaron se borran al día siguiente; las de un mensaje borrado, al borrarlo.
 - La pantalla (`web/src/pages/Conversacion.tsx`) pide las novedades cada 12 segundos mientras está abierta y a la vista
@@ -58,6 +63,5 @@ del registro (`activities`).
 
 ## Lo que falta (ideas)
 
-- Adjuntar PDF u otros archivos en un mensaje (hoy van por Bocetos o Remitos).
 - Llevar los comentarios a ClickUp y traer los de ClickUp, mientras Corporate siga trabajando allá.
 - Que Claude (MCP) pueda leer y escribir en la conversación.

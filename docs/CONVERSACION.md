@@ -18,6 +18,9 @@ que queda registrado, con @menciones y la actividad del pedido entremezclada.
 - Escribir (Enter manda, Shift+Enter baja de línea) y mencionar con `@` (lista de usuarios activos).
 - Responder a un mensaje (queda citado; clic en la cita lleva al original), editar los propios y borrar los propios
   (un administrador borra cualquiera). Queda «(editado)» y «Mensaje borrado».
+- Adjuntar imágenes (hasta 10 por mensaje, el mensaje puede ir sin texto): con el botón de la imagen, pegando una captura
+  con Ctrl+V o arrastrándolas sobre la conversación. Se ven en el mensaje (una sola, grande; varias, en grilla) y con un
+  clic a pantalla completa, con flechas para pasar a las otras de la conversación, «Descargar» y «Abrir».
 - «Todo» muestra los mensajes con la actividad; «Mensajes», solo el chat.
 - La campanita: seguir o dejar de seguir la conversación.
 - «Visto por» abajo del último mensaje y la raya de «Nuevos» desde donde había leído.
@@ -44,12 +47,17 @@ del registro (`activities`).
 - `src/worker/conversacion.ts` y las rutas `/api/records/:type/:id/conversacion` (GET con `desde` para las novedades,
   POST para escribir, `/leido`, `/seguir`), `/api/mensajes/:id` (PATCH, DELETE) y `/api/conversaciones` (la bandeja).
 - Las menciones van en el texto como `@[Nombre](id)`.
+- Imágenes (`migrations/0042_mensajes_imagenes.sql`, tabla `mensaje_adjuntos`): como las fotos de los remitos, se achican
+  en el navegador (lado mayor 2000 px, menos de 1,8 MB) y se guardan en la base. Se suben al elegirlas
+  (`POST …/conversacion/imagenes`) y quedan del mensaje al mandarlo (`adjuntos: [ids]`); se sirven en
+  `/api/mensaje-adjuntos/:id`. Solo JPG, PNG, WebP o GIF (se mira el contenido del archivo). Las que se subieron y no se
+  mandaron se borran al día siguiente; las de un mensaje borrado, al borrarlo.
 - La pantalla (`web/src/pages/Conversacion.tsx`) pide las novedades cada 12 segundos mientras está abierta y a la vista
   (lo de los últimos 20 minutos, por índice: pocas filas), y los sin leer del menú cada 45 segundos.
 - Prueba: `test/conversacion.test.mjs` (y los casos sumados en `test/produccion.test.mjs` y `test/avisos.test.mjs`).
 
 ## Lo que falta (ideas)
 
-- Adjuntar imágenes o archivos en un mensaje (hoy los archivos van por Bocetos o Remitos).
+- Adjuntar PDF u otros archivos en un mensaje (hoy van por Bocetos o Remitos).
 - Llevar los comentarios a ClickUp y traer los de ClickUp, mientras Corporate siga trabajando allá.
 - Que Claude (MCP) pueda leer y escribir en la conversación.

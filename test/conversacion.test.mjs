@@ -91,6 +91,40 @@ test('conversación del pedido: mensajes, menciones, no leídos y actividad', as
   await call('POST', url, { body: `@[${ceci.name}](${ceci.id}) ¿llegó?` });
   assert.equal((await call('GET', '/conversaciones?no_leidas=1', undefined, C)).data.conversaciones.find((c) => c.record_id === pedido.id)?.menciones, 1);
 
+  // Imágenes: se suben al elegirlas y van con el mensaje (puede ir sin texto). Solo imágenes de verdad, hasta 1,9 MB.
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+  const subir = async (bytes, nombre, tipo, headers = {}) => {
+    const fd = new FormData();
+    fd.append('archivo', new File([bytes], nombre, { type: tipo }));
+    fd.append('ancho', '1'); fd.append('alto', '1');
+    const res = await fetch(`${CRM}/api${url}/imagenes`, { method: 'POST', body: fd, headers });
+    return { status: res.status, data: await res.json() };
+  };
+  const img = await subir(PNG, 'captura.png', 'image/png');
+  assert.equal(img.status, 201, JSON.stringify(img.data));
+  assert.deepEqual([img.data.mime, img.data.size, img.data.ancho, img.data.mensaje_id], ['image/png', PNG.length, 1, null]);
+  assert.equal((await subir(Buffer.from('<svg onload=alert(1)>'), 'x.png', 'image/png')).status, 415, 'se mira el contenido, no el nombre');
+  assert.equal((await subir(Buffer.concat([PNG, Buffer.alloc(1_950_000)]), 'grande.png', 'image/png')).status, 413);
+  // Mientras no se manda, la ve solo quien la subió; nadie más la puede usar en su mensaje.
+  assert.equal((await fetch(`${CRM}/api/mensaje-adjuntos/${img.data.id}`, { headers: C })).status, 404);
+  assert.equal((await call('POST', url, { body: 'mía', adjuntos: [img.data.id] }, C)).status, 400);
+  const conImg = await call('POST', url, { body: '', adjuntos: [img.data.id] });
+  assert.equal(conImg.status, 201, JSON.stringify(conImg.data));
+  assert.deepEqual([conImg.data.body, conImg.data.adjuntos.map((a) => a.id)], ['', [img.data.id]]);
+  assert.equal((await call('POST', url, { body: '', adjuntos: [img.data.id] })).status, 400, 'ya es de otro mensaje');
+  const bajada = await fetch(`${CRM}/api/mensaje-adjuntos/${img.data.id}`, { headers: C });
+  assert.equal(bajada.status, 200);
+  assert.equal(bajada.headers.get('content-type'), 'image/png');
+  assert.equal(Buffer.compare(Buffer.from(await bajada.arrayBuffer()), PNG), 0);
+  assert.deepEqual((await call('GET', url)).data.items.find((i) => i.key === `m${conImg.data.id}`).adjuntos.map((a) => a.id), [img.data.id]);
+  assert.equal((await call('GET', '/conversaciones', undefined, C)).data.conversaciones.find((c) => c.record_id === pedido.id).ultimo.body, '📷 Imagen');
+  // Una subida que se saca antes de mandar se borra; las de un mensaje borrado, también.
+  const suelta = await subir(PNG, 'otra.png', 'image/png');
+  await call('DELETE', `/mensaje-adjuntos/${suelta.data.id}`);
+  assert.equal((await call('POST', url, { body: 'x', adjuntos: [suelta.data.id] })).status, 400);
+  await call('DELETE', `/mensajes/${conImg.data.id}`);
+  assert.equal((await fetch(`${CRM}/api/mensaje-adjuntos/${img.data.id}`)).status, 404);
+
   // La tarjeta del tablero cuenta los mensajes (sin los borrados).
   const lista = (await call('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(RUN)}`)).data;
   const tarjeta = lista.columns?.flatMap((c) => c.records).find((r) => r.id === pedido.id);

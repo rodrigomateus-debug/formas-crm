@@ -16,7 +16,7 @@ import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visib
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
-import { bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, seguir } from './conversacion';
+import { bandeja, borrarMensaje, conversacion, editarMensaje, escribir, imagen, marcarLeido, quitarImagen, seguir, subirImagen } from './conversacion';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
@@ -364,8 +364,25 @@ api.get('/records/:type/:id/conversacion', async (c) => {
 api.post('/records/:type/:id/conversacion', async (c) => {
   canWrite(c.get('ctx'));
   const rec = await registroVisible(c, Number(c.req.param('id')));
-  const b = await c.req.json<{ body?: string; responde_a?: number | null }>();
-  return c.json(await escribir(c.env.DB, c.get('ctx'), rec.id, { body: b.body, responde_a: b.responde_a }), 201);
+  const b = await c.req.json<{ body?: string; responde_a?: number | null; adjuntos?: number[] }>();
+  return c.json(await escribir(c.env.DB, c.get('ctx'), rec.id, { body: b.body, responde_a: b.responde_a, adjuntos: b.adjuntos }), 201);
+});
+// Imágenes del próximo mensaje: se suben al elegirlas (formulario con «archivo», «ancho» y «alto») y van con el mensaje.
+api.post('/records/:type/:id/conversacion/imagenes', async (c) => {
+  canWrite(c.get('ctx'));
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const form = await c.req.formData();
+  const archivo = form.get('archivo');
+  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta la imagen.');
+  return c.json(await subirImagen(c.env.DB, c.get('ctx'), rec.id, archivo, { ancho: form.get('ancho'), alto: form.get('alto') }), 201);
+});
+api.delete('/mensaje-adjuntos/:id', async (c) => c.json(await quitarImagen(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.get('/mensaje-adjuntos/:id', async (c) => {
+  const a = await imagen(c.env.DB, c.get('ctx'), Number(c.req.param('id')));
+  await registroVisible(c, a.record_id);
+  const disp = c.req.query('descargar') ? 'attachment' : 'inline';
+  return new Response(a.bytes, { headers: { 'content-type': a.mime, 'content-disposition': `${disp}; filename*=UTF-8''${encodeURIComponent(a.nombre)}`,
+    'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' } });
 });
 api.post('/records/:type/:id/conversacion/leido', async (c) => {
   const rec = await registroVisible(c, Number(c.req.param('id')));

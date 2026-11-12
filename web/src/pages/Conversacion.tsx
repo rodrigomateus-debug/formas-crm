@@ -1,5 +1,6 @@
+import { createPortal } from 'react-dom';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { http, qs, useMeta, useToast, Icon, OBJECTS, formatValue, propOf, fmtDate, fmtRelative, userOf, type Meta, type ObjectType, type User } from '../lib';
+import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue, propOf, fmtDate, fmtRelative, userOf, type Meta, type ObjectType, type User } from '../lib';
 import { Avatar, EstadoClickup, UserAvatar } from '../components';
 import { RecordPreview } from './RecordPage';
 
@@ -9,8 +10,10 @@ import { RecordPreview } from './RecordPage';
 
 export interface Mensaje {
   key: string; kind: 'mensaje'; at: string; id: number; record_id: number; user_id: number | null; body: string; menciones: number[];
-  responde_a: number | null; source: string; editado_at: string | null; borrado_at: string | null; created_at: string;
+  responde_a: number | null; source: string; editado_at: string | null; borrado_at: string | null; created_at: string; adjuntos: Adjunto[];
 }
+export interface Adjunto { id: number; nombre: string; mime: string; size: number; ancho: number | null; alto: number | null }
+const urlImagen = (id: number, descargar = false) => `/api/mensaje-adjuntos/${id}${descargar ? '?descargar=1' : ''}`;
 type Evento =
   | { key: string; kind: 'cambio'; at: string; prop: string; antes: string | null; despues: string | null; user_id: number | null; actor: string | null; source: string }
   | { key: string; kind: 'articulo'; at: string; articulo: string; es_pdv: boolean; antes: string | null; despues: string | null; user_id: number | null; actor: string | null; source: string }
@@ -183,10 +186,61 @@ function useUsuariosMencionables(meta: Meta) {
 }
 const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCancelar, placeholder, autoFocus }: {
-  inicial?: string; respondiendo?: ReactNode; onCancelarRespuesta?: () => void; onEnviar: (body: string) => Promise<boolean>; onCancelar?: () => void;
+// Una imagen elegida para el próximo mensaje: se achica y se sube enseguida (se ve la miniatura mientras tanto).
+interface Pendiente { tmp: string; url: string; adj?: Adjunto; error?: string }
+const MAX_IMAGENES = 10;
+
+// Las medidas, para reservar el lugar de la miniatura antes de que cargue (si no, la lista salta).
+async function medidas(f: File): Promise<{ ancho?: number; alto?: number }> {
+  try { const b = await createImageBitmap(f); const m = { ancho: b.width, alto: b.height }; b.close(); return m; } catch { return {}; }
+}
+
+function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCancelar, placeholder, autoFocus, subirA, registrarSoltar }: {
+  inicial?: string; respondiendo?: ReactNode; onCancelarRespuesta?: () => void; onEnviar: (body: string, adjuntos: number[]) => Promise<boolean>; onCancelar?: () => void;
   placeholder?: string; autoFocus?: boolean;
+  // Adónde se suben las imágenes (sin esto, como al editar, no se adjunta nada) y cómo el panel le pasa lo que se suelta encima.
+  subirA?: string; registrarSoltar?: (f: ((files: File[]) => void) | null) => void;
 }) {
+  const toast = useToast();
+  const [pendientes, setPendientes] = useState<Pendiente[]>([]);
+  const vivos = useRef(pendientes);
+  vivos.current = pendientes;
+  useEffect(() => () => { for (const p of vivos.current) URL.revokeObjectURL(p.url); }, []);
+  const agregar = useCallback((files: File[]) => {
+    if (!subirA) return;
+    const imgs = files.filter((f) => f.type.startsWith('image/'));
+    if (files.length && !imgs.length) { toast('Por ahora solo se pueden adjuntar imágenes.', true); return; }
+    const lugar = MAX_IMAGENES - vivos.current.length;
+    if (imgs.length > lugar) toast(`Van hasta ${MAX_IMAGENES} imágenes por mensaje.`, true);
+    for (const f of imgs.slice(0, Math.max(0, lugar))) {
+      const tmp = `${Date.now()}-${Math.random()}`;
+      setPendientes((ps) => [...ps, { tmp, url: URL.createObjectURL(f) }]);
+      (async () => {
+        const chica = await achicarImagen(f, 2000, 1_800_000);
+        const fd = new FormData();
+        fd.append('archivo', chica, f.name || 'captura.png');
+        const m = await medidas(chica);
+        if (m.ancho) { fd.append('ancho', String(m.ancho)); fd.append('alto', String(m.alto)); }
+        const res = await fetch(`/api${subirA}`, { method: 'POST', body: fd, credentials: 'same-origin' });
+        const data = await res.json().catch(() => null) as (Adjunto & { error?: string }) | null;
+        if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
+        return data as Adjunto;
+      })().then((adj) => {
+        // Si la sacaron mientras subía, se borra.
+        if (!vivos.current.some((p) => p.tmp === tmp)) { http('DELETE', `/mensaje-adjuntos/${adj.id}`).catch(() => undefined); return; }
+        setPendientes((ps) => ps.map((p) => (p.tmp === tmp ? { ...p, adj } : p)));
+      }, (e: Error) => setPendientes((ps) => ps.map((p) => (p.tmp === tmp ? { ...p, error: e.message } : p))));
+    }
+  }, [subirA, toast]);
+  useEffect(() => { registrarSoltar?.(agregar); return () => registrarSoltar?.(null); }, [registrarSoltar, agregar]);
+  const quitar = (p: Pendiente) => {
+    URL.revokeObjectURL(p.url);
+    setPendientes((ps) => ps.filter((x) => x.tmp !== p.tmp));
+    if (p.adj) http('DELETE', `/mensaje-adjuntos/${p.adj.id}`).catch(() => undefined);
+  };
+  const archivo = useRef<HTMLInputElement>(null);
+  const subiendo = pendientes.some((p) => !p.adj && !p.error);
+  const listas = pendientes.filter((p) => p.adj);
   const { meta } = useMeta();
   const usuarios = useUsuariosMencionables(meta);
   const ini = useMemo(() => aEditable(inicial ?? ''), [inicial]);
@@ -223,21 +277,51 @@ function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCanc
     const cursor = lista.desde + u.name.length + 2;
     requestAnimationFrame(() => { ta.current?.focus(); ta.current?.setSelectionRange(cursor, cursor); });
   };
+  const puedeMandar = (!!texto.trim() || listas.length > 0) && !subiendo && !busy;
   const enviar = async () => {
     const t = texto.trim();
-    if (!t || busy) return;
+    if (!puedeMandar) return;
     setBusy(true);
-    const ok = await onEnviar(conMarcas(t, menc)).finally(() => setBusy(false));
-    if (ok && inicial === undefined) { setTexto(''); setMenc([]); }
+    const ok = await onEnviar(conMarcas(t, menc), listas.map((p) => p.adj!.id)).finally(() => setBusy(false));
+    if (ok && inicial === undefined) {
+      setTexto(''); setMenc([]);
+      for (const p of pendientes) URL.revokeObjectURL(p.url);
+      setPendientes([]);
+    }
   };
   return (
     <div className="conv-escribir">
       {respondiendo && <div className="conv-respondiendo"><Icon name="reply" size={13} /><div className="grow ellipsis">{respondiendo}</div>
         <button className="btn ghost sm icon" onClick={onCancelarRespuesta} aria-label="No responder"><Icon name="x" size={14} /></button></div>}
+      {pendientes.length > 0 && (
+        <div className="conv-pendientes">
+          {pendientes.map((p) => (
+            <div key={p.tmp} className={`conv-pend${p.error ? ' error' : ''}${!p.adj && !p.error ? ' subiendo' : ''}`} title={p.error ?? (p.adj ? p.adj.nombre : 'Subiendo…')}>
+              <img src={p.url} alt="" />
+              {!p.adj && !p.error && <span className="spinner" aria-label="Subiendo" />}
+              {p.error && <span className="pend-error">No se subió</span>}
+              <button type="button" className="pend-x" onClick={() => quitar(p)} aria-label="Sacar la imagen"><Icon name="x" size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="conv-caja">
+        {subirA && <>
+          <input ref={archivo} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" multiple hidden
+            onChange={(e) => { agregar([...(e.target.files ?? [])]); e.target.value = ''; }} />
+          <button type="button" className="btn ghost sm icon conv-clip" onClick={() => archivo.current?.click()} title="Adjuntar imágenes (también podés pegar una captura con Ctrl+V o arrastrarlas)"
+            aria-label="Adjuntar imágenes"><Icon name="image" size={18} /></button>
+        </>}
         <textarea ref={ta} className="input" rows={1} value={texto} placeholder={placeholder ?? 'Escribí un comentario… (@ para mencionar)'}
           onChange={(e) => { setTexto(e.target.value); mirar(e.target.value, e.target.selectionStart); }}
           onClick={(e) => mirar(texto, e.currentTarget.selectionStart)}
+          onPaste={(e) => {
+            // Una captura de pantalla pegada (Ctrl+V) va como imagen; si además viene texto, el texto se pega igual.
+            const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+            if (!files.length || !subirA) return;
+            if (!e.clipboardData.types.includes('text/plain')) e.preventDefault();
+            agregar(files);
+          }}
           onBlur={() => setTimeout(() => setLista(null), 150)}
           onKeyDown={(e) => {
             if (lista && opciones.length) {
@@ -249,7 +333,7 @@ function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCanc
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); }
           }} />
         {onCancelar && <button className="btn sm" onClick={onCancelar}>Cancelar</button>}
-        <button className="btn primary sm conv-enviar" disabled={!texto.trim() || busy} onClick={enviar} aria-label={inicial !== undefined ? 'Guardar' : 'Enviar'} title="Enviar (Enter) · Shift+Enter: otra línea">
+        <button className="btn primary sm conv-enviar" disabled={!puedeMandar} onClick={enviar} aria-label={inicial !== undefined ? 'Guardar' : 'Enviar'} title="Enviar (Enter) · Shift+Enter: otra línea">
           {inicial !== undefined ? 'Guardar' : <Icon name="send" size={16} />}
         </button>
         {lista && opciones.length > 0 && (
@@ -269,9 +353,57 @@ function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCanc
 
 // ---------- Un mensaje ----------
 
-function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, onEditado, onIrA }: {
+// Las imágenes de un mensaje: una sola, grande (con su proporción, así no salta la lista al cargar); varias, en grilla.
+function Imagenes({ adjuntos, onAbrir }: { adjuntos: Adjunto[]; onAbrir: (id: number) => void }) {
+  if (!adjuntos.length) return null;
+  const una = adjuntos.length === 1;
+  return (
+    <div className={`msg-imagenes${una ? ' una' : ''}`}>
+      {adjuntos.map((a) => (
+        <button key={a.id} type="button" className="msg-img" onClick={() => onAbrir(a.id)} title={a.nombre} aria-label={`Ver ${a.nombre}`}
+          style={una && a.ancho && a.alto ? { aspectRatio: `${a.ancho} / ${a.alto}`, width: `min(100%, ${Math.round(240 * a.ancho / a.alto)}px, ${a.ancho}px)` } : undefined}>
+          <img src={urlImagen(a.id)} alt={a.nombre} loading="lazy" draggable={false} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Una imagen a pantalla completa, con las flechas para pasar a las otras de la conversación.
+function Visor({ imagenes, inicio, onClose }: { imagenes: Array<Adjunto & { autor: string; at: string }>; inicio: number; onClose: () => void }) {
+  const [i, setI] = useState(Math.max(0, imagenes.findIndex((a) => a.id === inicio)));
+  const a = imagenes[i];
+  useEffect(() => {
+    // En captura: que Escape cierre el visor y no la vista previa de atrás.
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      else if (e.key === 'ArrowLeft') { e.stopPropagation(); setI((x) => Math.max(0, x - 1)); }
+      else if (e.key === 'ArrowRight') { e.stopPropagation(); setI((x) => Math.min(imagenes.length - 1, x + 1)); }
+    };
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
+  }, [imagenes.length, onClose]);
+  if (!a) return null;
+  return createPortal(
+    <div className="visor" role="dialog" aria-label="Imagen" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="visor-barra">
+        <span className="grow ellipsis"><b>{a.autor}</b> · {fmtDate(a.at, true)} · {a.nombre}</span>
+        {imagenes.length > 1 && <span className="num">{i + 1} de {imagenes.length}</span>}
+        <a className="btn sm" href={urlImagen(a.id, true)}><Icon name="download" size={14} />Descargar</a>
+        <a className="btn sm" href={urlImagen(a.id)} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Abrir</a>
+        <button className="btn ghost icon visor-x" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={20} /></button>
+      </div>
+      {i > 0 && <button className="visor-flecha izq" onClick={() => setI(i - 1)} aria-label="Anterior"><Icon name="chevron" size={28} /></button>}
+      <img key={a.id} src={urlImagen(a.id)} alt={a.nombre} onMouseDown={(e) => e.stopPropagation()} />
+      {i < imagenes.length - 1 && <button className="visor-flecha der" onClick={() => setI(i + 1)} aria-label="Siguiente"><Icon name="chevron" size={28} /></button>}
+    </div>,
+    document.body,
+  );
+}
+
+function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen }: {
   m: Mensaje; cont: boolean; citado?: Mensaje; meId: number; esAdmin: boolean; vistoPor?: User[];
-  onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void;
+  onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void; onAbrirImagen: (id: number) => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -290,7 +422,7 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, o
         {!cont && <div className="msg-head"><b>{u?.name ?? 'Alguien'}</b>{m.source === 'mcp' && <span className="tag">con Claude</span>}<time dateTime={m.created_at} title={fmtDate(m.created_at, true)}>{hora}</time></div>}
         {citado && (
           <button type="button" className="msg-cita" onClick={() => onIrA(citado.id)}>
-            <b>{userOf(meta, citado.user_id)?.name ?? 'Alguien'}</b> <span className="ellipsis">{citado.borrado_at ? 'Mensaje borrado' : textoPlano(citado.body)}</span>
+            <b>{userOf(meta, citado.user_id)?.name ?? 'Alguien'}</b> <span className="ellipsis">{citado.borrado_at ? 'Mensaje borrado' : textoPlano(citado.body) || '📷 Imagen'}</span>
           </button>
         )}
         {editando
@@ -298,7 +430,8 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, o
             try { onEditado({ ...m, ...(await http<Omit<Mensaje, 'key' | 'kind' | 'at'>>('PATCH', `/mensajes/${m.id}`, { body })) }); setEditando(false); return true; }
             catch (e) { toast((e as Error).message, true); return false; }
           }} />
-          : <Cuerpo body={m.body} meId={meId} />}
+          : m.body ? <Cuerpo body={m.body} meId={meId} /> : null}
+        {!editando && <Imagenes adjuntos={m.adjuntos ?? []} onAbrir={onAbrirImagen} />}
         {(m.editado_at || (vistoPor && vistoPor.length > 0)) && !editando && (
           <div className="msg-pie">
             {m.editado_at && <span className="muted" title={fmtDate(m.editado_at, true)}>(editado)</span>}
@@ -352,6 +485,11 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
   const lista = useRef<HTMLDivElement>(null);
   const pegado = useRef(true);
   const marcado = useRef(0);
+  const [visor, setVisor] = useState<number | null>(null);
+  // Soltar imágenes en cualquier parte del panel: van al cuadro de escribir.
+  const soltar = useRef<((files: File[]) => void) | null>(null);
+  const registrarSoltar = useCallback((f: ((files: File[]) => void) | null) => { soltar.current = f; }, []);
+  const [encima, setEncima] = useState(0);
 
   const mezclar = useCallback((nuevos: Item[]) => {
     if (!nuevos.length) return;
@@ -423,9 +561,9 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
     setTimeout(() => el.classList.remove('destello'), 1600);
   };
 
-  const enviar = async (body: string) => {
+  const enviar = async (body: string, adjuntos: number[]) => {
     try {
-      const m = await http<Omit<Mensaje, 'key' | 'kind' | 'at'>>('POST', `/records/${type}/${recordId}/conversacion`, { body, responde_a: respondiendo?.id ?? null });
+      const m = await http<Omit<Mensaje, 'key' | 'kind' | 'at'>>('POST', `/records/${type}/${recordId}/conversacion`, { body, responde_a: respondiendo?.id ?? null, adjuntos });
       pegado.current = true;
       mezclar([{ ...m, key: `m${m.id}`, kind: 'mensaje', at: m.created_at }]);
       setRespondiendo(null);
@@ -452,12 +590,20 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
   const vistoUltimo = ultimo ? estado.participantes.filter((p) => p.user_id !== ultimo.user_id && p.leido_hasta >= ultimo.id)
     .map((p) => userOf(meta, p.user_id)).filter((u): u is User => !!u) : [];
   const puedeEscribir = me.role !== 'viewer';
+  const imagenes = mensajes.filter((m) => !m.borrado_at).flatMap((m) => (m.adjuntos ?? []).map((a) => ({ ...a, autor: userOf(meta, m.user_id)?.name ?? 'Alguien', at: m.created_at })));
+  const conArchivos = (e: React.DragEvent) => e.dataTransfer.types.includes('Files');
 
   let diaAnt = '';
   let autorAnt: { id: number | null; at: number } | null = null;
   let rayaPuesta = false;
   return (
-    <section className={`conv ${className}`} aria-label="Conversación">
+    <section className={`conv ${className}${encima > 0 ? ' soltando' : ''}`} aria-label="Conversación"
+      onDragEnter={(e) => { if (puedeEscribir && conArchivos(e)) { e.preventDefault(); setEncima((n) => n + 1); } }}
+      onDragLeave={(e) => { if (conArchivos(e)) setEncima((n) => Math.max(0, n - 1)); }}
+      onDragOver={(e) => { if (puedeEscribir && conArchivos(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
+      onDrop={(e) => { if (!conArchivos(e)) return; e.preventDefault(); setEncima(0); soltar.current?.([...e.dataTransfer.files]); }}>
+      {encima > 0 && <div className="conv-soltar"><Icon name="image" size={28} />Soltá las imágenes para adjuntarlas</div>}
+      {visor != null && <Visor imagenes={imagenes} inicio={visor} onClose={() => setVisor(null)} />}
       <header className="conv-head">
         <Icon name="chat" size={16} />
         <h3>Conversación</h3>
@@ -482,7 +628,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
         {cargado && !visibles.length && (
           <div className="conv-vacio">
             <Icon name="chat" size={28} />
-            <p><b>Todavía no hay comentarios.</b><br />Escribí lo que haga falta del {OBJECTS[type].single.toLowerCase()} y mencioná con @ a quien tenga que enterarse: le llega un aviso.</p>
+            <p><b>Todavía no hay comentarios.</b><br />Escribí lo que haga falta del {OBJECTS[type].single.toLowerCase()} y mencioná con @ a quien tenga que enterarse: le llega un aviso. Podés pegar capturas o adjuntar fotos.</p>
           </div>
         )}
         {visibles.map((it) => {
@@ -505,7 +651,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
             <Fragment key={it.key}>{sep}{raya}
               <MensajeVista m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'}
                 vistoPor={ultimo && it.id === ultimo.id ? vistoUltimo : undefined}
-                onResponder={() => setRespondiendo(it)} onIrA={irA}
+                onResponder={() => setRespondiendo(it)} onIrA={irA} onAbrirImagen={setVisor}
                 onEditado={(m) => mezclar([m])} />
             </Fragment>
           );
@@ -513,8 +659,8 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
       </div>
       {abajoNuevos > 0 && <button className="btn sm conv-hay-nuevos" onClick={irAbajo}>↓ {abajoNuevos === 1 ? 'Hay algo nuevo' : `${abajoNuevos} novedades`}</button>}
       {puedeEscribir
-        ? <Escribir key={`${type}-${recordId}`} onEnviar={enviar}
-          respondiendo={respondiendo ? <>Respondiendo a <b>{userOf(meta, respondiendo.user_id)?.name ?? 'Alguien'}</b>: {textoPlano(respondiendo.body)}</> : undefined}
+        ? <Escribir key={`${type}-${recordId}`} onEnviar={enviar} subirA={`/records/${type}/${recordId}/conversacion/imagenes`} registrarSoltar={registrarSoltar}
+          respondiendo={respondiendo ? <>Respondiendo a <b>{userOf(meta, respondiendo.user_id)?.name ?? 'Alguien'}</b>: {textoPlano(respondiendo.body) || '📷 Imagen'}</> : undefined}
           onCancelarRespuesta={() => setRespondiendo(null)} />
         : <div className="muted small conv-solo-mira">Tu usuario es de «Solo mira»: podés leer la conversación pero no escribir.</div>}
     </section>

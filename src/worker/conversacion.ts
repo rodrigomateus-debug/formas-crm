@@ -21,6 +21,10 @@ import { estadosPec } from './produccion';
 // pierde si cambia el nombre.
 const MENCION = /@\[([^\]\n]{1,80})\]\((\d{1,15})\)/g;
 const MAX = 5000;
+// Imágenes: achicadas en el navegador (lado mayor 2000 px); acá, el tope de una fila de D1 y cuántas por mensaje.
+const IMAGEN_MAX = 1_900_000;
+const IMAGENES_POR_MENSAJE = 10;
+const MIMES_IMAGEN = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export function mencionesDe(body: string) {
   return [...new Set([...body.matchAll(MENCION)].map((m) => Number(m[2])))];
@@ -34,11 +38,13 @@ const PROPS_CAMBIO = ['hs_pipeline_stage', 'dealstage', 'pipeline', 'owner_id', 
 
 export interface Mensaje {
   id: number; record_id: number; user_id: number | null; body: string; menciones: number[]; responde_a: number | null;
-  source: string; editado_at: string | null; borrado_at: string | null; created_at: string;
+  source: string; editado_at: string | null; borrado_at: string | null; created_at: string; adjuntos: Adjunto[];
 }
-interface MensajeRow extends Omit<Mensaje, 'menciones'> { menciones: string }
-const mensaje = (r: MensajeRow): Mensaje => ({
-  ...r, menciones: JSON.parse(r.menciones || '[]'), body: r.borrado_at ? '' : r.body,
+export interface Adjunto { id: number; mensaje_id: number | null; nombre: string; mime: string; size: number; ancho: number | null; alto: number | null }
+const COLS_ADJUNTO = 'id, mensaje_id, nombre, mime, size, ancho, alto';
+interface MensajeRow extends Omit<Mensaje, 'menciones' | 'adjuntos'> { menciones: string }
+const mensaje = (r: MensajeRow, adjuntos: Adjunto[] = []): Mensaje => ({
+  ...r, menciones: JSON.parse(r.menciones || '[]'), body: r.borrado_at ? '' : r.body, adjuntos: r.borrado_at ? [] : adjuntos,
 });
 
 export type Item =
@@ -62,7 +68,7 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
   const ahora = now();
   const desde = opts.desde && !Number.isNaN(Date.parse(opts.desde)) ? new Date(opts.desde).toISOString() : '';
   const lim = Math.min(Math.max(opts.limite ?? 300, 1), 500);
-  const [msgs, chs, arts, bocs, rems, acts, parts] = await db.batch([
+  const [msgs, chs, arts, bocs, rems, acts, parts, adjs] = await db.batch([
     db.prepare(`SELECT * FROM (SELECT * FROM mensajes WHERE record_id = ? AND COALESCE(borrado_at, editado_at, created_at) > ? ORDER BY id DESC LIMIT ?) ORDER BY id`)
       .bind(recordId, desde, lim),
     db.prepare(`SELECT id, prop, old_value, new_value, changed_at, user_id, actor, source FROM changes
@@ -78,9 +84,13 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
       WHERE a.archived = 0 AND (CASE WHEN a.type = 'task' THEN a.created_at ELSE a.occurred_at END) > ?
       ORDER BY a.id DESC LIMIT 150`).bind(recordId, desde),
     db.prepare('SELECT user_id, leido_hasta, siguiendo, motivo FROM conversacion_participantes WHERE record_id = ?').bind(recordId),
+    // Las imágenes de los mensajes (sin el archivo: se baja aparte, /api/mensaje-adjuntos/:id).
+    db.prepare(`SELECT ${COLS_ADJUNTO} FROM mensaje_adjuntos WHERE record_id = ? AND mensaje_id IS NOT NULL ORDER BY id`).bind(recordId),
   ]);
+  const adjuntosDe = new Map<number, Adjunto[]>();
+  for (const a of adjs.results as unknown as Adjunto[]) adjuntosDe.set(a.mensaje_id!, [...(adjuntosDe.get(a.mensaje_id!) ?? []), a]);
   const items: Item[] = [];
-  for (const m of msgs.results as unknown as MensajeRow[]) items.push({ key: `m${m.id}`, kind: 'mensaje', at: m.created_at, ...mensaje(m) });
+  for (const m of msgs.results as unknown as MensajeRow[]) items.push({ key: `m${m.id}`, kind: 'mensaje', at: m.created_at, ...mensaje(m, adjuntosDe.get(m.id)) });
   for (const c of chs.results as Array<{ id: number; prop: string; old_value: string | null; new_value: string | null; changed_at: string; user_id: number | null; actor: string | null; source: string }>) {
     items.push({ key: `c${c.id}`, kind: 'cambio', at: c.changed_at, prop: c.prop, antes: c.old_value, despues: c.new_value, user_id: c.user_id, actor: c.actor, source: c.source });
   }
@@ -129,9 +139,16 @@ function limpiar(body: unknown) {
   return s;
 }
 
-export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input: { body: unknown; responde_a?: number | null }) {
+export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input: { body: unknown; responde_a?: number | null; adjuntos?: unknown }) {
   const rec = await registro(db, recordId);
-  const body = limpiar(input.body);
+  // Las imágenes ya subidas (subirImagen): de este registro, de quien escribe y todavía sin mensaje.
+  const pedidos = [...new Set((Array.isArray(input.adjuntos) ? input.adjuntos : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (pedidos.length > IMAGENES_POR_MENSAJE) throw new HttpError(400, `Van hasta ${IMAGENES_POR_MENSAJE} imágenes por mensaje.`);
+  const sueltos = pedidos.length ? (await db.prepare(`SELECT id FROM mensaje_adjuntos WHERE id IN (SELECT value FROM json_each(?)) AND record_id = ? AND user_id = ? AND mensaje_id IS NULL`)
+    .bind(JSON.stringify(pedidos), recordId, ctx.user.id).all<{ id: number }>()).results.map((r) => r.id) : [];
+  if (sueltos.length !== pedidos.length) throw new HttpError(400, 'Alguna imagen no se terminó de subir o ya es de otro mensaje: volvé a adjuntarla.');
+  // Con imágenes, el texto puede ir vacío.
+  const body = sueltos.length && !String(input.body ?? '').trim() ? '' : limpiar(input.body);
   let respondeA: number | null = null;
   if (input.responde_a) {
     const r = await db.prepare('SELECT id FROM mensajes WHERE id = ? AND record_id = ?').bind(Number(input.responde_a), recordId).first<{ id: number }>();
@@ -158,11 +175,14 @@ export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input
     // Aviso por mail a los mencionados (sale con los demás avisos, si lo tienen prendido).
     ...(['crm', 'mcp'].includes(ctx.source) ? menciones.filter((u) => u !== ctx.user.id).map((u) =>
       db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, mensaje_id) VALUES (?, 'mencion', ?, ?, ?)").bind(u, recordId, ctx.user.id, id)) : []),
+    // Las imágenes quedan del mensaje.
+    ...(sueltos.length ? [db.prepare('UPDATE mensaje_adjuntos SET mensaje_id = ? WHERE id IN (SELECT value FROM json_each(?))').bind(id, JSON.stringify(sueltos))] : []),
     // La conversación cuenta como actividad del registro.
     db.prepare('UPDATE records SET last_activity_at = ? WHERE id = ?').bind(ts, recordId),
   ];
   await db.batch(stmts);
-  return mensaje(row!);
+  const adjuntos = sueltos.length ? (await db.prepare(`SELECT ${COLS_ADJUNTO} FROM mensaje_adjuntos WHERE mensaje_id = ? ORDER BY id`).bind(id).all<Adjunto>()).results : [];
+  return mensaje(row!, adjuntos);
 }
 
 async function propio(db: D1Database, ctx: Ctx, id: number) {
@@ -175,8 +195,10 @@ async function propio(db: D1Database, ctx: Ctx, id: number) {
 export async function editarMensaje(db: D1Database, ctx: Ctx, id: number, body: unknown) {
   const m = await propio(db, ctx, id);
   if (m.user_id !== ctx.user.id) throw new HttpError(403, 'Solo quien escribió el mensaje lo puede editar.');
-  const texto = limpiar(body);
-  if (texto === m.body) return mensaje(m);
+  const adjuntos = (await db.prepare(`SELECT ${COLS_ADJUNTO} FROM mensaje_adjuntos WHERE mensaje_id = ? ORDER BY id`).bind(id).all<Adjunto>()).results;
+  // Un mensaje con imágenes puede quedar sin texto.
+  const texto = adjuntos.length && !String(body ?? '').trim() ? '' : limpiar(body);
+  if (texto === m.body) return mensaje(m, adjuntos);
   const antes = JSON.parse(m.menciones || '[]') as number[];
   const menciones = await validarMenciones(db, mencionesDe(texto));
   const row = await db.prepare('UPDATE mensajes SET body = ?, menciones = ?, editado_at = ? WHERE id = ? RETURNING *').bind(texto, JSON.stringify(menciones), now(), id).first<MensajeRow>();
@@ -189,13 +211,17 @@ export async function editarMensaje(db: D1Database, ctx: Ctx, id: number, body: 
       db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, mensaje_id) VALUES (?, 'mencion', ?, ?, ?)").bind(u, m.record_id, ctx.user.id, id),
     ]));
   }
-  return mensaje(row!);
+  return mensaje(row!, adjuntos);
 }
 
 export async function borrarMensaje(db: D1Database, ctx: Ctx, id: number) {
   const m = await propio(db, ctx, id);
   if (m.user_id !== ctx.user.id && ctx.user.role !== 'admin') throw new HttpError(403, 'Solo quien escribió el mensaje (o un administrador) lo puede borrar.');
-  await db.prepare('UPDATE mensajes SET borrado_at = ? WHERE id = ?').bind(now(), id).run();
+  // Las imágenes de un mensaje borrado no se ven más: se borran (y liberan lugar en la base).
+  await db.batch([
+    db.prepare('UPDATE mensajes SET borrado_at = ? WHERE id = ?').bind(now(), id),
+    db.prepare('DELETE FROM mensaje_adjuntos WHERE mensaje_id = ?').bind(id),
+  ]);
   return { ok: true };
 }
 
@@ -229,11 +255,52 @@ export async function bandeja(db: D1Database, ctx: Ctx, opts: { noLeidas?: boole
     .bind(JSON.stringify(results.map((r) => r.ultimo_id))).all<{ id: number; user_id: number | null; body: string; created_at: string }>()).results.map((m) => [m.id, m])) : new Map();
   const conversaciones = results.map((r) => {
     const u = ultimos.get(r.ultimo_id);
-    return { ...r, ultimo: u ? { ...u, body: textoPlano(u.body).slice(0, 240) } : null };
+    return { ...r, ultimo: u ? { ...u, body: textoPlano(u.body).slice(0, 240) || '📷 Imagen' } : null };
   });
   return {
     no_leidos: conversaciones.reduce((s, c) => s + c.no_leidos, 0),
     menciones: conversaciones.reduce((s, c) => s + c.menciones, 0),
     conversaciones,
   };
+}
+
+// ---------- Imágenes ----------
+
+const esGif = (b: Uint8Array) => b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46;
+const esJpeg = (b: Uint8Array) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+const esPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+const esWebp = (b: Uint8Array) => b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45;
+
+// Sube una imagen para el próximo mensaje (queda sin mensaje hasta que se manda). Se mira el contenido, no solo lo que dice
+// el navegador: solo JPG, PNG, WebP o GIF (se sirven tal cual en el CRM).
+export async function subirImagen(db: D1Database, ctx: Ctx, recordId: number, archivo: File, medidas: { ancho?: unknown; alto?: unknown } = {}) {
+  await registro(db, recordId);
+  const bytes = new Uint8Array(await archivo.arrayBuffer());
+  if (!bytes.length) throw new HttpError(400, 'La imagen está vacía.');
+  if (bytes.length > IMAGEN_MAX) throw new HttpError(413, 'La imagen es muy pesada (más de 1,9 MB). Probá con una captura o una foto más chica.');
+  const mime = esJpeg(bytes) ? 'image/jpeg' : esPng(bytes) ? 'image/png' : esWebp(bytes) ? 'image/webp' : esGif(bytes) ? 'image/gif' : null;
+  if (!mime || !MIMES_IMAGEN.includes(mime)) throw new HttpError(415, 'Solo imágenes JPG, PNG, WebP o GIF (las fotos HEIC del iPhone, pasalas a JPG).');
+  const dim = (v: unknown) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n > 0 && n < 20000 ? n : null; };
+  const nombre = (archivo.name || 'imagen').replace(/[\r\n]/g, ' ').slice(0, 120);
+  // De paso, las que alguien subió y nunca mandó (de hace más de un día).
+  await db.prepare('DELETE FROM mensaje_adjuntos WHERE user_id = ? AND mensaje_id IS NULL AND created_at < ?')
+    .bind(ctx.user.id, new Date(Date.now() - 86_400_000).toISOString()).run();
+  const row = await db.prepare(`INSERT INTO mensaje_adjuntos (record_id, user_id, nombre, mime, size, ancho, alto, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING ${COLS_ADJUNTO}`).bind(recordId, ctx.user.id, nombre, mime, bytes.length, dim(medidas.ancho), dim(medidas.alto), bytes).first<Adjunto>();
+  return row!;
+}
+
+// Sacar una imagen subida que todavía no se mandó.
+export async function quitarImagen(db: D1Database, ctx: Ctx, id: number) {
+  await db.prepare('DELETE FROM mensaje_adjuntos WHERE id = ? AND user_id = ? AND mensaje_id IS NULL').bind(id, ctx.user.id).run();
+  return { ok: true };
+}
+
+// El archivo, para verlo: el de un mensaje (no borrado) o, mientras no se mandó, solo para quien lo subió.
+export async function imagen(db: D1Database, ctx: Ctx, id: number) {
+  const a = await db.prepare(`SELECT a.record_id, a.mensaje_id, a.user_id, a.nombre, a.mime, a.data FROM mensaje_adjuntos a
+      LEFT JOIN mensajes m ON m.id = a.mensaje_id WHERE a.id = ? AND (a.mensaje_id IS NULL OR m.borrado_at IS NULL)`)
+    .bind(id).first<{ record_id: number; mensaje_id: number | null; user_id: number | null; nombre: string; mime: string; data: ArrayBuffer | number[] }>();
+  if (!a || (a.mensaje_id == null && a.user_id !== ctx.user.id)) throw new HttpError(404, 'No existe la imagen.');
+  return { ...a, bytes: a.data instanceof ArrayBuffer ? a.data : new Uint8Array(a.data).buffer };
 }

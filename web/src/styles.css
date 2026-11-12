@@ -978,3 +978,41 @@ table.prod-grid .st-select { min-width: 190px; }
 .conv-fila .conv-ultimo { color: var(--ui-ink-2); margin-top: 2px; }
 .conv-fila.sin-leer .conv-ultimo { color: var(--ui-ink); }
 .conv-fila .count { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--r-pill); background: var(--ui-negative); color: var(--ui-surface); }
+
+/* Imágenes en la conversación */
+.msg-imagenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin-top: 6px; max-width: 360px; }
+.msg-imagenes.una { display: block; }
+.msg-img { display: block; padding: 0; border: 1px solid var(--ui-line); border-radius: 8px; overflow: hidden; background: var(--ui-surface-sunken); cursor: zoom-in; aspect-ratio: 1; }
+.msg-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.msg-imagenes.una .msg-img { aspect-ratio: auto; max-width: 100%; max-height: 240px; width: fit-content; }
+.msg-imagenes.una .msg-img img { object-fit: contain; max-height: 240px; height: 100%; width: auto; max-width: 100%; }
+.msg-imagenes.una .msg-img[style] img { width: 100%; height: 100%; object-fit: cover; }
+.conv-pendientes { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 0 8px; }
+.conv-pend { position: relative; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--ui-line); background: var(--ui-surface-sunken); }
+.conv-pend img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.conv-pend.subiendo img { opacity: .45; }
+.conv-pend.error { border-color: var(--ui-negative); }
+.conv-pend.error img { opacity: .3; }
+.conv-pend .pend-error { position: absolute; inset: auto 0 0 0; font-size: 10px; font-weight: 600; text-align: center; color: var(--ui-negative-ink); background: var(--ui-negative-soft); padding: 1px 0; }
+.conv-pend .pend-x { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  background: rgba(0, 0, 0, .6); color: #fff; padding: 0; }
+.conv-pend .spinner { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent-ink); animation: girar .8s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+.conv-clip { height: 38px; width: 34px; flex: none; color: var(--ui-ink-2); }
+.conv.soltando .conv-lista, .conv.soltando .conv-escribir { opacity: .35; }
+.conv-soltar { position: absolute; inset: 8px; z-index: 5; border: 2px dashed var(--accent-ink); border-radius: var(--r-panel); background: var(--accent-soft);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--accent-ink); font-weight: 600; pointer-events: none; }
+.visor { position: fixed; inset: 0; z-index: 200; background: rgba(8, 9, 20, .92); display: flex; align-items: center; justify-content: center; padding: 64px 72px 24px;
+  animation: fade-in var(--dur) var(--ease-out); cursor: zoom-out; }
+.visor > img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); cursor: auto; background: #fff; }
+.visor-barra { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 10px; padding: 12px 16px; color: #fff; font-size: 13px; cursor: auto; }
+.visor-barra .btn:not(.ghost) { background: rgba(255, 255, 255, .12); color: #fff; border-color: rgba(255, 255, 255, .2); }
+.visor-barra .visor-x { color: #fff; }
+.visor-flecha { position: absolute; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer;
+  background: rgba(255, 255, 255, .12); color: #fff; }
+.visor-flecha:hover { background: rgba(255, 255, 255, .24); }
+.visor-flecha.izq { left: 14px; }
+.visor-flecha.der { right: 14px; }
+.visor-flecha.der svg { transform: scaleX(-1); }
+@media (max-width: 860px) { .visor { padding: 60px 8px 16px; } .visor-flecha { width: 40px; height: 40px; } }

@@ -1,6 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, Icon, recordUrl, formatValue, useDebounced, propOf } from '../lib';
+import { Link, useSearchParams } from 'react-router-dom';
+import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf } from '../lib';
+import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '../vistas';
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug } from '../components';
 import { Select } from '../Select';
 import { NombreProveedor } from '../proveedores';
@@ -39,7 +40,12 @@ const UNIDADES = [
 ];
 const CERRADOS = ['entregados', 'anulado'];
 
-// Preferencias de cada uno en este navegador (vista, unidades, filtro de persona). Si el navegador no deja guardar, no pasa nada.
+// Lo que guarda una vista de Producción (pestañas, como en Pedidos): búsqueda, unidades, a quién está asignado, si se ven
+// los entregados y lista o tablero.
+interface ConfigProd { q: string; unidades: string[]; persona: string; cerrados: boolean; modo: 'lista' | 'tablero' }
+const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', !!c.cerrados, c.modo ?? 'lista']);
+
+// Preferencias de cada uno en este navegador (lista o tablero, colapsado). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
 function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean } {
   try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; }
@@ -63,9 +69,16 @@ export default function ProduccionPage() {
   const { meta } = useMeta();
   const toast = useToast();
   const pref = useMemo(leerPref, []);
+  // Pestañas de vistas (vistas.tsx): «Todos», «Míos» y las guardadas, en el orden de cada uno. Se abre la del link o la primera.
+  const [params, setParams] = useSearchParams();
+  const vistas = useAsync(() => http<Array<VistaGuardada<ConfigProd>>>('GET', '/views/produccion'), []);
+  const { pestanas, guardar: guardarOrden } = useOrdenPestanas('produccion', vistas.data);
+  const [activa, setActiva] = useState(() => params.get('v') ?? pestanas[0]);
   const [modo, setModo] = useState<'lista' | 'tablero'>(pref.modo ?? 'lista');
-  const [unidades, setUnidades] = useState<string[] | null>(pref.unidades ?? null);
-  const [persona, setPersona] = useState(pref.persona ?? '');
+  // Sin unidades elegidas: las que se trabajan desde el CRM (las manda el servidor; quedan en `base`).
+  const [unidades, setUnidades] = useState<string[] | null>(null);
+  const [base, setBase] = useState<string[] | null>(null);
+  const [persona, setPersona] = useState(activa === 'mine' ? 'yo' : '');
   const [cerrados, setCerrados] = useState(false);
   const [buscar, setBuscar] = useState('');
   const q = useDebounced(buscar, 150);
@@ -86,7 +99,7 @@ export default function ProduccionPage() {
     try {
       const d = await http<Vista>('GET', `/produccion${qs({ unidades: unidades?.join(','), cerrados: cerrados ? 1 : undefined })}`);
       setV(d); setError(null);
-      if (!unidades) setUnidades(d.unidades);
+      if (!unidades) { setUnidades(d.unidades); setBase(d.unidades); }
     } catch (e) { setError((e as Error).message); }
     setCargando(false);
   };
@@ -113,15 +126,43 @@ export default function ProduccionPage() {
     const t = q.trim().toLowerCase();
     return v.pdvs.filter((p) => {
       if (persona === 'nadie' && p.asignados_todos.length) return false;
-      if (persona && persona !== 'nadie' && !p.asignados_todos.includes(Number(persona === 'yo' ? yo?.clickup_id : persona))) return false;
+      // «Míos»: lo que tengo asignado en producción o los pedidos que son míos (para quien vende).
+      if (persona === 'yo' && !((yo && p.asignados_todos.includes(yo.clickup_id)) || p.owner_id === meta.me.id)) return false;
+      if (persona && persona !== 'nadie' && persona !== 'yo' && !p.asignados_todos.includes(Number(persona))) return false;
       if (!t) return true;
       return [p.npdv, p.cliente, p.vendedor, p.pedido, ...p.articulos.map((a) => a.nombre)].some((x) => String(x ?? '').toLowerCase().includes(t));
     });
-  }, [v, q, persona, yo?.clickup_id]);
+  }, [v, q, persona, yo?.clickup_id, meta.me.id]);
 
-  const cambiarUnidades = (u: string[]) => { setUnidades(u); guardarPref({ unidades: u }); };
-  const cambiarPersona = (p: string) => { setPersona(p); guardarPref({ persona: p }); };
+  const cambiarUnidades = (u: string[]) => setUnidades(u);
+  const cambiarPersona = (p: string) => setPersona(p);
   const cambiarModo = (m: 'lista' | 'tablero') => { setModo(m); guardarPref({ modo: m }); };
+
+  // Abrir una pestaña: «Todos» y «Míos» limpias (las unidades de siempre, sin entregados); una vista, como está guardada.
+  const vistaDe = (k: string) => vistas.data?.find((x) => String(x.id) === k);
+  const elegir = (k: string) => {
+    setActiva(k);
+    setParams((p) => { if (k === pestanas[0]) p.delete('v'); else p.set('v', k); return p; }, { replace: true });
+    const vista = vistaDe(k);
+    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setCerrados(false); setBuscar(''); }
+    else if (vista) {
+      const c = vista.config;
+      setUnidades(c.unidades?.length ? c.unidades : base); setPersona(c.persona ?? ''); setCerrados(!!c.cerrados); setBuscar(c.q ?? '');
+      if (c.modo) setModo(c.modo);
+    }
+    // Una vista recién guardada que todavía no llegó: queda como se ve (es lo que se guardó).
+  };
+  // Al llegar las vistas: se aplica la que se abrió (del link o la primera); si ya no existe, la primera pestaña.
+  const aplicada = useRef(false);
+  useEffect(() => {
+    if (!vistas.data || aplicada.current) return;
+    aplicada.current = true;
+    if (!esFija(activa)) { if (vistaDe(activa)) elegir(activa); else elegir(pestanas[0]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vistas.data]);
+  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, cerrados, modo };
+  const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista' })
+    !== normConfig({ q: '', unidades: base, persona: activa === 'mine' ? 'yo' : '', cerrados: false, modo: 'lista' });
   const articulos = filtrados.reduce((n, p) => n + p.articulos.length, 0);
   const soloLectura = v && !v.puede_editar;
 
@@ -134,6 +175,9 @@ export default function ProduccionPage() {
           <button type="button" className={`btn sm${modo === 'tablero' ? ' primary' : ''}`} aria-pressed={modo === 'tablero'} onClick={() => cambiarModo('tablero')}><Icon name="board" size={14} />Tablero</button>
         </div>
       </div>
+      <PestanasVistas tipo="produccion" vistas={vistas.data} pestanas={pestanas} guardarOrden={guardarOrden} activa={activa} onElegir={elegir}
+        recargar={vistas.reload} actual={actual} igual={(a, b) => normConfig(a) === normConfig({ ...b, unidades: b.unidades?.length ? b.unidades : base ?? [] })}
+        filtrosCambiados={filtrosCambiados} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, si se ven los entregados y si se ve en lista o tablero." />
       <div className="toolbar">
         <div className="search" style={{ minWidth: 220, flex: '0 1 280px' }}><Icon name="search" />
           <input className="input" placeholder="Buscar PDV, cliente o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
@@ -148,7 +192,7 @@ export default function ProduccionPage() {
         <div style={{ minWidth: 190 }}>
           <Select value={persona} onChange={(e) => cambiarPersona(e.target.value)} aria-label="Asignado a" className="input sm">
             <option value="">Asignado: todos</option>
-            {yo && <option value="yo">{personaOpcion(yo, ' (yo)')}</option>}
+            <option value="yo">{yo ? personaOpcion(yo, ' (yo)') : 'Míos (mis pedidos)'}</option>
             {personas.filter((p) => p !== yo).map((p) => <option key={p.clickup_id} value={String(p.clickup_id)}>{personaOpcion(p)}</option>)}
             <option value="nadie">Sin asignar</option>
           </Select>

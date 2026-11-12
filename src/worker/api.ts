@@ -697,8 +697,11 @@ function todayBounds(): [string, string, string] {
 // ---------- Vistas guardadas ----------
 
 // Vistas guardadas: propias, compartidas con todos o con un equipo (como «Administrar lo que se comparte» de HubSpot).
+// Las vistas guardadas son de cada lista (contactos, empresas, negocios, pedidos) y de Producción.
+const tipoDeVista = (t: string) => (t === 'produccion' ? t : assertType(t));
+
 api.get('/views/:type', async (c) => {
-  const type = assertType(c.req.param('type'));
+  const type = tipoDeVista(c.req.param('type'));
   const user = c.get('ctx').user;
   const [vistas, orden] = await c.env.DB.batch([
     c.env.DB.prepare(`SELECT * FROM views WHERE object_type = ?
@@ -716,7 +719,7 @@ api.get('/views/:type', async (c) => {
 // El orden de las pestañas de vistas de quien lo pide: {ids: ['mine', 3, 'all', 1, 2]}. «all» (Todos) y «mine» (Míos)
 // también se mueven; la primera pestaña es la que se abre al entrar a la lista.
 api.put('/views/:type/orden', async (c) => {
-  const type = assertType(c.req.param('type'));
+  const type = tipoDeVista(c.req.param('type'));
   const b = await c.req.json<{ ids?: unknown }>();
   if (!Array.isArray(b.ids) || !b.ids.every((x) => Number.isInteger(x) || x === 'all' || x === 'mine')) throw new HttpError(400, 'Falta ids: la lista de vistas en orden.');
   await c.env.DB.prepare(`INSERT INTO view_order (user_id, object_type, ids, updated_at) VALUES (?, ?, ?, ?)
@@ -726,7 +729,7 @@ api.put('/views/:type/orden', async (c) => {
 });
 
 api.post('/views/:type', async (c) => {
-  const type = assertType(c.req.param('type'));
+  const type = tipoDeVista(c.req.param('type'));
   const b = await c.req.json<{ name: string; shared?: boolean; team_id?: number | null; config: unknown }>();
   if (!b.name?.trim()) throw new HttpError(400, 'Falta el nombre de la vista.');
   const row = await c.env.DB.prepare('INSERT INTO views (object_type, name, user_id, shared, team_id, config) VALUES (?, ?, ?, ?, ?, ?) RETURNING *')

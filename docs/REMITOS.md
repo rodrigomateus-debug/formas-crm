@@ -135,3 +135,31 @@ guardadas en el celular y se mandan solas cuando vuelve; reintentar nunca duplic
 ## Costo
 
 Una lectura es una llamada a Claude con una foto: del orden de 5 centavos de dólar por remito.
+
+## Dirección de entrega (pedido de Rodrigo del 12/11/2026)
+
+Arriba de la tarjeta «Entrega» del pedido está la dirección de entrega (`src/worker/direcciones.ts`,
+`web/src/pages/Direcciones.tsx`, migración 0048):
+
+- **Una dirección** por defecto: todo el pedido va ahí. Se elige de las sugerencias de **Google Maps** y queda
+  «Validada en Google Maps», con «Ver en el mapa». Si Google la ubica sin altura (solo la calle o el barrio), avisa
+  «Sin altura». Escrita a mano, sin elegirla de Google, queda «Sin validar». Lleva un detalle opcional (piso, depto,
+  horario, quién recibe).
+- **Varias direcciones** («Entregar en varias direcciones»): una tabla con los productos del pedido y cuánto va a cada
+  dirección. Lo repartido se descuenta del total de cada producto («Falta repartir»); no se puede pasar de lo que tiene
+  el pedido (la pantalla no deja guardar y el servidor lo rechaza). «+ lo que falta» pasa a una dirección todo lo que queda.
+- La validación la hace el servidor: la pantalla manda el lugar elegido de Google y el CRM le vuelve a pedir a Google la
+  dirección, las coordenadas y la localidad. La clave de Google queda en el servidor.
+- El pedido guarda el resumen en «Dirección de entrega» (`direccion_entrega`, de solo lectura): la dirección, o
+  «N direcciones: …». Queda en el historial.
+- **Cronograma** ([CRONOGRAMA.md](CRONOGRAMA.md)): la ruta del día usa estas direcciones (una parada por dirección, con el
+  punto de Google en el mapa). Cambiar la dirección desde la parada pasa por acá (`direccionDesdeRuta`): con una sola, la
+  reemplaza (sin validar); con varias, pide hacerlo en la tarjeta. Las direcciones que ya estaban cargadas en el pedido
+  pasaron a la tarjeta con la migración 0048.
+- Sin dirección cargada, sugiere la del pedido de venta de Finnegans y, si no hay, la de la empresa.
+- Lo cargan quienes pueden editar el pedido (también la vendedora, en sus pedidos).
+
+**Para que valide con Google Maps** hace falta la clave `GOOGLE_MAPS_API_KEY` (Google Cloud → APIs y servicios →
+habilitar **Places API (New)** → Credenciales → Crear clave de API, restringida a esa API) en los secretos del repositorio
+de GitHub: el despliegue la carga en el Worker. Sin la clave, las direcciones se cargan a mano y quedan «Sin validar».
+Prueba: `test/direcciones.test.mjs` (Google Maps simulado).

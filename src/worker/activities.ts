@@ -191,7 +191,7 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
   ).bind(recordId, before, JSON.stringify(opts.hiddenPipelines ?? []), opts.q?.trim() ? `%${opts.q.trim()}%` : null, opts.owner ?? null).all<ActivityRow & { links: string | null }>();
   const changes = await db.prepare(
     `SELECT c.*, COALESCE(c.actor, u.name) AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id
-     WHERE c.record_id = ? AND c.prop IN ('dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'archived', 'merged', 'amount', 'hs_pipeline_stage', 'factura_numero')
+     WHERE c.record_id = ? AND c.prop IN ('dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'archived', 'merged', 'amount', 'hs_pipeline_stage', 'factura_numero', 'direccion_entrega')
      ORDER BY c.changed_at DESC LIMIT 100`,
   ).bind(recordId).all();
   const counts = await db.prepare(

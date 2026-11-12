@@ -24,6 +24,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
+import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { assertActividadVisible, assertVisible, esVentas, idsVisibles, sinVentas } from './alcance';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
@@ -946,6 +947,21 @@ api.get('/files/:id', async (c) => {
     return new Response(a.body, { headers: { 'content-type': a.type, 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(a.name)}` } });
   }
   throw new HttpError(404, 'El PDF de la factura todavía no se bajó de Finnegans (se baja solo en la próxima hora).');
+});
+
+// ---------- Direcciones de entrega del pedido (direcciones.ts) ----------
+
+// Las direcciones, los productos y cuánto de cada uno va a cada dirección (y cuánto falta repartir).
+api.get('/records/order/:id/direcciones', async (c) => c.json(await direccionesDe(c.env, Number(c.req.param('id')))));
+// Se guardan todas de una vez. Las elegidas de Google se validan acá contra Google Maps.
+api.put('/records/order/:id/direcciones', async (c) => {
+  canWrite(c.get('ctx'));
+  return c.json(await guardarDirecciones(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json<GuardarInput>()));
+});
+// Lo que sugiere Google Maps mientras se escribe la dirección (la clave de Google queda en el servidor).
+api.get('/maps/sugerencias', async (c) => {
+  if (!mapsConfigurado(c.env)) return c.json({ maps: false, sugerencias: [] });
+  return c.json({ maps: true, sugerencias: await sugerencias(c.env, c.req.query('q') ?? '', c.req.query('sesion')) });
 });
 
 // ---------- Remitos y estado de entrega (remitos.ts) ----------

@@ -43,7 +43,7 @@ OAuth 2.1 como lo piden los conectores remotos de Claude:
 - `/mcp/oauth/token`: el código por un token del CRM (`api_tokens`, tipo `mcp`, 30 días) y uno para renovarlo (180 días,
   se renuevan los dos cada vez). `/mcp/oauth/revoke` para revocar.
 - Desconectar desde el CRM: `DELETE /api/claude/conexiones/:id` (solo las propias).
-- Tablas: `oauth_clientes`, `oauth_codigos` y columnas nuevas en `api_tokens` (migración 0045).
+- Tablas: `oauth_clientes`, `oauth_codigos` y columnas nuevas en `api_tokens` (migración 0046).
 - `wrangler.jsonc`: `/conectar/*` y `/.well-known/*` van primero al Worker (si no, se sirve la pantalla del CRM).
 - Los links con token (`/mcp/fcrm_…`, Configuración → Integraciones) siguen andando para Cowork y scripts.
 - Prueba: `test/claude.test.mjs`.

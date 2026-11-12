@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, vistaProduccion } from './produccion';
+import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { bandeja, borrarMensaje, conversacion, editarMensaje, escribir, imagen, marcarLeido, quitarImagen, seguir, subirImagen } from './conversacion';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
@@ -216,7 +216,11 @@ api.get('/records/:type/:id', async (c) => {
     if (merged?.merged_into) return c.json({ redirect: merged.merged_into, record: rowToRecord(row) });
   }
   const tags = (await tagsFor(c.env.DB, c.get('ctx'), type, [row.id])).get(row.id) ?? [];
-  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx'))) });
+  // Pedidos: quién lo tiene en producción y cuántos artículos están listos, para la cabecera de la ficha y de la vista
+  // previa (lo mismo que la tarjeta del tablero de pedidos).
+  const prod = type === 'order' ? await produccionDePedido(c.env.DB, row.id) : null;
+  const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx'))), ...(produccion ? { produccion } : {}) });
 });
 
 api.patch('/records/:type/:id', async (c) => {

@@ -666,9 +666,9 @@ export function QuienProduce({ asignados, listos, total, conNombre = true }: { a
   );
 }
 
-// Estado de un artículo en ClickUp, pintado como en ClickUp: la pastilla llena del color del estado, en mayúsculas,
-// con letra blanca (u oscura si el color es claro, como el amarillo de «en el impresor»). Producción y los productos
-// del pedido lo muestran igual, para que pasar de ClickUp al CRM no cueste.
+// Estado de un artículo en ClickUp, con el color de ClickUp: una pastilla suave con su ícono (styles.css, .st-pec).
+// Producción, los productos del pedido (ficha y vista previa) y la conversación lo muestran igual.
+// tintaSobre: la letra que se lee sobre un color lleno (blanca, u oscura si el color es claro).
 export function tintaSobre(color: string) {
   const h = color.replace('#', '');
   const x = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6);

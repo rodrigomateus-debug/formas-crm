@@ -76,10 +76,15 @@ En el historial del pedido el cambio queda a nombre de quien lo hizo.
 
 ## Lo que ven las vendedoras
 
+- **Cabecera de la ficha y de la vista previa del pedido** (pedido de Rodrigo del 12/11/2026): la etapa y
+  «Producción:» con quién lo tiene (foto y nombre) y cuántos artículos están listos, lo mismo que la tarjeta del tablero
+  de pedidos. Lo trae `GET /api/records/order/:id` (`produccion`, con `produccionDePedido`). La vista previa que se
+  abre desde Producción es la misma de Pedidos, con la conversación del pedido.
+
 - **Tarjeta del tablero de pedidos:** mientras se produce, quién lo tiene en producción (foto y nombre) y cuántos
   artículos están listos (`adjuntosSql` en `productos.ts`, con `PRODUCCION_TARJETA_SQL`).
-- **Productos del pedido** (ficha y vista previa): «En producción:» con quién lo tiene, y en cada producto su estado y
-  quién tiene ese artículo.
+- **Productos del pedido** (ficha y vista previa): en cada producto su estado (la misma pastilla que en Producción y en
+  la conversación) y quién tiene ese artículo.
 
 ## Proveedores e impresores: empresas del CRM
 

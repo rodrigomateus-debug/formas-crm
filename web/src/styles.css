@@ -838,12 +838,19 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 .fecha-cell input[type="date"] { width: 138px; padding: 0 6px; }
 .fecha-alerta, .fecha-alerta input { color: var(--ui-negative-ink); font-weight: 600; }
 /* Estado de ClickUp: un punto del color de ClickUp sobre la pastilla, que se lee en los tres temas. */
-.st-pec { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 8px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500; white-space: nowrap;
-  background: color-mix(in srgb, var(--e) 14%, var(--ui-surface)); color: color-mix(in srgb, var(--e) 55%, var(--ui-ink)); }
-.st-pec::before, .st-dot { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--e); flex: none; display: inline-block; }
-.select-value .st-dot, .select-text .st-dot { margin-right: 8px; vertical-align: 1px; }
-[data-theme="dark"] .st-pec { background: color-mix(in srgb, var(--e) 22%, var(--ui-surface)); color: color-mix(in srgb, var(--e) 45%, #fff); }
-[data-theme="contrast"] .st-pec { color: var(--ui-ink); box-shadow: inset 0 0 0 1px currentColor; background: var(--ui-surface); }
+.st-pec { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px 0 7px; border-radius: 4px; font-size: 11px; font-weight: 700;
+  letter-spacing: .03em; text-transform: uppercase; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+  background: var(--e); color: var(--e-ink); }
+/* El circulito de ClickUp: un aro del color de la letra. */
+.st-pec::before { content: ''; width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; flex: none; opacity: .9; }
+[data-theme="contrast"] .st-pec { box-shadow: 0 0 0 1px var(--ui-ink); }
+/* El desplegable del estado, lleno del color del estado. */
+.input.st-select { background: var(--e); color: var(--e-ink); border-color: transparent; font-weight: 700; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
+.input.st-select:hover, .input.st-select.open { border-color: var(--ui-ink); }
+.input.st-select .st-pec { padding: 0; background: none; height: auto; }
+.input.st-select svg { color: var(--e-ink); }
+.select-text .st-pec { vertical-align: middle; }
+.col-head.st-col { border-top: 3px solid var(--e); border-radius: var(--r-panel) var(--r-panel) 0 0; }
 table.prod-grid .st-select { min-width: 190px; }
 /* Quién lo tiene: las fotos superpuestas. */
 .asignados { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 160px; }

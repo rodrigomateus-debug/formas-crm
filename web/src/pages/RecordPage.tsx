@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
-import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
+import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
@@ -553,7 +553,7 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 // ---------- Columna derecha: asociaciones ----------
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
-interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; asignados?: PersonaProduccion[] }
+interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[] }
 interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[];
   produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } | null }
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
@@ -609,7 +609,7 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
               : it.quantity != null ? `${qty(it.quantity)} unidades` : 'Cantidad sin cargar'}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
             {(it.status || (it.asignados?.length ?? 0) > 0) && (
               <div className="small row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                {it.status && <span className="tag info" style={{ textTransform: 'capitalize' }}>{it.status}</span>}
+                {it.status && <EstadoClickup estado={it.status} color={it.status_color} />}
                 {it.asignados?.map((p) => <span key={p.id} className="user-inline" title={`Lo tiene ${p.nombre}`}><PersonaProd p={p} size="xs" />{p.nombre.split(' ')[0]}</span>)}
               </div>
             )}

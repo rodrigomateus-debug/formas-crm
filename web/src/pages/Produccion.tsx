@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, recordUrl, formatValue, useDebounced } from '../lib';
-import { Avatar, UserAvatar, EtapaPedido } from '../components';
+import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado } from '../components';
 import { Select } from '../Select';
 
 // Producción (pedido de Rodrigo del 12/11/2026): la vista con la que trabajan Ceci y Sole en ClickUp («Estado PDV CECI»),
@@ -259,19 +259,20 @@ const primerNombre = (n: string) => n.split(' ')[0];
 // ---------- Celdas ----------
 
 function EstadoPec({ estado, estados }: { estado: string; estados: Estado[] }) {
-  const e = estados.find((x) => x.status === estado);
-  return <span className="st-pec" style={{ ['--e' as string]: e?.color ?? '#8d8d8d' }}>{capital(estado || 'sin estado')}</span>;
+  return <EstadoClickup estado={estado} color={estados.find((x) => x.status === estado)?.color} />;
 }
 
 function EstadoCelda({ a, v, editable, onChange }: { a: Articulo; v: Vista; editable: boolean; onChange: (s: string) => void }) {
   const opciones = useOpcionesEstado(v.estados);
   if (!editable) return <EstadoPec estado={a.estado} estados={v.estados} />;
-  return <Select value={a.estado} onChange={(e) => onChange(e.target.value)} className="input sm st-select" aria-label={`Estado de ${a.nombre}`}>{opciones}</Select>;
+  // El desplegable también va pintado del color del estado, como en ClickUp.
+  return <Select value={a.estado} onChange={(e) => onChange(e.target.value)} className="input sm st-select" style={estiloEstado(v.estados.find((x) => x.status === a.estado)?.color)}
+    aria-label={`Estado de ${a.nombre}`}>{opciones}</Select>;
 }
 const cacheEstados = new WeakMap<Estado[], ReactNode>();
 function useOpcionesEstado(estados: Estado[]) {
   if (!cacheEstados.has(estados)) {
-    cacheEstados.set(estados, estados.map((e) => <option key={e.status} value={e.status}><span className="st-dot" style={{ background: e.color }} />{capital(e.status)}</option>));
+    cacheEstados.set(estados, estados.map((e) => <option key={e.status} value={e.status}><EstadoClickup estado={e.status} color={e.color} /></option>));
   }
   return cacheEstados.get(estados);
 }
@@ -485,8 +486,8 @@ function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; edit
             onDragOver={(e) => { if (drag && drag.a.estado !== c.status) { e.preventDefault(); setOver(c.status); } }}
             onDragLeave={() => setOver(null)}
             onDrop={(e) => { e.preventDefault(); setOver(null); if (drag) editar(drag.pdv, drag.a.task_id, 'estado', c.status); setDrag(null); }}>
-            <div className="col-head etapa-col" style={{ ['--e' as string]: c.color }}>
-              <div className="t"><span className="st-dot" style={{ background: c.color }} />{capital(c.status)}<span className="n">{deCol.length}</span></div>
+            <div className="col-head st-col" style={estiloEstado(c.color)}>
+              <div className="t"><EstadoClickup estado={c.status} color={c.color} /><span className="n">{deCol.length}</span></div>
             </div>
             <div className="col-body">
               {deCol.map(({ p, a }) => {

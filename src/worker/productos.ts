@@ -2,7 +2,7 @@ import type { Env } from './env';
 import { Budget, OutOfBudget } from './budget';
 import { finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
 import { articulosDelPdv, articulosLivianos, type Articulo } from './clickup';
-import { PRODUCCION_TARJETA_SQL, produccionDePedido, type Persona } from './produccion';
+import { estadosPec, PRODUCCION_TARJETA_SQL, produccionDePedido, type Persona } from './produccion';
 import { clavePedido } from './totales';
 import { HttpError } from './env';
 
@@ -118,9 +118,12 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   const { fotos, sueltas } = fotosDeRenglones(results, cot.results as StpItem[]);
   // Producción: quién tiene asignado cada artículo en ClickUp (y el PDV entero).
   const prod = await produccionDePedido(db, recordId);
+  // El color de cada estado, el mismo que en ClickUp.
+  const estados = results.some((r) => r.status) ? await estadosPec(db) : [];
   const items = results.map((r, i) => ({
     code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], status: r.status, clickup_task: r.clickup_task,
     asignados: (r.clickup_task && prod?.porTarea.get(r.clickup_task)) || [],
+    status_color: estados.find((e) => e.status === String(r.status ?? '').toLowerCase().trim())?.color ?? null,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,
   }));

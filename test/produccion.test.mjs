@@ -104,7 +104,8 @@ before(async () => {
         if (p.endsWith(`/field/${F.egresoImp}`)) e.egresoImp = req.method === 'DELETE' ? null : new Date(json.value - 3 * 3600_000).toISOString().slice(0, 10);
         return send({});
       }
-      if (p === '/clickup/list/901326159292') return send({ statuses: [{ status: 'pdv', color: '#a18072', type: 'unstarted' }, { status: 'en revision', color: '#0f9d9f', type: 'custom' },
+      // «ingreso de pedido» viene con un color con nombre de ClickUp, no en hex.
+      if (p === '/clickup/list/901326159292') return send({ statuses: [{ status: 'ingreso de pedido', color: 'var(--cu-status-red)', type: 'open' }, { status: 'pdv', color: '#a18072', type: 'unstarted' }, { status: 'en revision', color: '#0f9d9f', type: 'custom' },
         { status: 'en el impresor', color: '#ffc53d', type: 'custom' }, { status: 'listo para entergar', color: '#008844', type: 'custom' },
         { status: 'anulado', color: '#8d8d8d', type: 'done' }, { status: 'entregados', color: '#008844', type: 'closed' }] });
       if (p === '/clickup/list/901326159292/task') {
@@ -138,6 +139,9 @@ test('producción: los PDV con sus artículos, el estado general sale de los art
   await sync();   // la segunda vuelta ata las opciones de proveedor e impresor a sus empresas
   const v = await vista();
   assert.deepEqual(v.unidades, ['FORMAS SHOP'], 'arranca con Formas Shop');
+  // Los colores de los estados, los de ClickUp (también los que tienen nombre).
+  assert.equal(v.estados.find((e) => e.status === 'en revision')?.color, '#0f9d9f');
+  assert.equal(v.estados.find((e) => e.status === 'ingreso de pedido')?.color, '#d33d44');
   const pdv = pdvDe(v, PDV);
   assert.ok(pdv, 'está el PDV de Formas Shop');
   assert.ok(!pdvDe(v, PDV_C), 'el de Corporate no, salvo que se pida');
@@ -252,6 +256,7 @@ test('producción: la vendedora ve quién lo tiene asignado, en la tarjeta y en 
   assert.ok(prods.produccion, 'el resumen de producción del pedido');
   assert.ok(prods.produccion.asignados.some((p) => p.nombre === `Ceci ${RUN}` && p.user_id), 'Ceci, con su usuario');
   assert.deepEqual([prods.produccion.listos, prods.produccion.total], [3, 3]);
+  assert.ok(prods.items.some((i) => i.status === 'listo para entergar' && i.status_color === '#008844'), 'cada producto con el color de su estado');
   const conAsignado = prods.items.filter((i) => i.asignados?.length);
   assert.ok(conAsignado.length, 'cada producto con quien lo tiene');
   // La tarjeta del tablero de pedidos.

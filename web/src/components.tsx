@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
@@ -661,4 +661,22 @@ export function QuienProduce({ asignados, listos, total, conNombre = true }: { a
       {!!total && <span className={`prod-avance${(listos ?? 0) >= total ? ' ok' : ''}`}>{listos ?? 0}/{total}</span>}
     </span>
   );
+}
+
+// Estado de un artículo en ClickUp, pintado como en ClickUp: la pastilla llena del color del estado, en mayúsculas,
+// con letra blanca (u oscura si el color es claro, como el amarillo de «en el impresor»). Producción y los productos
+// del pedido lo muestran igual, para que pasar de ClickUp al CRM no cueste.
+export function tintaSobre(color: string) {
+  const h = color.replace('#', '');
+  const x = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6);
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return Number.isFinite(l) && l > 0.4 ? '#1f2328' : '#ffffff';
+}
+export const estiloEstado = (color: string | null | undefined) => {
+  const e = color && /^#[0-9a-f]{3,8}$/i.test(color) ? color : '#87909e';
+  return { ['--e' as string]: e, ['--e-ink' as string]: tintaSobre(e) } as CSSProperties;
+};
+export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
+  return <span className="st-pec" style={estiloEstado(color)}>{estado || 'sin estado'}</span>;
 }

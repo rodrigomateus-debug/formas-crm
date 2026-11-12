@@ -303,6 +303,19 @@ export async function guardarProduccionConfig(db: D1Database, cfg: ProduccionCon
 // Producción (el perfil) y los administradores editan; los de «Solo mira», no.
 export const puedeEditarProduccion = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || u.profile === 'produccion');
 
+// El color de un estado como lo pinta ClickUp: hex, o uno de sus colores con nombre («var(--cu-status-red)», como
+// «ingreso de pedido»). Si no se reconoce, el que tenía ese estado en la lista de noviembre de 2026.
+const CU_COLORES: Record<string, string> = {
+  red: '#d33d44', orange: '#f76808', yellow: '#ffc53d', green: '#008844', teal: '#0f9d9f', blue: '#1090e0', purple: '#7b68ee',
+  pink: '#f708b4', gray: '#87909e', grey: '#87909e', black: '#2a2e34',
+};
+export function colorCu(color: string | null | undefined, status = '') {
+  const c = String(color ?? '').trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(c)) return c;
+  const nombre = c.match(/--cu-(?:status-)?([a-z]+)/i)?.[1]?.toLowerCase();
+  return (nombre && CU_COLORES[nombre]) || ESTADOS_PEC.find((e) => e.status === status.toLowerCase())?.color || '#87909e';
+}
+
 export async function estadosPec(db: D1Database) {
   const r = await db.prepare("SELECT value FROM settings WHERE key = 'clickup_estados'").first<{ value: string }>();
   try { const e = r ? JSON.parse(r.value).estados : null; if (Array.isArray(e) && e.length) return e as typeof ESTADOS_PEC; } catch { /* los de siempre */ }
@@ -315,7 +328,7 @@ export async function leerEstados(env: Env, b: Budget) {
   const at = r ? Number(JSON.parse(r.value).at) || 0 : 0;
   if (Date.now() - at < 86_400_000 || b.left() < 25) return;
   const l = await cu<{ statuses?: Array<{ status: string; color: string; type: string; orderindex?: number }> }>(env, `/list/${LIST}`, {}, b);
-  const estados = (l.statuses ?? []).map((s) => ({ status: s.status.toLowerCase(), color: /^#/.test(s.color) ? s.color : '#8d8d8d', type: s.type }));
+  const estados = (l.statuses ?? []).map((s) => ({ status: s.status.toLowerCase(), color: colorCu(s.color, s.status), type: s.type }));
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('clickup_estados', ?)").bind(JSON.stringify({ at: Date.now(), estados: estados.length ? estados : ESTADOS_PEC })).run();
 }
 

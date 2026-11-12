@@ -328,6 +328,13 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   const corrido = r.paradas.find((p) => p.company_id === imprefas);
   assert.deepEqual([corrido.lat, corrido.lng, corrido.punto_manual], [-34.7, -58.39, true]);
   assert.equal(consultasGeo, geoAntes);
+  // Se saca la corrección: la dirección se vuelve a buscar en el mapa.
+  assert.equal((await api('DELETE', `/cronograma/punto?direccion=${encodeURIComponent(`Cnel. Sayos ${PDV}, Lanús`)}`)).status, 200);
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-18')).data;
+  for (let i = 0; i < 6 && r.buscando > 0; i++) r = (await api('GET', '/cronograma/ruta?fecha=2026-11-18')).data;
+  const devuelta = r.paradas.find((p) => p.company_id === imprefas);
+  assert.deepEqual([devuelta.lat, devuelta.punto_manual], [-34.699, false]);
+  assert.ok(consultasGeo > geoAntes);
 
   // Los recorridos del día: dos choferes, cada uno con su orden y su depósito.
   const claves = r.paradas.map((p) => p.clave);

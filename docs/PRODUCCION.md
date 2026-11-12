@@ -85,7 +85,12 @@ Las opciones de los desplegables PROVEEDOR e IMPRESOR de ClickUp quedan atadas a
 4. «STOCK», «SIN LOGO» e «IMPRESOR A DEFINIR» no son empresas: quedan como opción suelta.
 
 En la pantalla, cada empresa aparece una sola vez en el desplegable; al elegirla se escribe en ClickUp su primera
-opción. La ficha de cada proveedor muestra **«En producción»**: los artículos abiertos que tiene, con sus fechas.
+opción. Los importadores VIP (Zecat, Promoproductos, Nuevas Formas, Stocksur/CDO, X-Trade, Irion y Bello) se ven con su
+logo y su color, como en el seguimiento de importados del tablero de Formas Shop, en el desplegable, en la celda y en
+la tarjeta del tablero (pedido de Rodrigo del 12/11/2026). Se reconocen por el nombre, también con su razón social
+(«IMPROM S.A.» es Promoproductos, «ENE FORMAS» es Nuevas Formas); la lista y los colores están en
+`web/src/proveedores.tsx` y los isotipos, recortados de los de `formas-shop-tablero/assets/proveedores`, en
+`web/public/proveedores/`. Si un importador aparece con otro nombre, se agrega en `alias`. La ficha de cada proveedor muestra **«En producción»**: los artículos abiertos que tiene, con sus fechas.
 
 ## Cómo está hecho
 

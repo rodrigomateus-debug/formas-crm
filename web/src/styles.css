@@ -841,6 +841,16 @@ tr.prod-art.cerrado td { opacity: .6; }
 table.prod-grid .input.sm { height: 30px; font-size: 13px; }
 table.prod-grid td.opcion-cell { min-width: 170px; max-width: 220px; }
 table.prod-grid td.opcion-cell .input { width: 100%; }
+/* Importadores VIP (proveedores.tsx): su isotipo y su color, como en el seguimiento de importados del tablero de Formas Shop. */
+.prov-marca { color: var(--prov-ink); font-weight: 600; }
+[data-theme="dark"] .prov-marca { color: var(--prov-ink-dark); }
+[data-theme="contrast"] .prov-marca { color: inherit; }
+.prov-logo { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px; padding: 2px; margin-right: 6px;
+  border-radius: 4px; border: 1px solid var(--ui-line); vertical-align: middle; overflow: hidden; flex: none; }
+.prov-logo.ancho { width: 40px; }
+.prov-logo img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.prod-card-provs .prov-logo { width: 18px; height: 16px; padding: 1px; margin-right: 4px; }
+.prod-card-provs .prov-logo.ancho { width: 34px; }
 .fecha-cell input[type="date"] { width: 138px; padding: 0 6px; }
 .fecha-alerta, .fecha-alerta input { color: var(--ui-negative-ink); font-weight: 600; }
 /* Estado de ClickUp: un punto del color de ClickUp sobre la pastilla, que se lee en los tres temas. */

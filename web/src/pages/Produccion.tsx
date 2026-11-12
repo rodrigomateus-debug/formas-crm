@@ -1,8 +1,9 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, recordUrl, formatValue, useDebounced } from '../lib';
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado } from '../components';
 import { Select } from '../Select';
+import { NombreProveedor } from '../proveedores';
 
 // Producción (pedido de Rodrigo del 12/11/2026): la vista con la que trabajan Ceci y Sole en ClickUp («Estado PDV CECI»),
 // en el CRM. Cada PDV con sus artículos abajo; cada artículo con su estado, quién lo tiene, proveedor, impresor y las
@@ -355,7 +356,8 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
   const et = etiquetaOpcion(v, campo, valor);
   if (!editable) {
     if (!et) return <span className="muted">—</span>;
-    return et.company ? <Link to={recordUrl('company', et.company)} className="ellipsis">{et.label}</Link> : <span className="ellipsis">{et.label}</span>;
+    const nombre = <NombreProveedor>{et.label}</NombreProveedor>;
+    return et.company ? <Link to={recordUrl('company', et.company)} className="ellipsis">{nombre}</Link> : <span className="ellipsis">{nombre}</span>;
   }
   // Si lo elegido es una opción repetida (la otra de la misma empresa), se muestra como la de la empresa.
   const o = valor ? v.opciones.find((x) => x.campo === campo && x.option_id === valor) : null;
@@ -376,8 +378,8 @@ const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${
 function Lista({ pdvs, v, editar, abierto, onToggle, onTodos }: {
   pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void;
 }) {
-  const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}>{o.label}</option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}>{o.label}</option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
+  const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
   const todosAbiertos = pdvs.every((p) => abierto(p.task_id));
   return (
     <div className="table-wrap prod-wrap">
@@ -535,7 +537,10 @@ function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; edit
                     <div className="small muted ellipsis">
                       {p.record_id ? <Link to={recordUrl('order', p.record_id)}>PDV {p.npdv}</Link> : `PDV ${p.npdv}`} · {p.cliente ?? '—'}
                     </div>
-                    <div className="small muted ellipsis">{[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov?.label, imp && `imp. ${imp.label}`].filter(Boolean).join(' · ')}</div>
+                    <div className="small muted ellipsis prod-card-provs">
+                      {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>]
+                        .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}
+                    </div>
                     <div className="row" style={{ gap: 6, justifyContent: 'space-between' }}>
                       <Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={(ids) => editar(p, a.task_id, 'asignados', ids)} label={a.nombre} />
                       {a.entrega_real && <span className={`small${a.entrega_real < hoyIso() && !['listo para entergar', 'entregados'].includes(a.estado) ? ' fecha-alerta' : ' muted'}`}>{dia(a.entrega_real)}</span>}

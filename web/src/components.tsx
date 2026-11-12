@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
@@ -641,4 +641,42 @@ export function EtapaPedido({ value, label }: { value: unknown; label: string })
   const slug = etapaPedidoSlug(value);
   if (!slug) return <>{label}</>;
   return <span className={`etapa e-${slug}`}><EtapaIcono value={value} size={13} />{label}</span>;
+}
+
+// Quién tiene el pedido en producción (asignado en ClickUp, produccion.ts) con su foto, y cuántos artículos están listos.
+// Para que las vendedoras sepan a quién preguntar: en la tarjeta del tablero de pedidos y en los productos del pedido.
+export interface PersonaProduccion { id: number; nombre: string; user_id: number | null; foto: string | null }
+export function PersonaProd({ p, size = 'sm' }: { p: PersonaProduccion; size?: 'sm' | 'xs' }) {
+  return p.user_id ? <UserAvatar id={p.user_id} size={size} /> : <Avatar name={p.nombre} photo={p.foto} size={size} />;
+}
+export function QuienProduce({ asignados, listos, total, conNombre = true }: { asignados: PersonaProduccion[]; listos?: number; total?: number; conNombre?: boolean }) {
+  if (!asignados.length && !total) return null;
+  const nombres = asignados.map((p) => p.nombre).join(', ');
+  const avance = total ? `${listos ?? 0} de ${total} artículos listos` : '';
+  return (
+    <span className="prod-quien" title={[nombres ? `En producción: ${nombres}` : 'Sin asignar en producción', avance].filter(Boolean).join('. ')}>
+      <Icon name="printer" size={13} />
+      {asignados.length > 0 && <span className="avatar-stack">{asignados.slice(0, 3).map((p) => <PersonaProd key={p.id} p={p} />)}</span>}
+      {conNombre && <span className="ellipsis">{asignados.length ? asignados.map((p) => p.nombre.split(' ')[0]).join(', ') : 'Sin asignar'}</span>}
+      {!!total && <span className={`prod-avance${(listos ?? 0) >= total ? ' ok' : ''}`}>{listos ?? 0}/{total}</span>}
+    </span>
+  );
+}
+
+// Estado de un artículo en ClickUp, pintado como en ClickUp: la pastilla llena del color del estado, en mayúsculas,
+// con letra blanca (u oscura si el color es claro, como el amarillo de «en el impresor»). Producción y los productos
+// del pedido lo muestran igual, para que pasar de ClickUp al CRM no cueste.
+export function tintaSobre(color: string) {
+  const h = color.replace('#', '');
+  const x = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6);
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return Number.isFinite(l) && l > 0.4 ? '#1f2328' : '#ffffff';
+}
+export const estiloEstado = (color: string | null | undefined) => {
+  const e = color && /^#[0-9a-f]{3,8}$/i.test(color) ? color : '#87909e';
+  return { ['--e' as string]: e, ['--e-ink' as string]: tintaSobre(e) } as CSSProperties;
+};
+export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
+  return <span className="st-pec" style={estiloEstado(color)}>{estado || 'sin estado'}</span>;
 }

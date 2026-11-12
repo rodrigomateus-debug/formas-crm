@@ -14,6 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
+import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
@@ -324,7 +325,10 @@ api.post('/records/:type/:id/merge', async (c) => {
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
   const { other_id } = await c.req.json<{ other_id: number }>();
-  return c.json(rowToRecord(await mergeRecords(c.env.DB, ctx, type, Number(c.req.param('id')), Number(other_id))));
+  const row = await mergeRecords(c.env.DB, ctx, type, Number(c.req.param('id')), Number(other_id));
+  // Dos empresas proveedoras combinadas: las opciones de ClickUp de la que se va pasan a la que queda (produccion.ts).
+  if (type === 'company') await opcionesAEmpresa(c.env.DB, [Number(other_id)], row.id);
+  return c.json(rowToRecord(row));
 });
 
 api.get('/records/:type/:id/history', async (c) => {
@@ -990,6 +994,24 @@ api.get('/integrations/bocetos/probar', async (c) => {
 });
 
 // Estado de las conexiones con ClickUp y Finnegans, y correrlas a mano.
+// ---------- Producción (produccion.ts): los PDV de ClickUp con sus artículos, editables desde el CRM ----------
+
+api.get('/produccion', async (c) => {
+  const q = c.req.query();
+  const unidades = q.unidades ? q.unidades.split(',').map((u) => u.trim()).filter(Boolean) : undefined;
+  return c.json(await vistaProduccion(c.env.DB, c.get('ctx').user, { unidades, cerrados: q.cerrados === '1' }));
+});
+api.get('/produccion/config', async (c) => c.json(await produccionConfig(c.env.DB)));
+api.put('/produccion/config', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await guardarProduccionConfig(c.env.DB, await c.req.json()));
+});
+api.patch('/produccion/:task', async (c) => {
+  const b = await c.req.json<{ campo?: string; valor?: unknown }>();
+  return c.json({ pdv: await editarProduccion(c.env, c.get('ctx'), c.req.param('task'), String(b.campo ?? ''), b.valor) });
+});
+api.get('/records/company/:id/produccion', async (c) => c.json(await produccionDeEmpresa(c.env.DB, Number(c.req.param('id')))));
+
 api.get('/integrations/pedidos', async (c) => {
   const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
   return c.json({

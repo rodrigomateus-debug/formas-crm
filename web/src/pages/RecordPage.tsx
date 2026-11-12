@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
-import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, PropertyInput, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink } from '../components';
+import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
@@ -42,6 +42,7 @@ export default function RecordPage() {
         </section>
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
+          {type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
           {type === 'deal' && <FacturarCard record={record} />}
           {type === 'deal' && <BocetosNegocioCard dealId={record.id} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
@@ -552,8 +553,9 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 // ---------- Columna derecha: asociaciones ----------
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
-interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null }
-interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[] }
+interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[] }
+interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[];
+  produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } | null }
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
 // los artículos del PDV de ClickUp (producto, cantidad, código y estado de producción, sin precio).
 // En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
@@ -592,6 +594,8 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
       <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3>
         {puedeSubir && items.length > 0 && <BotonArchivos onArchivos={sub.elegir} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
       </div>
+      {/* Quién lo tiene en producción (asignado en ClickUp), con su foto: a quién preguntarle cómo viene. */}
+      {d?.produccion && <div className="panel-body" style={{ paddingTop: 0 }}><span className="small muted" style={{ marginRight: 8 }}>En producción:</span><QuienProduce {...d.produccion} /></div>}
       {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
       {shown.map((it, i) => (
         <div key={i} className="assoc-item product-item">
@@ -603,7 +607,12 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
             <div className="small muted">{it.unit_price != null
               ? <>{qty(it.quantity)} × {fmtMoney(it.unit_price, it.currency)}{it.discount ? ` · ${qty(it.discount)} % de descuento` : ''}</>
               : it.quantity != null ? `${qty(it.quantity)} unidades` : 'Cantidad sin cargar'}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
-            {it.status && <div className="small"><span className="tag info" style={{ textTransform: 'capitalize' }}>{it.status}</span></div>}
+            {(it.status || (it.asignados?.length ?? 0) > 0) && (
+              <div className="small row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {it.status && <EstadoClickup estado={it.status} color={it.status_color} />}
+                {it.asignados?.map((p) => <span key={p.id} className="user-inline" title={`Lo tiene ${p.nombre}`}><PersonaProd p={p} size="xs" />{p.nombre.split(' ')[0]}</span>)}
+              </div>
+            )}
             {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
             <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
               <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={setVer} />
@@ -664,6 +673,35 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
 
 interface FileRow { id: number; kind: string; name: string; source: string; created_at: string; ready: boolean; meta: Record<string, any> }
 // Compras de la empresa en Finnegans (las calcula el CRM cada noche): estado, última compra, cuánto compra y cuánto debe.
+// Proveedor o impresor (produccion.ts): lo que tiene ahora en producción, con las fechas de ingreso y retiro.
+interface ArticuloProveedor { task_id: string; nombre: string; estado: string; cantidad: number | null; npdv: string | null; cliente: string | null; record_id: number | null;
+  rol: 'proveedor' | 'impresor'; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null }
+function ProduccionProveedorCard({ companyId }: { companyId: number }) {
+  const res = useAsync(() => http<{ articulos: ArticuloProveedor[] }>('GET', `/records/company/${companyId}/produccion`), [companyId]);
+  const arts = res.data?.articulos ?? [];
+  if (!arts.length) return null;
+  const f = (v: string | null) => (v ? fmtDate(v) : null);
+  return (
+    <div className="panel assoc-card">
+      <div className="panel-head"><h3>En producción <span className="muted small">({arts.length})</span></h3><Link className="btn sm ghost" to="/produccion">Ver producción</Link></div>
+      {arts.slice(0, 12).map((a) => {
+        const fechas = (a.rol === 'impresor'
+          ? [f(a.egreso_impresor) && `fue ${f(a.egreso_impresor)}`, f(a.retiro_impresor) && `retiro ${f(a.retiro_impresor)}`]
+          : [f(a.ingreso_proveedor) && `ingreso ${f(a.ingreso_proveedor)}`, f(a.retiro_proveedor) && `retiro ${f(a.retiro_proveedor)}`]).filter(Boolean);
+        return (
+          <div key={a.task_id} className="assoc-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
+            <div className="ellipsis" title={a.nombre}>{a.nombre}</div>
+            <div className="small muted ellipsis">
+              {a.record_id ? <Link to={recordUrl('order', a.record_id)}>PDV {a.npdv}</Link> : `PDV ${a.npdv}`}
+              {` · ${a.cliente ?? '—'} · ${a.rol === 'impresor' ? 'imprime' : 'provee'} · ${a.estado}`}{fechas.length ? ` · ${fechas.join(', ')}` : ''}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ComprasCard({ record }: { record: CrmRecord }) {
   const p = record.props;
   if (!p.estado_cliente && p.saldo_pendiente == null) return null;
@@ -908,6 +946,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
         {type === 'company' && <ComprasCard record={record} />}
+        {type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} />}
         {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}

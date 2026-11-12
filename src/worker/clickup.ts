@@ -8,6 +8,7 @@ import { bajarArchivo } from './drive';
 import { tareaPostEntrega } from './postentrega';
 import { montosDesdePedidos } from './montos';
 import { recalcularEntrega } from './remitos';
+import { enlazarPedido, guardarTareas, leerEstados, podarArticulos, vincularOpciones } from './produccion';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
@@ -19,10 +20,11 @@ import { recalcularEntrega } from './remitos';
 //   «Pendiente Boceto Digital» y «Listo para producción»): mientras los artículos no arrancan, esto no lo toca. Lo demás
 //   lo mueve esto.
 // - Cuando el PDV está entregado, la foto del remito que suben a la tarea del PDV queda en el pedido (tabla `files`).
-// - ClickUp solo se lee.
+// - ClickUp casi solo se lee: lo que el CRM escribe está abajo («Lo que el CRM escribe en ClickUp») y en produccion.ts.
+// - Cada tarea que se lee (PDV y artículos) también queda en la vista de Producción (produccion.ts).
 
-const LIST = '901326159292';
-const API = (env: Env) => env.CLICKUP_API_URL ?? 'https://api.clickup.com/api/v2';
+export const LIST = '901326159292';
+export const API = (env: Env) => env.CLICKUP_API_URL ?? 'https://api.clickup.com/api/v2';
 const POR_PDV = 5;    // consultas que puede llevar un PDV: la tarea y, si el pedido es nuevo, el token, el pedido y el cliente en Finnegans
 const LISTADO = 20;   // la lectura de la lista deja al menos esto para revisar PDV en la misma corrida
 
@@ -59,16 +61,17 @@ export function generalStage(statuses: string[]): string | null {
   return null;
 }
 
-interface CuTask {
+export interface CuTask {
   id: string; name: string; parent?: string | null; url: string; date_updated?: string; text_content?: string; description?: string;
   status?: { status: string; type?: string };
-  assignees?: Array<{ id?: number; username?: string | null; email?: string | null }>;
-  custom_fields?: Array<{ name: string; type: string; value?: unknown; type_config?: { options?: Array<{ id: string; name: string; orderindex?: number }> } }>;
+  due_date?: string | null; orderindex?: string | number; tags?: Array<{ name: string }>;
+  assignees?: Array<{ id?: number; username?: string | null; email?: string | null; profilePicture?: string | null; initials?: string | null; color?: string | null }>;
+  custom_fields?: Array<{ id?: string; name: string; type: string; value?: unknown; type_config?: { options?: Array<{ id: string; name: string; orderindex?: number; color?: string }> } }>;
   subtasks?: CuTask[];
   attachments?: Array<{ id: string; title?: string; extension?: string; mimetype?: string; size?: number; date?: string }>;
 }
 
-async function cu<T>(env: Env, path: string, params: Record<string, string | number> = {}, b?: Budget): Promise<T> {
+export async function cu<T>(env: Env, path: string, params: Record<string, string | number> = {}, b?: Budget): Promise<T> {
   b?.take();
   const url = new URL(API(env) + path);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
@@ -96,7 +99,7 @@ function fields(t: CuTask) {
   return out;
 }
 
-const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+export const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 // Nombre de empresa para comparar: sin la forma societaria del final ("Memes Games SRL" = "MEMES GAMES S.R.L.").
 const companyKey = (s: string) => norm(s).replace(/[.,]/g, '').replace(/(\s(s ?r ?l|s ?a ?s|s ?a ?u|s ?a ?i ?c|s ?a ?c ?i ?f|s ?a|s ?h))+$/, '').trim();
 
@@ -341,12 +344,13 @@ async function findOrder(db: D1Database, pdv: ReturnType<typeof readPdv>) {
 }
 
 // Un PDV de ClickUp → su pedido en el CRM. Devuelve qué hizo.
-export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | null, b?: Budget): Promise<'creado' | 'actualizado' | 'igual' | 'omitido'> {
+// `actor`: quién hizo el cambio, cuando se sabe (lo que se edita en la vista de Producción del CRM).
+export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | null, b?: Budget, actor?: { name: string; userId: number | null }): Promise<'creado' | 'actualizado' | 'igual' | 'omitido'> {
   const db = env.DB;
   const pdv = readPdv(t);
   if (!pdv.npdv || !pdv.unidad) return 'omitido';
   // Lo que cambia ClickUp en este pedido queda a nombre de quien tiene asignado el PDV, no del usuario de la sincronización.
-  const resp = await responsableClickup(db, t);
+  const resp = actor ?? await responsableClickup(db, t);
   const pctx: Ctx = resp ? { ...ctx, actor: resp } : ctx;
   const existing = await findOrder(db, pdv);
   let id: number;
@@ -365,6 +369,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
       fecha_de_entrega: pdv.entrega, owner_id: (owner = (await ownerFor(db, pdv.vendedor, pdv.mailVendedor)) ?? null),
     }, { system: true, strict: false });
     id = row.id;
+    await enlazarPedido(db, t.id, id);
     entregadoAhora = pdv.stage === STAGE.entregado;
     const company = await companyFor(env, pdv, fin, b);
     if (company) await associate(db, ctx, id, company, { primary: true }).catch(() => undefined);
@@ -393,7 +398,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     }
   }
   // Lo que ClickUp cambió antes de esto (a nombre de la sincronización) pasa a quien tiene asignado el PDV.
-  if (resp) {
+  if (resp && !actor) {
     await db.prepare("UPDATE changes SET user_id = ?, actor = ? WHERE record_id = ? AND source = 'clickup' AND actor IS NULL").bind(resp.userId, resp.name, id).run();
   }
   if (entregadoAhora) {
@@ -467,7 +472,7 @@ export async function clickupRemitos(env: Env, recordId: number, props: Record<s
     throw e;
   }
 }
-const frenar = (e: unknown) => e instanceof OutOfBudget || /HTTP 429/.test((e as Error)?.message ?? '');
+export const frenar = (e: unknown) => e instanceof OutOfBudget || /HTTP 429/.test((e as Error)?.message ?? '');
 
 // Saca los «remitos» guardados antes de que se miraran los nombres (fotos de producto, capturas, bocetos): solo en el CRM,
 // en ClickUp no se toca nada.
@@ -519,6 +524,7 @@ export interface ClickupState {
   scan?: { full: boolean; step: number; page: number; since: number; started: number } | null;   // lectura en curso
   queue?: Array<[string, number]>;  // PDV por revisar: [tarea, última modificación]
   at?: string; creados?: number; actualizados?: number; error?: string | null; pendientes?: number;
+  produccion?: number;              // 1: ya se hizo la lectura completa que llena la vista de Producción (produccion.ts)
 }
 
 export async function clickupState(db: D1Database): Promise<ClickupState> {
@@ -542,7 +548,9 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
   const b = Budget.of(env);
   const queue = new Map(state.queue ?? []);
   const out: ClickupState = { ...state, at: new Date(started).toISOString(), creados: 0, actualizados: 0, error: null };
-  if (opts.full || (!state.last && !state.scan)) out.scan = { full: true, step: 0, page: 0, since: started - 45 * 86_400_000, started };
+  // La vista de Producción necesita una lectura completa de la lista la primera vez (después, lo cambiado alcanza).
+  const llenarProduccion = !state.produccion && !state.scan?.full;
+  if (opts.full || llenarProduccion || (!state.last && !state.scan)) out.scan = { full: true, step: 0, page: 0, since: started - 45 * 86_400_000, started };
   else if (!state.scan) out.scan = { full: false, step: 0, page: 0, since: state.last! - 5 * 60_000, started };
   try {
     const ctx = await systemCtx(env);
@@ -556,10 +564,14 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
         queue.set(pid, Math.max(queue.get(pid) ?? 0, Number(t.date_updated ?? 0)));
       }
       out.actualizados! += await ownersFromList(db, ctx, d.tasks);
+      // La lista ya trae cada artículo con sus campos y sus asignados: a la vista de Producción, sin consultas de más.
+      await guardarTareas(db, d.tasks);
       if (d.last_page === false && d.tasks.length && sc.page < 200) sc.page++;
       else if (sc.full && sc.step === 0) { sc.step = 1; sc.page = 0; }
-      else { out.last = sc.started; out.scan = null; }
+      else { out.last = sc.started; if (sc.full) out.produccion = 1; out.scan = null; }
     }
+    await leerEstados(env, b).catch((e) => { if (e instanceof OutOfBudget) throw e; console.error('estados', (e as Error).message); });
+    await vincularOpciones(db, ctx).catch((e) => console.error('proveedores', (e as Error).message));
     // 2. Los PDV anotados.
     // El CUIT del pedido (dos consultas a Finnegans) solo sirve si hay empresas con CUIT en el CRM; si no, se busca por nombre.
     const conCuit = await db.prepare("SELECT 1 FROM records WHERE object_type = 'company' AND archived = 0 AND COALESCE(json_extract(props, '$.cuit'), '') != '' LIMIT 1").first();
@@ -575,6 +587,9 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
         continue;
       }
       if (!t.parent && /PDV/i.test(t.name)) {
+        // Producción: el estado y los asignados de cada artículo, y fuera los que ya no están en el PDV.
+        await guardarTareas(db, [t, ...(t.subtasks ?? []).map((s) => ({ ...s, parent: s.parent ?? t.id }))]);
+        if (t.subtasks) await podarArticulos(db, t.id, [t.id, ...t.subtasks.map((s) => s.id)]);
         if (fin === undefined) fin = await finnegansToken(env, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
         const r = await upsertPdv(env, ctx, t, fin, b);
         if (r === 'creado') out.creados!++;

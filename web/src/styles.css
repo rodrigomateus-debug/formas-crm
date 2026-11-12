@@ -884,7 +884,6 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 [data-theme="contrast"] .input.st-select { box-shadow: inset 0 0 0 1px var(--ui-ink); }
 [data-theme="contrast"] .input.st-select .st-pec { box-shadow: none; }
 .select-text .st-pec { vertical-align: middle; }
-.col-head.st-col { border-top: 3px solid var(--e); border-radius: var(--r-panel) var(--r-panel) 0 0; }
 /* Quién lo tiene: las fotos superpuestas. */
 .asignados { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 160px; }
 .avatar-stack { display: inline-flex; flex: none; }
@@ -892,9 +891,26 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 .avatar-stack .avatar + .avatar { margin-left: -4px; }
 .asignados-btn { border: 1px solid transparent; background: none; padding: 2px 6px 2px 2px; border-radius: var(--r-pill); cursor: pointer; color: inherit; font: inherit; display: inline-flex; max-width: 170px; }
 .asignados-btn:hover, .asignados-btn:focus-visible { border-color: var(--ui-line-strong); background: var(--ui-surface); }
-.prod-board .card { cursor: default; }
-.prod-board .card .t { font-weight: 600; font-size: 13px; }
-.prod-card-estado .input { width: 100%; }
+/* Tablero de producción: una tarjeta por PDV, con sus artículos como hijos (con la línea del árbol, como en la lista). */
+.prod-board .col { flex-basis: 300px; }
+.prod-board .card { cursor: default; padding: 0; gap: 0; contain-intrinsic-size: auto 260px; }
+.prod-board .card.abre { cursor: pointer; }
+.prod-pdv-card-head { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 9px; }
+.prod-npdv { font-weight: 700; font-size: 13px; color: var(--accent-ink); }
+.prod-cliente { font-weight: 600; font-size: 13px; color: var(--ui-ink); line-height: 1.3; }
+.prod-hijos { border-top: 1px solid var(--ui-line); padding: 6px 10px 8px 12px; display: flex; flex-direction: column; background: color-mix(in srgb, var(--ui-surface-sunken) 45%, var(--ui-surface));
+  border-radius: 0 0 var(--r-panel) var(--r-panel); }
+.prod-hijo { position: relative; padding: 7px 0 7px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.prod-hijo + .prod-hijo { border-top: 1px dashed var(--ui-line); }
+.prod-hijo::before { content: ''; position: absolute; left: 2px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); opacity: .5; }
+.prod-hijo::after { content: ''; position: absolute; left: 2px; top: 22px; width: 8px; border-top: 1.5px solid var(--ui-line-strong); opacity: .5; }
+.prod-hijo:last-of-type::before { bottom: calc(100% - 22px); }
+.prod-hijo.cerrado { opacity: .6; }
+.prod-hijo-t { font-size: 12.5px; font-weight: 500; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.prod-hijo-pie { gap: 8px; justify-content: space-between; min-width: 0; }
+.prod-hijo-pie .asignados { max-width: 110px; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; }
+.prod-hijo-pie .input.st-select, .prod-hijo-pie > .st-pec { flex: 0 0 auto; max-width: 75%; }
+.prod-mas { align-self: flex-start; margin: 4px 0 0 12px; }
 /* Pedidos: quién lo tiene en producción (tarjeta del tablero y productos del pedido). */
 .prod-quien { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-ink-2); min-width: 0; }
 @media (max-width: 700px) {

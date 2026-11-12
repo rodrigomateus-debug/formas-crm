@@ -45,8 +45,13 @@ se edita desde ahí.
 - **Estados como pastilla suave**, del color de ClickUp con su ícono, del ancho del texto y con mayúscula solo al
   principio, igual que la etapa del PDV. Las erratas de los nombres de ClickUp se corrigen solo a la vista
   («listo para entergar» se ve «Listo para entregar»; `nombreEstado` en `components.tsx`).
-- **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero tiene una
-  columna por estado y una tarjeta por artículo.
+- **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero (pedido de
+  Rodrigo del 12/11/2026) tiene **una tarjeta por PDV**, en la columna de su etapa general (la misma de la lista y de
+  Pedidos: Esperando boceto o confirmación, En producción, Listo para entregar…), con sus productos adentro como
+  hijos: foto, nombre, cantidad, proveedor e impresor, y su estado y asignado, que se cambian ahí mismo. Muestra
+  hasta 4 productos y el resto con «+ N productos más». Las tres etapas de producción se ven siempre; las demás,
+  solo si tienen algún PDV. Como el PDV cambia de etapa solo según sus artículos, no se arrastra: se cambia el
+  estado de cada producto.
 - **Filtros:** unidad de negocio, asignado (yo, cada persona, sin asignar), búsqueda por PDV, cliente o producto, y
   «Ver entregados (30 días)». Lo elegido queda guardado en el navegador de cada una.
 - Sin «Ver entregados» se muestran los PDV con algún artículo abierto, y en ellos los artículos que no están

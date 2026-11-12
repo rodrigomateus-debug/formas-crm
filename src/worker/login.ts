@@ -131,10 +131,11 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
   /* Design System de Formas (los mismos tokens que web/src/styles.css). */
   :root, [data-theme="light"] { color-scheme: light; --navy: #000085; --navy-2: #00006a; --green: #8cc63f; --canvas: #f4f5f9; --surface: #fff;
     --ink: #12143a; --ink-2: #4b4f6b; --ink-3: #656b85; --line: #e3e6ee; --line-strong: #c7cbd8; --neg-soft: #fbe7e5; --neg-ink: #a1312c;
-    --info-soft: #e4eefa; --info-ink: #24578f; --ring: 0 0 0 3px rgba(0, 0, 133, .18); --g-bg: #fff; --g-line: #747775; --g-ink: #1f1f1f; --logo: url(/login/formas-logo.png); }
+    --info-soft: #e4eefa; --info-ink: #24578f; --ring: 0 0 0 3px rgba(0, 0, 133, .18); --g-bg: #fff; --g-line: #747775; --g-ink: #1f1f1f; --g-hover: #f4f5f9; --logo: url(/login/formas-logo.png); }
   [data-theme="dark"] { color-scheme: dark; --canvas: #0b0c1e; --surface: #12142b; --ink: #eef0fa; --ink-2: #b9bdd6; --ink-3: #9297b5; --line: #262a4a;
     --line-strong: #383d63; --neg-soft: #3a1b20; --neg-ink: #ffb4ab; --info-soft: #172744; --info-ink: #a9c8f2; --ring: 0 0 0 3px rgba(140, 198, 63, .35);
-    --g-bg: #131314; --g-line: #8e918f; --g-ink: #e3e3e3; --logo: url(/formas-logo-white.png); }
+    /* El botón en oscuro: una superficie apenas más clara que el panel, con el borde y la letra del DS (no el negro de Google). */
+    --g-bg: #1c1f3d; --g-line: #3a3f68; --g-ink: #eef0fa; --g-hover: #252950; --logo: url(/formas-logo-white.png); }
   [data-theme="contrast"] { color-scheme: light; --canvas: #fff; --surface: #fff; --ink: #0b0c24; --ink-2: #272a45; --ink-3: #3d4160; --line: #6e7290;
     --line-strong: #3d4160; --g-line: #0b0c24; --logo: url(/login/formas-logo.png); }
   * { box-sizing: border-box; }
@@ -146,18 +147,19 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
   .hero { position: relative; overflow: hidden; background: #00046a; color: #fff; }
   /* La imagen entera, entre el logo y la frase: los productos (con su logo) no quedan debajo del texto. El fondo es el
      mismo azul de los bordes de la imagen, así no se nota dónde termina. */
-  .hero img.foto { position: absolute; top: 96px; bottom: 200px; left: 24px; right: 24px; width: calc(100% - 48px); height: calc(100% - 296px);
-    object-fit: contain; object-position: center; }
-  .hero::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(90% 60% at 50% 45%, rgba(0, 4, 106, 0) 60%, rgba(0, 2, 70, .55) 100%); }
+  /* La imagen ocupa todo el costado; un degradé suave arriba (el logo) y abajo (la frase) para que se lean. */
+  .hero img.foto { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 38%; }
+  .hero::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(180deg, rgba(0, 3, 80, .35) 0%, rgba(0, 3, 80, 0) 16%, rgba(0, 3, 80, 0) 60%, rgba(0, 2, 60, .72) 100%); }
   .hero-top, .hero-bottom { position: absolute; left: 48px; right: 48px; z-index: 1; }
   .hero-top { top: 40px; display: flex; align-items: center; gap: 12px; }
   .hero-top img { height: 40px; width: auto; display: block; }
   .hero-top span { font-size: 12px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .72);
     padding-left: 12px; border-left: 1px solid rgba(255, 255, 255, .28); }
   .hero-bottom { bottom: 44px; max-width: 460px; }
-  .hero-bottom h2 { margin: 0 0 10px; font-size: clamp(26px, 2.6vw, 36px); line-height: 1.15; font-weight: 600; letter-spacing: -.01em; }
+  .hero-bottom h2 { margin: 0 0 10px; font-size: clamp(26px, 2.6vw, 36px); line-height: 1.15; font-weight: 600; letter-spacing: -.01em; text-shadow: 0 2px 18px rgba(0, 2, 50, .55); }
   .hero-bottom h2 b { color: var(--green); font-weight: 700; }
-  .hero-bottom p { margin: 0; font-size: 15px; line-height: 1.55; color: rgba(255, 255, 255, .78); }
+  .hero-bottom p { margin: 0; font-size: 15px; line-height: 1.55; color: rgba(255, 255, 255, .85); text-shadow: 0 1px 12px rgba(0, 2, 50, .6); }
   /* El lado del login. */
   .panel { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 48px 32px; background: var(--surface); }
   .card { width: 100%; max-width: 380px; }
@@ -172,7 +174,7 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
   .google { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; height: 48px; padding: 0 16px; border-radius: 10px;
     border: 1px solid var(--g-line); background: var(--g-bg); color: var(--g-ink); font: 500 15px/1 'Roboto', 'Poppins', Arial, sans-serif; text-decoration: none;
     cursor: pointer; transition: background .16s cubic-bezier(.4, 0, .2, 1), box-shadow .16s cubic-bezier(.4, 0, .2, 1), transform .12s; }
-  .google:hover { background: color-mix(in srgb, var(--g-bg) 92%, var(--navy)); box-shadow: 0 1px 2px rgba(18, 20, 58, .12), 0 4px 12px -4px rgba(18, 20, 58, .18); }
+  .google:hover { background: var(--g-hover); box-shadow: 0 1px 2px rgba(18, 20, 58, .12), 0 4px 12px -4px rgba(18, 20, 58, .18); }
   .google:active { transform: translateY(1px); }
   .google:focus-visible { outline: none; box-shadow: var(--ring); }
   .google[aria-disabled="true"] { opacity: .5; pointer-events: none; }
@@ -181,8 +183,8 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
   .pie i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; }
   @media (max-width: 900px) {
     .login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-    .hero { min-height: 340px; }
-    .hero img.foto { top: 64px; bottom: 8px; left: 16px; right: 16px; width: calc(100% - 32px); height: calc(100% - 72px); }
+    .hero { min-height: 320px; }
+    .hero img.foto { object-position: center 42%; }
     .hero-top { top: 24px; left: 24px; right: 24px; }
     .hero-top img { height: 32px; }
     .hero-bottom { display: none; }

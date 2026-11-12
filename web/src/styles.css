@@ -935,7 +935,30 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 .fecha-btn.vacia { color: var(--ui-ink-3); }
 .fecha-btn:hover, .fecha-btn:focus-visible { border-color: var(--ui-line-strong); background: var(--ui-surface); }
 .fecha-btn.fecha-alerta { color: var(--ui-negative-ink); }
-.fecha-input { width: 140px; padding: 0 6px; }
+/* El ícono del calendario aparece al pasar el mouse (o con foco): avisa que se puede cambiar sin mover la columna. */
+.fecha-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; }
+.fecha-btn svg { flex: none; color: var(--ui-ink-3); opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.fecha-btn:hover svg, .fecha-btn:focus-visible svg, .fecha-btn[aria-expanded="true"] svg { opacity: 1; }
+.fecha-btn[aria-expanded="true"] { border-color: var(--accent-ink); background: var(--ui-surface); }
+
+/* Calendario del CRM (Fecha.tsx). */
+.cal-pop { padding: 10px; width: 272px; overflow: visible; }
+.cal-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.cal-mes { flex: 1; text-align: center; font-size: 13px; text-transform: capitalize; }
+.cal-sig svg { transform: scaleX(-1); }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-dow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); text-align: center; padding: 4px 0; }
+.cal-dia { height: 32px; border: 0; border-radius: var(--r-control); background: none; font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--ui-ink);
+  cursor: pointer; transition: background var(--dur-fast) var(--ease); }
+.cal-dia:hover { background: var(--ui-surface-sunken); }
+.cal-dia:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: -2px; }
+.cal-dia.finde { color: var(--ui-ink-2); }
+.cal-dia.otro { color: var(--ui-ink-3); }
+.cal-dia.hoy { box-shadow: inset 0 0 0 1px var(--ui-line-strong); font-weight: 600; }
+.cal-dia.sel, .cal-dia.sel:hover { background: var(--accent); color: var(--on-accent); font-weight: 600; box-shadow: none; }
+.cal-atajos { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ui-line); }
+.cal-atajos .chip { cursor: pointer; border: 1px solid transparent; font: inherit; font-size: 12px; }
+.cal-quitar { margin-left: auto; color: var(--ui-negative-ink); }
 .flecha { display: inline-grid; place-items: center; transition: transform var(--dur) var(--ease); }
 .flecha.cerrada { transform: rotate(-90deg); }
 /* La foto de cada producto en Producción, a la izquierda del nombre (como en los productos del pedido). */

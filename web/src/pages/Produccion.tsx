@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, us
 import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '../vistas';
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug } from '../components';
 import { Select } from '../Select';
+import { SelectorFecha } from '../Fecha';
 import { NombreProveedor } from '../proveedores';
 import { RecordPreview } from './RecordPage';
 
@@ -394,38 +395,16 @@ function useOpcionesEstado(estados: Estado[]) {
 }
 
 // La fecha se ve como texto («mié 18/11»); con permiso, un clic abre el calendario y se guarda al elegir. Vacía se borra.
+// Una fecha editable: la celda queda igual (sin campo del navegador que ensanche la columna) y el calendario del CRM se
+// abre flotando (Fecha.tsx). Elegir un día lo guarda; «Quitar fecha» la borra.
 function FechaCelda({ valor, editable, onChange, label, alerta }: { valor: string | null; editable: boolean; onChange: (v: string) => void; label: string; alerta?: boolean }) {
-  const [editando, setEditando] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const hecho = useRef(false);   // ya se cerró (con Enter o Escape): el blur que viene después no vuelve a guardar
-  useEffect(() => {
-    if (!editando) return;
-    hecho.current = false;
-    input.current?.focus();
-    try { input.current?.showPicker?.(); } catch { /* algunos navegadores no lo dejan abrir solo */ }
-  }, [editando]);
   const texto = dia(valor);
   if (!editable) return <span className={alerta ? 'fecha-alerta' : undefined}>{texto || <span className="muted">—</span>}</span>;
-  // Se guarda al salir del campo (o con Enter), no mientras se escribe el año; Escape deja la que estaba.
-  if (editando) {
-    const cerrar = (guardar: boolean) => {
-      if (hecho.current) return;
-      hecho.current = true;
-      const x = input.current;
-      setEditando(false);
-      if (!guardar || !x || x.validity.badInput) return;
-      if (x.value !== (valor ?? '') && (!x.value || x.value >= '2000-01-01')) onChange(x.value);
-    };
-    return (
-      <input ref={input} type="date" className="input sm fecha-input" defaultValue={valor ?? ''} aria-label={label}
-        onBlur={() => cerrar(true)} onKeyDown={(e) => { if (e.key === 'Enter') cerrar(true); if (e.key === 'Escape') cerrar(false); }} />
-    );
-  }
   return (
-    <button type="button" className={`fecha-btn${alerta ? ' fecha-alerta' : ''}${texto ? '' : ' vacia'}`} onClick={() => setEditando(true)}
-      aria-label={`${label}: ${texto || 'sin fecha'}. Cambiar`} title={alerta ? 'Ya pasó y no está listo' : 'Cambiar la fecha'}>
-      {texto || '—'}
-    </button>
+    <SelectorFecha valor={valor} onElegir={onChange} className={`fecha-btn${alerta ? ' fecha-alerta' : ''}${texto ? '' : ' vacia'}`}
+      label={`${label}: ${texto || 'sin fecha'}. Cambiar`} title={alerta ? 'Ya pasó y no está listo' : 'Cambiar la fecha'}>
+      <span>{texto || '—'}</span><Icon name="meeting" size={13} />
+    </SelectorFecha>
   );
 }
 

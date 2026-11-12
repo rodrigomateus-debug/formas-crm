@@ -52,8 +52,11 @@ se edita desde ahí.
   hasta 4 productos y el resto con «+ N productos más». Las tres etapas de producción se ven siempre; las demás,
   solo si tienen algún PDV. Como el PDV cambia de etapa solo según sus artículos, no se arrastra: se cambia el
   estado de cada producto.
-- **Filtros:** unidad de negocio, asignado (yo, cada persona, sin asignar), búsqueda por PDV, cliente o producto, y
-  «Ver entregados (30 días)». Lo elegido queda guardado en el navegador de cada una.
+- **Filtros:** unidad de negocio, asignado (yo, cada persona, sin asignar), **vendedor** y **cliente** (pedido de
+  Rodrigo del 12/11/2026; las opciones son las de los PDV que se ven), búsqueda por PDV, cliente o producto, y «Ver
+  entregados (30 días)». Todo se puede guardar como vista (pestañas).
+- **Quién vende, con su foto**, en el renglón del PDV y en la tarjeta: el propietario del pedido en el CRM y, si el PDV
+  no tiene pedido, el VENDEDOR de ClickUp.
 - Sin «Ver entregados» se muestran los PDV con algún artículo abierto, y en ellos los artículos que no están
   entregados ni anulados.
 

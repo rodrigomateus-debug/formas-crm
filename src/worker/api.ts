@@ -16,6 +16,7 @@ import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visib
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
+import { bandeja, borrarMensaje, conversacion, editarMensaje, escribir, imagen, marcarLeido, quitarImagen, seguir, subirImagen } from './conversacion';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
@@ -353,6 +354,51 @@ api.get('/records/:type/:id/timeline', async (c) => {
     owner: num(q.owner),
   }));
 });
+
+// ---------- Conversación del pedido o negocio (conversacion.ts): chat con @menciones y la actividad entremezclada ----------
+
+api.get('/records/:type/:id/conversacion', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  return c.json(await conversacion(c.env.DB, c.get('ctx'), rec.id, { desde: c.req.query('desde'), limite: num(c.req.query('limite')) }));
+});
+api.post('/records/:type/:id/conversacion', async (c) => {
+  canWrite(c.get('ctx'));
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const b = await c.req.json<{ body?: string; responde_a?: number | null; adjuntos?: number[] }>();
+  return c.json(await escribir(c.env.DB, c.get('ctx'), rec.id, { body: b.body, responde_a: b.responde_a, adjuntos: b.adjuntos }), 201);
+});
+// Imágenes del próximo mensaje: se suben al elegirlas (formulario con «archivo», «ancho» y «alto») y van con el mensaje.
+api.post('/records/:type/:id/conversacion/imagenes', async (c) => {
+  canWrite(c.get('ctx'));
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const form = await c.req.formData();
+  const archivo = form.get('archivo');
+  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta la imagen.');
+  return c.json(await subirImagen(c.env.DB, c.get('ctx'), rec.id, archivo, { ancho: form.get('ancho'), alto: form.get('alto') }), 201);
+});
+api.delete('/mensaje-adjuntos/:id', async (c) => c.json(await quitarImagen(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.get('/mensaje-adjuntos/:id', async (c) => {
+  const a = await imagen(c.env.DB, c.get('ctx'), Number(c.req.param('id')));
+  await registroVisible(c, a.record_id);
+  const disp = c.req.query('descargar') ? 'attachment' : 'inline';
+  return new Response(a.bytes, { headers: { 'content-type': a.mime, 'content-disposition': `${disp}; filename*=UTF-8''${encodeURIComponent(a.nombre)}`,
+    'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' } });
+});
+api.post('/records/:type/:id/conversacion/leido', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  return c.json(await marcarLeido(c.env.DB, c.get('ctx'), rec.id, Number((await c.req.json<{ hasta?: number }>()).hasta)));
+});
+api.put('/records/:type/:id/conversacion/seguir', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  return c.json(await seguir(c.env.DB, c.get('ctx'), rec.id, !!(await c.req.json<{ siguiendo?: boolean }>()).siguiendo));
+});
+api.patch('/mensajes/:id', async (c) => {
+  canWrite(c.get('ctx'));
+  return c.json(await editarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ body?: string }>()).body));
+});
+api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+// Las conversaciones que sigue el usuario (la bandeja) o, con no_leidas=1, solo las que tienen algo sin leer (el globito).
+api.get('/conversaciones', async (c) => c.json(await bandeja(c.env.DB, c.get('ctx'), { noLeidas: c.req.query('no_leidas') === '1', limite: num(c.req.query('limite')) })));
 
 // Búsqueda global (la lupa de arriba).
 api.get('/search', async (c) => {
@@ -949,7 +995,7 @@ api.patch('/bocetos/:id', async (c) => {
   canWrite(c.get('ctx'));
   const b0 = await bocetoPorId(c.env.DB, Number(c.req.param('id')));
   const rec = await registroVisible(c, b0.record_id);
-  const b = await actualizarBoceto(c.env.DB, b0.id, await c.req.json());
+  const b = await actualizarBoceto(c.env.DB, b0.id, await c.req.json(), c.get('ctx').user.id);
   // Aprobado en un pedido: a ClickUp (a la subtarea del artículo) enseguida, sin esperar la próxima corrida.
   if (rec.object_type === 'order' && b.estado === 'aprobado' && !b.clickup_at) c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
   return c.json(b);

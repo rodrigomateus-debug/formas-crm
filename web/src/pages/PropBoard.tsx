@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMon
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
 import { SortPick, useCollapsed, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
+import { ChatChip } from './Conversacion';
 
 // amount: suma del monto de la columna (en pedidos, el total sin IVA); sin_monto: cuántas tarjetas no lo tienen.
 interface Column { value: string; label: string; total: number; amount: number; sin_monto: number; records: CrmRecord[] }
@@ -65,7 +66,7 @@ function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
 
 // Abajo de la tarjeta de pedido: si tiene factura, remito y bocetos (cuántos de sus productos tienen), con un iconito
 // cada uno que se pinta cuando está.
-interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
+interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; mensajes?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
 function Adjuntos({ r }: { r: CrmRecord }) {
   const a = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos;
   if (!a) return null;
@@ -80,6 +81,7 @@ function Adjuntos({ r }: { r: CrmRecord }) {
       <span className={`adj${a.facturas ? ' ok' : ''}`} title={factura}><Icon name="receipt" size={14} /></span>
       <span className={`adj${a.remitos ? ' ok' : ''}`} title={remito}><Icon name="truck" size={14} /></span>
       <span className={`adj${bClase}`} title={bocetos}><Icon name="boceto" size={14} />{bTexto && <span className="n">{bTexto}</span>}</span>
+      <ChatChip recordId={r.id} mensajes={a.mensajes ?? 0} />
     </span>
   );
 }

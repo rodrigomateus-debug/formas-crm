@@ -8,6 +8,7 @@ import { StageProps } from './Board';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
 import { RemitosCard } from './Remitos';
+import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number }
@@ -38,7 +39,11 @@ export default function RecordPage() {
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
-          <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
+          {type === 'order' || type === 'deal'
+            ? <CentroConConversacion type={type} record={record}>
+              <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
+            </CentroConConversacion>
+            : <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />}
         </section>
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
@@ -53,6 +58,30 @@ export default function RecordPage() {
         {peek && <RecordPreview type={peek.type} id={peek.id} onClose={() => setPeek(null)} onChange={refresh} />}
       </div>
     </div>
+  );
+}
+
+// En pedidos y negocios, el centro de la ficha tiene dos pestañas: la conversación del equipo (con la actividad
+// entremezclada, como en ClickUp) y la actividad de siempre (como en HubSpot). Cada uno queda en la que eligió; el link del
+// mail de una mención (?conversacion=1) abre la conversación.
+function CentroConConversacion({ type, record, children }: { type: ObjectType; record: CrmRecord; children: ReactNode }) {
+  const clave = `crm:centro-${type}`;
+  const [tab, setTabState] = useState<'conversacion' | 'actividad'>(() => {
+    if (new URLSearchParams(window.location.search).has('conversacion')) return 'conversacion';
+    try { const v = localStorage.getItem(clave); if (v === 'conversacion' || v === 'actividad') return v; } catch { /* sin memoria */ }
+    return type === 'order' ? 'conversacion' : 'actividad';
+  });
+  const setTab = (t: 'conversacion' | 'actividad') => { setTabState(t); try { localStorage.setItem(clave, t); } catch { /* sin memoria */ } };
+  const sinLeer = useNoLeidosDe(record.id);
+  return (
+    <>
+      <div className="tabs centro-tabs">
+        <button className={`tab ${tab === 'conversacion' ? 'on' : ''}`} onClick={() => setTab('conversacion')}><Icon name="chat" size={14} />Conversación
+          {sinLeer ? <span className={`count nuevo${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</button>
+        <button className={`tab ${tab === 'actividad' ? 'on' : ''}`} onClick={() => setTab('actividad')}><Icon name="history" size={14} />Actividad</button>
+      </div>
+      {tab === 'conversacion' ? <ConversacionPanel type={type} recordId={record.id} className="en-ficha" /> : children}
+    </>
   );
 }
 
@@ -856,6 +885,14 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   const tl = useAsync(() => http<{ activities: Activity[] }>('GET', `/records/${type}/${id}/timeline${qs({ limit: 5 })}`), [type, id]);
   const [compose, setCompose] = useState<Activity['type'] | null>(composeIn ?? null);
   const [hist, setHist] = useState<string | null>(null);
+  // La conversación del pedido (o negocio), a la izquierda de la vista previa. Queda abierta o cerrada como la dejó cada uno;
+  // en pantallas angostas arranca cerrada y se abre encima.
+  const conChat = type === 'order' || type === 'deal';
+  const [chat, setChatState] = useState(() => {
+    try { const v = localStorage.getItem('crm:preview-chat'); return v ? v === '1' : window.innerWidth >= 1100; } catch { return true; }
+  });
+  const setChat = (v: boolean) => { setChatState(v); try { localStorage.setItem('crm:preview-chat', v ? '1' : '0'); } catch { /* sin memoria */ } };
+  const sinLeer = useNoLeidosDe(id);
   const record = data.data?.record;
   const associations = data.data?.associations;
   const changed = () => { data.reload(); tl.reload(); onChange?.(); };
@@ -918,6 +955,9 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   ];
   return (
     <Drawer clear title={`Vista previa · ${OBJECTS[type].single}`} onClose={onClose}
+      aside={conChat && chat ? <ConversacionPanel type={type} recordId={id} onClose={() => setChat(false)} /> : undefined}
+      actions={conChat && !chat ? <button className="btn sm conv-abrir" onClick={() => setChat(true)} title="Abrir la conversación del equipo sobre este registro">
+        <Icon name="chat" size={14} />Conversación{sinLeer ? <span className={`count${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</button> : undefined}
       footer={<>
         {onBack && <button className="btn" onClick={onBack}>← Volver</button>}
         {type === 'deal' && meta.me.role !== 'viewer' && <button className="btn" onClick={clone} title="Crea una copia con los mismos datos y asociaciones">Clonar</button>}

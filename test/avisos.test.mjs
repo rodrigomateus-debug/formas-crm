@@ -79,6 +79,19 @@ test('avisos por mail: asignaciones de otra persona y resumen de tareas del día
   // Ya salió: la corrida siguiente no lo repite.
   assert.equal((await call('POST', '/hooks/avisos/enviar', undefined, H)).data.asignaciones, 0);
 
+  // Una mención en la conversación de un pedido: le llega a Vera con lo que le escribieron y el link a la conversación.
+  // Si el mensaje se borra antes de que salga, no se avisa.
+  const ped = (await call('POST', '/records/order', { props: { hs_order_name: `PDV Mención ${RUN}` } })).data;
+  await call('POST', `/records/order/${ped.id}/conversacion`, { body: `@[${otra.name}](${otra.id}) ¿mañana sale el pedido ${RUN}?` });
+  const borrar = (await call('POST', `/records/order/${ped.id}/conversacion`, { body: `@[${otra.name}](${otra.id}) me equivoqué` })).data;
+  await call('DELETE', `/mensajes/${borrar.id}`);
+  sent.length = 0;
+  assert.equal((await call('POST', '/hooks/avisos/enviar', undefined, H)).data.asignaciones, 1);
+  const mencion = decode(sent.find((m) => m.raw.includes(`<${otra.email}>`)).raw);
+  assert.match(mencion, new RegExp(`: «@Vera ${RUN} ¿mañana sale el pedido ${RUN}\\?»`));
+  assert.match(mencion, new RegExp(`/orders/${ped.id}\\?conversacion=1`));
+  assert.doesNotMatch(mencion, /me equivoqué/);
+
   // Resumen del día (forzado): Vera tiene una para hoy y Rodrigo una vencida.
   sent.length = 0;
   const r2 = (await call('POST', '/hooks/avisos/enviar?resumen=1', undefined, H)).data;

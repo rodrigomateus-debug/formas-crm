@@ -207,6 +207,12 @@ test('producción: editar desde el CRM escribe en ClickUp y cambia el pedido', a
   assert.equal(r.data.pdv.etapa, '1237498996');
   const pedido = (await api('GET', `/records/order/${pdv.record_id}`)).data.record;
   assert.equal(pedido.props.hs_pipeline_stage, '1237498996', 'el pedido ya está «Listo para entregar», sin esperar la sincronización');
+  // En la conversación del pedido: el cambio del artículo, a nombre de Ceci, una sola vez (la sincronización no lo repite).
+  await sync();
+  const conv = (await api('GET', `/records/order/${pdv.record_id}/conversacion`)).data;
+  const cambios = conv.items.filter((i) => i.kind === 'articulo' && i.articulo === nec.nombre && i.despues === 'listo para entergar');
+  assert.equal(cambios.length, 1, JSON.stringify(conv.items.filter((i) => i.kind === 'articulo')));
+  assert.equal(cambios[0].source, 'crm');
   // Un estado que no existe no va.
   assert.equal((await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'estado', valor: 'inventado' })).status, 400);
   // Fecha: al mediodía de Buenos Aires; vacía, se borra.
@@ -237,6 +243,14 @@ test('producción: editar desde el CRM escribe en ClickUp y cambia el pedido', a
   await sync();
   const despues = pdvDe(await vista(), PDV).articulos.find((a) => a.task_id === nec.task_id);
   assert.deepEqual([despues.estado, despues.proveedor, despues.asignados], ['listo para entergar', OP_PROV[2].id, [SOLE.id]]);
+  // Un cambio hecho en ClickUp llega con la sincronización y queda en la conversación del pedido.
+  const pelota = pdvDe(await vista(), PDV).articulos.find((a) => a.nombre.startsWith(`Pelota ${RUN}`));
+  estado.arts[pelota.task_id] = { ...(estado.arts[pelota.task_id] ?? {}), status: 'en el impresor', updated: Date.now() };
+  await sync();
+  const enConv = (await api('GET', `/records/order/${pdv.record_id}/conversacion`)).data.items.filter((i) => i.kind === 'articulo' && i.source === 'clickup');
+  assert.deepEqual(enConv.map((i) => [i.antes, i.despues]), [['listo para entergar', 'en el impresor']], JSON.stringify(enConv));
+  estado.arts[pelota.task_id] = { ...estado.arts[pelota.task_id], status: 'listo para entergar', updated: Date.now() + 1 };
+  await sync();
   // Corporate no se edita desde el CRM… hasta que el administrador lo habilita.
   const corp = pdvDe(await vista('?unidades=CORPORATE'), PDV_C);
   asUser = CECI.email;

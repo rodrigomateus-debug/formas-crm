@@ -17,6 +17,7 @@ import { syncFacturas } from './finnegans';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
 import { leerPendientes } from './remitos';
+import { login } from './login';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 const GMAIL_CRON = '5-59/10 * * * *';   // el mismo que en wrangler.jsonc
@@ -74,6 +75,9 @@ app.get('/contacts/:portal/record/:typeId/:id', (c) => {
 });
 
 app.get('/health', (c) => c.json({ ok: true }));
+
+// Login propio con Google (login.ts): /login, /auth/google, /auth/google/callback y /auth/salir.
+app.route('/', login);
 
 app.all('*', (c) => c.env.ASSETS.fetch(c.req.raw));
 

@@ -13,3 +13,8 @@ ARCA_FCE_URL=http://localhost:8796/fce
 # Lectura de remitos (test/remitos.test.mjs): Claude simulado en el mismo puerto.
 ANTHROPIC_API_KEY=prueba
 ANTHROPIC_BASE_URL=http://localhost:8797/anthropic
+# Login con Google (test/login.test.mjs): Google simulado en el puerto 8795.
+GOOGLE_OAUTH_CLIENT_ID=prueba-login.apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=prueba
+SESSION_SECRET=clave-de-prueba-para-firmar-la-sesion
+GOOGLE_OAUTH_TOKEN_URL=http://localhost:8795/google/token

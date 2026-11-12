@@ -16,7 +16,7 @@ import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visib
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
-import { bandeja, borrarMensaje, conversacion, editarMensaje, escribir, imagen, marcarLeido, quitarImagen, seguir, subirImagen } from './conversacion';
+import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
@@ -387,21 +387,27 @@ api.post('/records/:type/:id/conversacion', async (c) => {
   const b = await c.req.json<{ body?: string; responde_a?: number | null; adjuntos?: number[] }>();
   return c.json(await escribir(c.env.DB, c.get('ctx'), rec.id, { body: b.body, responde_a: b.responde_a, adjuntos: b.adjuntos }), 201);
 });
-// Imágenes del próximo mensaje: se suben al elegirlas (formulario con «archivo», «ancho» y «alto») y van con el mensaje.
-api.post('/records/:type/:id/conversacion/imagenes', async (c) => {
-  canWrite(c.get('ctx'));
-  const rec = await registroVisible(c, Number(c.req.param('id')));
-  const form = await c.req.formData();
-  const archivo = form.get('archivo');
-  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta la imagen.');
-  return c.json(await subirImagen(c.env.DB, c.get('ctx'), rec.id, archivo, { ancho: form.get('ancho'), alto: form.get('alto') }), 201);
-});
-api.delete('/mensaje-adjuntos/:id', async (c) => c.json(await quitarImagen(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+// Imágenes y archivos del próximo mensaje: se suben al elegirlos (formulario con «archivo» y, en las imágenes, «ancho» y
+// «alto») y van con el mensaje. «imagenes» es el nombre de antes (la pantalla vieja que quede abierta lo sigue usando).
+for (const ruta of ['/records/:type/:id/conversacion/adjuntos', '/records/:type/:id/conversacion/imagenes']) {
+  api.post(ruta, async (c) => {
+    canWrite(c.get('ctx'));
+    const rec = await registroVisible(c, Number(c.req.param('id')));
+    const form = await c.req.formData();
+    const archivo = form.get('archivo');
+    if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo.');
+    return c.json(await subirAdjunto(c.env.DB, c.get('ctx'), rec.id, archivo, { ancho: form.get('ancho'), alto: form.get('alto') }), 201);
+  });
+}
+api.delete('/mensaje-adjuntos/:id', async (c) => c.json(await quitarAdjunto(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+// Las imágenes y los PDF se ven en el CRM; el resto (y con ?descargar=1, todo) se baja como archivo, sin que el navegador
+// lo interprete.
 api.get('/mensaje-adjuntos/:id', async (c) => {
-  const a = await imagen(c.env.DB, c.get('ctx'), Number(c.req.param('id')));
+  const a = await adjunto(c.env.DB, c.get('ctx'), Number(c.req.param('id')));
   await registroVisible(c, a.record_id);
-  const disp = c.req.query('descargar') ? 'attachment' : 'inline';
-  return new Response(a.bytes, { headers: { 'content-type': a.mime, 'content-disposition': `${disp}; filename*=UTF-8''${encodeURIComponent(a.nombre)}`,
+  const ver = seVe(a.mime) && !c.req.query('descargar');
+  return new Response(a.bytes, { headers: { 'content-type': ver ? a.mime : 'application/octet-stream',
+    'content-disposition': `${ver ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(a.nombre)}`,
     'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' } });
 });
 api.post('/records/:type/:id/conversacion/leido', async (c) => {

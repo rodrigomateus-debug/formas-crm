@@ -908,8 +908,14 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 .prod-hijo.cerrado { opacity: .6; }
 .prod-hijo-t { font-size: 12.5px; font-weight: 500; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .prod-hijo-pie { gap: 8px; justify-content: space-between; min-width: 0; }
-.prod-hijo-pie .asignados { max-width: 110px; flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; }
-.prod-hijo-pie .input.st-select, .prod-hijo-pie > .st-pec { flex: 0 0 auto; max-width: 75%; }
+/* El responsable no se achica nunca (es a quién preguntarle); si no entra todo, el estado se corta con «…». */
+.prod-hijo-pie { flex-wrap: nowrap; }
+.prod-hijo-pie > :last-child, .prod-hijo-pie .asignados { flex: none; max-width: none; white-space: nowrap; }
+.prod-hijo-pie .asignados-btn { flex: none; max-width: none; }
+.prod-hijo-pie .input.st-select, .prod-hijo-pie > .st-pec { flex: 0 1 auto; min-width: 0; max-width: none; }
+.st-pec { min-width: 0; }
+.st-pec .st-txt { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.input.st-select .select-value, .input.st-select .st-pec { min-width: 0; max-width: 100%; }
 .prod-mas { align-self: flex-start; margin: 4px 0 0 12px; }
 /* Pedidos: quién lo tiene en producción (tarjeta del tablero y productos del pedido). */
 .rec-prod { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 6px; }

@@ -714,9 +714,10 @@ export function nombreEstado(estado: string) {
 export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
   const d = iconoEstado(estado ?? '');
   return (
-    <span className={`st-pec${d ? ' con-icono' : ''}`} style={estiloEstado(color)}>
+    // El texto va en su propio span: así, si no entra, se corta con «…» (el nombre entero queda en el cartelito).
+    <span className={`st-pec${d ? ' con-icono' : ''}`} style={estiloEstado(color)} title={nombreEstado(estado ?? '')}>
       {d && <svg className="st-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>}
-      {nombreEstado(estado ?? '')}
+      <span className="st-txt">{nombreEstado(estado ?? '')}</span>
     </span>
   );
 }

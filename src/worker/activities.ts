@@ -1,6 +1,7 @@
 import { ownersOfUnitsSql, UNIDADES } from './records';
+import { actividadVisibleSql, esVentas, visibleSql } from './alcance';
 import { avisarAsignacion } from './avisos';
-import type { Ctx } from './env';
+import type { Ctx, User } from './env';
 import { HttpError, now } from './env';
 import { refreshActivityDates } from './records';
 import { primaryCompanyId } from './associations';
@@ -166,13 +167,15 @@ export async function updateActivity(db: D1Database, ctx: Ctx, id: number, input
 
 // Línea de tiempo de un registro. En empresas y negocios suma la actividad de los contactos asociados
 // (y en empresas, la de sus negocios), que es lo que el equipo espera ver en la ficha.
-export async function timeline(db: D1Database, recordId: number, opts: { types?: string[]; rollup?: boolean; limit?: number; before?: string; hiddenPipelines?: string[]; q?: string; owner?: number } = {}) {
+// `user`: quien mira; en el perfil Ventas, lo que se suma de los contactos y negocios asociados es solo de los que ve (alcance.ts).
+export async function timeline(db: D1Database, recordId: number, opts: { types?: string[]; rollup?: boolean; limit?: number; before?: string; hiddenPipelines?: string[]; q?: string; owner?: number; user?: User } = {}) {
   const rec = await db.prepare('SELECT object_type FROM records WHERE id = ?').bind(recordId).first<{ object_type: string }>();
   if (!rec) throw new HttpError(404, `No existe el registro ${recordId}.`);
   const rollup = opts.rollup !== false && rec.object_type !== 'contact';
   const scope = rollup
     ? `l.record_id = ?1 OR l.record_id IN (SELECT a.to_id FROM associations a JOIN records x ON x.id = a.to_id WHERE a.from_id = ?1
-        AND a.to_type IN (${rec.object_type === 'company' ? "'contact', 'deal'" : "'contact'"}) AND (x.pipeline_id IS NULL OR x.pipeline_id NOT IN (SELECT value FROM json_each(?3))))`
+        AND a.to_type IN (${rec.object_type === 'company' ? "'contact', 'deal'" : "'contact'"}) AND (x.pipeline_id IS NULL OR x.pipeline_id NOT IN (SELECT value FROM json_each(?3)))
+        AND ${opts.user ? visibleSql('x', opts.user) : '1'})`
     : '(l.record_id = ?1 AND ?3 IS NOT NULL)';
   const types = (opts.types ?? []).filter((t) => ACTIVITY_TYPES.includes(t as ActivityType));
   const typeSql = types.length ? `AND a.type IN (${types.map((t) => `'${t}'`).join(', ')})` : '';
@@ -217,6 +220,8 @@ export async function listTasks(db: D1Database, ctx: Ctx, q: TaskQuery) {
   const binds: unknown[] = [];
   const owner = q.owner ?? ctx.user.id;
   if (owner !== 'all') { where.push('a.owner_id = ?'); binds.push(owner); }
+  // Perfil Ventas: sus tareas y las de los registros que ve (alcance.ts).
+  if (esVentas(ctx.user)) where.push(actividadVisibleSql('a', ctx.user));
   const unidades = (q.unidades ?? []).filter((k) => UNIDADES[k]);
   if (unidades.length) where.push(ownersOfUnitsSql(unidades, binds, 'a.owner_id'));
   if ((q.status ?? 'open') === 'open') where.push("a.status != 'COMPLETED'");

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType } from './env';
 import { HttpError } from './env';
+import { esVentas } from './alcance';
 import { Meta } from './meta';
 import { createRecord, getRow, updateRecord, searchRecords, rowToRecord, type Filter, type RecordRow } from './records';
 import { associate } from './associations';
@@ -13,6 +14,15 @@ import { createActivity, type ActivityRow } from './activities';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const compat = new Hono<App>();
+
+// La API compatible es para los tableros y las integraciones (tokens de administrador). Un token de una usuaria del perfil
+// Ventas no entra: desde acá se lee por id sin el recorte de lo que ve cada vendedora (alcance.ts).
+// Solo en sus rutas (/crm/…): el compat también está montado en la raíz y no tiene que tocar el resto.
+compat.use('/crm/*', async (c, next) => {
+  const ctx = c.get('ctx');
+  if (ctx && esVentas(ctx.user)) throw new HttpError(403, 'La API compatible con HubSpot no está en el perfil Ventas.');
+  await next();
+});
 
 const RECORD_TYPES: Record<string, ObjectType> = {
   contacts: 'contact', contact: 'contact', '0-1': 'contact',

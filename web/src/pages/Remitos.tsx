@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, useToast, userName, Icon, type CrmRecord, cabecerasVerComo } from '../lib';
+import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, esVentas, useToast, userName, Icon, type CrmRecord, cabecerasVerComo } from '../lib';
 import { EstadoEntrega, Modal } from '../components';
 import { BotonArchivos } from './Bocetos';
 import { Select } from '../Select';
@@ -96,7 +96,9 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
   const mostrarLineas = !!e && e.lineas.length > 0 && e.remitos_ok > 0;
   const sinLeer = remitos.filter((r) => r.estado === 'sin_leer' && r.record_id === record.id).length;
   const paraRevisar = remitos.filter((r) => r.estado === 'revisar').length;
-  const puedeEditar = meta.me.role !== 'viewer';
+  // Perfil Ventas: ve y baja los remitos de sus pedidos (para mandárselos al cliente); cargarlos, revisarlos y asignarlos
+  // es de Logística.
+  const puedeEditar = meta.me.role !== 'viewer' && !esVentas(meta.me);
   return (
     <div className="panel assoc-card remitos-card">
       <div className="panel-head">
@@ -178,7 +180,7 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
         <div className="panel-body" style={{ paddingTop: 0 }}><button className="btn sm" onClick={() => setFinalizar(true)}>Finalizar con faltante</button></div>
       )}
       {remitos.length > 0 && <div className="remitos-sub small muted">Remitos ({remitos.length})</div>}
-      {remitos.map((r) => <RemitoFila key={r.id} r={r} orderId={record.id} onCambio={recargar} />)}
+      {remitos.map((r) => <RemitoFila key={r.id} r={r} orderId={record.id} onCambio={recargar} soloVer={!puedeEditar} />)}
       {!remitos.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay remitos. Llegan solos de ClickUp y de la app del chofer, o subí la foto acá.'}</div>}
       {d && !d.lector && remitos.some((r) => r.estado === 'sin_leer') && <div className="panel-body small muted">Los remitos se leen cuando esté conectada la API de Claude (Configuración → Integraciones).</div>}
       {finalizar && e && <FinalizarModal orderId={record.id} faltan={faltan} onClose={() => setFinalizar(false)} onDone={() => { setFinalizar(false); recargar(); }} />}
@@ -279,7 +281,7 @@ function FinalizarModal({ orderId, faltan, onClose, onDone }: { orderId: number;
   );
 }
 
-function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onCambio: () => void }) {
+function RemitoFila({ r, orderId, onCambio, soloVer }: { r: Remito; orderId?: number; onCambio: () => void; soloVer?: boolean }) {
   const toast = useToast();
   const [ocupado, setOcupado] = useState(false);
   const accion = async (body: Record<string, unknown>, ok: string) => {
@@ -300,6 +302,7 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
         <span className={`tag ${cls}`}>{label}</span>
         <span className="remito-titulo grow">{titulo(r)}</span>
         <a className="btn sm" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer">Ver</a>
+        <a className="btn sm ghost icon" href={`/api/remitos/${r.id}/archivo?descargar=1`} title="Descargar el remito (para mandárselo al cliente)" aria-label="Descargar el remito"><Icon name="download" size={14} /></a>
       </div>
       <div className="remito-cuerpo">
         <div className="small muted">{[r.pdv && `PDV ${r.pdv}${r.pdv_chofer ? ' (escrito por el chofer)' : ''}`, r.fecha && fmtDate(r.fecha), origenDe(r), r.recibido_por && `recibió ${r.recibido_por}`].filter(Boolean).join(' · ')}</div>
@@ -322,7 +325,7 @@ function RemitoFila({ r, orderId, onCambio }: { r: Remito; orderId?: number; onC
             <ul>{r.controles.map((c, i) => <li key={i} className={c.ok === true ? 'ok' : c.ok === false ? 'bad' : ''}>{c.ok === true ? '✓' : c.ok === false ? '✗' : '•'} {c.detalle}</li>)}</ul>
           </details>
         )}
-        {(r.estado === 'revisar' || r.estado === 'sin_leer') && (
+        {!soloVer && (r.estado === 'revisar' || r.estado === 'sin_leer') && (
           <div className="row wrap" style={{ gap: 6, marginTop: 2 }}>
             {orderId != null && r.estado === 'revisar' && <button className="btn sm" disabled={ocupado} onClick={() => accion({ accion: 'confirmar', pedido: orderId }, 'Remito confirmado en este pedido')}>Es de este pedido</button>}
             <button className="btn sm ghost" disabled={ocupado} onClick={() => accion({ accion: 'releer' }, 'Remito leído de nuevo')}>{ocupado ? 'Leyendo…' : 'Leer de nuevo'}</button>

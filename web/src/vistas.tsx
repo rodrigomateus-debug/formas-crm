@@ -202,7 +202,7 @@ export function PestanasVistas<C>({ tipo, vistas, pestanas, guardarOrden, activa
             </div>
           );
         })}
-        <button className="tab" onClick={() => setGuardando(true)}>+ Agregar vista</button>
+        <button className="tab add" onClick={() => setGuardando(true)}>+ Agregar vista</button>
       </div>
       {(cambiada || (esFija(activa) && filtrosCambiados)) && (
         <div className="save-bar" role="region" aria-label="Cambios sin guardar en la vista">

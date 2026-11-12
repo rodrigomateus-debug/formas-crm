@@ -138,8 +138,8 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
   return (
     <>
       <div className="toolbar">
-        <div className="search" style={{ width: 220 }}><Icon name="search" /><input className="input sm" placeholder="Buscar negocios…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
-        <Select className="input sm" style={{ width: 170 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados" title="Negocios cerrados que se muestran">
+        <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar negocios…" aria-label="Buscar" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
+        <Select className="input" style={{ width: 170 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados" title="Negocios cerrados que se muestran">
           <option value={30}>Cerrados: 30 días</option>
           <option value={90}>Cerrados: 90 días</option>
           <option value={365}>Cerrados: 1 año</option>

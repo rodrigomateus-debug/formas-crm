@@ -19,7 +19,7 @@ Nada se carga: los movimientos salen de las fechas de cada artículo en ClickUp,
 | Listos para entregar, sin fecha | Estado «listo para entregar» sin fecha de entrega | — |
 
 Lo único propio del CRM: las notas sueltas de un día, los feriados, lo que se marcó como hecho, los recorridos y lo que
-marca el chofer (migración `0044_cronograma.sql`).
+marca el chofer (migración `0045_cronograma.sql`).
 
 ## Semana
 
@@ -49,7 +49,7 @@ marca el chofer (migración `0044_cronograma.sql`).
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque
-  producción lo siga trabajando en ClickUp). El resto mira.
+  producción lo siga trabajando en ClickUp). El perfil Ventas no lo ve (igual que Producción y Entregas); el resto mira.
 
 ## Ruta del día
 
@@ -99,7 +99,7 @@ vuelve, como siempre.
 
 | Qué | Dónde |
 |---|---|
-| Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0044_cronograma.sql` |
+| Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0045_cronograma.sql` |
 | Movimientos, mover, marcar, notas, feriados, direcciones, ruta, chofer | `src/worker/cronograma.ts` |
 | API `/api/cronograma…` | `src/worker/api.ts` |
 | API del chofer: `GET /hooks/chofer/api/ruta`, `POST /hooks/chofer/api/ruta/parada` | `src/worker/hooks.ts` |

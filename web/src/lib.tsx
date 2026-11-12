@@ -22,6 +22,10 @@ export interface User { id: number; email: string; name: string; role: string; p
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
+// Perfil Ventas (perfil Comercial que no es administrador): ve lo suyo, lo sin propietario y lo asociado a lo suyo; no ve
+// Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta. Lo controla el servidor (src/worker/alcance.ts);
+// la pantalla solo esconde lo que no va a poder abrir.
+export const esVentas = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'comercial' && u.role !== 'admin';
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
 export interface Meta {
@@ -402,6 +406,7 @@ const paths: Record<string, string> = {
   theme: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 3v18M12 3a9 9 0 0 1 0 18',
   timer: 'M10 2h4M12 14l3-3M12 22a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z',
   chat: 'M4 5h16v11H10l-5 4v-4H4z',
+  clip: 'M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   image: 'M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15.5 9.5h.01',
   reply: 'M9 15l-5-5 5-5M4 10h10a6 6 0 0 1 6 6v3',

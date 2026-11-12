@@ -15,8 +15,8 @@ async function call(method, path, body, headers = {}) {
 
 test('conversación del pedido: mensajes, menciones, no leídos y actividad', async () => {
   const yo = (await call('GET', '/meta')).data.me;
-  const ceci = (await call('POST', '/users', { email: `ceci.${RUN}@formas.ar`, name: `Ceci ${RUN}`, role: 'member' })).data;
-  const sole = (await call('POST', '/users', { email: `sole.${RUN}@formas.ar`, name: `Sole ${RUN}`, role: 'member' })).data;
+  const ceci = (await call('POST', '/users', { email: `ceci.${RUN}@formas.ar`, name: `Ceci ${RUN}`, profile: 'produccion', role: 'member' })).data;
+  const sole = (await call('POST', '/users', { email: `sole.${RUN}@formas.ar`, name: `Sole ${RUN}`, profile: 'produccion', role: 'member' })).data;
   const tok = (await call('POST', '/tokens', { name: `Ceci ${RUN}`, source: 'api', user_id: ceci.id })).data.token;
   const C = { authorization: `Bearer ${tok}` };
   const pedido = (await call('POST', '/records/order', { props: { hs_order_name: `PDV ${RUN} · Crockett`, owner_id: yo.id } })).data;
@@ -97,14 +97,14 @@ test('conversación del pedido: mensajes, menciones, no leídos y actividad', as
     const fd = new FormData();
     fd.append('archivo', new File([bytes], nombre, { type: tipo }));
     fd.append('ancho', '1'); fd.append('alto', '1');
-    const res = await fetch(`${CRM}/api${url}/imagenes`, { method: 'POST', body: fd, headers });
+    const res = await fetch(`${CRM}/api${url}/adjuntos`, { method: 'POST', body: fd, headers });
     return { status: res.status, data: await res.json() };
   };
   const img = await subir(PNG, 'captura.png', 'image/png');
   assert.equal(img.status, 201, JSON.stringify(img.data));
   assert.deepEqual([img.data.mime, img.data.size, img.data.ancho, img.data.mensaje_id], ['image/png', PNG.length, 1, null]);
   assert.equal((await subir(Buffer.from('<svg onload=alert(1)>'), 'x.png', 'image/png')).status, 415, 'se mira el contenido, no el nombre');
-  assert.equal((await subir(Buffer.concat([PNG, Buffer.alloc(1_950_000)]), 'grande.png', 'image/png')).status, 413);
+  assert.equal((await subir(Buffer.concat([PNG, Buffer.alloc(21 * 1024 * 1024)]), 'grande.png', 'image/png')).status, 413);
   // Mientras no se manda, la ve solo quien la subió; nadie más la puede usar en su mensaje.
   assert.equal((await fetch(`${CRM}/api/mensaje-adjuntos/${img.data.id}`, { headers: C })).status, 404);
   assert.equal((await call('POST', url, { body: 'mía', adjuntos: [img.data.id] }, C)).status, 400);
@@ -117,7 +117,26 @@ test('conversación del pedido: mensajes, menciones, no leídos y actividad', as
   assert.equal(bajada.headers.get('content-type'), 'image/png');
   assert.equal(Buffer.compare(Buffer.from(await bajada.arrayBuffer()), PNG), 0);
   assert.deepEqual((await call('GET', url)).data.items.find((i) => i.key === `m${conImg.data.id}`).adjuntos.map((a) => a.id), [img.data.id]);
-  assert.equal((await call('GET', '/conversaciones', undefined, C)).data.conversaciones.find((c) => c.record_id === pedido.id).ultimo.body, '📷 Imagen');
+  assert.equal((await call('GET', '/conversaciones', undefined, C)).data.conversaciones.find((c) => c.record_id === pedido.id).ultimo.body, '📎 Adjunto');
+  // Archivos: un PDF de más de 3 MB (se guarda en pedazos y vuelve igual, para verlo en el CRM), una planilla (se baja
+  // como archivo) y lo que no es un archivo de trabajo (un .exe) no va.
+  const PDF = Buffer.concat([Buffer.from('%PDF-1.4\n% boceto\n'), Buffer.alloc(3_300_000, 7), Buffer.from('\n%%EOF')]);
+  const pdf = await subir(PDF, 'Boceto técnico.pdf', 'application/pdf');
+  assert.equal(pdf.status, 201, JSON.stringify(pdf.data));
+  assert.deepEqual([pdf.data.mime, pdf.data.size, pdf.data.ancho], ['application/pdf', PDF.length, null]);
+  const xls = await subir(Buffer.from('PK\u0003\u0004 planilla'), 'Cantidades.xlsx', 'application/octet-stream');
+  assert.equal(xls.status, 201, JSON.stringify(xls.data));
+  assert.equal((await subir(Buffer.from('MZ'), 'programa.exe', 'application/octet-stream')).status, 415);
+  const conArchivos = await call('POST', url, { body: 'Te paso el técnico y las cantidades', adjuntos: [pdf.data.id, xls.data.id] });
+  assert.equal(conArchivos.status, 201, JSON.stringify(conArchivos.data));
+  const bajadoPdf = await fetch(`${CRM}/api/mensaje-adjuntos/${pdf.data.id}`, { headers: C });
+  assert.deepEqual([bajadoPdf.status, bajadoPdf.headers.get('content-type'), bajadoPdf.headers.get('content-disposition')?.split(';')[0]], [200, 'application/pdf', 'inline']);
+  assert.equal(Buffer.compare(Buffer.from(await bajadoPdf.arrayBuffer()), PDF), 0, 'el PDF vuelve entero, en orden');
+  const bajadoXls = await fetch(`${CRM}/api/mensaje-adjuntos/${xls.data.id}`, { headers: C });
+  assert.deepEqual([bajadoXls.headers.get('content-type'), bajadoXls.headers.get('content-disposition')?.split(';')[0]], ['application/octet-stream', 'attachment'], 'una planilla se baja');
+  await call('DELETE', `/mensajes/${conArchivos.data.id}`);
+  assert.equal((await fetch(`${CRM}/api/mensaje-adjuntos/${pdf.data.id}`)).status, 404);
+
   // Una subida que se saca antes de mandar se borra; las de un mensaje borrado, también.
   const suelta = await subir(PNG, 'otra.png', 'image/png');
   await call('DELETE', `/mensaje-adjuntos/${suelta.data.id}`);

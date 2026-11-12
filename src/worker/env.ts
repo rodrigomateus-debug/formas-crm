@@ -44,8 +44,8 @@ export interface Env {
   GEOCODER_URL?: string;
 }
 
-// Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; los demás, por ahora,
-// también ven todo: acá se va a colgar lo que ve cada uno cuando se restrinja. Qué puede hacer (editar, borrar, solo
+// Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; Comercial es el perfil
+// Ventas, que ve lo suyo (alcance.ts, 12/11/2026); Producción y Logística, por ahora, ven todo. Qué puede hacer (editar, borrar, solo
 // mirar) lo dice role; un admin tiene perfil admin y viceversa.
 export const PROFILES = ['admin', 'comercial', 'produccion', 'logistica'] as const;
 export type Profile = (typeof PROFILES)[number];

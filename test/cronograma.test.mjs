@@ -189,11 +189,11 @@ test('cronograma: mover a otro día escribe la fecha en ClickUp, también en Cor
   v = await semana();
   assert.equal(mov(v, 'entrega', 'Mochila').fecha, '2026-11-20');
   assert.equal(mov(v, 'entrega', 'Termo').fecha, '2026-11-18', 'el termo tiene su propia fecha: no se movió');
-  // Quien solo mira no puede.
+  // El perfil Ventas no entra al cronograma (como a Producción y Entregas).
   await api('POST', '/users', { email: `vende.${RUN}@formas.ar`, name: `Vende ${RUN}`, profile: 'comercial' });
   asUser = `vende.${RUN}@formas.ar`;
   assert.equal((await api('POST', '/cronograma/mover', { ids: [T], tipo: 'egreso', fecha: '2026-11-17' })).status, 403);
-  assert.equal((await semana()).puede_editar, false);
+  assert.equal((await api('GET', '/cronograma?desde=2026-11-16&hasta=2026-11-22')).status, 403, 'el perfil Ventas no ve el cronograma');
   // Logística sí.
   asUser = null;
   await api('POST', '/users', { email: `logi.${RUN}@formas.ar`, name: `Logi ${RUN}`, profile: 'logistica' });

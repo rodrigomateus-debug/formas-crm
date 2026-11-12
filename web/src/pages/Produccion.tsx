@@ -40,6 +40,8 @@ const UNIDADES = [
   { value: 'FORMAS SHOP', label: 'Formas Shop' }, { value: 'CORPORATE', label: 'Corporate' },
   { value: 'NO ESTRÉS', label: 'NoEstres' }, { value: 'MERCADO LIBRE', label: 'Mercado Libre' },
 ];
+// Las que se ofrecen para filtrar y configurar: Mercado Libre hoy no hace falta (su nombre queda para los PDV que la tengan).
+const UNIDADES_VISIBLES = UNIDADES.filter((u) => u.value !== 'MERCADO LIBRE');
 const CERRADOS = ['entregados', 'anulado'];
 
 // Lo que guarda una vista de Producción (pestañas, como en Pedidos): búsqueda, unidades, a quién está asignado, vendedor,
@@ -241,7 +243,7 @@ export default function ProduccionPage() {
           <input className="input" placeholder="Buscar PDV, cliente o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
         </div>
         <div className="btn-group" role="group" aria-label="Unidades de negocio">
-          {UNIDADES.map((u) => {
+          {UNIDADES_VISIBLES.map((u) => {
             const on = (unidades ?? []).includes(u.value);
             return <button key={u.value} type="button" className={`btn qf-btn${on ? ' on' : ''}`} aria-pressed={on}
               onClick={() => cambiarUnidades(on ? (unidades ?? []).filter((x) => x !== u.value) : [...(unidades ?? []), u.value])}>{u.label}</button>;
@@ -333,7 +335,7 @@ function ConfigUnidades({ config, onGuardado }: { config: { unidades: string[] }
       {open && (
         <div className="popover" style={{ right: 0, top: 36, minWidth: 260 }}>
           <div className="grp">Se trabaja desde el CRM</div>
-          {UNIDADES.map((u) => (
+          {UNIDADES_VISIBLES.map((u) => (
             <label key={u.value} className="opt small">
               <input type="checkbox" checked={config.unidades.includes(u.value)}
                 onChange={(e) => guardar(e.target.checked ? [...config.unidades, u.value] : config.unidades.filter((x) => x !== u.value))} />{u.label}

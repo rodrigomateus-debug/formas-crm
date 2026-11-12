@@ -1,8 +1,8 @@
 # Login del CRM: «Ingresar con Google»
 
 Pedido de Rodrigo del 12/11/2026: una pantalla de ingreso propia, con el Design System de Formas, en lugar de la
-genérica de Cloudflare Access. De un lado la imagen animada (productos promocionales flotando sobre el azul de Formas)
-y del otro el botón **Ingresar con Google**, que es la única forma de entrar.
+genérica de Cloudflare Access. De un lado la imagen (productos promocionales con el logo de Formas, flotando sobre el
+azul de Formas) y del otro el botón **Ingresar con Google**, que es la única forma de entrar.
 
 ## Quién entra
 
@@ -11,7 +11,7 @@ y del otro el botón **Ingresar con Google**, que es la única forma de entrar.
   `soutex.com.ar`).
 - Y tiene que estar como usuario activo en **Configuración → Usuarios**, igual que con Access. Desactivar a alguien lo
   deja afuera en el próximo clic, aunque tenga la sesión abierta.
-- La sesión dura 30 días. «Salir» está en el menú de abajo a la izquierda (donde se elige el tema).
+- La sesión dura 30 días. **Cerrar sesión** está en el menú de tu usuario (tu foto, abajo a la izquierda), al final.
 - Los tokens (Claude, Darwin, chofer) siguen igual: no pasan por esta pantalla.
 
 ## Cómo está hecho
@@ -21,7 +21,7 @@ y del otro el botón **Ingresar con Google**, que es la única forma de entrar.
 | Pantalla `/login`, ida a Google (`/auth/google`), vuelta (`/auth/google/callback`) y salir (`/auth/salir`) | `src/worker/login.ts` |
 | La sesión: cookie `crm_sesion` con el mail y el vencimiento, firmada con `SESSION_SECRET` (HttpOnly, SameSite=Lax, Secure). Los cambios con la cookie solo valen desde el mismo CRM (cabecera `Origin`) | `src/worker/auth.ts` |
 | Sin sesión, la API contesta 401 con `login: '/login'` y la pantalla va al login y después vuelve a donde estaba | `web/src/lib.tsx` (`http`) |
-| La imagen: `gpt-image-2.6-sunburst` de OpenAI en GIF (16 cuadros de 640×800, 110 ms), sin textos ni logos; `hero.png` es el primer cuadro, para quien tiene las animaciones apagadas | `web/public/login/` |
+| La imagen (`hero.webp`, fija; pedido de Rodrigo del 12/11/2026): la escena del GIF que se hizo primero, rehecha en alta con `gpt-image-2.6-sunburst` de OpenAI (calidad max, 1712×2144) y el logo de Formas en cada producto | `web/public/login/` |
 | Prueba de punta a punta con Google simulado | `test/login.test.mjs` |
 
 El ida y vuelta a Google lleva un `state` y un `nonce` al azar, firmados en una cookie de 10 minutos. El `id_token` se

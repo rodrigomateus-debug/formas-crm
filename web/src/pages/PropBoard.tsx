@@ -47,6 +47,20 @@ function OrderLine({ r }: { r: CrmRecord }) {
   );
 }
 
+// Saldo pendiente del pedido (Finnegans, con IVA: lo facturado que falta cobrar más lo que falta facturar), bien a la vista:
+// en rojo y en negrita si queda algo por cobrar; en verde, con un tilde, si está todo pago. Sin dato de Finnegans (o anulado),
+// no se muestra: no saber no es lo mismo que estar pago.
+function Saldo({ r }: { r: CrmRecord }) {
+  const p = r.props;
+  const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const saldo = num(p.saldo_pendiente_de_pago_mxn);
+  if (saldo == null || p.hs_pipeline_stage === ANULADO) return null;
+  if (saldo <= 0) return <div className="saldo pago" title="Sin saldo pendiente en Finnegans: está todo pago."><Icon name="check" size={13} />Pagado</div>;
+  const pf = num(p.importe_por_facturar);
+  const detalle = pf ? (pf >= saldo - 1 ? ' (todavía sin facturar)' : ` (${fmtMoney(pf)} todavía sin facturar)`) : '';
+  return <div className="saldo debe" title={`Saldo pendiente en Finnegans: ${fmtMoneyExact(saldo, 'ARS')} con IVA${detalle}.`}>Saldo pendiente <span className="num">{fmtMoney(saldo)}</span></div>;
+}
+
 // Miniaturas de los productos del pedido (solo si alguno tiene foto): hasta 3, una al lado de la otra, y «+X» si tiene más
 // productos. Un clic abre la vista previa del pedido, con la lista de productos.
 function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
@@ -120,6 +134,7 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
         ? cardProps.map((k) => { const v = formatValue(meta, type, k, r.props[k], r.props); return v ? <div key={k} className="meta" title={propOf(meta, type, k)?.label}><span className="ellipsis">{v}</span></div> : null; })
         : subtitle && <div className="meta"><span className="ellipsis">{subtitle}</span></div>}
       {type === 'order' && !cardProps?.length && <OrderLine r={r} />}
+      {type === 'order' && <Saldo r={r} />}
       {type === 'order' && <Fotos r={r} onOpen={() => onOpen(r.id)} />}
       <div className="meta">
         <UserAvatar id={r.props.owner_id} />

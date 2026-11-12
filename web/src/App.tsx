@@ -232,6 +232,8 @@ function UserMenu({ name, email, photo, superadmin, mirando }: { name: string; e
               {tema === k && <span className="check"><Icon name="check" size={16} /></span>}
             </div>
           ))}
+          <div className="sep" role="separator" />
+          <a className="opt" role="menuitem" href="/auth/salir"><Icon name="external" size={16} />Salir</a>
         </div>
       )}
       <button type="button" className="me" onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open} title="Tema y usuario">

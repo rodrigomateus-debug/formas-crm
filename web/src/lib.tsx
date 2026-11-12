@@ -95,6 +95,11 @@ export async function http<T = any>(method: string, path: string, body?: unknown
   const data = text ? JSON.parse(text) : null;
   // El usuario que se estaba mirando ya no está (o se perdió el permiso): vuelve al propio.
   if (res.status === 403 && data?.ver_como_invalido && verComoId()) { verComo(null); throw new Error(data.error); }
+  // Sin sesión (o vencida): a la pantalla de «Ingresar con Google», y después de vuelta a donde estaba.
+  if (res.status === 401 && data?.login) {
+    window.location.assign(`${data.login}?volver=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+    return new Promise<T>(() => { /* la página se va */ });
+  }
   if (!res.ok) {
     const err = new Error(data?.error ?? `Error ${res.status}`) as Error & { data?: any };
     err.data = data;

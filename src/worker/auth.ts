@@ -4,7 +4,8 @@ import { HttpError } from './env';
 // Quién hace el pedido:
 // 1. Token propio (Authorization: Bearer fcrm_…, o /mcp/<token>): Claude, Darwin/Pipedream, Zapier, formularios.
 // 2. Cloudflare Access: el mail del JWT `Cf-Access-Jwt-Assertion`, verificado contra las claves del equipo.
-// 3. Desarrollo local: DEV_USER_EMAIL.
+// 3. Sesión propia del CRM: la cookie `crm_sesion` que deja «Ingresar con Google» (login.ts), firmada con SESSION_SECRET.
+// 4. Desarrollo local: DEV_USER_EMAIL.
 
 export async function sha256(text: string) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
@@ -63,11 +64,57 @@ async function verifyAccessJwt(env: Env, jwt: string): Promise<string | null> {
   return payload.email ?? null;
 }
 
+// ---------- Sesión propia (login con Google, login.ts) ----------
+// La cookie lleva el mail y el vencimiento, firmados con HMAC-SHA256 (SESSION_SECRET). No hace falta guardarla en la
+// base: quien entra lo sigue decidiendo la lista de usuarios (desactivar a alguien lo deja afuera en el próximo pedido).
+export const COOKIE_SESION = 'crm_sesion';
+export const DIAS_SESION = 30;
+const b64url = (b: Uint8Array) => btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+async function hmac(secret: string, data: string) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return b64url(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data))));
+}
+function igualSeguro(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+// Firma un contenido cualquiera (la sesión, o el estado del ida y vuelta a Google): «base64.firma».
+export async function firmar(secret: string, contenido: Record<string, unknown>) {
+  const datos = b64url(new TextEncoder().encode(JSON.stringify(contenido)));
+  return `${datos}.${await hmac(secret, datos)}`;
+}
+export async function leerFirmado<T extends { exp: number }>(secret: string, valor: string | null | undefined): Promise<T | null> {
+  if (!valor) return null;
+  const [datos, firma] = valor.split('.');
+  if (!datos || !firma || !igualSeguro(firma, await hmac(secret, datos))) return null;
+  try {
+    const c = JSON.parse(new TextDecoder().decode(b64urlDecode(datos))) as T;
+    return typeof c.exp === 'number' && c.exp > Date.now() ? c : null;
+  } catch { return null; }
+}
+export function leerCookie(req: Request, nombre: string) {
+  for (const parte of (req.headers.get('cookie') ?? '').split(';')) {
+    const i = parte.indexOf('=');
+    if (i > 0 && parte.slice(0, i).trim() === nombre) return decodeURIComponent(parte.slice(i + 1).trim());
+  }
+  return null;
+}
+export const nuevaSesion = (env: Env, email: string) => firmar(env.SESSION_SECRET!, { email, exp: Date.now() + DIAS_SESION * 86400_000 });
+// Un cambio (POST, PATCH, DELETE…) con la cookie solo vale desde el mismo CRM: si el navegador manda el origen, tiene que
+// ser este. La cookie ya es SameSite=Lax; esto es una vuelta más contra pedidos armados desde otra página.
+function mismoOrigen(req: Request) {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return true;
+  const origen = req.headers.get('origin');
+  return !origen || origen === new URL(req.url).origin;
+}
+
 function nameFromEmail(email: string) {
   return email.split('@')[0].split(/[._-]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
 
-async function userByEmail(env: Env, email: string): Promise<User> {
+export async function userByEmail(env: Env, email: string): Promise<User> {
   const sinUsuario = () => new HttpError(403, `Tu mail (${email}) no tiene usuario en el CRM. Pedile a un administrador que te agregue en Configuración → Usuarios.`);
   const found = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email).first<User>();
   if (found) {
@@ -102,11 +149,16 @@ export async function authenticate(env: Env, req: Request, pathToken?: string, o
     if (!email) throw new HttpError(401, 'No se pudo verificar la sesión de Cloudflare Access.');
     return verComo(env, req, { user: await userByEmail(env, email), source: 'crm' });
   }
+  const sesion = env.SESSION_SECRET ? await leerFirmado<{ email: string; exp: number }>(env.SESSION_SECRET, leerCookie(req, COOKIE_SESION)) : null;
+  if (sesion) {
+    if (!mismoOrigen(req)) throw new HttpError(403, 'Pedido desde otra página: se rechaza.');
+    return verComo(env, req, { user: await userByEmail(env, sesion.email), source: 'crm' });
+  }
   if (env.DEV_USER_EMAIL) {
     const email = req.headers.get('x-dev-user') || env.DEV_USER_EMAIL;
     return verComo(env, req, { user: await userByEmail(env, email), source: 'crm' });
   }
-  throw new HttpError(401, 'Falta iniciar sesión (Cloudflare Access) o un token.');
+  throw new HttpError(401, 'Tu sesión terminó: volvé a ingresar con Google.', { login: '/login' });
 }
 
 // Superadmin: un administrador con la marca (Configuración → Usuarios) o el administrador principal (ADMIN_EMAIL).
@@ -116,7 +168,7 @@ export function esSuperadmin(env: Env, u: User) {
 
 // «Ver como» (pedido de Rodrigo del 12/11/2026): un superadmin, desde su sesión, mira el CRM como lo ve otro usuario
 // (sus pipelines, sus tareas, sus conversaciones, lo que puede y no puede hacer). La pantalla manda el id en la cabecera
-// x-ver-como en cada pedido. Solo con la sesión de Cloudflare Access (nunca con un token) y solo para mirar: cualquier
+// x-ver-como en cada pedido. Solo con la sesión (Cloudflare Access o «Ingresar con Google»; nunca con un token) y solo para mirar: cualquier
 // cambio se rechaza (api.ts), así nada queda hecho a nombre del otro.
 async function verComo(env: Env, req: Request, ctx: Ctx): Promise<Ctx> {
   const v = req.headers.get('x-ver-como');

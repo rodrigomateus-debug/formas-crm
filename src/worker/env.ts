@@ -6,6 +6,16 @@ export interface Env {
   ACCESS_AUD?: string;
   // Solo para desarrollo local: entra como este usuario sin Access.
   DEV_USER_EMAIL?: string;
+  // Login propio con Google (login.ts, docs/LOGIN.md): el cliente OAuth «Aplicación web» de Google Cloud y la clave con
+  // que se firma la sesión. Sin estos tres, la página de login avisa que falta configurarlo.
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  SESSION_SECRET?: string;
+  // Dominios de mail que pueden iniciar sesión (separados por coma). Por defecto, los de Formas.
+  LOGIN_DOMINIOS?: string;
+  // Solo para pruebas: Google simulado.
+  GOOGLE_OAUTH_AUTH_URL?: string;
+  GOOGLE_OAUTH_TOKEN_URL?: string;
   // Email del primer administrador (se crea solo la primera vez que entra).
   ADMIN_EMAIL?: string;
   APP_URL?: string;

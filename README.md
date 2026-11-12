@@ -9,6 +9,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Por qué Cloudflare, cuánto aguanta (prueba con el volumen de 5 años) y cuándo revisarlo: [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 - Remitos (ClickUp, ficha del pedido y app del chofer), lectura con Claude y qué falta entregar: [docs/REMITOS.md](docs/REMITOS.md).
 - Producción (la vista de ClickUp de Ceci y Sole en el CRM, editable; arranca con Formas Shop): [docs/PRODUCCION.md](docs/PRODUCCION.md).
+- Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
 
 ## Cómo está hecho
@@ -28,7 +29,7 @@ Un solo Worker de Cloudflare, igual que el tablero de Formas Shop:
 | Cron a los :05, :15… | Avisos por mail (`src/worker/avisos.ts`: resumen de tareas a la mañana y lo que te asignan), fotos de Google de los usuarios (`src/worker/fotos.ts`) y registro automático de mails de Gmail (`src/worker/gmail.ts`), en su propia corrida para no quitarle consultas a ClickUp y Finnegans (a los :00, :10…). |
 | Tareas de GitHub | Compras de clientes cada mañana (`scripts/clientes.mjs`, [docs/CLIENTES.md](docs/CLIENTES.md)), PDF de facturas (`scripts/facturas-pdf.mjs`) y respaldo diario. |
 
-Quién entra: Cloudflare Access con el mail de Formas (igual que el tablero). Las integraciones y Claude entran con
+Quién entra: «Ingresar con Google» con el mail de Formas y usuario activo en el CRM ([docs/LOGIN.md](docs/LOGIN.md)); hasta sacarlo, Cloudflare Access adelante (igual que el tablero). Las integraciones y Claude entran con
 tokens propios (`fcrm_…`) que se crean en Configuración → Integraciones. Los ids de todo lo migrado son los de
 HubSpot, así los links y los cruces con Finnegans/ClickUp/Darwin no cambian; lo nuevo arranca en 900000000001.
 

@@ -6,7 +6,7 @@ remito (cuando lo cargan en ClickUp al entregar). Las vendedoras y el backoffice
 producción (de «Pedido confirmado» a «Listo para producción», pasando si hace falta por «$ Pendiente de Anticipo» y
 «Pendiente Boceto Digital»); lo demás lo mueve ClickUp.
 
-**Finnegans solo se lee. De ClickUp se lee todo y se escriben solo dos cosas.** La primera (pedido de Rodrigo del 4/11/2026): cuando la
+**Finnegans solo se lee. De ClickUp se lee todo y se escriben dos cosas, más lo que edita producción desde la pestaña Producción** ([PRODUCCION.md](PRODUCCION.md): estado, asignados, proveedor, impresor y fechas de cada artículo, en las unidades que se trabajan desde el CRM). La primera (pedido de Rodrigo del 4/11/2026): cuando la
 vendedora pasa el pedido a «Listo para producción» desde «Pedido confirmado», «$ Pendiente de Anticipo» o «Pendiente Boceto
 Digital» (en la pantalla, en masa o desde Claude), el PDV y
 sus artículos que siguen en «ingreso de pedido» pasan a «pdv» en ClickUp. Lo que ya avanzó no se toca. El pedido queda en

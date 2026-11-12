@@ -642,3 +642,23 @@ export function EtapaPedido({ value, label }: { value: unknown; label: string })
   if (!slug) return <>{label}</>;
   return <span className={`etapa e-${slug}`}><EtapaIcono value={value} size={13} />{label}</span>;
 }
+
+// Quién tiene el pedido en producción (asignado en ClickUp, produccion.ts) con su foto, y cuántos artículos están listos.
+// Para que las vendedoras sepan a quién preguntar: en la tarjeta del tablero de pedidos y en los productos del pedido.
+export interface PersonaProduccion { id: number; nombre: string; user_id: number | null; foto: string | null }
+export function PersonaProd({ p, size = 'sm' }: { p: PersonaProduccion; size?: 'sm' | 'xs' }) {
+  return p.user_id ? <UserAvatar id={p.user_id} size={size} /> : <Avatar name={p.nombre} photo={p.foto} size={size} />;
+}
+export function QuienProduce({ asignados, listos, total, conNombre = true }: { asignados: PersonaProduccion[]; listos?: number; total?: number; conNombre?: boolean }) {
+  if (!asignados.length && !total) return null;
+  const nombres = asignados.map((p) => p.nombre).join(', ');
+  const avance = total ? `${listos ?? 0} de ${total} artículos listos` : '';
+  return (
+    <span className="prod-quien" title={[nombres ? `En producción: ${nombres}` : 'Sin asignar en producción', avance].filter(Boolean).join('. ')}>
+      <Icon name="printer" size={13} />
+      {asignados.length > 0 && <span className="avatar-stack">{asignados.slice(0, 3).map((p) => <PersonaProd key={p.id} p={p} />)}</span>}
+      {conNombre && <span className="ellipsis">{asignados.length ? asignados.map((p) => p.nombre.split(' ')[0]).join(', ') : 'Sin asignar'}</span>}
+      {!!total && <span className={`prod-avance${(listos ?? 0) >= total ? ' ok' : ''}`}>{listos ?? 0}/{total}</span>}
+    </span>
+  );
+}

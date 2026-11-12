@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
-import { AREAS_PEDIDO, EtapaIcono, MultiPick, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido } from '../components';
+import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
 import { SortPick, useCollapsed, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 
@@ -65,7 +65,7 @@ function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
 
 // Abajo de la tarjeta de pedido: si tiene factura, remito y bocetos (cuántos de sus productos tienen), con un iconito
 // cada uno que se pinta cuando está.
-interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number }
+interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
 function Adjuntos({ r }: { r: CrmRecord }) {
   const a = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos;
   if (!a) return null;
@@ -82,6 +82,13 @@ function Adjuntos({ r }: { r: CrmRecord }) {
       <span className={`adj${bClase}`} title={bocetos}><Icon name="boceto" size={14} />{bTexto && <span className="n">{bTexto}</span>}</span>
     </span>
   );
+}
+
+// Quién lo tiene en producción, con su foto, mientras se produce (no en los entregados ni anulados).
+function Produccion({ r }: { r: CrmRecord }) {
+  const p = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos?.produccion;
+  if (!p || [ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage)) return null;
+  return <div className="card-prod"><QuienProduce asignados={p.asignados} listos={p.listos} total={p.total} /></div>;
 }
 
 // Tarjeta del tablero (empresas, contactos o pedidos). No se vuelve a dibujar si no cambió: lo que hace al tocarla lo lee
@@ -116,6 +123,7 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
         <UserAvatar id={r.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>
       </div>
+      {type === 'order' && <Produccion r={r} />}
       <div className="card-actions">
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>

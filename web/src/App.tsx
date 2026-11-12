@@ -8,6 +8,7 @@ import RecordPage from './pages/RecordPage';
 import Tasks from './pages/Tasks';
 import Settings from './pages/Settings';
 import RemitosPage from './pages/Remitos';
+import ProduccionPage from './pages/Produccion';
 import { TEMAS, useTema } from './theme';
 
 export default function App() {
@@ -38,6 +39,7 @@ export default function App() {
         <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>
         <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
+        <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>
         <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
@@ -56,6 +58,7 @@ export default function App() {
           <Route path="/" element={<Home />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/entregas" element={<RemitosPage />} />
+          <Route path="/produccion" element={<ProduccionPage />} />
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={<ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />

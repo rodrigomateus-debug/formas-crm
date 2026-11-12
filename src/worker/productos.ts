@@ -2,6 +2,7 @@ import type { Env } from './env';
 import { Budget, OutOfBudget } from './budget';
 import { finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
 import { articulosDelPdv, articulosLivianos, type Articulo } from './clickup';
+import { PRODUCCION_TARJETA_SQL, produccionDePedido, type Persona } from './produccion';
 import { clavePedido } from './totales';
 import { HttpError } from './env';
 
@@ -115,13 +116,17 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null;
     foto_cot: string | null; foto_fin: string | null; foto_sku: string | null }>;
   const { fotos, sueltas } = fotosDeRenglones(results, cot.results as StpItem[]);
+  // Producción: quién tiene asignado cada artículo en ClickUp (y el PDV entero).
+  const prod = await produccionDePedido(db, recordId);
   const items = results.map((r, i) => ({
     code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], status: r.status, clickup_task: r.clickup_task,
+    asignados: (r.clickup_task && prod?.porTarea.get(r.clickup_task)) || [],
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,
   }));
   return {
     pedido, configured, clickup: !!taskId, source: sync?.source ?? null, fetched_at: sync?.fetched_at ?? null, error: sync?.error ?? null, items,
+    produccion: prod ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null,
     // Las fotos de la cotización que no quedaron en ningún producto (solo si a alguno le falta foto).
     cotizacion_fotos: items.length && items.every((i) => i.image_url) ? [] : sueltas,
     total: items.reduce((t, i) => t + (i.subtotal ?? 0), 0), currency: items[0]?.currency ?? 'ARS', tax_included: items.some((i) => i.tax_included),
@@ -362,7 +367,11 @@ export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
 }
 // Lo adjunto de cada pedido, para los iconitos de abajo de la tarjeta: facturas, remitos y bocetos (cuántos de sus
 // productos tienen al menos uno; el boceto va atado al código del producto o, si no tiene, a su nombre).
-export interface Adjuntos { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number }
+export interface Adjuntos {
+  facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number;
+  // Producción (produccion.ts): quién lo tiene asignado en ClickUp y cuántos artículos están listos.
+  produccion?: { asignados: Persona[]; listos: number; total: number };
+}
 export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
   return db.prepare(`WITH ids(id) AS (${ids}) SELECT r.id AS record_id,
       (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'factura') AS facturas,
@@ -370,11 +379,17 @@ export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
       (SELECT COUNT(*) FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0) AS bocetos,
       (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id
         AND EXISTS (SELECT 1 FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0 AND b.producto IN (li.code, li.name, p.name))) AS con_boceto,
-      (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS productos
+      (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS productos${PRODUCCION_TARJETA_SQL}
     FROM records r WHERE r.id IN (SELECT id FROM ids)`).bind(...binds);
 }
+type FilaAdjuntos = Omit<Adjuntos, 'produccion'> & { record_id: number; prod_asignados: string | null; prod_total: number; prod_listos: number };
 export function armarAdjuntos(rows: unknown[]) {
-  return new Map((rows as Array<Adjuntos & { record_id: number }>).map(({ record_id, ...a }) => [record_id, a as Adjuntos]));
+  return new Map((rows as FilaAdjuntos[]).map(({ record_id, prod_asignados, prod_total, prod_listos, ...a }) => {
+    let asignados: Persona[] = [];
+    try { asignados = JSON.parse(prod_asignados ?? '[]'); } catch { /* sin asignados */ }
+    const produccion = prod_total || asignados.length ? { asignados, listos: prod_listos, total: prod_total } : undefined;
+    return [record_id, { ...a, ...(produccion ? { produccion } : {}) } as Adjuntos];
+  }));
 }
 
 // Fotos y adjuntos de una tanda de pedidos (las tarjetas que se suman con «Cargar más»).

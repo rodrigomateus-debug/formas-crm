@@ -205,53 +205,64 @@ export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; ti
   let escritos = 0;
   const pdvsTocados: string[] = [];
   if (b.tipo === 'entrega') {
+    // Cada artículo queda con su propia fecha. La del PDV se mueve solo si se movieron todos sus artículos abiertos: así
+    // pasar uno a otro día no arrastra a los demás (ni a los que ya se entregaron).
     const pdvIds = [...new Set(filas.map((f) => f.pdv_task))];
-    const pdvs = (await env.DB.prepare('SELECT * FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(pdvIds)).all<FilaDb>()).results;
-    for (const p of pdvs) {
-      const suyos = filas.filter((f) => f.pdv_task === p.task_id && !f.es_pdv);
-      const antes = new Set(suyos.map((f) => f.entrega_real ?? p.entrega_real));
-      // La fecha del PDV se mueve si es la que se estaba mirando (o si el PDV es el que se movió).
-      if (filas.some((f) => f.task_id === p.task_id) || (p.entrega_real && antes.has(p.entrega_real)) || (!p.entrega_real && suyos.some((f) => !f.entrega_real))) {
-        if (p.entrega_real !== fecha) { await editarProduccion(env, ctx, p.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; pdvsTocados.push(p.task_id); }
-      }
-      for (const f of suyos) if (f.entrega_real && f.entrega_real !== fecha) { await editarProduccion(env, ctx, f.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; }
+    const todos = (await env.DB.prepare('SELECT * FROM produccion WHERE pdv_task IN (SELECT value FROM json_each(?))').bind(JSON.stringify(pdvIds)).all<FilaDb>()).results;
+    const pedidos = new Set(filas.map((f) => f.task_id));
+    for (const id of pdvIds) {
+      const p = todos.find((x) => x.task_id === id);
+      const arts = todos.filter((x) => x.pdv_task === id && !x.es_pdv && !['anulado', 'anulada', 'cancelado'].includes(x.estado));
+      for (const f of arts) if (pedidos.has(f.task_id) && f.entrega_real !== fecha) { await editarProduccion(env, ctx, f.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; }
+      const abiertos = arts.filter((x) => x.estado !== 'entregados');
+      const todosMovidos = abiertos.every((x) => pedidos.has(x.task_id)) && !arts.some((x) => x.estado === 'entregados');
+      if (p && (pedidos.has(p.task_id) || todosMovidos) && p.entrega_real !== fecha) { await editarProduccion(env, ctx, p.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; pdvsTocados.push(p.task_id); }
     }
   } else {
     for (const f of filas) if ((f as unknown as Record<string, string | null>)[col] !== fecha) { await editarProduccion(env, ctx, f.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; }
   }
+  // Lo que estaba marcado hecho deja de estarlo: cambió de día, hay que hacerlo de nuevo.
+  await env.DB.prepare('DELETE FROM cronograma_hechos WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
   await refrescar(env, ctx, pdvsTocados);
   return { escritos };
 }
 
 // Marca (o desmarca) como hecho: queda quién y cuándo, y el artículo cambia de estado en ClickUp. Si el artículo ya está
 // más adelante, el estado no se toca. Al desmarcar vuelve al estado que tenía, si nadie lo cambió después.
-export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: boolean } = {}) {
+export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string } = {}) {
   if (!opts.chofer) exigir(ctx);
   if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
   const tipo = b.tipo, hecho = b.hecho !== false;
   const db = env.DB;
+  // Lo que marca el chofer queda a su nombre (en la conversación del pedido y en el historial), no al de quien creó su link.
+  const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null } } : ctx;
   const filas = await filasDe(db, b.ids);
   const destino = (await cronogramaConfig(db)).estados[tipo];
-  const existe = (await estadosPec(db)).some((e) => e.status === destino);
+  const orden = (await estadosPec(db)).map((e) => e.status);
+  const existe = orden.includes(destino);
+  // Solo hacia adelante: si el artículo ya pasó ese estado (según el orden de la lista de ClickUp), no se lo vuelve atrás.
+  const adelante = (actual: string) => { const a = orden.indexOf(actual); return a < 0 || a < orden.indexOf(destino); };
   const marcas = new Map((await db.prepare('SELECT task_id, estado_antes FROM cronograma_hechos WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))')
     .bind(tipo, JSON.stringify(filas.map((f) => f.task_id))).all<{ task_id: string; estado_antes: string | null }>()).results.map((m) => [m.task_id, m]));
   let cambiados = 0;
-  const pdvs: string[] = [];
+  const pdvs: string[] = [], marcados: string[] = [];
   for (const f of filas) {
     if (hecho) {
       if (marcas.has(f.task_id)) continue;
-      const cambia = existe && f.estado !== destino && !CERRADOS.includes(f.estado) && !(tipo !== 'entrega' && AVANZADOS.includes(f.estado));
-      if (cambia) { await editarProduccion(env, ctx, f.task_id, 'estado', destino, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
-      await db.prepare('INSERT OR REPLACE INTO cronograma_hechos (task_id, tipo, estado_antes, user_id, at) VALUES (?, ?, ?, ?, ?)')
-        .bind(f.task_id, tipo, cambia ? f.estado : null, ctx.user.id, now()).run();
+      const cambia = existe && f.estado !== destino && !CERRADOS.includes(f.estado) && adelante(f.estado) && !(tipo !== 'entrega' && AVANZADOS.includes(f.estado));
+      if (cambia) { await editarProduccion(env, c2, f.task_id, 'estado', destino, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
+      // OR IGNORE: si otro pedido la marcó recién, no se pierde el estado que tenía antes.
+      await db.prepare('INSERT OR IGNORE INTO cronograma_hechos (task_id, tipo, estado_antes, user_id, chofer, at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(f.task_id, tipo, cambia ? f.estado : null, opts.chofer ? null : ctx.user.id, opts.chofer ?? null, now()).run();
+      marcados.push(f.task_id);
     } else {
       const m = marcas.get(f.task_id);
-      if (m?.estado_antes && f.estado === destino) { await editarProduccion(env, ctx, f.task_id, 'estado', m.estado_antes, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
+      if (m?.estado_antes && f.estado === destino) { await editarProduccion(env, c2, f.task_id, 'estado', m.estado_antes, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
       await db.prepare('DELETE FROM cronograma_hechos WHERE task_id = ? AND tipo = ?').bind(f.task_id, tipo).run();
     }
   }
-  await refrescar(env, ctx, pdvs);
-  return { cambiados, estado: existe ? destino : null };
+  await refrescar(env, c2, pdvs);
+  return { cambiados, estado: existe ? destino : null, marcados };
 }
 
 // ---------- Notas y feriados ----------
@@ -321,12 +332,12 @@ export function direccionDeFinnegans(p: unknown): string | null {
   return null;
 }
 
-async function direccionesFinnegans(env: Env, pedidos: Array<{ id: number; pedido: string | null }>, b: Budget) {
+async function direccionesFinnegans(env: Env, pedidos: Array<{ id: number; pedido: string | null }>, b: Budget, buscar: boolean) {
   const db = env.DB;
   const ya = new Map((await db.prepare('SELECT record_id, direccion FROM direcciones_finnegans WHERE record_id IN (SELECT value FROM json_each(?))')
     .bind(JSON.stringify(pedidos.map((p) => p.id))).all<{ record_id: number; direccion: string | null }>()).results.map((r) => [r.record_id, r.direccion]));
   const faltan = pedidos.filter((p) => p.pedido && !ya.has(p.id)).slice(0, 6);
-  if (faltan.length && env.FINNEGANS_CLIENT_ID) {
+  if (buscar && faltan.length && env.FINNEGANS_CLIENT_ID) {
     try {
       const token = await finnegansToken(env, b);
       for (const p of faltan) {
@@ -337,7 +348,7 @@ async function direccionesFinnegans(env: Env, pedidos: Array<{ id: number; pedid
       }
     } catch (e) { console.error('cronograma: Finnegans', (e as Error).message); }
   }
-  return { direcciones: ya, pendientes: pedidos.filter((p) => p.pedido && !ya.has(p.id)).length };
+  return { direcciones: ya, pendientes: buscar && env.FINNEGANS_CLIENT_ID ? pedidos.filter((p) => p.pedido && !ya.has(p.id)).length : 0 };
 }
 
 // Dónde fueron las últimas entregas a cada cliente: la dirección de sus remitos leídos, la más reciente primero.
@@ -377,7 +388,8 @@ async function revisarDireccion(env: Env, recordId: number, actual: string, hist
   const guardar = (distinta: boolean, sugerida: string | null, motivo: string | null) => db.prepare(`INSERT OR REPLACE INTO direcciones_revisadas
     (record_id, firma, distinta, sugerida, motivo, resuelta, at) VALUES (?, ?, ?, ?, ?, 0, ?)`).bind(recordId, firma, distinta ? 1 : 0, sugerida, motivo, now()).run();
   const a = claveDireccion(actual);
-  if (historial.some((h) => { const k = claveDireccion(h); return k === a || k.startsWith(a) || a.startsWith(k); })) { await guardar(false, null, null); return null; }
+  if (!a) return null;
+  if (historial.some((h) => claveDireccion(h) === a)) { await guardar(false, null, null); return null; }
   if (!env.ANTHROPIC_API_KEY || !puedeConsultar()) return null;
   try {
     const res = await new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, maxRetries: 1, timeout: 25_000 }).beta.messages.create({
@@ -388,8 +400,8 @@ async function revisarDireccion(env: Env, recordId: number, actual: string, hist
     });
     const r = JSON.parse(res.content.map((x) => (x.type === 'text' ? x.text : '')).join('').trim()) as { mismo_lugar: boolean; direccion_sugerida: string; motivo: string };
     const distinta = r.mismo_lugar === false && String(r.direccion_sugerida ?? '').trim().length > 4;
-    await guardar(distinta, distinta ? r.direccion_sugerida.trim() : null, distinta ? String(r.motivo ?? '').trim().slice(0, 300) : null);
-    return distinta ? { sugerida: r.direccion_sugerida.trim(), motivo: String(r.motivo ?? '').trim() } : null;
+    await guardar(distinta, distinta ? r.direccion_sugerida.trim().slice(0, 200) : null, distinta ? String(r.motivo ?? '').trim().slice(0, 300) : null);
+    return distinta ? { sugerida: r.direccion_sugerida.trim().slice(0, 200), motivo: String(r.motivo ?? '').trim().slice(0, 300) } : null;
   } catch (e) { console.error('cronograma: revisar dirección', recordId, (e as Error).message); return null; }
 }
 
@@ -413,7 +425,14 @@ export async function guardarDireccion(env: Env, ctx: Ctx, b: { record_id?: unkn
     await direccionDesdeRuta(env, ctx, Number(b.record_id), direccion || null);
   } else if (b.company_id) {
     const cambios: Record<string, unknown> = {};
-    if (direccion !== undefined) { cambios.address = direccion || null; cambios.city = null; }
+    if (direccion !== undefined) {
+      // La pantalla muestra «dirección, ciudad»: si lo que se guarda termina con la ciudad de la ficha, la ciudad queda
+      // en su campo; si no, la dirección nueva manda entera.
+      const e = await env.DB.prepare("SELECT json_extract(props, '$.city') AS city FROM records WHERE id = ?").bind(Number(b.company_id)).first<{ city: string | null }>();
+      const ciudad = String(e?.city ?? '').trim();
+      if (ciudad && norm(direccion).endsWith(norm(ciudad))) cambios.address = direccion.slice(0, direccion.length - ciudad.length).replace(/[,\s]+$/, '') || null;
+      else { cambios.address = direccion || null; cambios.city = null; }
+    }
     if (b.horario !== undefined) {
       const h = String(b.horario ?? '').trim();
       if (h && !horarioDe(h)) throw new HttpError(400, 'El horario va como «9 a 13».');
@@ -431,7 +450,7 @@ const GEOCODER = (env: Env) => env.GEOCODER_URL ?? 'https://nominatim.openstreet
 // El servicio pide a lo sumo una consulta por segundo: pocas por vez y la pantalla vuelve a pedir lo que falta.
 const GEO_POR_VEZ = 4;
 
-async function ubicar(env: Env, direcciones: string[]) {
+async function ubicar(env: Env, direcciones: string[], buscar: boolean) {
   const db = env.DB;
   const claves = [...new Set(direcciones.map(claveDireccion).filter(Boolean))];
   const out = new Map<string, Geo | null>();
@@ -439,7 +458,7 @@ async function ubicar(env: Env, direcciones: string[]) {
   const { results } = await db.prepare('SELECT clave, lat, lng, ok, manual FROM geocodigos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(claves))
     .all<{ clave: string; lat: number | null; lng: number | null; ok: number; manual: number }>();
   for (const r of results) out.set(r.clave, r.ok && r.lat != null && r.lng != null ? { lat: r.lat, lng: r.lng, manual: !!r.manual } : null);
-  const faltan = claves.filter((k) => !out.has(k));
+  const faltan = buscar ? claves.filter((k) => !out.has(k)) : [];
   let hechas = 0;
   for (const k of faltan) {
     if (hechas >= GEO_POR_VEZ) break;
@@ -462,7 +481,7 @@ async function ubicar(env: Env, direcciones: string[]) {
       .bind(k, original, punto?.lat ?? null, punto?.lng ?? null, punto ? 1 : 0, now()).run();
     out.set(k, punto ? { ...punto, manual: false } : null);
   }
-  return { geo: out, pendientes: claves.filter((k) => !out.has(k)).length };
+  return { geo: out, pendientes: buscar ? claves.filter((k) => !out.has(k)).length : 0 };
 }
 
 // Alguien corrió el punto en el mapa: queda ahí y no se vuelve a buscar.
@@ -487,7 +506,8 @@ export interface Parada {
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
 interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[] }
 
-export async function rutaDelDia(env: Env, user: User, fecha: string) {
+export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { buscar?: boolean } = {}) {
+  const buscar = !!opts.buscar;
   if (!esDia(fecha)) throw new HttpError(400, 'Falta el día (AAAA-MM-DD).');
   const db = env.DB;
   const b = Budget.of(env);
@@ -512,10 +532,11 @@ export async function rutaDelDia(env: Env, user: User, fecha: string) {
 
   // Las direcciones cargadas en la tarjeta «Entrega» de cada pedido (direcciones.ts): con varias, una parada por dirección.
   const cargadas = await direccionesDePedidos(db, pedidosIds);
-  const fin = await direccionesFinnegans(env, pedidos.filter((p) => !p.manual && !cargadas.has(p.id)), b);
+  const fin = await direccionesFinnegans(env, pedidos.filter((p) => !p.manual && !cargadas.has(p.id)), b, buscar);
   const historial = await ultimasEntregas(db, [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.cliente).map((m) => m.cliente!))]);
   let consultas = 0;
-  const puedeConsultar = () => consultas++ < 3;
+  const puedeConsultar = () => buscar && consultas++ < 3;
+  const revisadas = new Map<number, Parada['sugerencia']>();   // una vez por pedido, no por artículo
 
   const paradas = new Map<string, Parada>();
   const puntoGoogle = new Map<string, { lat: number; lng: number }>();
@@ -536,15 +557,22 @@ export async function rutaDelDia(env: Env, user: User, fecha: string) {
       else if (deFinnegans) {
         direccion = deFinnegans; origen = 'finnegans';
         if (previas.length && m.record_id) {
-          const s = await revisarDireccion(env, m.record_id, deFinnegans, previas.slice(0, 3).map((h) => h.direccion), puedeConsultar);
-          if (s) sugerencia = { record_id: m.record_id, ...s };
+          if (!revisadas.has(m.record_id)) {
+            const s = await revisarDireccion(env, m.record_id, deFinnegans, previas.slice(0, 3).map((h) => h.direccion), puedeConsultar);
+            revisadas.set(m.record_id, s ? { record_id: m.record_id, ...s } : null);
+          }
+          sugerencia = revisadas.get(m.record_id) ?? null;
         }
       } else if (previas.length) { direccion = previas[0].direccion; origen = 'ultima_entrega'; }
       else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
     } else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
+    // La clave no depende de la dirección: corregirla no saca la parada del recorrido guardado ni pierde lo que marcó el
+    // chofer. Una entrega es la de su PDV; un retiro o un egreso, el de esa empresa. Un pedido que va a varias direcciones
+    // (tarjeta «Entrega») tiene una parada por dirección: la primera con la clave del PDV y las otras con su número (:2, :3…).
+    const base = m.tipo === 'entrega' ? `p:${m.pdv_task}` : companyId ? `e:${companyId}` : `o:${norm(nombre)}`;
     const horarioTexto = companyId ? empresas.get(companyId)?.horario ?? null : null;
-    for (const dir of [direccion, ...otras]) {
-      const clave = dir ? `d:${claveDireccion(dir)}` : m.tipo === 'entrega' ? `p:${m.pdv_task}` : companyId ? `e:${companyId}` : `o:${norm(nombre)}`;
+    for (const [i, dir] of [direccion, ...otras].entries()) {
+      const clave = i ? `${base}:${i + 1}` : base;
       const par = paradas.get(clave) ?? { clave, nombre, direccion: dir, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
         company_id: companyId, record_id: recordId, movimientos: [], sugerencia: null };
       par.movimientos.push(m);
@@ -555,10 +583,11 @@ export async function rutaDelDia(env: Env, user: User, fecha: string) {
   }
 
   const lista_ = [...paradas.values()];
-  const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)]);
+  const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)], buscar);
   for (const p of lista_) {
     const g = p.direccion ? geo.get(claveDireccion(p.direccion)) : null;
     if (g) { p.lat = g.lat; p.lng = g.lng; p.punto_manual = g.manual; }
+    // Validada con Google Maps en la tarjeta del pedido: el punto de Google, aunque el buscador del mapa no la haya buscado.
     else { const pg = p.direccion ? puntoGoogle.get(claveDireccion(p.direccion)) : undefined; if (pg) { p.lat = pg.lat; p.lng = pg.lng; } }
   }
 
@@ -571,6 +600,11 @@ export async function rutaDelDia(env: Env, user: User, fecha: string) {
   const rutas: RutaGuardada[] = guardadas.length
     ? guardadas.map((r) => ({ n: r.n, chofer: r.chofer, base: cfg.bases.some((x) => x.id === r.base) ? r.base! : cfg.bases[0].id, salida: r.salida, orden: lista(r.orden).map(String) }))
     : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [] }];
+  // Las paradas que no están en ningún recorrido (un movimiento que se pasó a este día después de armarlo) van al primero,
+  // también para el chofer; las que ya no existen se sacan.
+  const existen = new Set(lista_.map((p) => p.clave)), vistas = new Set<string>();
+  for (const r of rutas) r.orden = r.orden.filter((c) => existen.has(c) && !vistas.has(c) && (vistas.add(c), true));
+  rutas[0].orden.push(...lista_.map((p) => p.clave).filter((c) => !vistas.has(c)));
   const choferes = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
   return {
     fecha, paradas: lista_, llegan, rutas, guardada: guardadas.length > 0, choferes,
@@ -595,9 +629,11 @@ export async function guardarRutas(db: D1Database, ctx: Ctx, b: { fecha?: unknow
 }
 
 // El recorrido de un chofer para la app de los remitos (/hooks/chofer): las paradas en el orden que armó Logística, con
-// la dirección y lo que hay que retirar o entregar en cada una. Es el recorrido del día que tiene su nombre (el del link).
-export async function rutaDelChofer(env: Env, user: User, chofer: string, fecha: string) {
-  const dia = esDia(fecha) ? fecha : hoyBsAs();
+// la dirección y lo que hay que retirar o entregar en cada una. Es el recorrido de hoy que tiene su nombre (el del link;
+// no puede haber dos links activos con el mismo nombre). Solo el de hoy: el link del chofer no sirve para otros días.
+// Desde acá no se busca nada afuera (Finnegans, el mapa, Claude): eso lo dispara Logística al armar la ruta.
+export async function rutaDelChofer(env: Env, user: User, chofer: string) {
+  const dia = hoyBsAs();
   const r = await rutaDelDia(env, user, dia);
   const nombre = norm(chofer);
   const suyas = r.guardada ? r.rutas.filter((x) => x.chofer && norm(x.chofer) === nombre) : [];
@@ -625,32 +661,47 @@ export const MOTIVOS: Record<string, string> = {
   no_listo: 'No estaba listo', otro: 'Otro motivo',
 };
 
-// El chofer marca una parada de su recorrido: la hizo (los artículos cambian de estado en ClickUp, igual que cuando lo
-// marca Logística), no se pudo (con el motivo) o la deja para más tarde. `resultado` vacío borra lo marcado.
-export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { fecha?: unknown; clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }) {
-  const fecha = esDia(b.fecha) ? b.fecha : hoyBsAs();
+// El chofer marca una parada de su recorrido de hoy: la hizo (los artículos cambian de estado en ClickUp, a su nombre),
+// no se pudo (con el motivo) o la deja para más tarde. `resultado` vacío borra lo marcado. Al deshacer un «hecho» se
+// vuelve atrás solo lo que marcó él en esa parada, no lo que había marcado Logística. Repetir lo mismo no hace nada.
+export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }) {
+  const fecha = hoyBsAs();
   const clave = String(b.clave ?? '');
   const resultado = b.resultado == null || b.resultado === '' ? null : String(b.resultado);
   if (resultado && !['hecho', 'no_se_pudo', 'salteada'].includes(resultado)) throw new HttpError(400, 'Resultado desconocido.');
   const motivo = resultado === 'no_se_pudo' ? String(b.motivo ?? '') : null;
   if (resultado === 'no_se_pudo' && !(motivo! in MOTIVOS)) throw new HttpError(400, 'Falta el motivo.');
+  const nota = String(b.nota ?? '').trim().slice(0, 300) || null;
   const r = await rutaDelDia(env, ctx.user, fecha);
   const nombre = norm(chofer);
   const suya = r.guardada && r.rutas.some((x) => x.chofer && norm(x.chofer) === nombre && x.orden.includes(clave));
   const parada = r.paradas.find((p) => p.clave === clave);
   if (!suya || !parada) throw new HttpError(404, 'Esa parada no está en tu recorrido de hoy. Puede que Logística lo haya cambiado: actualizá la pantalla.');
   const db = env.DB;
-  const antes = parada.visita?.resultado === 'hecho';
-  if (resultado) {
-    await db.prepare('INSERT OR REPLACE INTO cronograma_visitas (fecha, clave, resultado, motivo, nota, chofer, token_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(fecha, clave, resultado, motivo, String(b.nota ?? '').trim().slice(0, 300) || null, chofer, ctx.tokenId ?? null, now()).run();
-  } else await db.prepare('DELETE FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave).run();
-  // Hecho: cada movimiento de la parada queda hecho. Si antes estaba hecho y ahora no, se deshace.
-  const hecho = resultado === 'hecho';
-  if (hecho || antes) {
-    const porTipo = new Map<Tipo, string[]>();
-    for (const m of parada.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
-    for (const [tipo, ids] of porTipo) await marcarHecho(env, ctx, { ids: ids.slice(0, MAX_POR_VEZ), tipo, hecho }, { chofer: true });
+  const entrega = parada.movimientos.some((m) => m.tipo === 'entrega');
+  const antes = await db.prepare('SELECT resultado, motivo, nota, marcados FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave)
+    .first<{ resultado: string; motivo: string | null; nota: string | null; marcados: string }>();
+  if ((antes?.resultado ?? null) === resultado && (antes?.motivo ?? null) === motivo && (antes?.nota ?? null) === (resultado ? nota : null)) return { ok: true, entrega };
+  let marcados = (lista(antes?.marcados) as Array<{ id: string; tipo: Tipo }>).filter((x) => x && esTipo(x.tipo));
+  const porTipo = (xs: Array<{ id: string; tipo: Tipo }>) => { const m = new Map<Tipo, string[]>(); for (const x of xs) m.set(x.tipo, [...(m.get(x.tipo) ?? []), x.id]); return m; };
+  const deATandas = async (ids: string[], tipo: Tipo, hecho: boolean) => {
+    const hechos: string[] = [];
+    for (let i = 0; i < ids.length; i += MAX_POR_VEZ) hechos.push(...(await marcarHecho(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo, hecho }, { chofer })).marcados);
+    return hechos;
+  };
+  if (resultado === 'hecho' && antes?.resultado !== 'hecho') {
+    // Primero los artículos (si ClickUp falla, la parada no queda como hecha) y después la visita.
+    marcados = [];
+    for (const [tipo, ids] of porTipo(parada.movimientos.filter((m) => !m.hecho).map((m) => ({ id: m.task_id, tipo: m.tipo })))) {
+      for (const id of await deATandas(ids, tipo, true)) marcados.push({ id, tipo });
+    }
+  } else if (resultado !== 'hecho' && antes?.resultado === 'hecho') {
+    for (const [tipo, ids] of [...porTipo(marcados)].reverse()) await deATandas(ids, tipo, false);
+    marcados = [];
   }
-  return { ok: true, entrega: parada.movimientos.some((m) => m.tipo === 'entrega') };
+  if (resultado) {
+    await db.prepare('INSERT OR REPLACE INTO cronograma_visitas (fecha, clave, resultado, motivo, nota, chofer, token_id, marcados, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(fecha, clave, resultado, motivo, nota, chofer, ctx.tokenId ?? null, JSON.stringify(marcados), now()).run();
+  } else await db.prepare('DELETE FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave).run();
+  return { ok: true, entrega };
 }

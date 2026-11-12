@@ -10,6 +10,8 @@ const RUN = Date.now().toString(36);
 const PDV = String(60000 + Math.floor(Math.random() * 20000));
 const PDV_V = String(Number(PDV) + 1);   // un pedido viejo del mismo cliente, ya entregado en otra dirección
 const CLIENTE = `Nestle ${RUN} S.A.`;
+// El recorrido del chofer es siempre el de hoy (Buenos Aires).
+const HOY = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
 let asUser = null;
 async function api(method, path, body) {
   const res = await fetch(`${BASE}/api${path}`, {
@@ -38,6 +40,8 @@ const ARTS = {
     { nombre: `Termo ${RUN}`, cantidad: 100, status: 'pedido al proveedor', proveedor: OP_PROV[0].id, impresor: OP_IMP[0].id,
       ingresoProv: '2026-11-16', egresoImp: '2026-11-17', retiroImp: '2026-11-18', entrega: '2026-11-18' },
     { nombre: `Mochila ${RUN}`, cantidad: 50, status: 'pedido al proveedor', proveedor: OP_PROV[0].id, retiroProv: '2026-11-17', entrega: null },
+    // Para la app del chofer: un retiro de hoy, ya «en el impresor» (marcar su ingreso viejo no lo tiene que volver atrás).
+    { nombre: `Gorra ${RUN}`, cantidad: 20, status: 'en el impresor', proveedor: OP_PROV[0].id, impresor: OP_IMP[0].id, ingresoProv: '2026-10-05', retiroImp: HOY, entrega: '2027-03-01' },
   ],
   [`cv${RUN}`]: [{ nombre: `Lapicera ${RUN}`, cantidad: 10, status: 'entregados', entrega: '2026-10-20' }],
 };
@@ -146,7 +150,7 @@ test('cronograma: los movimientos salen de las fechas de ClickUp, con sus avisos
   await sync(); await sync();
   const v = await semana();
   assert.equal(v.puede_editar, true);
-  const propios = v.movimientos.filter((m) => m.npdv === PDV);
+  const propios = v.movimientos.filter((m) => m.npdv === PDV && !m.articulo.startsWith('Gorra'));
   assert.deepEqual(propios.map((m) => `${m.fecha} ${m.tipo}`).sort(), [
     '2026-11-16 ingreso', '2026-11-17 egreso', '2026-11-17 retiro_proveedor', '2026-11-18 entrega', '2026-11-18 retiro_impresor', '2026-11-19 entrega']);
   const ing = mov(v, 'ingreso', 'Termo');
@@ -185,7 +189,7 @@ test('cronograma: mover a otro día escribe la fecha en ClickUp, también en Cor
   escrito.length = 0;
   r = await api('POST', '/cronograma/mover', { ids: [M], tipo: 'entrega', fecha: '2026-11-20' });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.deepEqual(escrito.map((e) => e.task), [`cr${RUN}`], 'se escribió en la tarea del PDV');
+  assert.deepEqual(escrito.map((e) => e.task), [M], 'la fecha queda en el artículo: mover uno no arrastra a los demás del PDV');
   v = await semana();
   assert.equal(mov(v, 'entrega', 'Mochila').fecha, '2026-11-20');
   assert.equal(mov(v, 'entrega', 'Termo').fecha, '2026-11-18', 'el termo tiene su propia fecha: no se movió');
@@ -208,7 +212,7 @@ test('cronograma: marcar hecho cambia el estado en ClickUp y se puede deshacer',
   escrito.length = 0;
   let r = await api('POST', '/cronograma/hecho', { ids: [T], tipo: 'egreso', hecho: true });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.deepEqual(r.data, { cambiados: 1, estado: 'en el impresor' });
+  assert.deepEqual([r.data.cambiados, r.data.estado, r.data.marcados], [1, 'en el impresor', [T]]);
   assert.deepEqual(escrito.map((e) => [e.method, e.task, e.body]), [['PUT', T, { status: 'en el impresor' }]]);
   let v = await semana();
   assert.equal(mov(v, 'egreso', 'Termo').hecho, true);
@@ -220,9 +224,13 @@ test('cronograma: marcar hecho cambia el estado en ClickUp y se puede deshacer',
   v = await semana();
   assert.equal(mov(v, 'egreso', 'Termo').hecho, false);
   assert.equal(mov(v, 'egreso', 'Termo').estado, 'pedido al proveedor');
+  // La gorra ya está «en el impresor»: marcar su ingreso viejo como hecho no la vuelve a «en control de depósito».
+  escrito.length = 0;
+  r = await api('POST', '/cronograma/hecho', { ids: [`cr${RUN}-a2`], tipo: 'ingreso', hecho: true });
+  assert.deepEqual([r.data.cambiados, escrito.length], [0, 0], 'el estado no retrocede');
   // Entregado: todo lo anterior queda hecho, y marcar un retiro ya no vuelve el estado para atrás.
   r = await api('POST', '/cronograma/hecho', { ids: [T], tipo: 'entrega', hecho: true });
-  assert.deepEqual(r.data, { cambiados: 1, estado: 'entregados' });
+  assert.deepEqual([r.data.cambiados, r.data.estado], [1, 'entregados']);
   r = await api('POST', '/cronograma/hecho', { ids: [T], tipo: 'retiro_impresor', hecho: true });
   assert.equal(r.data.cambiados, 0);
   v = await semana();
@@ -312,7 +320,6 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.equal(consultasGeo, geoAntes);
 
   // Los recorridos del día: dos choferes, cada uno con su orden y su depósito.
-  assert.equal(r.guardada, false);
   const claves = r.paradas.map((p) => p.clave);
   const ch = (await api('POST', '/choferes', { name: `Juan ${RUN}` })).data;
   const g = await api('PUT', '/cronograma/ruta', { fecha: '2026-11-18', rutas: [{ chofer: `Juan ${RUN}`, base: 'matienzo', salida: 480, orden: claves.slice(0, 1) }, { chofer: null, base: 'roca', salida: 540, orden: claves.slice(1) }] });
@@ -322,35 +329,52 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.deepEqual(r.rutas.map((x) => [x.n, x.chofer, x.base, x.salida]), [[1, `Juan ${RUN}`, 'matienzo', 480], [2, null, 'roca', 540]]);
   assert.deepEqual(r.rutas[0].orden, claves.slice(0, 1));
 
-  // El chofer ve su recorrido en la app de los remitos: solo el suyo, con sus paradas en orden.
-  const suya = await fetch(`${BASE}/hooks/chofer/api/ruta?fecha=2026-11-18`, { headers: { authorization: `Bearer ${ch.token}` } });
-  assert.equal(suya.status, 200);
-  const rc = await suya.json();
+  // No puede haber dos links activos con el mismo nombre: el recorrido se asigna por nombre.
+  assert.equal((await api('POST', '/choferes', { name: `juan  ${RUN.toUpperCase()}` })).status, 409);
+
+  // ---------- La app del chofer: su recorrido de hoy ----------
+  const chofer = (ruta, token, opts = {}) => fetch(`${BASE}/hooks/chofer/api${ruta}`, { headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...opts });
+  let hoy = (await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data;
+  const gorra = hoy.paradas.find((p) => p.movimientos.some((m) => m.npdv === PDV && m.articulo.startsWith('Gorra')));
+  assert.ok(gorra, 'el retiro de la gorra es una parada de hoy');
+  assert.equal(gorra.clave, `e:${imprefas}`, 'la clave de la parada es la empresa, no su dirección');
+  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: HOY, rutas: [{ chofer: `Juan ${RUN}`, base: 'matienzo', salida: 480, orden: [gorra.clave] }] })).status, 200);
+  const rc = await (await chofer('/ruta', ch.token)).json();
+  assert.equal(rc.fecha, HOY);
   assert.equal(rc.recorridos.length, 1);
   assert.equal(rc.recorridos[0].base.nombre, 'Oficina Matienzo');
-  assert.equal(rc.recorridos[0].salida, 480);
-  assert.deepEqual(rc.recorridos[0].paradas.map((p) => p.clave), claves.slice(0, 1));
-  assert.ok(rc.recorridos[0].paradas[0].movimientos.length >= 1);
+  assert.ok(rc.recorridos[0].paradas.some((p) => p.clave === gorra.clave));
   assert.equal((await fetch(`${BASE}/hooks/chofer/api/ruta`)).status, 401, 'sin el link del chofer no se ve');
-  // El chofer marca la parada: no había nadie (queda a la vista de Logística) y después, hecha (cambia el estado en ClickUp).
-  const marcar = async (cuerpo, token = ch.token) => { const x = await fetch(`${BASE}/hooks/chofer/api/ruta/parada`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ fecha: '2026-11-18', clave: claves[0], ...cuerpo }) }); return { status: x.status, data: await x.json() }; };
+  // Corregir la dirección del impresor no saca la parada del recorrido del chofer.
+  await api('PUT', '/cronograma/direccion', { company_id: imprefas, direccion: `Cnel. Sayos ${PDV}, Lanús Oeste` });
+  assert.ok((await (await chofer('/ruta', ch.token)).json()).recorridos[0].paradas.some((p) => p.clave === gorra.clave));
+  // Otro chofer no ve ese recorrido ni puede marcar sus paradas.
+  const otro = (await api('POST', '/choferes', { name: `Pedro ${RUN}` })).data;
+  assert.deepEqual((await (await chofer('/ruta', otro.token)).json()).recorridos, []);
+  const marcar = async (cuerpo, token = ch.token) => { const x = await chofer('/ruta/parada', token, { method: 'POST', body: JSON.stringify({ clave: gorra.clave, ...cuerpo }) }); return { status: x.status, data: await x.json() }; };
+  assert.equal((await marcar({ resultado: 'hecho' }, otro.token)).status, 404);
+  // No había nadie: queda a la vista de Logística, sin tocar ClickUp.
+  escrito.length = 0;
   assert.equal((await marcar({ resultado: 'no_se_pudo' })).status, 400, 'falta el motivo');
   assert.equal((await marcar({ resultado: 'no_se_pudo', motivo: 'nadie', nota: 'Vuelvo a las 15' })).status, 200);
-  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-18')).data;
-  const vis = r.paradas.find((p) => p.clave === claves[0]).visita;
+  hoy = (await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data;
+  const vis = hoy.paradas.find((p) => p.clave === gorra.clave).visita;
   assert.deepEqual([vis.resultado, vis.motivo, vis.nota, vis.chofer], ['no_se_pudo', 'nadie', 'Vuelvo a las 15', `Juan ${RUN}`]);
+  assert.equal(escrito.length, 0);
+  // Hecha: el artículo cambia de estado en ClickUp. Repetirlo no escribe de nuevo.
+  const G = `cr${RUN}-a2`;
+  assert.equal((await marcar({ resultado: 'hecho' })).status, 200);
+  assert.deepEqual(escrito.filter((e) => e.body?.status).map((e) => [e.task, e.body.status]), [[G, 'en revision']], 'el retiro del impresor pasa el artículo a «en revision»');
   escrito.length = 0;
-  const pendientes = r.paradas.find((p) => p.clave === claves[0]).movimientos.filter((m) => !m.hecho).length;
-  const hecha = await marcar({ resultado: 'hecho' });
-  assert.equal(hecha.status, 200, JSON.stringify(hecha.data));
-  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-18')).data;
-  const ya = r.paradas.find((p) => p.clave === claves[0]);
+  assert.equal((await marcar({ resultado: 'hecho' })).status, 200);
+  assert.equal(escrito.length, 0, 'marcar lo mismo otra vez no escribe nada');
+  hoy = (await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data;
+  const ya = hoy.paradas.find((p) => p.clave === gorra.clave);
   assert.equal(ya.visita.resultado, 'hecho');
-  assert.ok(ya.movimientos.every((m) => m.hecho), 'todo lo de la parada quedó hecho');
-  assert.equal((await (await fetch(`${BASE}/hooks/chofer/api/ruta?fecha=2026-11-18`, { headers: { authorization: `Bearer ${ch.token}` } })).json()).recorridos[0].paradas[0].visita.resultado, 'hecho');
-  assert.ok(pendientes === 0 || escrito.length > 0, 'lo pendiente cambió de estado en ClickUp');
-  const otro = (await api('POST', '/choferes', { name: `Pedro ${RUN}` })).data;
-  const nada = await (await fetch(`${BASE}/hooks/chofer/api/ruta?fecha=2026-11-18`, { headers: { authorization: `Bearer ${otro.token}` } })).json();
-  assert.deepEqual(nada.recorridos, [], 'otro chofer no ve ese recorrido');
-  assert.equal((await marcar({ resultado: 'hecho' }, otro.token)).status, 404, 'ni puede marcar una parada que no es suya');
+  assert.ok(ya.movimientos.filter((m) => m.npdv === PDV).every((m) => m.hecho));
+  // Deshacer: vuelve al estado que tenía.
+  assert.equal((await marcar({ resultado: '' })).status, 200);
+  assert.deepEqual(escrito.filter((e) => e.body?.status).map((e) => [e.task, e.body.status]), [[G, 'en el impresor']]);
+  hoy = (await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data;
+  assert.equal(hoy.paradas.find((p) => p.clave === gorra.clave).visita, null);
 });

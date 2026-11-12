@@ -29,8 +29,9 @@ marca el chofer (migración `0045_cronograma.sql`).
 - **Cada día** con sus cuatro carriles. Una tarjeta junta los artículos de un PDV con el mismo movimiento, el mismo día
   y en el mismo lugar. Un clic abre la vista previa del pedido.
 - **Mover**: arrastrar la tarjeta a otro día (o el ícono de calendario, para el celular) escribe la fecha en ClickUp en
-  el momento. Si ClickUp no lo acepta, no cambia nada. En las entregas se mueve también la fecha del PDV cuando era la
-  misma.
+  el momento. Si ClickUp no lo acepta, no cambia nada. En las entregas la fecha queda en cada artículo que se movió; la
+  del PDV se mueve solo si se movieron todos sus artículos abiertos (pasar uno a otro día no arrastra a los demás). Lo que
+  estaba marcado hecho y se pasa a otro día vuelve a pendiente.
 - **Hecho**: el círculo. Queda quién y cuándo, y **el artículo cambia de estado en ClickUp**:
 
   | Se marca | El artículo pasa a |
@@ -40,7 +41,8 @@ marca el chofer (migración `0045_cronograma.sql`).
   | Retiro del impresor | en revision |
   | Entrega | entregados |
 
-  Si el artículo ya está más adelante (listo para entregar, entregado), el estado no se toca. Desmarcar lo vuelve al
+  El estado solo avanza: si el artículo ya está más adelante en la lista de ClickUp (por ejemplo «en el impresor» cuando
+  se marca un ingreso viejo), no se toca. Desmarcar lo vuelve al
   estado que tenía. Los estados se pueden cambiar con `PUT /api/cronograma/config` (`estados`). Un artículo entregado
   cuenta como hecho aunque nadie lo haya marcado (las semanas viejas no aparecen todas pendientes).
 - **Avisos** en la tarjeta: cae en feriado o fin de semana, se retira y se entrega el mismo día, la entrega es anterior
@@ -53,8 +55,9 @@ marca el chofer (migración `0045_cronograma.sql`).
 
 ## Ruta del día
 
-Las paradas del día en el mapa, **una por lugar**: tres retiros en el mismo impresor son una parada, y dos pedidos que
-van a la misma dirección también.
+Las paradas del día en el mapa: **una por proveedor o impresor** (tres retiros en el mismo impresor son una parada) y
+**una por PDV** en las entregas. La parada no depende de su dirección: corregirla no la saca del recorrido ni pierde lo
+que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos va al final del primero.
 
 - **Varios recorridos por día, uno por chofer** (pestañas). Cada uno con su chofer (los que tienen link en Entregas →
   Choferes), de dónde sale (Depósito Gral. Roca 4250 u Oficina Matienzo 1308, Florida Oeste) y a qué hora. Las paradas
@@ -82,26 +85,31 @@ van a la misma dirección también.
   leídos de ese cliente. Si a simple vista no son iguales, Claude decide si es el mismo lugar escrito distinto o es
   otro. Solo si es otro aparece la sugerencia en la parada, para usarla o descartarla. Se consulta una vez por pedido.
 - Cada dirección se busca en el mapa una sola vez (Nominatim de OpenStreetMap, de a pocas por vez).
+- Buscar afuera (Finnegans, el mapa, Claude) lo dispara solo quien edita el cronograma al abrir la ruta. Quien solo
+  mira, «Ver como» y la app del chofer usan lo que ya está guardado.
 
 ## La app del chofer
 
 En la misma app de los remitos (`/hooks/chofer/`, ver [REMITOS.md](REMITOS.md)), arriba: **«Tu recorrido de hoy»**, el
 que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay que retirar, dejar o entregar y «Cómo
-llegar» (abre el mapa del celular). En cada parada marca cómo le fue:
+llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
+En cada parada marca cómo le fue:
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo
-  marca Logística). Si era una entrega, se abre la cámara para la foto del remito firmado.
+  marca Logística, pero a nombre del chofer en la conversación del pedido). Si era una entrega, se abre la cámara para
+  la foto del remito firmado. «Deshacer» vuelve atrás solo lo que marcó él, no lo que había marcado Logística.
 - **No se pudo**, con el motivo: no había nadie, estaba cerrado, no encontré la dirección, no lo quisieron recibir, no
   estaba listo (en los retiros) u otro, y una nota. Logística lo ve en la parada, en el momento.
 - **Dejar para después**.
 
-Sin señal no se puede marcar (el recorrido tampoco se actualiza); las fotos de los remitos siguen saliendo solas cuando
+Sin señal no se puede marcar, pero el recorrido se sigue viendo (queda guardado en el celular); las fotos de los remitos siguen saliendo solas cuando
 vuelve, como siempre.
 
 ## Cómo está hecho
 
 | Qué | Dónde |
 |---|---|
+| Correcciones de la revisión: qué marcó el chofer en cada parada, a nombre de quién, feriados que faltaban | `migrations/0046_cronograma_chofer.sql` |
 | Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0045_cronograma.sql` |
 | Movimientos, mover, marcar, notas, feriados, direcciones, ruta, chofer | `src/worker/cronograma.ts` |
 | API `/api/cronograma…` | `src/worker/api.ts` |

@@ -24,7 +24,11 @@ interface BaseGeo { id: string; nombre: string; direccion: string; lat: number |
 interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; rutas: Recorrido[]; guardada: boolean; choferes: string[]; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
 interface Real extends TramosReales { linea: Array<[number, number]> }
 
-const COLORES = ['#3b5bdb', '#e8590c', '#0c8599', '#9c36b5', '#2f9e44', '#c2255c', '#5f3dc4', '#a61e4d'];
+// Con el número en blanco encima: todos pasan 4,5:1.
+const COLORES = ['#3b5bdb', '#c2410c', '#0b7285', '#862e9c', '#2b7a39', '#a61e4d', '#5f3dc4', '#364fc7'];
+// Los nombres vienen de ClickUp y de las fichas: al mapa van como texto, nunca como HTML.
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const TANDA = 25;   // el servidor acepta de a 25 artículos por vez
 const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedido', finnegans: 'Del pedido en Finnegans', ultima_entrega: 'De la última entrega a este cliente', empresa: 'De la ficha de la empresa' };
 const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
@@ -52,6 +56,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [sobre, setSobre] = useState<string | null>(null);
   const pedido = useRef(0);
   const sucio = useRef(false);
+  const tocado = useRef(false);                                       // alguien cambió el orden a mano: no se reordena solo
+  const porGuardar = useRef<{ fecha: string; rutas: Recorrido[] } | null>(null);
+  const sondeo = useRef<number>();
 
   const cargar = useCallback(async (intento = 0) => {
     const n = ++pedido.current;
@@ -63,23 +70,35 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       setRutas((antes) => {
         const base = antes.length && d.fecha === (antes as Recorrido[] & { fecha?: string }).fecha ? antes : d.rutas;
         let r = acomodar(base, d.paradas);
-        // La primera vez que se abre el día (nadie guardó un orden), arranca con el recorrido más corto.
-        if (!d.guardada && base === d.rutas) { const b = punto(d.bases.find((x) => x.id === r[0].base)); r = [{ ...r[0], orden: optimizar(b, d.paradas, r[0].salida).map((p) => p.clave) }, ...r.slice(1)]; }
+        // Mientras nadie guardó ni tocó el orden, arranca con el recorrido más corto (y se vuelve a ordenar a medida que
+        // se van ubicando las direcciones).
+        if (!d.guardada && !tocado.current) { const b = punto(d.bases.find((x) => x.id === r[0].base)); r = [{ ...r[0], orden: optimizar(b, d.paradas, r[0].salida).map((p) => p.clave) }, ...r.slice(1)]; }
         return Object.assign(r, { fecha: d.fecha });
       });
       // Faltan ubicar direcciones (se buscan de a pocas): vuelve a pedir hasta que estén.
-      if (d.buscando > 0 && intento < 12) window.setTimeout(() => { if (n === pedido.current) void cargar(intento + 1); }, 1500);
+      window.clearTimeout(sondeo.current);
+      if (d.buscando > 0 && intento < 12) sondeo.current = window.setTimeout(() => { if (n === pedido.current) void cargar(intento + 1); }, 1500);
     } catch (e) { if (n === pedido.current) setError((e as Error).message); }
   }, [fecha]);
-  useEffect(() => { setDatos(null); setRutas([]); setActiva(0); setEditando(null); void cargar(); }, [cargar]);
+  useEffect(() => {
+    setDatos(null); setRutas([]); setActiva(0); setEditando(null); tocado.current = false;
+    void cargar();
+    // Al cambiar de día o salir: se corta el sondeo y, si quedó un cambio sin guardar, se guarda ya.
+    return () => {
+      pedido.current++;
+      window.clearTimeout(sondeo.current);
+      const p = porGuardar.current;
+      if (sucio.current && p) { sucio.current = false; porGuardar.current = null; void http('PUT', '/cronograma/ruta', p).catch(() => undefined); }
+    };
+  }, [cargar]);
 
   const puede = !!datos?.puede_editar;
   const porClave = useMemo(() => new Map((datos?.paradas ?? []).map((p) => [p.clave, p])), [datos]);
-  const cambiar = (f: (r: Recorrido[]) => Recorrido[]) => { sucio.current = true; setRutas((r) => Object.assign(f(r), { fecha })); };
+  const cambiar = (f: (r: Recorrido[]) => Recorrido[]) => { sucio.current = true; tocado.current = true; setRutas((r) => { const n = Object.assign(f(r), { fecha }); porGuardar.current = { fecha, rutas: n }; return n; }); };
   // Guarda el orden y los recorridos un rato después del último cambio.
   useEffect(() => {
-    if (!sucio.current || !puede || !rutas.length) return;
-    const t = window.setTimeout(() => { sucio.current = false; http('PUT', '/cronograma/ruta', { fecha, rutas }).catch((e) => toast((e as Error).message, true)); }, 700);
+    if (!sucio.current || !puede || !rutas.length || (rutas as Recorrido[] & { fecha?: string }).fecha !== fecha) return;
+    const t = window.setTimeout(() => { sucio.current = false; porGuardar.current = null; http('PUT', '/cronograma/ruta', { fecha, rutas }).catch((e) => toast((e as Error).message, true)); }, 700);
     return () => window.clearTimeout(t);
   }, [rutas, puede, fecha, toast]);
 
@@ -123,11 +142,14 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   }));
   const pasar = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => ({ ...r, orden: i === a ? [...r.orden.filter((c) => c !== clave), clave] : r.orden.filter((c) => c !== clave) })));
   const ordenar = () => {
-    const antes = act.sim.fin;
-    const nuevo = optimizar(punto(act.base), act.paradas, act.r.salida);
-    const despues = simular(punto(act.base), nuevo, act.r.salida).fin;
+    // Los dos órdenes se comparan con la misma cuenta (línea recta), y el de ahora solo se cambia si el nuevo es mejor.
+    const b = punto(act.base);
+    const antes = simular(b, act.paradas, act.r.salida).costo;
+    const nuevo = optimizar(b, act.paradas, act.r.salida);
+    const despues = simular(b, nuevo, act.r.salida).costo;
+    if (antes - despues <= 1) { toast('Ya era el recorrido más corto.'); return; }
     cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, orden: nuevo.map((p) => p.clave) } : r)));
-    toast(antes - despues > 1 ? `Recorrido reordenado: ${duracion(antes - despues)} menos.` : 'Ya era el recorrido más corto.');
+    toast(`Recorrido reordenado: unos ${duracion(antes - despues)} menos.`);
   };
   async function marcar(p: Parada) {
     const hecho = !p.movimientos.every((m) => m.hecho);
@@ -136,7 +158,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     setDatos((d) => d && { ...d, paradas: d.paradas.map((x) => (x.clave === p.clave ? { ...x, movimientos: x.movimientos.map((m) => ({ ...m, hecho })) } : x)) });
     try {
       let cambiados = 0;
-      for (const [tipo, ids] of porTipo) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids, tipo, hecho })).cambiados;
+      for (const [tipo, ids] of porTipo) for (let i = 0; i < ids.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + TANDA), tipo, hecho })).cambiados;
       toast(!hecho ? `${p.nombre}: quedó como pendiente.` : `${p.nombre}: hecho.${cambiados ? ` ${cambiados} artículo${cambiados === 1 ? ' cambió' : 's cambiaron'} de estado en ClickUp.` : ''}`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar(); onCambio();
@@ -190,7 +212,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
         </label>
         <label className="cr-campo">A las
           <input type="time" className="input sm" value={`${String(Math.floor(act.r.salida / 60)).padStart(2, '0')}:${String(act.r.salida % 60).padStart(2, '0')}`} disabled={!puede}
-            onChange={(e) => { const [h, m] = e.target.value.split(':').map(Number); if (Number.isFinite(h)) cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, salida: h * 60 + (m || 0) } : r))); }} />
+            onChange={(e) => { if (!e.target.value) return; const [h, m] = e.target.value.split(':').map(Number); if (Number.isFinite(h)) cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, salida: h * 60 + (m || 0) } : r))); }} />
         </label>
         {puede && <button type="button" className="btn sm primary" disabled={act.paradas.length < 2} onClick={ordenar}><Icon name="route" size={14} />Ordenar por el recorrido más corto</button>}
         <span className="grow" />
@@ -335,6 +357,7 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, onMover }: {
   const mapa = useRef<L.Map | null>(null);
   const capa = useRef<L.LayerGroup | null>(null);
   const encuadre = useRef('');
+  const pines = useRef(new Map<string, L.Marker>());
   const cb = useRef({ onPin, onMover });
   cb.current = { onPin, onMover };
 
@@ -352,13 +375,14 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, onMover }: {
     const m = mapa.current, g = capa.current;
     if (!m || !g) return;
     g.clearLayers();
+    pines.current.clear();
     const todos: Array<[number, number]> = [];
     const usadas = new Set(armadas.filter((a) => a.paradas.length).map((a) => a.base?.id));
     for (const b of bases) {
       if (b.lat == null || b.lng == null || (!usadas.has(b.id) && usadas.size)) continue;
       todos.push([b.lat, b.lng]);
       L.marker([b.lat, b.lng], { icon: L.divIcon({ className: 'cr-pin-wrap', html: '<span class="cr-pin base">⌂</span>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 500, keyboard: false })
-        .bindTooltip(b.nombre, { direction: 'top', offset: [0, -14] }).addTo(g);
+        .bindTooltip(esc(b.nombre), { direction: 'top', offset: [0, -14] }).addTo(g);
     }
     // Primero los recorridos que no se están mirando, apagados; el activo arriba.
     for (const a of [...armadas].sort((x, y) => Number(x.i === activa) - Number(y.i === activa))) {
@@ -374,17 +398,22 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, onMover }: {
         todos.push([p.lat, p.lng]);
         const s = a.sim.paradas[i], hecha = p.movimientos.every((x) => x.hecho);
         const mk = L.marker([p.lat, p.lng], {
-          icon: L.divIcon({ className: 'cr-pin-wrap', html: `<span class="cr-pin${act ? '' : ' apagado'}${hecha ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${s.tarde || (p.visita && p.visita.resultado === 'no_se_pudo') ? ' tarde' : ''}" style="--c:${a.color}">${hecha ? '✓' : i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
-          zIndexOffset: (act ? 1000 : 0) + (caliente === p.clave ? 2000 : 0), draggable: puede && act, keyboard: false,
-        }).bindTooltip(`${p.nombre} · ${hhmm(s.llega)}`, { direction: 'top', offset: [0, -14] }).addTo(g);
+          icon: L.divIcon({ className: 'cr-pin-wrap', html: `<span class="cr-pin${act ? '' : ' apagado'}${hecha ? ' hecha' : ''}${s.tarde || (p.visita && p.visita.resultado === 'no_se_pudo') ? ' tarde' : ''}" style="--c:${a.color}">${hecha ? '✓' : i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
+          zIndexOffset: act ? 1000 : 0, draggable: puede && act, keyboard: false,
+        }).bindTooltip(esc(`${p.nombre} · ${hhmm(s.llega)}`), { direction: 'top', offset: [0, -14] }).addTo(g);
+        pines.current.set(p.clave, mk);
         mk.on('click', () => cb.current.onPin(p.clave, a.i));
         mk.on('dragend', () => { const ll = mk.getLatLng(); cb.current.onMover(p, ll.lat, ll.lng); });
       });
     }
     // Se vuelve a encuadrar solo cuando cambian los puntos, no al reordenar.
-    const firma = todos.map((t) => t.join(',')).sort().join('|');
+    const firma = [...pines.current.keys()].sort().join('|');
     if (todos.length && firma !== encuadre.current) { encuadre.current = firma; m.fitBounds(L.latLngBounds(todos).pad(0.15), { maxZoom: 15, animate: false }); }
-  }, [armadas, activa, bases, caliente, puede]);
+  }, [armadas, activa, bases, puede]);
+  // La parada sobre la que está el mouse: se resalta su pin sin rehacer el mapa.
+  useEffect(() => {
+    for (const [clave, mk] of pines.current) { mk.getElement()?.querySelector('.cr-pin')?.classList.toggle('caliente', clave === caliente); mk.setZIndexOffset(clave === caliente ? 3000 : 1000); }
+  }, [caliente, armadas, activa]);
 
   return <div ref={caja} className="cr-mapa" role="application" aria-label="Mapa del recorrido" />;
 }

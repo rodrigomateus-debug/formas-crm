@@ -106,14 +106,15 @@ export default function CronogramaPage() {
   const q = buscar.trim().toLowerCase();
   const unidades = useMemo(() => [...new Set((v?.movimientos ?? []).map((m) => m.unidad).filter((u): u is string => !!u))].sort(), [v]);
   const movs = useMemo(() => (v?.movimientos ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad) && (!pendientes || !m.hecho)), [v, q, unidad, pendientes]);
-  const finDeSemana = [5, 6].filter((i) => movs.some((m) => m.fecha === sumar(semana, i)));
+  // Sábado y domingo se ven si tienen algo: un movimiento, una nota o un feriado.
+  const finDeSemana = [5, 6].filter((i) => { const d = sumar(semana, i); return movs.some((m) => m.fecha === d) || !!v?.notas.some((n) => n.fecha === d); });
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
 
   async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string) {
     setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === tipo ? { ...m, fecha } : m)), sin_fecha: d.sin_fecha.filter((s) => !ids.includes(s.task_id)) });
     try {
-      await http('POST', '/cronograma/mover', { ids, tipo, fecha });
+      for (let i = 0; i < ids.length; i += 25) await http('POST', '/cronograma/mover', { ids: ids.slice(i, i + 25), tipo, fecha });
       toast(`${pdv}: ${carrilDe(tipo).uno.toLowerCase()} pasó al ${diaCorto(fecha)}. Ya está en ClickUp.`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
@@ -122,7 +123,8 @@ export default function CronogramaPage() {
     const hecho = !t.hecho, ids = t.movs.map((m) => m.task_id);
     setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === t.tipo ? { ...m, hecho } : m)) });
     try {
-      const r = await http<{ cambiados: number; estado: string | null }>('POST', '/cronograma/hecho', { ids, tipo: t.tipo, hecho });
+      const r = { cambiados: 0, estado: null as string | null };
+      for (let i = 0; i < ids.length; i += 25) { const x = await http<{ cambiados: number; estado: string | null }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + 25), tipo: t.tipo, hecho }); r.cambiados += x.cambiados; r.estado = x.estado; }
       toast(!hecho ? 'Quedó como pendiente.' : r.cambiados && r.estado ? `Hecho. ${r.cambiados === 1 ? 'El artículo pasó' : `${r.cambiados} artículos pasaron`} a «${r.estado}» en ClickUp.` : 'Marcado como hecho.');
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
@@ -336,7 +338,7 @@ function Notas({ dia, notas, puede, onCambio }: { dia: string; notas: Nota[]; pu
         </div>
       ))}
       {puede && (abierto ? (
-        <form className="cr-nota-form" onSubmit={(e) => { e.preventDefault(); if (!texto.trim()) return; void hacer(http('POST', '/cronograma/notas', { fecha: dia, texto })); setTexto(''); setAbierto(false); }}>
+        <form className="cr-nota-form" onSubmit={(e) => { e.preventDefault(); if (!texto.trim()) return; void http('POST', '/cronograma/notas', { fecha: dia, texto }).then(() => { setTexto(''); setAbierto(false); onCambio(); }, (err) => toast((err as Error).message, true)); }}>
           <input className="input sm" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Llevar el sobre a…" aria-label="Nota del día" onKeyDown={(e) => { if (e.key === 'Escape') setAbierto(false); }} />
           <button type="submit" className="btn sm primary">Agregar</button>
         </form>

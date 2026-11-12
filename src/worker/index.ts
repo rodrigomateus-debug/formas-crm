@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
+import { conectar, sinPermiso } from './conectar';
 import { ensureSeeded } from './meta';
 import { api } from './api';
 import { compat } from './compat';
@@ -65,7 +66,19 @@ app.route('/hooks', hooks);
 
 // MCP para Claude. El token puede ir en el header Authorization o en la URL (/mcp/fcrm_…),
 // porque algunos clientes (conectores personalizados de claude.ai) solo dejan cargar una URL.
-app.all('/mcp', async (c) => handleMcp(c.req.raw, await authenticate(c.env, c.req.raw), c.env));
+// «Conectar con Claude» (conectar.ts): OAuth para que cada uno conecte su Claude sin copiar tokens. Sin token (o vencido),
+// /mcp contesta 401 diciendo dónde pedir permiso, y Claude hace el resto.
+app.route('/', conectar);
+app.all('/mcp', async (c) => {
+  const conToken = /^Bearer\s+\S/.test(c.req.header('authorization') ?? '');
+  if (!conToken) return sinPermiso(c.req.raw, 'Falta conectar Claude con el CRM.', false);
+  let ctx: Ctx;
+  try { ctx = await authenticate(c.env, c.req.raw); } catch (e) {
+    if (e instanceof HttpError && e.status === 401) return sinPermiso(c.req.raw, e.message, true);
+    throw e;
+  }
+  return handleMcp(c.req.raw, ctx, c.env);
+});
 app.all('/mcp/:token', async (c) => handleMcp(c.req.raw, await authenticate(c.env, c.req.raw, c.req.param('token')), c.env));
 
 // Links viejos de HubSpot (app.hubspot.com/contacts/47666798/record/0-3/123) → misma ficha acá.

@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
@@ -1056,6 +1056,10 @@ api.post('/choferes', async (c) => {
   const { name } = await c.req.json<{ name?: string }>();
   const nombre = String(name ?? '').trim();
   if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre del chofer.');
+  // El recorrido del día se le asigna por nombre (cronograma.ts): dos links activos con el mismo nombre verían lo mismo.
+  const activos = (await c.env.DB.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0").all<{ name: string }>()).results;
+  const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  if (activos.some((a) => igual(a.name) === igual(nombre))) throw new HttpError(409, `Ya hay un link activo para «${nombre}». Dalo de baja primero, o usá otro nombre.`);
   const token = newToken();
   const r = await c.env.DB.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source, chofer_token) VALUES (?, ?, ?, 'chofer', ?) RETURNING id")
     .bind(nombre.slice(0, 80), await sha256(token), ctx.user.id, token).first<{ id: number }>();
@@ -1184,7 +1188,11 @@ api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.
 api.patch('/cronograma/notas/:id', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 api.delete('/cronograma/notas/:id', async (c) => c.json(await borrarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
 api.put('/cronograma/feriados', async (c) => c.json(await guardarFeriado(c.env.DB, c.get('ctx'), await c.req.json())));
-api.get('/cronograma/ruta', async (c) => c.json(await rutaDelDia(c.env, c.get('ctx').user, String(c.req.query('fecha') ?? ''))));
+// Buscar direcciones afuera (Finnegans, el mapa, Claude) es solo para quien edita el cronograma, y no en «Ver como».
+api.get('/cronograma/ruta', async (c) => {
+  const ctx = c.get('ctx');
+  return c.json(await rutaDelDia(c.env, ctx.user, String(c.req.query('fecha') ?? ''), { buscar: puedeEditarCronograma(ctx.user) && !ctx.realUser }));
+});
 api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
 api.put('/cronograma/punto', async (c) => c.json(await fijarPunto(c.env.DB, c.get('ctx'), await c.req.json())));
 api.put('/cronograma/direccion', async (c) => c.json(await guardarDireccion(c.env, c.get('ctx'), await c.req.json())));
@@ -1546,6 +1554,20 @@ api.delete('/users/:id', async (c) => {
     db.prepare('UPDATE users SET active = 0, deleted_at = ? WHERE id = ?').bind(ts, cur.id),
   ]);
   return c.json({ ok: true, reasignado_a: to, ...uso });
+});
+
+// «Conectar con Claude» (conectar.ts): las conexiones hechas desde Claude de quien pregunta, y desconectarlas. Cada uno ve
+// y desconecta solo las suyas. Los tokens de integración (Cowork, scripts), que crea un administrador, no aparecen acá:
+// siguen en Configuración → Integraciones, así nadie corta una integración sin querer.
+api.get('/claude/conexiones', async (c) => {
+  const { results } = await c.env.DB.prepare(`SELECT id, name, client_id, created_at, last_used_at, expires_at, refresh_expira FROM api_tokens
+    WHERE user_id = ? AND source = 'mcp' AND client_id IS NOT NULL AND revoked = 0 AND refresh_expira > ? ORDER BY id DESC`)
+    .bind(c.get('ctx').user.id, new Date().toISOString()).all();
+  return c.json({ conexiones: results.map((r) => ({ ...r, tipo: 'oauth' })), mcp: `${new URL(c.req.url).origin}/mcp` });
+});
+api.delete('/claude/conexiones/:id', async (c) => {
+  await c.env.DB.prepare("UPDATE api_tokens SET revoked = 1 WHERE id = ? AND user_id = ? AND source = 'mcp' AND client_id IS NOT NULL").bind(Number(c.req.param('id')), c.get('ctx').user.id).run();
+  return c.json({ ok: true });
 });
 
 api.get('/tokens', async (c) => {

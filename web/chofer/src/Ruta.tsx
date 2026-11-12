@@ -11,11 +11,18 @@ import { hhmm, simular } from '../../src/ruta';
 const TIPO: Record<string, string> = { entrega: 'Entregar', retiro_proveedor: 'Retirar', retiro_impresor: 'Retirar', egreso: 'Dejar' };
 const MOTIVOS: Array<[string, string]> = [['nadie', 'No había nadie'], ['cerrado', 'Estaba cerrado'], ['direccion', 'No encontré la dirección'], ['rechazo', 'No lo quisieron recibir'], ['no_listo', 'No estaba listo'], ['otro', 'Otro motivo']];
 const num = new Intl.NumberFormat('es-AR');
+const CLAVE = 'chofer-ruta';
+const hoy = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' });
+function guardado(): RecorridoChofer[] {
+  try { const g = JSON.parse(localStorage.getItem(CLAVE) ?? 'null') as { dia: string; r: RecorridoChofer[] } | null; return g && g.dia === hoy() && Array.isArray(g.r) ? g.r : []; } catch { return []; }
+}
 
 export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar: () => void }) {
-  const [recorridos, setRecorridos] = useState<RecorridoChofer[]>([]);
+  // Lo último que se trajo queda en el celular: sin señal (o si el celular recarga la app al volver de la cámara) el
+  // recorrido de hoy se sigue viendo.
+  const [recorridos, setRecorridos] = useState<RecorridoChofer[]>(guardado);
   const [abierta, setAbierta] = useState<string | null>(null);
-  const traer = useCallback(() => pedirRuta().then(setRecorridos, () => undefined), []);
+  const traer = useCallback(() => pedirRuta().then((r) => { setRecorridos(r); try { localStorage.setItem(CLAVE, JSON.stringify({ dia: hoy(), r })); } catch { /* sin almacenamiento */ } }, () => undefined), []);
   useEffect(() => {
     if (!enLinea) return;
     void traer();
@@ -71,12 +78,13 @@ function Detalle({ p, tarde, hecha, enLinea, alCambiar, alEntregar }: { p: Parad
   const soloRetiros = p.movimientos.every((m) => m.tipo.startsWith('retiro'));
   async function marcar(resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, m?: string, n?: string) {
     setOcupado(true); setError('');
+    // Una entrega hecha: directo a la foto del remito firmado. La cámara se abre ya, en el mismo toque: si se espera a que
+    // conteste el servidor, el iPhone no la deja abrir.
+    if (resultado === 'hecho' && esEntrega) alEntregar();
     try {
       await marcarParada(p.clave, resultado, m, n);
       await alCambiar();
       setPaso('botones');
-      // Una entrega hecha: directo a la foto del remito firmado.
-      if (resultado === 'hecho' && esEntrega) alEntregar();
     } catch (e) { setError(e instanceof SinSenal ? 'Sin señal: probá de nuevo cuando vuelva.' : 'No se pudo guardar. Actualizá la pantalla y probá de nuevo.'); }
     setOcupado(false);
   }

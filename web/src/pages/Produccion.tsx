@@ -279,15 +279,15 @@ function EstadoCelda({ a, v, editable, onChange }: { a: Articulo; v: Vista; edit
   if (!editable) return <EstadoPec estado={a.estado} estados={v.estados} />;
   // Un estado que no está en la lista (la sacaron o se sumó en ClickUp después de leerla) se ve igual, no el primero.
   const conocido = v.estados.some((x) => x.status === a.estado);
-  const opciones = conocido ? lista : <>{lista}<option value={a.estado}><EstadoClickup estado={a.estado} color={null} plano /></option></>;
-  // El desplegable es uno más del CRM: el estado adentro con su ícono del color, sin pintar el fondo.
-  return <Select value={a.estado} onChange={(e) => onChange(e.target.value)} className="input sm st-select"
+  const opciones = conocido ? lista : <>{lista}<option value={a.estado}><EstadoClickup estado={a.estado} color={null} /></option></>;
+  // El desplegable también va pintado del color del estado, como en ClickUp.
+  return <Select value={a.estado} onChange={(e) => onChange(e.target.value)} className="input sm st-select" style={estiloEstado(v.estados.find((x) => x.status === a.estado)?.color)}
     aria-label={`Estado de ${a.nombre}`}>{opciones}</Select>;
 }
 const cacheEstados = new WeakMap<Estado[], ReactNode>();
 function useOpcionesEstado(estados: Estado[]) {
   if (!cacheEstados.has(estados)) {
-    cacheEstados.set(estados, estados.map((e) => <option key={e.status} value={e.status}><EstadoClickup estado={e.status} color={e.color} plano /></option>));
+    cacheEstados.set(estados, estados.map((e) => <option key={e.status} value={e.status}><EstadoClickup estado={e.status} color={e.color} /></option>));
   }
   return cacheEstados.get(estados);
 }
@@ -519,8 +519,8 @@ function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; edit
             onDragOver={(e) => { if (drag && drag.a.estado !== c.status) { e.preventDefault(); setOver(c.status); } }}
             onDragLeave={() => setOver(null)}
             onDrop={(e) => { e.preventDefault(); setOver(null); if (drag) editar(drag.pdv, drag.a.task_id, 'estado', c.status); setDrag(null); }}>
-            <div className="col-head etapa-col" style={estiloEstado(c.color)}>
-              <div className="t"><EstadoClickup estado={c.status} color={c.color} plano /><span className="n">{deCol.length}</span></div>
+            <div className="col-head st-col" style={estiloEstado(c.color)}>
+              <div className="t"><EstadoClickup estado={c.status} color={c.color} /><span className="n">{deCol.length}</span></div>
             </div>
             <div className="col-body">
               {deCol.map(({ p, a }) => {

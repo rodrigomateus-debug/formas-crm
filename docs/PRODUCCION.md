@@ -130,3 +130,14 @@ hay que actualizarlo ahí. Para leer, también se reconoce por el nombre.
 - **Calendario de producción** (segunda etapa, pedido de Rodrigo): qué hay que hacer hoy (retiros de proveedores e
   impresores, egresos, entregas), armado solo con estas fechas.
 - Si se suma Corporate: tildarlo en «Qué se edita acá».
+
+## Vistas, filtros por columna y fechas
+
+- **Pestañas de vistas** como en Pedidos (`web/src/vistas.tsx`): «Todos», «Míos» (lo asignado a mí en producción o mis
+  pedidos) y las guardadas. Guardan búsqueda, unidades, asignado, vendedor, cliente, filtros por columna, entregados y
+  lista o tablero.
+- **Filtros por columna** (`web/src/pages/ProduccionFiltros.tsx`): el embudo de cada encabezado de la lista o «+ Filtro»
+  (también en el tablero). Estado (varios), cantidad (desde/hasta), proveedor e impresor (varios, o «sin»; las opciones
+  repetidas de ClickUp juntas) y cada fecha (ya pasó, hoy, esta semana, próximos 7 días, con o sin fecha, o entre dos
+  fechas). Filtran **productos**: de cada PDV quedan los que cumplen y los PDV sin ninguno no se ven.
+- **Fechas**: el calendario del CRM (`web/src/Fecha.tsx`) en lugar del campo del navegador; elegir un día lo guarda.

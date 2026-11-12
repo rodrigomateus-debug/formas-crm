@@ -1,9 +1,15 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, recordUrl, formatValue, useDebounced } from '../lib';
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado } from '../components';
 import { Select } from '../Select';
 import { NombreProveedor } from '../proveedores';
+import { RecordPreview } from './RecordPage';
+
+// Un clic en un renglón o una tarjeta abre la vista previa del pedido, salvo que sea en algo que se usa ahí mismo (un
+// desplegable, una fecha, un link, los asignados…).
+const clicAdentro = (e: React.MouseEvent) =>
+  !!(e.target as HTMLElement).closest('a, button, input, select, textarea, label, [role="combobox"], [role="listbox"], [role="option"], .select-pop, .popover');
 
 // Producción (pedido de Rodrigo del 12/11/2026): la vista con la que trabajan Ceci y Sole en ClickUp («Estado PDV CECI»),
 // en el CRM. Cada PDV con sus artículos abajo; cada artículo con su estado, quién lo tiene, proveedor, impresor y las
@@ -71,6 +77,9 @@ export default function ProduccionPage() {
   const [colapsado, setColapsado] = useState(!!pref.colapsado);
   const [excepciones, setExcepciones] = useState<Set<string>>(new Set());
   const cambiarColapsado = (c: boolean) => { setColapsado(c); setExcepciones(new Set()); guardarPref({ colapsado: c }); };
+  // La vista previa del pedido (la misma de Pedidos: datos, productos, comentarios y actividad), al hacer clic en un PDV.
+  const [preview, setPreview] = useState<number | null>(null);
+  const abrir = useCallback((p: Pdv) => { if (p.record_id) setPreview(p.record_id); }, []);
 
   const cargar = async () => {
     setCargando(true);
@@ -162,10 +171,11 @@ export default function ProduccionPage() {
         <div className="empty plain">{v.pdvs.length ? 'Ningún PDV con esos filtros.' : 'No hay PDV en producción para estas unidades. Si recién se instaló, la primera lectura de ClickUp tarda unas corridas (cada 10 minutos).'}</div>
       )}
       {v && filtrados.length > 0 && (modo === 'lista'
-        ? <Lista pdvs={filtrados} v={v} editar={editar} abierto={(id) => colapsado === excepciones.has(id)}
+        ? <Lista pdvs={filtrados} v={v} editar={editar} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
             onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onTodos={(abrir) => cambiarColapsado(!abrir)} />
-        : <Tablero pdvs={filtrados} v={v} editar={editar} verCerrados={cerrados} />)}
+        : <Tablero pdvs={filtrados} v={v} editar={editar} verCerrados={cerrados} onAbrir={abrir} sel={preview} />)}
+      {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
     </div>
   );
 }
@@ -375,8 +385,8 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
 // La flecha de abrir y cerrar, como en ClickUp: para abajo si está abierto, para la derecha si está cerrado.
 const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
 
-function Lista({ pdvs, v, editar, abierto, onToggle, onTodos }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void;
+function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void; onAbrir: (p: Pdv) => void; sel: number | null;
 }) {
   const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
   const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
@@ -404,16 +414,19 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos }: {
           </tr>
         </thead>
         <tbody>
-          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={() => onToggle(p.task_id)} provs={provs} imps={imps} />)}
+          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
         </tbody>
       </table>
     </div>
   );
 }
 
-const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps }: {
-  p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: boolean; onToggle: () => void; provs: ReactNode; imps: ReactNode;
+const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps, onAbrir, elegido }: {
+  p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: boolean; onToggle: (id: string) => void; provs: ReactNode; imps: ReactNode;
+  onAbrir: (p: Pdv) => void; elegido: boolean;
 }) {
+  const clic = p.record_id ? (e: React.MouseEvent) => { if (!clicAdentro(e)) onAbrir(p); } : undefined;
+  const cls = `${p.record_id ? ' abre' : ''}${elegido ? ' sel' : ''}`;
   const { meta } = useMeta();
   const ed = v.puede_editar && p.editable;
   const etapa = p.etapa ? formatValue(meta, 'order', 'hs_pipeline_stage', p.etapa) : '';
@@ -421,10 +434,10 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
   const atrasado = (f: string | null) => !!f && f < hoyIso() && !listo;
   return (
     <>
-      <tr className="prod-pdv">
+      <tr className={`prod-pdv${cls}`} onClick={clic} title={p.record_id ? `Ver el pedido del PDV ${p.npdv}` : undefined}>
         <td className="prod-nombre">
           <div className="row" style={{ gap: 6, minWidth: 0 }}>
-            <button type="button" className="btn ghost xs" onClick={onToggle} aria-expanded={abierto} aria-label={`${abierto ? 'Cerrar' : 'Abrir'} PDV ${p.npdv}`}>
+            <button type="button" className="btn ghost xs" onClick={() => onToggle(p.task_id)} aria-expanded={abierto} aria-label={`${abierto ? 'Cerrar' : 'Abrir'} PDV ${p.npdv}`}>
               <Flecha abierto={abierto} /></button>
             <Icon name="order" size={15} />
             <div className="prod-pdv-t">
@@ -456,21 +469,22 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         <td>{p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir PDV ${p.npdv} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
       </tr>
       {abierto && p.articulos.map((a) => (
-        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} />
+        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} />
       ))}
       {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={12} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
 
-function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo }: {
+function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
   a: Articulo; p: Pdv; v: Vista; ed: boolean; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; provs: ReactNode; imps: ReactNode; listo: boolean;
+  clic?: (e: React.MouseEvent) => void; cls: string;
 }) {
   const set = (c: Campo) => (x: unknown) => editar(p, a.task_id, c, x);
   const artListo = ['listo para entergar', 'entregados'].includes(a.estado);
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
-    <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}`}>
+    <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
       <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={set('asignados')} label={a.nombre} /></td>
@@ -504,7 +518,9 @@ function FotoProducto({ url, nombre, grande }: { url?: string | null; nombre: st
 
 // ---------- Tablero: una columna por estado de ClickUp, una tarjeta por artículo ----------
 
-function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; verCerrados: boolean }) {
+function Tablero({ pdvs, v, editar, verCerrados, onAbrir, sel }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; verCerrados: boolean; onAbrir: (p: Pdv) => void; sel: number | null;
+}) {
   const [drag, setDrag] = useState<{ pdv: Pdv; a: Articulo } | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const items = pdvs.flatMap((p) => p.articulos.map((a) => ({ p, a })));
@@ -530,8 +546,9 @@ function Tablero({ pdvs, v, editar, verCerrados }: { pdvs: Pdv[]; v: Vista; edit
                 const prov = etiquetaOpcion(v, 'proveedor', a.proveedor);
                 const imp = etiquetaOpcion(v, 'impresor', a.impresor);
                 return (
-                  <div key={a.task_id} className={`card${drag?.a.task_id === a.task_id ? ' dragging' : ''}`} draggable={ed}
-                    style={{ cursor: ed ? 'grab' : 'default' }}
+                  <div key={a.task_id} className={`card${drag?.a.task_id === a.task_id ? ' dragging' : ''}${p.record_id ? ' abre' : ''}${p.record_id && p.record_id === sel ? ' sel' : ''}`} draggable={ed}
+                    onClick={(e) => { if (p.record_id && !clicAdentro(e)) onAbrir(p); }} title={p.record_id ? `Ver el pedido del PDV ${p.npdv}` : undefined}
+                    style={{ cursor: ed ? 'grab' : p.record_id ? 'pointer' : 'default' }}
                     onDragStart={(e) => { setDrag({ pdv: p, a }); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDrag(null)}>
                     <div className="row" style={{ gap: 8, minWidth: 0 }}><FotoProducto url={a.foto} nombre={a.nombre} grande /><div className="t ellipsis" title={a.nombre}>{a.nombre}</div></div>
                     <div className="small muted ellipsis">

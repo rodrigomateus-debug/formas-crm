@@ -701,12 +701,22 @@ const ICONOS_ESTADO: Record<string, string> = {
   'anulado': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.6 5.6l12.8 12.8',                                         // prohibido
 };
 const iconoEstado = (estado: string) => ICONOS_ESTADO[estado.toLowerCase().trim()] ?? ICONOS_ESTADO[estado.toLowerCase().trim().replace('listo para entregar', 'listo para entergar')];
+// El estado como se lee: con mayúscula al principio y con los acentos y erratas de los nombres de ClickUp corregidos
+// (solo a la vista: en ClickUp se sigue escribiendo el estado tal cual).
+const NOMBRE_ESTADO: Record<string, string> = {
+  'listo para entergar': 'listo para entregar', 'en revision': 'en revisión', 'articulo con logo': 'artículo con logo',
+  'ingreso proveedor/ stock': 'ingreso proveedor / stock', 'impresion aprobada': 'impresión aprobada',
+};
+export function nombreEstado(estado: string) {
+  const t = NOMBRE_ESTADO[estado.toLowerCase().trim()] ?? estado.toLowerCase().trim();
+  return t ? t[0].toUpperCase() + t.slice(1) : 'Sin estado';
+}
 export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
   const d = iconoEstado(estado ?? '');
   return (
     <span className={`st-pec${d ? ' con-icono' : ''}`} style={estiloEstado(color)}>
       {d && <svg className="st-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>}
-      {estado || 'sin estado'}
+      {nombreEstado(estado ?? '')}
     </span>
   );
 }

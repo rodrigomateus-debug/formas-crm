@@ -39,6 +39,12 @@ se edita desde ahí.
 - **Cada artículo con la foto de su producto**, a la izquierda del nombre: la misma que en los productos del pedido
   (cotización del STP, ficha de Finnegans o SKU, `fotosDeRenglones`). Va por el renglón del pedido atado a ese artículo
   y, si no quedó atado, por las palabras del nombre (`fotosDeArticulos` en `productos.ts`). Sin foto, el ícono.
+- **Un clic en un renglón o una tarjeta abre la vista previa del pedido**, la misma de Pedidos: datos, productos,
+  comentarios y actividad de ese PDV (pedido de Rodrigo del 12/11/2026). Los clics en lo que se edita ahí mismo
+  (estado, asignados, fechas, proveedor, impresor, links) no la abren. El PDV abierto queda marcado.
+- **Estados como pastilla suave**, del color de ClickUp con su ícono, del ancho del texto y con mayúscula solo al
+  principio, igual que la etapa del PDV. Las erratas de los nombres de ClickUp se corrigen solo a la vista
+  («listo para entergar» se ve «Listo para entregar»; `nombreEstado` en `components.tsx`).
 - **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero tiene una
   columna por estado y una tarjeta por artículo.
 - **Filtros:** unidad de negocio, asignado (yo, cada persona, sin asignar), búsqueda por PDV, cliente o producto, y

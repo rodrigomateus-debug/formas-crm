@@ -11,7 +11,7 @@ azul de Formas) y del otro el botón **Ingresar con Google**, que es la única f
   `soutex.com.ar`).
 - Y tiene que estar como usuario activo en **Configuración → Usuarios**, igual que con Access. Desactivar a alguien lo
   deja afuera en el próximo clic, aunque tenga la sesión abierta.
-- La sesión dura 30 días. «Salir» está en el menú de abajo a la izquierda (donde se elige el tema).
+- La sesión dura 30 días. **Cerrar sesión** está en el menú de tu usuario (tu foto, abajo a la izquierda), al final.
 - Los tokens (Claude, Darwin, chofer) siguen igual: no pasan por esta pantalla.
 
 ## Cómo está hecho

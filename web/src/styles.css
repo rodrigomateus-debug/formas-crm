@@ -843,6 +843,9 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
   background: var(--e); color: var(--e-ink); }
 /* El circulito de ClickUp: un aro del color de la letra. */
 .st-pec::before { content: ''; width: 9px; height: 9px; border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; flex: none; opacity: .9; }
+.st-pec.con-icono::before { display: none; }
+.st-ic { flex: none; }
+.input.st-select .st-ic { margin-right: 1px; }
 [data-theme="contrast"] .st-pec { box-shadow: 0 0 0 1px var(--ui-ink); }
 /* El desplegable del estado, lleno del color del estado. */
 .input.st-select { background: var(--e); color: var(--e-ink); border-color: transparent; font-weight: 700; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }

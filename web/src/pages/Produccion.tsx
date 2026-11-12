@@ -263,8 +263,11 @@ function EstadoPec({ estado, estados }: { estado: string; estados: Estado[] }) {
 }
 
 function EstadoCelda({ a, v, editable, onChange }: { a: Articulo; v: Vista; editable: boolean; onChange: (s: string) => void }) {
-  const opciones = useOpcionesEstado(v.estados);
+  const lista = useOpcionesEstado(v.estados);
   if (!editable) return <EstadoPec estado={a.estado} estados={v.estados} />;
+  // Un estado que no está en la lista (la sacaron o se sumó en ClickUp después de leerla) se ve igual, no el primero.
+  const conocido = v.estados.some((x) => x.status === a.estado);
+  const opciones = conocido ? lista : <>{lista}<option value={a.estado}><EstadoClickup estado={a.estado} color={null} /></option></>;
   // El desplegable también va pintado del color del estado, como en ClickUp.
   return <Select value={a.estado} onChange={(e) => onChange(e.target.value)} className="input sm st-select" style={estiloEstado(v.estados.find((x) => x.status === a.estado)?.color)}
     aria-label={`Estado de ${a.nombre}`}>{opciones}</Select>;

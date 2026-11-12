@@ -677,6 +677,33 @@ export const estiloEstado = (color: string | null | undefined) => {
   const e = color && /^#[0-9a-f]{3,8}$/i.test(color) ? color : '#87909e';
   return { ['--e' as string]: e, ['--e-ink' as string]: tintaSobre(e) } as CSSProperties;
 };
+// Un iconito para cada estado de la lista PEC (trazos de 24 × 24, del color de la letra), para reconocerlos de un
+// vistazo. Un estado nuevo de ClickUp que no está acá lleva el circulito de ClickUp.
+const ICONOS_ESTADO: Record<string, string> = {
+  'ingreso de pedido': 'M4 13h4.5l1.5 2.5h4l1.5-2.5H20M4 13l2.5-8h11L20 13v6H4zM12 4.5v6M9.5 8 12 10.5 14.5 8',   // bandeja que entra
+  pdv: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',                                                   // la orden
+  'en espera de confirmación': 'M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9',          // reloj de arena
+  'personales': 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 21a7 7 0 0 1 14 0',                                    // una persona
+  'boceto pendiente': 'M4 20l4-1L19 8a2.1 2.1 0 0 0-3-3L5 16zM14 7l3 3',                                     // lápiz
+  'pedido al proveedor': 'M21 3 3 10.5l7 2.5 2.5 7zM10 13 21 3',                                              // avión de papel
+  'ingreso proveedor/ stock': 'M3 7.5 12 3l9 4.5v9L12 21l-9-4.5zM3 7.5l9 4.5 9-4.5M12 12v9',                    // caja
+  'en control de depósito': 'M9 3.5h6v3H9zM7.5 5H5v16h14V5h-2.5M9 14l2 2 4-4.5',                             // planilla con tilde
+  'en el impresor': 'M6 9V3h12v6M6 18H4v-7h16v7h-2M7 14h10v7H7z',                                             // impresora
+  'impresión aprobada': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8 12.5l2.8 2.8L16.5 9',                         // tilde en círculo
+  'articulo con logo': 'M12 3l2.4 5.6L20 11l-5.6 2.4L12 19l-2.4-5.6L4 11l5.6-2.4zM19 3v4M17 5h4',              // brillo
+  'en revision': 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5M8.5 11l2 2 3.5-4',                         // lupa
+  'parcial entregado': 'M2.5 6.5h11v9h-11zM13.5 9.5h4l3 3v3h-7M6.5 18.5a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6zM17 18.5a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6z', // camión
+  'listo para entergar': 'M21 7.5 12 3 3 7.5v9l9 4.5 9-4.5zM8.5 12l2.5 2.5 4.5-5',                             // caja con tilde
+  'entregados': 'M2 12.5l4.5 4.5L17 6.5M11 16l1 1L22 6.5',                                                     // doble tilde
+  'anulado': 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM5.6 5.6l12.8 12.8',                                         // prohibido
+};
+const iconoEstado = (estado: string) => ICONOS_ESTADO[estado.toLowerCase().trim()] ?? ICONOS_ESTADO[estado.toLowerCase().trim().replace('listo para entregar', 'listo para entergar')];
 export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
-  return <span className="st-pec" style={estiloEstado(color)}>{estado || 'sin estado'}</span>;
+  const d = iconoEstado(estado ?? '');
+  return (
+    <span className={`st-pec${d ? ' con-icono' : ''}`} style={estiloEstado(color)}>
+      {d && <svg className="st-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>}
+      {estado || 'sin estado'}
+    </span>
+  );
 }

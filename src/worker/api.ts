@@ -14,6 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
+import { borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
@@ -38,12 +39,13 @@ api.use('*', async (c, next) => {
   await next();
 });
 
-// Perfil Ventas (alcance.ts): sin Producción, Entregas, importar ni exportar (los remitos de sus pedidos sí los ve y los
+// Perfil Ventas (alcance.ts): sin Producción, Entregas, Cronograma, importar ni exportar (los remitos de sus pedidos sí los ve y los
 // baja, para mandárselos al cliente; revisarlos, cargarlos y cerrar entregas es de Logística); y cualquier ruta de un registro
 // (/records/<tipo>/<id>/…: la ficha, su historial, actividad, conversación, archivos, bocetos, productos, datos para
 // facturar, cambios, clonar, combinar, restaurar) solo si el registro es de ella, no tiene propietario o está asociado a lo suyo.
 const SIN_VENTAS: Array<[RegExp, string]> = [
   [/\/produccion(\/|$)/, 'Producción'], [/\/(remitos|entrega|choferes)(\/|$)/, 'Entregas'], [/\/(import|export)\//, 'Importar y exportar listas'],
+  [/\/cronograma(\/|$)/, 'Cronograma'],
 ];
 const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order)\/(\d+)(?:\/|$)/;
 const REMITOS_VENTAS = [/\/records\/order\/\d+\/remitos$/, /\/remitos\/\d+\/archivo$/];
@@ -1154,6 +1156,32 @@ api.patch('/produccion/:task', async (c) => {
   const b = await c.req.json<{ campo?: string; valor?: unknown }>();
   return c.json({ pdv: await editarProduccion(c.env, c.get('ctx'), c.req.param('task'), String(b.campo ?? ''), b.valor) });
 });
+// ---------- Cronograma (cronograma.ts): entregas, ingresos, retiros y egresos por día, y la ruta de cada día ----------
+
+api.get('/cronograma', async (c) => {
+  const q = c.req.query();
+  return c.json(await vistaCronograma(c.env.DB, c.get('ctx').user, { desde: q.desde, hasta: q.hasta, rd: q.rd, rh: q.rh }));
+});
+api.post('/cronograma/mover', async (c) => c.json(await moverMovimiento(c.env, c.get('ctx'), await c.req.json())));
+api.post('/cronograma/hecho', async (c) => c.json(await marcarHecho(c.env, c.get('ctx'), await c.req.json())));
+api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), null, await c.req.json())));
+api.patch('/cronograma/notas/:id', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
+api.delete('/cronograma/notas/:id', async (c) => c.json(await borrarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.put('/cronograma/feriados', async (c) => c.json(await guardarFeriado(c.env.DB, c.get('ctx'), await c.req.json())));
+api.get('/cronograma/ruta', async (c) => c.json(await rutaDelDia(c.env, c.get('ctx').user, String(c.req.query('fecha') ?? ''))));
+api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
+api.put('/cronograma/punto', async (c) => c.json(await fijarPunto(c.env.DB, c.get('ctx'), await c.req.json())));
+api.put('/cronograma/direccion', async (c) => c.json(await guardarDireccion(c.env, c.get('ctx'), await c.req.json())));
+api.post('/cronograma/sugerencia', async (c) => {
+  const b = await c.req.json<{ record_id?: number; aceptar?: boolean }>();
+  return c.json(await resolverSugerencia(c.env, c.get('ctx'), Number(b.record_id), !!b.aceptar));
+});
+api.get('/cronograma/config', async (c) => c.json(await cronogramaConfig(c.env.DB)));
+api.put('/cronograma/config', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await guardarCronogramaConfig(c.env.DB, await c.req.json()));
+});
+
 api.get('/records/company/:id/produccion', async (c) => c.json(await produccionDeEmpresa(c.env.DB, Number(c.req.param('id')))));
 
 api.get('/integrations/pedidos', async (c) => {

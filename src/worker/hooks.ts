@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { marcarParada, rutaDelChofer } from './cronograma';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
@@ -324,6 +325,16 @@ async function pedidoNombre(db: D1Database, id: number | null) {
 hooks.get('/chofer/api/yo', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
   return c.json({ nombre: ctx.sourceDetail ?? 'Chofer' });
+});
+// El recorrido del día de este chofer (cronograma.ts): el que Logística armó con su nombre.
+hooks.get('/chofer/api/ruta', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  return c.json(await rutaDelChofer(c.env, ctx.user, ctx.sourceDetail ?? '', String(c.req.query('fecha') ?? '')));
+});
+// El chofer marca una parada: hecha, no se pudo (con el motivo) o la deja para más tarde.
+hooks.post('/chofer/api/ruta/parada', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  return c.json(await marcarParada(c.env, ctx, ctx.sourceDetail ?? '', await c.req.json()));
 });
 hooks.get('/chofer/api/remitos', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);

@@ -60,7 +60,7 @@ export const ESTADOS_PEC: Array<{ status: string; color: string; type: string }>
   { status: 'anulado', color: '#8d8d8d', type: 'done' },
   { status: 'entregados', color: '#008844', type: 'closed' },
 ];
-const CERRADOS = ['entregados', 'anulado', 'anulada', 'cancelado'];
+export const CERRADOS = ['entregados', 'anulado', 'anulada', 'cancelado'];
 const LISTOS = ['listo para entergar', 'listo para entregar', 'entregados'];
 
 // ---------- Lectura de las tareas de ClickUp ----------
@@ -80,7 +80,7 @@ const diaDe = (v: unknown) => {
   return new Date(n - 3 * 3600_000).toISOString().slice(0, 10);
 };
 // AAAA-MM-DD → ms para ClickUp: el mediodía de Buenos Aires, para que no cambie de día con el huso.
-const msDe = (dia: string) => { const [y, m, d] = dia.split('-').map(Number); return Date.UTC(y, m - 1, d, 15); };
+export const msDe = (dia: string) => { const [y, m, d] = dia.split('-').map(Number); return Date.UTC(y, m - 1, d, 15); };
 
 type CampoCu = NonNullable<CuTask['custom_fields']>[number];
 const campoDe = (t: CuTask, c: Campo): CampoCu | undefined => {
@@ -354,7 +354,7 @@ export async function leerEstados(env: Env, b: Budget) {
 
 // ---------- La vista de Producción ----------
 
-type FilaDb = Fila & { record_id: number | null };
+export type FilaDb = Fila & { record_id: number | null };
 export interface ArticuloVista {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
@@ -367,7 +367,7 @@ export interface PdvVista extends ArticuloVista {
   asignados_todos: number[]; articulos: ArticuloVista[];
 }
 
-const lista = (s: string | null | undefined) => { try { const v = JSON.parse(s ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+export const lista = (s: string | null | undefined) => { try { const v = JSON.parse(s ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const articulo = (f: FilaDb): ArticuloVista => ({
   task_id: f.task_id, nombre: f.nombre, estado: f.estado, cantidad: f.cantidad, cantidad_controlada: f.cantidad_controlada, cliente: f.cliente,
   proveedor: f.proveedor, impresor: f.impresor, entrega_real: f.entrega_real, ingreso_proveedor: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
@@ -458,15 +458,18 @@ async function escribir(env: Env, method: string, path: string, body?: unknown) 
   }
 }
 
-export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo: string, valor: unknown) {
+// `libre`: desde el cronograma (cronograma.ts), que ya controló quién puede y vale para todas las unidades: Logística
+// mueve fechas y marca lo hecho también en los PDV que producción sigue trabajando en ClickUp. `sinRefrescar`: quien
+// llama relee el PDV una sola vez al final.
+export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo: string, valor: unknown, opts: { libre?: boolean; sinRefrescar?: boolean } = {}) {
   const db = env.DB;
-  if (!puedeEditarProduccion(ctx.user)) throw new HttpError(403, 'Producción la editan las usuarias con perfil Producción y los administradores.');
+  if (!opts.libre && !puedeEditarProduccion(ctx.user)) throw new HttpError(403, 'Producción la editan las usuarias con perfil Producción y los administradores.');
   if (!(EDITABLES as readonly string[]).includes(campo)) throw new HttpError(400, `No se puede editar «${campo}» desde el CRM.`);
   const fila = await db.prepare('SELECT * FROM produccion WHERE task_id = ?').bind(taskId).first<FilaDb>();
   if (!fila) throw new HttpError(404, 'No está esa tarea de producción (puede que la hayan borrado en ClickUp).');
   const pdv = fila.es_pdv ? fila : await db.prepare('SELECT * FROM produccion WHERE task_id = ?').bind(fila.pdv_task).first<FilaDb>();
   const cfg = await produccionConfig(db);
-  if (!cfg.unidades.includes(pdv?.unidad ?? fila.unidad ?? '')) {
+  if (!opts.libre && !cfg.unidades.includes(pdv?.unidad ?? fila.unidad ?? '')) {
     throw new HttpError(409, `Los PDV de ${pdv?.unidad ?? fila.unidad ?? 'esta unidad'} todavía se trabajan en ClickUp. Desde el CRM se editan: ${cfg.unidades.join(', ') || 'ninguna unidad'}.`);
   }
   const c = campo as Editable;
@@ -519,13 +522,13 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   }
   // El estado (o la fecha real de entrega) del PDV cambia el pedido: se relee el PDV y se actualiza ya, sin esperar la
   // sincronización. Si falla, queda para la próxima corrida.
-  if (c === 'estado' || (c === 'entrega_real' && fila.es_pdv)) {
+  if (!opts.sinRefrescar && (c === 'estado' || (c === 'entrega_real' && fila.es_pdv))) {
     await refrescarPdv(env, ctx, fila.pdv_task).catch((e) => console.error('produccion: refrescar', fila.pdv_task, (e as Error).message));
   }
   return pdvVista(db, fila.pdv_task);
 }
 
-async function refrescarPdv(env: Env, ctx: Ctx, pdvTask: string) {
+export async function refrescarPdv(env: Env, ctx: Ctx, pdvTask: string) {
   const b = Budget.of(env);
   const t = await cu<CuTask>(env, `/task/${encodeURIComponent(pdvTask)}`, { include_subtasks: 'true' }, b);
   await guardarTareas(env.DB, [t, ...(t.subtasks ?? []).map((s) => ({ ...s, parent: s.parent ?? t.id }))]);

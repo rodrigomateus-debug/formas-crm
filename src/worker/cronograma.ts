@@ -1,0 +1,640 @@
+import Anthropic from '@anthropic-ai/sdk';
+import type { Ctx, Env, User } from './env';
+import { HttpError, now } from './env';
+import { Budget } from './budget';
+import { norm } from './clickup';
+import { CERRADOS, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
+import { finnegansPedidoVenta, finnegansToken } from './finnegans';
+import { updateRecord } from './records';
+import { MODELO } from './remitos';
+
+// Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
+// repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
+// fechas de cada artículo (tabla `produccion`, que llena la sincronización de ClickUp):
+//
+//   Entregas  ← ENTREGAS (FECHA REAL)          Retiros ← RETIROS (PROVEEDOR) y RETIRO (IMPRESOR)
+//   Ingresos  ← INGRESO (PROVEEDOR)            Egresos ← EGRESO (IMPRESOR)
+//
+// Mover un movimiento a otro día escribe la fecha en ClickUp; marcarlo como hecho cambia el estado del artículo en
+// ClickUp. Vale para todas las unidades, aunque producción todavía trabaje Corporate en ClickUp. Lo único propio son las
+// notas sueltas, los feriados, lo que se marcó como hecho y los recorridos de cada día (docs/CRONOGRAMA.md).
+
+export const TIPOS = {
+  entrega: { col: 'entrega_real', rol: null, nombre: 'Entrega' },
+  ingreso: { col: 'ingreso_proveedor', rol: 'proveedor', nombre: 'Ingreso' },
+  retiro_proveedor: { col: 'retiro_proveedor', rol: 'proveedor', nombre: 'Retiro' },
+  egreso: { col: 'egreso_impresor', rol: 'impresor', nombre: 'Egreso' },
+  retiro_impresor: { col: 'retiro_impresor', rol: 'impresor', nombre: 'Retiro' },
+} as const;
+export type Tipo = keyof typeof TIPOS;
+const esTipo = (t: unknown): t is Tipo => typeof t === 'string' && t in TIPOS;
+const esDia = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
+
+// A qué estado pasa el artículo en ClickUp cuando se marca hecho cada movimiento. Se puede cambiar en la configuración
+// del cronograma (settings `cronograma`).
+const ESTADO_AL_HACER: Record<Tipo, string> = {
+  ingreso: 'en control de depósito', retiro_proveedor: 'en control de depósito', egreso: 'en el impresor',
+  retiro_impresor: 'en revision', entrega: 'entregados',
+};
+// Con el artículo en estos estados, lo anterior a la entrega ya pasó: no se lo vuelve atrás.
+const AVANZADOS = ['listo para entergar', 'listo para entregar', 'parcial entregado', 'entregados'];
+
+export interface Base { id: string; nombre: string; direccion: string }
+export interface CronogramaConfig { bases: Base[]; estados: Record<Tipo, string> }
+const BASES: Base[] = [
+  { id: 'roca', nombre: 'Depósito Gral. Roca', direccion: 'General Roca 4250, Florida Oeste, Vicente López, Buenos Aires' },
+  { id: 'matienzo', nombre: 'Oficina Matienzo', direccion: 'Matienzo 1308, Florida Oeste, Vicente López, Buenos Aires' },
+];
+export async function cronogramaConfig(db: D1Database): Promise<CronogramaConfig> {
+  const r = await db.prepare("SELECT value FROM settings WHERE key = 'cronograma'").first<{ value: string }>();
+  let c: Partial<CronogramaConfig> = {};
+  try { c = r ? JSON.parse(r.value) : {}; } catch { /* rota: la de siempre */ }
+  const bases = Array.isArray(c.bases) && c.bases.length ? c.bases.filter((b) => b && b.id && b.direccion) : BASES;
+  return { bases: bases.length ? bases : BASES, estados: { ...ESTADO_AL_HACER, ...(c.estados ?? {}) } };
+}
+export async function guardarCronogramaConfig(db: D1Database, cfg: Partial<CronogramaConfig>) {
+  const actual = await cronogramaConfig(db);
+  const bases = Array.isArray(cfg.bases) ? cfg.bases.map((b, i) => ({ id: String(b.id || `base${i + 1}`), nombre: String(b.nombre ?? '').trim() || `Base ${i + 1}`, direccion: String(b.direccion ?? '').trim() })).filter((b) => b.direccion) : actual.bases;
+  const estados = { ...actual.estados };
+  for (const [k, v] of Object.entries(cfg.estados ?? {})) if (esTipo(k) && typeof v === 'string' && v.trim()) estados[k] = v.toLowerCase().trim();
+  const nuevo = { bases: bases.length ? bases : actual.bases, estados };
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('cronograma', ?)").bind(JSON.stringify(nuevo)).run();
+  return nuevo;
+}
+
+// Logística, Producción y los administradores editan; el resto mira.
+export const puedeEditarCronograma = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || u.profile === 'logistica' || u.profile === 'produccion');
+function exigir(ctx: Ctx) {
+  if (!puedeEditarCronograma(ctx.user)) throw new HttpError(403, 'El cronograma lo editan Logística, Producción y los administradores.');
+}
+
+// ---------- Los movimientos ----------
+
+export interface Movimiento {
+  id: string; tipo: Tipo; fecha: string; task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null;
+  record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
+  hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null;
+}
+type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null };
+interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
+
+const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+const diaSemana = (dia: string) => new Date(`${dia}T12:00:00Z`).getUTCDay();
+export const hoyBsAs = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+// El nombre del artículo sin la coletilla que le pone ClickUp («Necessaire - Proveedor»).
+const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stock)\s*$/i, '').trim();
+
+const SELECT_MOV = `SELECT a.*, p.npdv AS pdv_npdv, p.cliente AS pdv_cliente, p.unidad AS pdv_unidad, p.record_id AS pdv_record, p.entrega_real AS pdv_entrega,
+    json_extract(r.props, '$.tipo_de_pedido') AS evento
+  FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0
+  WHERE (a.es_pdv = 0 OR NOT EXISTS (SELECT 1 FROM produccion h WHERE h.pdv_task = a.task_id AND h.es_pdv = 0))
+    AND a.estado NOT IN ('anulado', 'anulada', 'cancelado') AND p.estado NOT IN ('anulado', 'anulada', 'cancelado')`;
+
+async function opciones(db: D1Database) {
+  const { results } = await db.prepare(`SELECT o.campo, o.option_id, o.nombre, o.company_id, r.name AS empresa
+    FROM produccion_opciones o LEFT JOIN records r ON r.id = o.company_id AND r.archived = 0`).all<Opcion>();
+  return new Map(results.map((o) => [`${o.campo}:${o.option_id}`, o]));
+}
+
+function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, { user_id: number | null }>, feriados: Map<string, string>, desde: string, hasta: string) {
+  const out: Movimiento[] = [];
+  for (const f of filas) {
+    const fechas: Record<Tipo, string | null> = {
+      entrega: f.entrega_real ?? f.pdv_entrega, ingreso: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
+      egreso: f.egreso_impresor, retiro_impresor: f.retiro_impresor,
+    };
+    const previos = [fechas.ingreso, fechas.retiro_proveedor, fechas.egreso, fechas.retiro_impresor].filter((x): x is string => !!x).sort();
+    for (const tipo of Object.keys(TIPOS) as Tipo[]) {
+      const fecha = fechas[tipo];
+      if (!fecha || fecha < desde || fecha > hasta) continue;
+      const rol = TIPOS[tipo].rol;
+      const op = rol ? ops.get(`${rol}:${f[rol] ?? ''}`) : undefined;
+      const marca = hechos.get(`${f.task_id}:${tipo}`);
+      const implicito = f.estado === 'entregados' || (tipo !== 'entrega' && AVANZADOS.includes(f.estado));
+      const avisos: string[] = [];
+      if (feriados.has(fecha)) avisos.push(`Cae en feriado (${feriados.get(fecha)})`);
+      else if ([0, 6].includes(diaSemana(fecha))) avisos.push('Cae en fin de semana');
+      if (tipo === 'entrega' && previos.length) {
+        const ultimo = previos[previos.length - 1];
+        if (ultimo > fecha) avisos.push('La entrega es anterior al último retiro');
+        else if (ultimo === fecha) avisos.push('Se retira y se entrega el mismo día');
+      }
+      if (tipo === 'retiro_impresor' && fechas.egreso && fechas.egreso > fecha) avisos.push('El retiro del impresor es anterior al egreso');
+      out.push({
+        id: `${f.task_id}:${tipo}`, tipo, fecha, task_id: f.task_id, pdv_task: f.pdv_task, npdv: f.pdv_npdv ?? f.npdv, cliente: f.cliente ?? f.pdv_cliente,
+        unidad: f.pdv_unidad ?? f.unidad, record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
+        estado: f.estado, lugar: rol ? op?.empresa ?? op?.nombre ?? null : null, company_id: op?.company_id ?? null,
+        hecho: !!marca || implicito, hecho_por: marca?.user_id ?? null, evento: String(f.evento ?? '').toUpperCase() === 'EVENTO', avisos, url: f.url,
+      });
+    }
+  }
+  return out;
+}
+
+async function movimientos(db: D1Database, desde: string, hasta: string) {
+  const filas = (await db.prepare(`${SELECT_MOV} AND (COALESCE(a.entrega_real, p.entrega_real) BETWEEN ?1 AND ?2 OR a.ingreso_proveedor BETWEEN ?1 AND ?2
+      OR a.retiro_proveedor BETWEEN ?1 AND ?2 OR a.egreso_impresor BETWEEN ?1 AND ?2 OR a.retiro_impresor BETWEEN ?1 AND ?2)`).bind(desde, hasta).all<FilaMov>()).results;
+  const [ops, hechos, feriados] = await Promise.all([
+    opciones(db),
+    db.prepare(`SELECT h.task_id, h.tipo, h.user_id FROM cronograma_hechos h JOIN produccion a ON a.task_id = h.task_id`).all<{ task_id: string; tipo: string; user_id: number | null }>(),
+    db.prepare('SELECT fecha, nombre FROM feriados WHERE fecha BETWEEN ? AND ?').bind(desde, hasta).all<{ fecha: string; nombre: string }>(),
+  ]);
+  const fer = new Map(feriados.results.map((x) => [x.fecha, x.nombre]));
+  return { movs: armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta), feriados: fer };
+}
+
+// La semana que se mira (`desde`–`hasta`) y, para la barra de semanas, cuánto hay y cuánto falta en cada día de un rango
+// más ancho (`rd`–`rh`).
+export async function vistaCronograma(db: D1Database, user: User, q: { desde: string; hasta: string; rd?: string; rh?: string }) {
+  if (!esDia(q.desde) || !esDia(q.hasta) || q.hasta < q.desde) throw new HttpError(400, 'Faltan las fechas (desde y hasta, AAAA-MM-DD).');
+  const rd = esDia(q.rd) && q.rd < q.desde ? q.rd : q.desde;
+  const rh = esDia(q.rh) && q.rh > q.hasta ? q.rh : q.hasta;
+  if (Date.parse(rh) - Date.parse(rd) > 200 * 86_400_000) throw new HttpError(400, 'El rango es demasiado largo.');
+  const { movs, feriados } = await movimientos(db, rd, rh);
+  const hoy = hoyBsAs();
+  const dias: Record<string, { total: number; pendientes: number; atrasados: number }> = {};
+  for (const m of movs) {
+    const d = (dias[m.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 });
+    d.total++;
+    if (!m.hecho) { d.pendientes++; if (m.fecha < hoy) d.atrasados++; }
+  }
+  const [notas, sinFecha] = await Promise.all([
+    db.prepare('SELECT id, fecha, texto, hecho, user_id FROM cronograma_notas WHERE fecha BETWEEN ? AND ? ORDER BY id').bind(rd, rh).all<{ id: number; fecha: string; texto: string; hecho: number; user_id: number | null }>(),
+    db.prepare(`${SELECT_MOV} AND a.estado IN ('listo para entergar', 'listo para entregar') AND COALESCE(a.entrega_real, p.entrega_real) IS NULL
+      ORDER BY p.npdv LIMIT 150`).all<FilaMov>(),
+  ]);
+  for (const n of notas.results) { const d = (dias[n.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 }); d.total++; if (!n.hecho) { d.pendientes++; if (n.fecha < hoy) d.atrasados++; } }
+  return {
+    hoy, desde: q.desde, hasta: q.hasta,
+    movimientos: movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta),
+    notas: notas.results.filter((n) => n.fecha >= q.desde && n.fecha <= q.hasta),
+    feriados: Object.fromEntries(feriados), dias,
+    sin_fecha: sinFecha.results.map((f) => ({
+      task_id: f.task_id, pdv_task: f.pdv_task, npdv: f.pdv_npdv ?? f.npdv, cliente: f.cliente ?? f.pdv_cliente, unidad: f.pdv_unidad ?? f.unidad,
+      record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
+    })),
+    puede_editar: puedeEditarCronograma(user),
+  };
+}
+
+// ---------- Mover y marcar: se escribe en ClickUp ----------
+
+const MAX_POR_VEZ = 25;
+async function filasDe(db: D1Database, ids: unknown) {
+  const l = [...new Set((Array.isArray(ids) ? ids : []).map(String))].slice(0, MAX_POR_VEZ + 1);
+  if (!l.length) throw new HttpError(400, 'Falta qué movimiento.');
+  if (l.length > MAX_POR_VEZ) throw new HttpError(400, `De a ${MAX_POR_VEZ} artículos por vez.`);
+  const { results } = await db.prepare('SELECT * FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(l)).all<FilaDb>();
+  if (!results.length) throw new HttpError(404, 'Esos artículos ya no están en producción (puede que los hayan borrado en ClickUp).');
+  return results;
+}
+async function refrescar(env: Env, ctx: Ctx, pdvs: Iterable<string>) {
+  for (const p of new Set(pdvs)) await refrescarPdv(env, ctx, p).catch((e) => console.error('cronograma: refrescar', p, (e as Error).message));
+}
+
+// Pasa un movimiento a otro día (o le saca la fecha, con `fecha` vacía): la fecha de cada artículo en ClickUp. En las
+// entregas, también la del PDV si era la misma (los artículos sin fecha propia usan la del PDV).
+export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; fecha?: unknown }) {
+  exigir(ctx);
+  if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
+  const fecha = b.fecha == null || b.fecha === '' ? null : b.fecha;
+  if (fecha !== null && !esDia(fecha)) throw new HttpError(400, 'La fecha tiene que ser AAAA-MM-DD.');
+  const filas = await filasDe(env.DB, b.ids);
+  const col = TIPOS[b.tipo].col;
+  let escritos = 0;
+  const pdvsTocados: string[] = [];
+  if (b.tipo === 'entrega') {
+    const pdvIds = [...new Set(filas.map((f) => f.pdv_task))];
+    const pdvs = (await env.DB.prepare('SELECT * FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(pdvIds)).all<FilaDb>()).results;
+    for (const p of pdvs) {
+      const suyos = filas.filter((f) => f.pdv_task === p.task_id && !f.es_pdv);
+      const antes = new Set(suyos.map((f) => f.entrega_real ?? p.entrega_real));
+      // La fecha del PDV se mueve si es la que se estaba mirando (o si el PDV es el que se movió).
+      if (filas.some((f) => f.task_id === p.task_id) || (p.entrega_real && antes.has(p.entrega_real)) || (!p.entrega_real && suyos.some((f) => !f.entrega_real))) {
+        if (p.entrega_real !== fecha) { await editarProduccion(env, ctx, p.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; pdvsTocados.push(p.task_id); }
+      }
+      for (const f of suyos) if (f.entrega_real && f.entrega_real !== fecha) { await editarProduccion(env, ctx, f.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; }
+    }
+  } else {
+    for (const f of filas) if ((f as unknown as Record<string, string | null>)[col] !== fecha) { await editarProduccion(env, ctx, f.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; }
+  }
+  await refrescar(env, ctx, pdvsTocados);
+  return { escritos };
+}
+
+// Marca (o desmarca) como hecho: queda quién y cuándo, y el artículo cambia de estado en ClickUp. Si el artículo ya está
+// más adelante, el estado no se toca. Al desmarcar vuelve al estado que tenía, si nadie lo cambió después.
+export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: boolean } = {}) {
+  if (!opts.chofer) exigir(ctx);
+  if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
+  const tipo = b.tipo, hecho = b.hecho !== false;
+  const db = env.DB;
+  const filas = await filasDe(db, b.ids);
+  const destino = (await cronogramaConfig(db)).estados[tipo];
+  const existe = (await estadosPec(db)).some((e) => e.status === destino);
+  const marcas = new Map((await db.prepare('SELECT task_id, estado_antes FROM cronograma_hechos WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))')
+    .bind(tipo, JSON.stringify(filas.map((f) => f.task_id))).all<{ task_id: string; estado_antes: string | null }>()).results.map((m) => [m.task_id, m]));
+  let cambiados = 0;
+  const pdvs: string[] = [];
+  for (const f of filas) {
+    if (hecho) {
+      if (marcas.has(f.task_id)) continue;
+      const cambia = existe && f.estado !== destino && !CERRADOS.includes(f.estado) && !(tipo !== 'entrega' && AVANZADOS.includes(f.estado));
+      if (cambia) { await editarProduccion(env, ctx, f.task_id, 'estado', destino, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
+      await db.prepare('INSERT OR REPLACE INTO cronograma_hechos (task_id, tipo, estado_antes, user_id, at) VALUES (?, ?, ?, ?, ?)')
+        .bind(f.task_id, tipo, cambia ? f.estado : null, ctx.user.id, now()).run();
+    } else {
+      const m = marcas.get(f.task_id);
+      if (m?.estado_antes && f.estado === destino) { await editarProduccion(env, ctx, f.task_id, 'estado', m.estado_antes, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
+      await db.prepare('DELETE FROM cronograma_hechos WHERE task_id = ? AND tipo = ?').bind(f.task_id, tipo).run();
+    }
+  }
+  await refrescar(env, ctx, pdvs);
+  return { cambiados, estado: existe ? destino : null };
+}
+
+// ---------- Notas y feriados ----------
+
+export async function guardarNota(db: D1Database, ctx: Ctx, id: number | null, b: { fecha?: unknown; texto?: unknown; hecho?: unknown }) {
+  exigir(ctx);
+  if (id == null) {
+    const texto = String(b.texto ?? '').trim();
+    if (!esDia(b.fecha) || !texto) throw new HttpError(400, 'La nota necesita el día y el texto.');
+    const r = await db.prepare('INSERT INTO cronograma_notas (fecha, texto, user_id) VALUES (?, ?, ?) RETURNING id').bind(b.fecha, texto.slice(0, 500), ctx.user.id).first<{ id: number }>();
+    return { id: r!.id };
+  }
+  const n = await db.prepare('SELECT id FROM cronograma_notas WHERE id = ?').bind(id).first();
+  if (!n) throw new HttpError(404, 'Esa nota ya no está.');
+  if (b.texto !== undefined) { const t = String(b.texto).trim(); if (!t) throw new HttpError(400, 'La nota no puede quedar vacía.'); await db.prepare('UPDATE cronograma_notas SET texto = ? WHERE id = ?').bind(t.slice(0, 500), id).run(); }
+  if (b.fecha !== undefined) { if (!esDia(b.fecha)) throw new HttpError(400, 'La fecha tiene que ser AAAA-MM-DD.'); await db.prepare('UPDATE cronograma_notas SET fecha = ? WHERE id = ?').bind(b.fecha, id).run(); }
+  if (b.hecho !== undefined) await db.prepare('UPDATE cronograma_notas SET hecho = ?, hecho_por = ?, hecho_at = ? WHERE id = ?').bind(b.hecho ? 1 : 0, b.hecho ? ctx.user.id : null, b.hecho ? now() : null, id).run();
+  return { id };
+}
+export async function borrarNota(db: D1Database, ctx: Ctx, id: number) {
+  exigir(ctx);
+  await db.prepare('DELETE FROM cronograma_notas WHERE id = ?').bind(id).run();
+  return { ok: true };
+}
+export async function guardarFeriado(db: D1Database, ctx: Ctx, b: { fecha?: unknown; nombre?: unknown }) {
+  exigir(ctx);
+  if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
+  const nombre = String(b.nombre ?? '').trim();
+  if (nombre) await db.prepare('INSERT OR REPLACE INTO feriados (fecha, nombre) VALUES (?, ?)').bind(b.fecha, nombre.slice(0, 80)).run();
+  else await db.prepare('DELETE FROM feriados WHERE fecha = ?').bind(b.fecha).run();
+  return { ok: true };
+}
+
+// ---------- Direcciones ----------
+
+// Para comparar y para buscar en el mapa: sin la unidad, el piso ni el departamento.
+export function limpiarDireccion(s: string) {
+  return s.replace(/\s+/g, ' ').replace(/[,;]?\s*\b(unidad|uf|piso|dto\.?|depto\.?|dpto\.?|departamento|of\.?|oficina|local|nave|galp[oó]n)\s*[:.]?\s*[\w°º-]+/gi, '').replace(/\s+,/g, ',').trim().replace(/[,;.\s]+$/, '');
+}
+export const claveDireccion = (s: string) => norm(limpiarDireccion(s)).replace(/[.,;]/g, ' ').replace(/\b(avenida|avda|av)\b/g, 'av').replace(/\b(general|gral)\b/g, 'gral')
+  .replace(/\b(argentina|provincia de|pcia de|pcia|prov)\b/g, ' ').replace(/\s+/g, ' ').trim();
+
+// «9 a 13», «09:00-13:30», «de 8 a 12 hs» → minutos desde las 0:00.
+export function horarioDe(s: unknown): [number, number] | null {
+  const m = String(s ?? '').match(/(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs?\.?)?\s*(?:a|-|–|hasta)\s*(?:las\s*)?(\d{1,2})(?:[:.](\d{2}))?/i);
+  if (!m) return null;
+  const d = Number(m[1]) * 60 + Number(m[2] ?? 0), h = Number(m[3]) * 60 + Number(m[4] ?? 0);
+  return d < h && h <= 24 * 60 ? [d, h] : null;
+}
+
+// La dirección de entrega del pedido de venta de Finnegans. El nombre exacto del campo no está documentado: se toma el
+// primero que hable de la entrega (o del domicilio), sea un texto o un objeto con calle, número y localidad.
+export function direccionDeFinnegans(p: unknown): string | null {
+  if (!p || typeof p !== 'object') return null;
+  const texto = (v: unknown): string | null => {
+    if (typeof v === 'string') return v.trim().length > 4 ? v.trim() : null;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const partes = Object.entries(v as Record<string, unknown>).filter(([k, x]) => typeof x === 'string' && x.trim() && /calle|direcc|domic|numero|altura|localidad|ciudad|partido|provincia|nombre|descrip/i.test(k)).map(([, x]) => String(x).trim());
+      return partes.length ? [...new Set(partes)].join(', ') : null;
+    }
+    return null;
+  };
+  const entradas = Object.entries(p as Record<string, unknown>);
+  for (const re of [/(direcc|domic|lugar).*entrega|entrega.*(direcc|domic|lugar)/i, /^(direccion|domicilio)(entrega)?$/i, /direcc|domic/i]) {
+    for (const [k, v] of entradas) { if (re.test(k) && !/factur|fiscal|legal|mail/i.test(k)) { const t = texto(v); if (t) return t; } }
+  }
+  return null;
+}
+
+async function direccionesFinnegans(env: Env, pedidos: Array<{ id: number; pedido: string | null }>, b: Budget) {
+  const db = env.DB;
+  const ya = new Map((await db.prepare('SELECT record_id, direccion FROM direcciones_finnegans WHERE record_id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(pedidos.map((p) => p.id))).all<{ record_id: number; direccion: string | null }>()).results.map((r) => [r.record_id, r.direccion]));
+  const faltan = pedidos.filter((p) => p.pedido && !ya.has(p.id)).slice(0, 6);
+  if (faltan.length && env.FINNEGANS_CLIENT_ID) {
+    try {
+      const token = await finnegansToken(env, b);
+      for (const p of faltan) {
+        if (!token || b.left() < 3) break;
+        const dir = direccionDeFinnegans(await finnegansPedidoVenta(env, token, p.pedido!, b));
+        await db.prepare('INSERT OR REPLACE INTO direcciones_finnegans (record_id, direccion, at) VALUES (?, ?, ?)').bind(p.id, dir, now()).run();
+        ya.set(p.id, dir);
+      }
+    } catch (e) { console.error('cronograma: Finnegans', (e as Error).message); }
+  }
+  return { direcciones: ya, pendientes: pedidos.filter((p) => p.pedido && !ya.has(p.id)).length };
+}
+
+// Dónde fueron las últimas entregas a cada cliente: la dirección de sus remitos leídos, la más reciente primero.
+async function ultimasEntregas(db: D1Database, clientes: string[]) {
+  const out = new Map<string, Array<{ direccion: string; fecha: string | null; record_id: number }>>();
+  if (!clientes.length) return out;
+  const { results } = await db.prepare(`SELECT p.cliente, rm.record_id, rm.fecha, json_extract(rm.lectura, '$.direccion_entrega') AS direccion
+    FROM remitos rm JOIN produccion p ON p.record_id = rm.record_id AND p.es_pdv = 1
+    WHERE rm.estado = 'ok' AND p.cliente IN (SELECT value FROM json_each(?)) AND json_extract(rm.lectura, '$.direccion_entrega') IS NOT NULL
+    ORDER BY COALESCE(rm.fecha, rm.created_at) DESC LIMIT 400`).bind(JSON.stringify(clientes)).all<{ cliente: string; record_id: number; fecha: string | null; direccion: string }>();
+  for (const r of results) {
+    if (String(r.direccion).trim().length < 5) continue;
+    const l = out.get(r.cliente) ?? [];
+    if (l.length < 5) { l.push({ direccion: String(r.direccion).trim(), fecha: r.fecha, record_id: r.record_id }); out.set(r.cliente, l); }
+  }
+  return out;
+}
+
+const ESQUEMA_DIR = {
+  type: 'object', additionalProperties: false, required: ['mismo_lugar', 'direccion_sugerida', 'motivo'],
+  properties: { mismo_lugar: { type: 'boolean' }, direccion_sugerida: { type: 'string' }, motivo: { type: 'string' } },
+};
+const INSTRUCCIONES_DIR = `Sos parte del CRM de Formas Publicitarias (Buenos Aires). Te paso la dirección de entrega que figura en un pedido y las direcciones de las últimas entregas reales al mismo cliente (de los remitos firmados).
+Decidí si la dirección del pedido es el mismo lugar que el de las últimas entregas. Es el mismo lugar aunque esté escrita distinto (abreviaturas, mayúsculas, con o sin localidad, piso u oficina, errores de tipeo). Es otro lugar si cambia la calle, la altura o la localidad.
+- mismo_lugar: true si coincide con el lugar habitual de las últimas entregas (o si no hay un lugar habitual claro: las últimas entregas fueron a lugares distintos entre sí).
+- direccion_sugerida: si mismo_lugar es false, la dirección de las últimas entregas, escrita completa y prolija; si es true, cadena vacía.
+- motivo: una frase corta en castellano rioplatense para Logística («Las últimas 3 entregas fueron a Av. Libertador 1234, Vicente López»).`;
+
+// Revisa la dirección del pedido contra las últimas entregas. Solo consulta a Claude si a simple vista no son iguales, y
+// una vez por combinación (direcciones_revisadas). Devuelve la sugerencia si son lugares distintos y nadie la resolvió.
+async function revisarDireccion(env: Env, recordId: number, actual: string, historial: string[], puedeConsultar: () => boolean) {
+  const db = env.DB;
+  const firma = [claveDireccion(actual), ...historial.map(claveDireccion)].join('|');
+  const ya = await db.prepare('SELECT firma, distinta, sugerida, motivo, resuelta FROM direcciones_revisadas WHERE record_id = ?').bind(recordId)
+    .first<{ firma: string; distinta: number; sugerida: string | null; motivo: string | null; resuelta: number }>();
+  if (ya && ya.firma === firma) return ya.distinta && !ya.resuelta ? { sugerida: ya.sugerida!, motivo: ya.motivo ?? '' } : null;
+  const guardar = (distinta: boolean, sugerida: string | null, motivo: string | null) => db.prepare(`INSERT OR REPLACE INTO direcciones_revisadas
+    (record_id, firma, distinta, sugerida, motivo, resuelta, at) VALUES (?, ?, ?, ?, ?, 0, ?)`).bind(recordId, firma, distinta ? 1 : 0, sugerida, motivo, now()).run();
+  const a = claveDireccion(actual);
+  if (historial.some((h) => { const k = claveDireccion(h); return k === a || k.startsWith(a) || a.startsWith(k); })) { await guardar(false, null, null); return null; }
+  if (!env.ANTHROPIC_API_KEY || !puedeConsultar()) return null;
+  try {
+    const res = await new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, maxRetries: 1, timeout: 25_000 }).beta.messages.create({
+      model: MODELO, max_tokens: 2000,
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: ESQUEMA_DIR } },
+      system: INSTRUCCIONES_DIR,
+      messages: [{ role: 'user', content: `Dirección del pedido: ${actual}\n\nÚltimas entregas al cliente (la más reciente primero):\n${historial.map((h, i) => `${i + 1}. ${h}`).join('\n')}` }],
+    });
+    const r = JSON.parse(res.content.map((x) => (x.type === 'text' ? x.text : '')).join('').trim()) as { mismo_lugar: boolean; direccion_sugerida: string; motivo: string };
+    const distinta = r.mismo_lugar === false && String(r.direccion_sugerida ?? '').trim().length > 4;
+    await guardar(distinta, distinta ? r.direccion_sugerida.trim() : null, distinta ? String(r.motivo ?? '').trim().slice(0, 300) : null);
+    return distinta ? { sugerida: r.direccion_sugerida.trim(), motivo: String(r.motivo ?? '').trim() } : null;
+  } catch (e) { console.error('cronograma: revisar dirección', recordId, (e as Error).message); return null; }
+}
+
+// Aceptar la sugerencia (queda como dirección de entrega del pedido) o descartarla.
+export async function resolverSugerencia(env: Env, ctx: Ctx, recordId: number, aceptar: boolean) {
+  exigir(ctx);
+  const s = await env.DB.prepare('SELECT sugerida FROM direcciones_revisadas WHERE record_id = ? AND distinta = 1').bind(recordId).first<{ sugerida: string | null }>();
+  if (!s) throw new HttpError(404, 'No hay una sugerencia para ese pedido.');
+  if (aceptar && s.sugerida) await updateRecord(env.DB, ctx, 'order', recordId, { direccion_entrega: s.sugerida }, { strict: false });
+  await env.DB.prepare('UPDATE direcciones_revisadas SET resuelta = 1 WHERE record_id = ?').bind(recordId).run();
+  return { ok: true };
+}
+
+// Corregir una dirección desde la ruta: la de entrega del pedido, o la de la empresa (proveedor o impresor).
+export async function guardarDireccion(env: Env, ctx: Ctx, b: { record_id?: unknown; company_id?: unknown; direccion?: unknown; horario?: unknown }) {
+  exigir(ctx);
+  const direccion = b.direccion === undefined ? undefined : String(b.direccion ?? '').trim();
+  if (b.record_id) {
+    if (direccion === undefined) throw new HttpError(400, 'Falta la dirección.');
+    await updateRecord(env.DB, ctx, 'order', Number(b.record_id), { direccion_entrega: direccion || null }, { strict: false });
+  } else if (b.company_id) {
+    const cambios: Record<string, unknown> = {};
+    if (direccion !== undefined) { cambios.address = direccion || null; cambios.city = null; }
+    if (b.horario !== undefined) {
+      const h = String(b.horario ?? '').trim();
+      if (h && !horarioDe(h)) throw new HttpError(400, 'El horario va como «9 a 13».');
+      cambios.horario_recepcion = h || null;
+    }
+    await updateRecord(env.DB, ctx, 'company', Number(b.company_id), cambios, { strict: false });
+  } else throw new HttpError(400, 'Falta de qué pedido o empresa es la dirección.');
+  return { ok: true };
+}
+
+// ---------- El mapa: dónde queda cada dirección ----------
+
+interface Geo { lat: number; lng: number; manual: boolean }
+const GEOCODER = (env: Env) => env.GEOCODER_URL ?? 'https://nominatim.openstreetmap.org/search';
+// El servicio pide a lo sumo una consulta por segundo: pocas por vez y la pantalla vuelve a pedir lo que falta.
+const GEO_POR_VEZ = 4;
+
+async function ubicar(env: Env, direcciones: string[]) {
+  const db = env.DB;
+  const claves = [...new Set(direcciones.map(claveDireccion).filter(Boolean))];
+  const out = new Map<string, Geo | null>();
+  if (!claves.length) return { geo: out, pendientes: 0 };
+  const { results } = await db.prepare('SELECT clave, lat, lng, ok, manual FROM geocodigos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(claves))
+    .all<{ clave: string; lat: number | null; lng: number | null; ok: number; manual: number }>();
+  for (const r of results) out.set(r.clave, r.ok && r.lat != null && r.lng != null ? { lat: r.lat, lng: r.lng, manual: !!r.manual } : null);
+  const faltan = claves.filter((k) => !out.has(k));
+  let hechas = 0;
+  for (const k of faltan) {
+    if (hechas >= GEO_POR_VEZ) break;
+    const original = direcciones.find((d) => claveDireccion(d) === k)!;
+    if (hechas) await new Promise((r) => setTimeout(r, 1100));
+    hechas++;
+    let punto: { lat: number; lng: number } | null = null;
+    try {
+      const url = new URL(GEOCODER(env));
+      const q = limpiarDireccion(original);
+      url.searchParams.set('q', /argentina/i.test(q) ? q : `${q}, Argentina`);
+      url.searchParams.set('format', 'jsonv2'); url.searchParams.set('limit', '1'); url.searchParams.set('countrycodes', 'ar');
+      url.searchParams.set('viewbox', '-59.4,-34.1,-57.7,-35.2');   // primero el área metropolitana, sin excluir el resto
+      const res = await fetch(url, { headers: { 'user-agent': 'formas-crm/1.0 (cronograma de entregas)', 'accept-language': 'es' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = (await res.json()) as Array<{ lat?: string; lon?: string }>;
+      if (j[0]?.lat && j[0]?.lon && Number.isFinite(Number(j[0].lat))) punto = { lat: Number(j[0].lat), lng: Number(j[0].lon) };
+    } catch (e) { console.error('cronograma: ubicar', (e as Error).message); continue; }   // falló el servicio: se intenta la próxima
+    await db.prepare('INSERT OR REPLACE INTO geocodigos (clave, direccion, lat, lng, ok, manual, at) VALUES (?, ?, ?, ?, ?, 0, ?)')
+      .bind(k, original, punto?.lat ?? null, punto?.lng ?? null, punto ? 1 : 0, now()).run();
+    out.set(k, punto ? { ...punto, manual: false } : null);
+  }
+  return { geo: out, pendientes: claves.filter((k) => !out.has(k)).length };
+}
+
+// Alguien corrió el punto en el mapa: queda ahí y no se vuelve a buscar.
+export async function fijarPunto(db: D1Database, ctx: Ctx, b: { direccion?: unknown; lat?: unknown; lng?: unknown }) {
+  exigir(ctx);
+  const direccion = String(b.direccion ?? '').trim(), lat = Number(b.lat), lng = Number(b.lng);
+  const clave = claveDireccion(direccion);
+  if (!clave || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw new HttpError(400, 'Falta la dirección o el punto.');
+  await db.prepare('INSERT OR REPLACE INTO geocodigos (clave, direccion, lat, lng, ok, manual, at) VALUES (?, ?, ?, ?, 1, 1, ?)').bind(clave, direccion, lat, lng, now()).run();
+  return { ok: true };
+}
+
+// ---------- La ruta del día ----------
+
+export interface Parada {
+  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | null;
+  lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
+  company_id: number | null; record_id: number | null; movimientos: Movimiento[];
+  sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
+  visita?: Visita | null;   // lo que marcó el chofer en la app
+}
+export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
+interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[] }
+
+export async function rutaDelDia(env: Env, user: User, fecha: string) {
+  if (!esDia(fecha)) throw new HttpError(400, 'Falta el día (AAAA-MM-DD).');
+  const db = env.DB;
+  const b = Budget.of(env);
+  const cfg = await cronogramaConfig(db);
+  const { movs } = await movimientos(db, fecha, fecha);
+  const llegan = movs.filter((m) => m.tipo === 'ingreso');
+  const viajes = movs.filter((m) => m.tipo !== 'ingreso');
+
+  // Las empresas (proveedores, impresores y clientes de los pedidos) con su dirección y su horario.
+  const pedidosIds = [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
+  const pedidos = pedidosIds.length ? (await db.prepare(`SELECT r.id, json_extract(r.props, '$.direccion_entrega') AS manual, json_extract(r.props, '$.pedido_finnegans') AS pedido,
+      (SELECT c.id FROM associations s JOIN records c ON c.id = CASE WHEN s.from_id = r.id THEN s.to_id ELSE s.from_id END AND c.object_type = 'company' AND c.archived = 0
+        WHERE s.from_id = r.id OR s.to_id = r.id ORDER BY s.is_primary DESC LIMIT 1) AS company_id
+    FROM records r WHERE r.id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(pedidosIds))
+    .all<{ id: number; manual: string | null; pedido: string | null; company_id: number | null }>()).results : [];
+  const pedidoDe = new Map(pedidos.map((p) => [p.id, p]));
+  const empresasIds = [...new Set([...viajes.map((m) => m.company_id), ...pedidos.map((p) => p.company_id)].filter((x): x is number => !!x))];
+  const empresas = new Map(empresasIds.length ? (await db.prepare(`SELECT id, name, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city,
+      json_extract(props, '$.horario_recepcion') AS horario FROM records WHERE id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(empresasIds))
+    .all<{ id: number; name: string; address: string | null; city: string | null; horario: string | null }>()).results.map((e) => [e.id, e]) : []);
+  const dirEmpresa = (id: number | null) => { const e = id ? empresas.get(id) : null; return e?.address ? [e.address, e.city].filter(Boolean).join(', ') : null; };
+
+  const fin = await direccionesFinnegans(env, pedidos.filter((p) => !p.manual), b);
+  const historial = await ultimasEntregas(db, [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.cliente).map((m) => m.cliente!))]);
+  let consultas = 0;
+  const puedeConsultar = () => consultas++ < 3;
+
+  const paradas = new Map<string, Parada>();
+  for (const m of viajes) {
+    let direccion: string | null = null, origen: Parada['origen'] = null, nombre = m.lugar ?? 'Sin proveedor', companyId = m.company_id, recordId: number | null = null;
+    let sugerencia: Parada['sugerencia'] = null;
+    if (m.tipo === 'entrega') {
+      const p = m.record_id ? pedidoDe.get(m.record_id) : undefined;
+      nombre = m.cliente ?? `PDV ${m.npdv ?? ''}`; companyId = p?.company_id ?? null; recordId = m.record_id;
+      const previas = (m.cliente ? historial.get(m.cliente) ?? [] : []).filter((h) => h.record_id !== m.record_id);
+      const deFinnegans = p ? fin.direcciones.get(p.id) ?? null : null;
+      if (p?.manual) { direccion = p.manual; origen = 'pedido'; }
+      else if (deFinnegans) {
+        direccion = deFinnegans; origen = 'finnegans';
+        if (previas.length && m.record_id) {
+          const s = await revisarDireccion(env, m.record_id, deFinnegans, previas.slice(0, 3).map((h) => h.direccion), puedeConsultar);
+          if (s) sugerencia = { record_id: m.record_id, ...s };
+        }
+      } else if (previas.length) { direccion = previas[0].direccion; origen = 'ultima_entrega'; }
+      else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
+    } else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
+    const clave = direccion ? `d:${claveDireccion(direccion)}` : m.tipo === 'entrega' ? `p:${m.pdv_task}` : companyId ? `e:${companyId}` : `o:${norm(nombre)}`;
+    const horarioTexto = companyId ? empresas.get(companyId)?.horario ?? null : null;
+    const par = paradas.get(clave) ?? { clave, nombre, direccion, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
+      company_id: companyId, record_id: recordId, movimientos: [], sugerencia: null };
+    par.movimientos.push(m);
+    if (sugerencia && !par.sugerencia) par.sugerencia = sugerencia;
+    if (!par.horario && horarioDe(horarioTexto)) { par.horario = horarioDe(horarioTexto); par.horario_texto = horarioTexto; }
+    paradas.set(clave, par);
+  }
+
+  const lista_ = [...paradas.values()];
+  const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)]);
+  for (const p of lista_) { const g = p.direccion ? geo.get(claveDireccion(p.direccion)) : null; if (g) { p.lat = g.lat; p.lng = g.lng; p.punto_manual = g.manual; } }
+
+  const visitas = new Map((await db.prepare('SELECT clave, resultado, motivo, nota, chofer, at FROM cronograma_visitas WHERE fecha = ?').bind(fecha)
+    .all<Visita & { clave: string }>()).results.map((x) => [x.clave, x]));
+  for (const p of lista_) { const x = visitas.get(p.clave); p.visita = x ? { resultado: x.resultado, motivo: x.motivo, nota: x.nota, chofer: x.chofer, at: x.at } : null; }
+
+  const guardadas = (await db.prepare('SELECT n, chofer, base, salida, orden FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
+    .all<{ n: number; chofer: string | null; base: string | null; salida: number; orden: string }>()).results;
+  const rutas: RutaGuardada[] = guardadas.length
+    ? guardadas.map((r) => ({ n: r.n, chofer: r.chofer, base: cfg.bases.some((x) => x.id === r.base) ? r.base! : cfg.bases[0].id, salida: r.salida, orden: lista(r.orden).map(String) }))
+    : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [] }];
+  const choferes = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
+  return {
+    fecha, paradas: lista_, llegan, rutas, guardada: guardadas.length > 0, choferes,
+    bases: cfg.bases.map((x) => { const g = geo.get(claveDireccion(x.direccion)); return { ...x, lat: g?.lat ?? null, lng: g?.lng ?? null }; }),
+    buscando: pendientes + fin.pendientes, puede_editar: puedeEditarCronograma(user),
+  };
+}
+
+export async function guardarRutas(db: D1Database, ctx: Ctx, b: { fecha?: unknown; rutas?: unknown }) {
+  exigir(ctx);
+  if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
+  const rutas = (Array.isArray(b.rutas) ? b.rutas : []).slice(0, 8) as Array<Partial<RutaGuardada>>;
+  if (!rutas.length) throw new HttpError(400, 'Falta el recorrido.');
+  const ts = now();
+  await db.batch([
+    db.prepare('DELETE FROM cronograma_rutas WHERE fecha = ?').bind(b.fecha),
+    ...rutas.map((r, i) => db.prepare('INSERT INTO cronograma_rutas (fecha, n, chofer, base, salida, orden, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(b.fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base) : null,
+        Math.min(1439, Math.max(0, Math.round(Number(r.salida) || 510))), JSON.stringify((Array.isArray(r.orden) ? r.orden : []).map(String)), ctx.user.id, ts)),
+  ]);
+  return { ok: true };
+}
+
+// El recorrido de un chofer para la app de los remitos (/hooks/chofer): las paradas en el orden que armó Logística, con
+// la dirección y lo que hay que retirar o entregar en cada una. Es el recorrido del día que tiene su nombre (el del link).
+export async function rutaDelChofer(env: Env, user: User, chofer: string, fecha: string) {
+  const dia = esDia(fecha) ? fecha : hoyBsAs();
+  const r = await rutaDelDia(env, user, dia);
+  const nombre = norm(chofer);
+  const suyas = r.guardada ? r.rutas.filter((x) => x.chofer && norm(x.chofer) === nombre) : [];
+  const porClave = new Map(r.paradas.map((p) => [p.clave, p]));
+  return {
+    fecha: dia,
+    recorridos: suyas.map((x) => {
+      const base = r.bases.find((b) => b.id === x.base) ?? r.bases[0];
+      return {
+        n: x.n, salida: x.salida, base: { nombre: base.nombre, direccion: base.direccion, lat: base.lat, lng: base.lng },
+        paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
+          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario,
+          visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
+          movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.cantidad, hecho: m.hecho })),
+        })),
+      };
+    }),
+  };
+}
+
+// Por qué no se pudo hacer una parada. Son los motivos que usan las apps de reparto (nadie para recibir, cerrado,
+// dirección incorrecta, rechazo), más «no estaba listo» para los retiros en proveedores e impresores.
+export const MOTIVOS: Record<string, string> = {
+  nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontré la dirección', rechazo: 'No lo quisieron recibir',
+  no_listo: 'No estaba listo', otro: 'Otro motivo',
+};
+
+// El chofer marca una parada de su recorrido: la hizo (los artículos cambian de estado en ClickUp, igual que cuando lo
+// marca Logística), no se pudo (con el motivo) o la deja para más tarde. `resultado` vacío borra lo marcado.
+export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { fecha?: unknown; clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }) {
+  const fecha = esDia(b.fecha) ? b.fecha : hoyBsAs();
+  const clave = String(b.clave ?? '');
+  const resultado = b.resultado == null || b.resultado === '' ? null : String(b.resultado);
+  if (resultado && !['hecho', 'no_se_pudo', 'salteada'].includes(resultado)) throw new HttpError(400, 'Resultado desconocido.');
+  const motivo = resultado === 'no_se_pudo' ? String(b.motivo ?? '') : null;
+  if (resultado === 'no_se_pudo' && !(motivo! in MOTIVOS)) throw new HttpError(400, 'Falta el motivo.');
+  const r = await rutaDelDia(env, ctx.user, fecha);
+  const nombre = norm(chofer);
+  const suya = r.guardada && r.rutas.some((x) => x.chofer && norm(x.chofer) === nombre && x.orden.includes(clave));
+  const parada = r.paradas.find((p) => p.clave === clave);
+  if (!suya || !parada) throw new HttpError(404, 'Esa parada no está en tu recorrido de hoy. Puede que Logística lo haya cambiado: actualizá la pantalla.');
+  const db = env.DB;
+  const antes = parada.visita?.resultado === 'hecho';
+  if (resultado) {
+    await db.prepare('INSERT OR REPLACE INTO cronograma_visitas (fecha, clave, resultado, motivo, nota, chofer, token_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(fecha, clave, resultado, motivo, String(b.nota ?? '').trim().slice(0, 300) || null, chofer, ctx.tokenId ?? null, now()).run();
+  } else await db.prepare('DELETE FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave).run();
+  // Hecho: cada movimiento de la parada queda hecho. Si antes estaba hecho y ahora no, se deshace.
+  const hecho = resultado === 'hecho';
+  if (hecho || antes) {
+    const porTipo = new Map<Tipo, string[]>();
+    for (const m of parada.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
+    for (const [tipo, ids] of porTipo) await marcarHecho(env, ctx, { ids: ids.slice(0, MAX_POR_VEZ), tipo, hecho }, { chofer: true });
+  }
+  return { ok: true, entrega: parada.movimientos.some((m) => m.tipo === 'entrega') };
+}

@@ -42,18 +42,18 @@ export default function Tasks() {
     ...(owner === 'all' ? [['responsable', 'Responsable'] as [string, string]] : []), ['unidad', 'Unidad']];
   return (
     <div className="content list-fixed">
-      <div className="page-head"><h1>Tareas</h1>
-        <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
-          <option value={String(meta.me.id)}>Mis tareas</option>
-          <option value="all">Todo el equipo</option>
-          {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
-        </Select>
-      </div>
+      <div className="page-head"><h1>Tareas {list.data && <span className="muted small num">{list.data.total.toLocaleString('es-AR')}</span>}</h1></div>
       <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div>
       <div className="toolbar">
-        <div className="search" style={{ width: 320 }}><Icon name="search" /><input className="input" placeholder="Buscar en título o detalle (ej. Prospectar)…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar en título o detalle (ej. Prospectar)…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" /></div>
+        <div className="bar-select">
+          <Select className={`input${owner !== String(meta.me.id) ? ' on' : ''}`} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Responsable">
+            <option value={String(meta.me.id)}>Mis tareas</option>
+            <option value="all">Todo el equipo</option>
+            {meta.users.filter((u) => u.active && u.id !== meta.me.id).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
+          </Select>
+        </div>
         <UnidadFilter value={unidades} onChange={setUnidades} />
-        <span className="muted small">{list.data ? `${list.data.total} tareas` : ''}</span>
       </div>
       <div className="table-wrap">
         <ColumnWidths scope="grid-tasks" order={['__check', ...cols.map(([k]) => k)]} widths={resize.widths} />

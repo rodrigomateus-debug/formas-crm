@@ -158,9 +158,18 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-ink); w
 .content { flex: 1; overflow: auto; padding: 24px var(--gutter) 40px; }
 .content.flush { padding: 0; }
 .content.record-wrap { overflow: hidden; }
-.page-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+/* ---------- Cabecera de módulo: la misma en todas las pantallas ----------
+   1. .page-head: título con su cuenta al lado; a la derecha, cómo se ve (.seg) y las acciones.
+   2. .tabs: las vistas.
+   3. .toolbar: buscar, los filtros, «Filtros» y, a la derecha (.bar-end), lo que es de la vista (columnas, colapsar…).
+      Los filtros activos van en un renglón propio abajo (.bar-chips).
+   Todos los controles miden lo mismo (32 px) y un filtro en uso se marca siempre igual (borde y fondo de acento). */
+.page-head, .toolbar { --control-h: 32px; --control-h-sm: 32px; }
+.page-head { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-bottom: 16px; flex-wrap: wrap; }
+.page-head:has(+ .tabs) { margin-bottom: 4px; }
 .page-head h1 { margin-right: auto; }
-.page-head h1 .muted, .page-head h1 .small { font-size: 13px; font-weight: 500; letter-spacing: 0; }
+.page-head h1 .muted, .page-head h1 .small { margin-left: 6px; font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.page-head .btn:not(.icon), .toolbar .btn:not(.icon):not(.xs) { padding: 0 10px; font-size: 13px; gap: 6px; }
 .btn.menu-btn { display: none; }
 
 /* ---------- Controles (ActionButton, TextField, SelectField) ---------- */
@@ -245,6 +254,8 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
   border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; display: inline-flex; gap: 8px; align-items: center; transition: color var(--dur) var(--ease), border-color var(--dur-slow) var(--ease-out); }
 .tab:hover { color: var(--ui-ink); }
 .tab.on { color: var(--ui-ink); border-bottom-color: var(--accent-ink); font-weight: 600; }
+.tab.add { color: var(--text-3); }
+.tab.add:hover { color: var(--accent-ink); }
 .tab .x { color: var(--text-3); font-size: 11px; font-weight: 500; }
 .tab .count { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: var(--r-pill); background: var(--ui-surface-sunken); color: var(--ui-ink-2); line-height: 1.2; }
 .tab.on .count { background: var(--accent-soft); color: var(--accent-ink); }
@@ -302,6 +313,26 @@ body:has(.save-bar) .toast { bottom: 88px; }
 
 /* ---------- Tabla (DataTable del DS): encabezado hundido en mayúsculas chicas, filas con borde fino ---------- */
 .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.toolbar .search { flex: 0 1 280px; min-width: 180px; }
+.toolbar .bar-select { flex: 0 1 auto; min-width: 170px; max-width: 260px; }
+.toolbar .bar-label { font-weight: 500; color: var(--ui-ink-2); white-space: nowrap; }
+.toolbar .input.select-like.on { border-color: var(--accent-ink); background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
+.toolbar .qf-clear { order: 1; }
+.toolbar .bar-end { order: 2; margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.toolbar .board-sum { order: 2; }
+.toolbar .bar-chips { order: 10; flex: 0 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.toolbar .bar-chips .btn { height: 26px; padding: 0 8px; font-size: 12px; }
+/* Varios botones de prender y apagar que son un solo filtro (las unidades de Producción): pegados. */
+.btn-group { display: inline-flex; flex-wrap: wrap; }
+.btn-group > .btn { position: relative; border-radius: 0; margin-left: -1px; }
+.btn-group > .btn:first-child { margin-left: 0; border-top-left-radius: var(--r-control); border-bottom-left-radius: var(--r-control); }
+.btn-group > .btn:last-child { border-top-right-radius: var(--r-control); border-bottom-right-radius: var(--r-control); }
+.btn-group > .btn.on, .btn-group > .btn:focus-visible { z-index: 1; }
+@media (max-width: 640px) {
+  .toolbar .search { flex-basis: 100%; }
+  .btn-group { gap: 6px; }
+  .btn-group > .btn, .btn-group > .btn:first-child, .btn-group > .btn:last-child { margin-left: 0; border-radius: var(--r-control); }
+}
 .table-wrap { overflow: auto; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); }
 table.grid { border-collapse: separate; border-spacing: 0; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
 table.grid th { position: sticky; top: 0; z-index: 1; background: var(--ui-surface-sunken); text-align: left; font-weight: 600; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
@@ -350,8 +381,9 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .col-foot { border-top: 1px solid var(--ui-line); padding: 8px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; font-variant-numeric: tabular-nums; }
 .col-body .more { align-self: center; }
 .qf { position: relative; }
-.qf-btn { gap: 6px; height: 32px; font-size: 13px; padding: 0 10px; }
+.qf-btn { gap: 6px; height: 32px; font-size: 13px; padding: 0 10px; font-weight: 500; }
 .qf-btn.on { border-color: var(--accent-ink); background: var(--accent-soft); color: var(--accent-ink); }
+.qf-btn.on:hover { background: var(--accent-soft); }
 .qf-btn .caret { font-size: 10px; color: var(--ui-ink-3); }
 .qf-pop { top: calc(100% + 4px); left: 0; min-width: 240px; }
 .qf-pop label.opt { font-size: 13px; }
@@ -579,7 +611,6 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
 .pipe-switch .caret { font-size: 13px; }
 .pipe-menu { min-width: 320px; }
 
-.toolbar .qf + .btn, .toolbar .btn.qf-clear { height: 32px; font-size: 13px; }
 
 /* Etiquetas de color (reglas en Configuración → Etiquetas): el color lo elige cada uno; el fondo y el borde salen de él. */
 .tag-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
@@ -973,10 +1004,12 @@ a.prod-foto:hover { border-color: var(--accent-ink); }
 .prod-art-t .ellipsis { min-width: 0; }
 
 /* ---------- Conversación del pedido (Conversacion.tsx): chat con @menciones y la actividad entremezclada ---------- */
-.seg { display: inline-flex; border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; flex: none; }
-.seg button { border: 0; background: none; padding: 4px 10px; font-size: 12px; font-weight: 500; color: var(--ui-ink-2); cursor: pointer; }
-.seg button + button { border-left: 1px solid var(--ui-line); }
-.seg button.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+/* Control segmentado: una opción entre pocas (Lista o Tablero, Todo o Mensajes). Mide lo mismo que los demás controles. */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--ui-line); border-radius: var(--r-control); background: var(--ui-surface-sunken); flex: none; }
+.seg button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 0; border-radius: 4px; background: none; font-size: 12px; font-weight: 500;
+  color: var(--ui-ink-2); cursor: pointer; white-space: nowrap; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.seg button:hover { color: var(--ui-ink); }
+.seg button.on { background: var(--ui-surface); color: var(--accent-ink); font-weight: 600; box-shadow: 0 0 0 1px var(--ui-line-strong), 0 1px 2px rgba(18, 20, 58, .08); }
 
 .conv { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--ui-surface); position: relative; }
 .conv-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--ui-line); flex: none; color: var(--ui-ink); }
@@ -1141,7 +1174,6 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .fcol-n { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .fcol-entre { gap: 6px; padding: 4px 6px 2px 30px; }
 .fcol-entre .fecha-btn { min-width: 72px; border-color: var(--ui-line); }
-.fcol-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 12px; }
 .fcol-chip { padding: 0 4px 0 10px; max-width: 420px; }
 .fcol-chip button:first-child { display: inline-flex; gap: 4px; min-width: 0; max-width: 360px; font: inherit; color: inherit; }
 

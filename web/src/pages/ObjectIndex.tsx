@@ -391,15 +391,15 @@ function IndexFor({ type }: { type: ObjectType }) {
       onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [], relacion: undefined }))} />
     </>
   );
-  const filterButton = <button className={`btn${mode === 'board' ? ' sm' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
-  const filterChips = (
-    <>
+  const filterButton = <button className={`btn qf-btn${nFilters ? ' on' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
+  const filterChips = cfg.groups.length > 0 && (
+    <div className="bar-chips" role="group" aria-label="Filtros activos">
       {cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
         <span key={`${gi}-${fi}`} className="chip on">{gi > 0 && fi === 0 ? 'o ' : ''}{describeFilter(meta, type, f)}
           <button aria-label="Quitar" onClick={() => setCfg((c) => ({ ...c, groups: c.groups.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg).filter((gg) => gg.length) }))}>×</button>
         </span>
       )))}
-    </>
+    </div>
   );
 
   const exportCsv = () => {
@@ -421,9 +421,9 @@ function IndexFor({ type }: { type: ObjectType }) {
           <h1>{OBJECTS[type].plural} <span className="muted small num">{list.data ? list.data.total.toLocaleString('es-AR') : ''}</span></h1>
         )}
         {(
-          <div className="row" role="group" aria-label="Vista">
-            <button className={`btn sm ${mode === 'table' ? 'primary' : ''}`} onClick={() => setMode('table')}><Icon name="table" size={14} />Tabla</button>
-            <button className={`btn sm ${mode === 'board' ? 'primary' : ''}`} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
+          <div className="seg" role="group" aria-label="Vista">
+            <button type="button" className={mode === 'table' ? 'on' : ''} aria-pressed={mode === 'table'} onClick={() => setMode('table')}><Icon name="table" size={14} />Tabla</button>
+            <button type="button" className={mode === 'board' ? 'on' : ''} aria-pressed={mode === 'board'} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
           </div>
         )}
         <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>
@@ -454,7 +454,7 @@ function IndexFor({ type }: { type: ObjectType }) {
             </div>
           );
         })}
-        <button className="tab" onClick={() => setShow('save')}>+ Agregar vista</button>
+        <button className="tab add" onClick={() => setShow('save')}>+ Agregar vista</button>
       </div>
 
       {/* Con cambios sin guardar aparece la barra abajo (como en HubSpot); al guardar o descartar, se va. */}
@@ -484,11 +484,11 @@ function IndexFor({ type }: { type: ObjectType }) {
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
           tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>
         <div className="toolbar">
-          <div className="search" style={{ width: 280 }}><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+          <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" aria-label="Buscar" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           {quickBar}
           {filterButton}
-          <button className="btn" onClick={() => setShow('columns')}><Icon name="columns" size={16} />Columnas</button>
           {filterChips}
+          <div className="bar-end"><button className="btn ghost" onClick={() => setShow('columns')}><Icon name="columns" size={15} />Columnas</button></div>
         </div>
 
         <div className={`table-wrap${list.fresh ? '' : ' cargando'}`} aria-busy={list.loading}>

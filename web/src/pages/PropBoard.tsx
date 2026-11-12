@@ -275,15 +275,15 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   return (
     <>
       <div className="toolbar">
-        <label className="row small" style={{ fontWeight: 600 }}>Agrupar por
-          <Select className="input" style={{ width: 240 }} value={prop} onChange={(e) => onProp(e.target.value)} aria-label="Agrupar por">
+        <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} aria-label="Buscar" /></div>
+        <label className="row small bar-label">Agrupar por
+          <Select className="input" style={{ width: 220 }} value={prop} onChange={(e) => onProp(e.target.value)} aria-label="Agrupar por">
             {groupable.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
           </Select>
         </label>
-        <div className="search" style={{ width: 220 }}><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
         <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />
-        <div className="row small" title="Datos que muestra cada tarjeta (se guarda en la vista)">
-          <span style={{ fontWeight: 600 }}>Tarjeta</span>
+        <div className="row small bar-label" title="Datos que muestra cada tarjeta (se guarda en la vista)">
+          <span>Tarjeta</span>
           <MultiPick small options={propsOf(meta, type).filter((p) => !['name', 'hs_order_name'].includes(p.name)).map((p) => ({ value: p.name, label: p.label }))}
             values={cardProps ?? []} onChange={(v) => onCardProps(v.slice(0, 5))} />
         </div>

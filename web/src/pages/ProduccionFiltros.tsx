@@ -202,7 +202,8 @@ export function FiltroEncabezado({ col, f, onChange, ctx }: { col: ColFiltro; f:
   );
 }
 
-// Los filtros activos como chips (un clic los edita, la ✕ los saca), «+ Filtro» para sumar uno y «Borrar filtros».
+// Va adentro de la barra de filtros: el botón «Filtros» para sumar uno y, en un renglón propio abajo, los activos como
+// chips (un clic los edita, la ✕ los saca) con «Borrar filtros».
 export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: Ctx; extra?: ReactNode }) {
   const [abierto, setAbierto] = useState<ColFiltro | null>(null);
   const [menu, setMenu] = useState(false);
@@ -219,18 +220,23 @@ export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onC
   }, [menu]);
   const activos = COLUMNAS.filter((c) => activo(f, c));
   return (
-    <div className="fcol-chips" role="group" aria-label="Filtros por columna">
-      {activos.map((c) => (
-        <span key={c} className="chip on fcol-chip" ref={(el) => { anclas.current.set(c, el); }}>
-          <button type="button" onClick={() => setAbierto(c)} title="Cambiar el filtro"><b>{NOMBRE_COL[c]}:</b> <span className="ellipsis">{resumen(f, c, ctx)}</span></button>
-          <button type="button" onClick={() => onChange({ ...f, [c]: undefined })} aria-label={`Quitar el filtro de ${NOMBRE_COL[c]}`}><Icon name="x" size={12} /></button>
-        </span>
-      ))}
-      <button ref={(el) => { mas.current = el; anclas.current.set('+', el); }} type="button" className="btn sm ghost" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}>
-        <Icon name="filter" size={14} />+ Filtro
+    <>
+      <button ref={(el) => { mas.current = el; anclas.current.set('+', el); }} type="button" className={`btn qf-btn${activos.length ? ' on' : ''}`} onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}
+        title="Filtrar los productos por estado, cantidad, fechas, proveedor o impresor">
+        <Icon name="filter" size={15} />Filtros{activos.length ? ` (${activos.length})` : ''}
       </button>
-      {activos.length > 0 && <button type="button" className="btn sm ghost" onClick={() => onChange({})}>Borrar filtros</button>}
       {extra}
+      {activos.length > 0 && (
+        <div className="bar-chips" role="group" aria-label="Filtros por columna">
+          {activos.map((c) => (
+            <span key={c} className="chip on fcol-chip" ref={(el) => { anclas.current.set(c, el); }}>
+              <button type="button" onClick={() => setAbierto(c)} title="Cambiar el filtro"><b>{NOMBRE_COL[c]}:</b> <span className="ellipsis">{resumen(f, c, ctx)}</span></button>
+              <button type="button" onClick={() => onChange({ ...f, [c]: undefined })} aria-label={`Quitar el filtro de ${NOMBRE_COL[c]}`}><Icon name="x" size={12} /></button>
+            </span>
+          ))}
+          <button type="button" className="btn ghost" onClick={() => onChange({})}>Borrar filtros</button>
+        </div>
+      )}
       {menu && createPortal(
         <div ref={menuPop} className="popover" role="menu" style={{ ...style, minWidth: 200 }}>
           <div className="grp">Filtrar productos por</div>
@@ -240,6 +246,6 @@ export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onC
         document.body,
       )}
       {abierto && <Pop ancla={ancla} col={abierto} f={f} onChange={onChange} ctx={ctx} onClose={() => setAbierto(null)} />}
-    </div>
+    </>
   );
 }

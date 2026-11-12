@@ -227,58 +227,61 @@ export default function ProduccionPage() {
     <div className="content prod-page">
       <div className="page-head">
         <h1>Producción {v && <span className="muted small">{filtrados.length} PDV · {articulos} artículos</span>}</h1>
-        <div className="row" role="group" aria-label="Vista">
-          <button type="button" className={`btn sm${modo === 'lista' ? ' primary' : ''}`} aria-pressed={modo === 'lista'} onClick={() => cambiarModo('lista')}><Icon name="table" size={14} />Lista</button>
-          <button type="button" className={`btn sm${modo === 'tablero' ? ' primary' : ''}`} aria-pressed={modo === 'tablero'} onClick={() => cambiarModo('tablero')}><Icon name="board" size={14} />Tablero</button>
+        <div className="seg" role="group" aria-label="Vista">
+          <button type="button" className={modo === 'lista' ? 'on' : ''} aria-pressed={modo === 'lista'} onClick={() => cambiarModo('lista')}><Icon name="table" size={14} />Lista</button>
+          <button type="button" className={modo === 'tablero' ? 'on' : ''} aria-pressed={modo === 'tablero'} onClick={() => cambiarModo('tablero')}><Icon name="board" size={14} />Tablero</button>
         </div>
       </div>
       <PestanasVistas tipo="produccion" vistas={vistas.data} pestanas={pestanas} guardarOrden={guardarOrden} activa={activa} onElegir={elegir}
         recargar={vistas.reload} actual={actual} igual={(a, b) => normConfig(a) === normConfig({ ...b, unidades: b.unidades?.length ? b.unidades : base ?? [] })}
         filtrosCambiados={filtrosCambiados} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, los filtros por columna, si se ven los entregados y si se ve en lista o tablero." />
+      {/* La barra de filtros, igual en todos los módulos: buscar, filtros, «Filtros» y, a la derecha, lo que es de la vista. */}
       <div className="toolbar">
-        <div className="search" style={{ minWidth: 220, flex: '0 1 280px' }}><Icon name="search" />
+        <div className="search"><Icon name="search" />
           <input className="input" placeholder="Buscar PDV, cliente o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
         </div>
-        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Unidades de negocio">
+        <div className="btn-group" role="group" aria-label="Unidades de negocio">
           {UNIDADES.map((u) => {
             const on = (unidades ?? []).includes(u.value);
-            return <button key={u.value} type="button" className={`chip${on ? ' on' : ''}`} aria-pressed={on}
+            return <button key={u.value} type="button" className={`btn qf-btn${on ? ' on' : ''}`} aria-pressed={on}
               onClick={() => cambiarUnidades(on ? (unidades ?? []).filter((x) => x !== u.value) : [...(unidades ?? []), u.value])}>{u.label}</button>;
           })}
         </div>
-        <div style={{ minWidth: 190 }}>
-          <Select value={persona} onChange={(e) => cambiarPersona(e.target.value)} aria-label="Asignado a" className="input sm">
+        <div className="bar-select">
+          <Select value={persona} onChange={(e) => cambiarPersona(e.target.value)} aria-label="Asignado a" className={`input${persona ? ' on' : ''}`}>
             <option value="">Asignado: todos</option>
             <option value="yo">{yo ? personaOpcion(yo, ' (yo)') : 'Míos (mis pedidos)'}</option>
             {personas.filter((p) => p !== yo).map((p) => <option key={p.clickup_id} value={String(p.clickup_id)}>{personaOpcion(p)}</option>)}
             <option value="nadie">Sin asignar</option>
           </Select>
         </div>
-        <div style={{ minWidth: 190 }}>
-          <Select value={vendedor} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className="input sm">
+        <div className="bar-select">
+          <Select value={vendedor} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className={`input${vendedor ? ' on' : ''}`}>
             <option value="">Vendedor: todos</option>
             {vendedor && !vendedores.some((x) => x.clave === vendedor) && <option value={vendedor}>{vendedor.replace(/^n:|^u/, '')}</option>}
             {vendedores.map((x) => <option key={x.clave} value={x.clave}><Vendedor p={x.p} /></option>)}
           </Select>
         </div>
-        <div style={{ minWidth: 190, maxWidth: 260 }}>
-          <Select value={cliente} onChange={(e) => setCliente(e.target.value)} aria-label="Cliente" className="input sm">
+        <div className="bar-select">
+          <Select value={cliente} onChange={(e) => setCliente(e.target.value)} aria-label="Cliente" className={`input${cliente ? ' on' : ''}`}>
             <option value="">Cliente: todos</option>
             {cliente && !clientes.includes(cliente) && <option value={cliente}>{cliente}</option>}
             {clientes.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
         </div>
-        <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={cerrados} onChange={(e) => setCerrados(e.target.checked)} />Ver entregados (30 días)</label>
-        {modo === 'lista' && (
-          <button type="button" className="btn sm" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
-            title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
-            <Flecha abierto={!colapsado} />{colapsado ? 'Expandir todo' : 'Colapsar todo'}
-          </button>
-        )}
-        <span className="grow" />
-        {meta.me.role === 'admin' && v && <ConfigUnidades config={v.config} onGuardado={cargar} />}
+        <button type="button" className={`btn qf-btn${cerrados ? ' on' : ''}`} aria-pressed={cerrados} onClick={() => setCerrados(!cerrados)}
+          title="Suma los PDV entregados o anulados en los últimos 30 días">Ver entregados (30 días)</button>
+        {v && <FiltrosActivos f={columnas} onChange={setColumnas} ctx={ctxFiltros} />}
+        <div className="bar-end">
+          {modo === 'lista' && (
+            <button type="button" className="btn ghost" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
+              title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
+              <Flecha abierto={!colapsado} />{colapsado ? 'Expandir todo' : 'Colapsar todo'}
+            </button>
+          )}
+          {meta.me.role === 'admin' && v && <ConfigUnidades config={v.config} onGuardado={cargar} />}
+        </div>
       </div>
-      {v && <FiltrosActivos f={columnas} onChange={setColumnas} ctx={ctxFiltros} />}
       {v && <AvisoUnidades v={v} unidades={unidades ?? []} />}
       {soloLectura && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves la producción para saber cómo vienen los pedidos. La editan las usuarias con perfil Producción.</div>}
       {error && <div className="aviso warn small" style={{ marginBottom: 12 }}>{error}</div>}
@@ -326,7 +329,7 @@ function ConfigUnidades({ config, onGuardado }: { config: { unidades: string[] }
   };
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" className="btn sm ghost" onClick={() => setOpen(!open)} aria-expanded={open}><Icon name="settings" size={15} />Qué se edita acá</button>
+      <button type="button" className="btn ghost" onClick={() => setOpen(!open)} aria-expanded={open}><Icon name="settings" size={15} />Qué se edita acá</button>
       {open && (
         <div className="popover" style={{ right: 0, top: 36, minWidth: 260 }}>
           <div className="grp">Se trabaja desde el CRM</div>

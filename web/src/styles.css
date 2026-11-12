@@ -833,6 +833,8 @@ table.prod-grid tr.abre { cursor: pointer; }
 table.prod-grid tr.prod-pdv.sel td, table.prod-grid tr.prod-art.sel td { background: var(--row-sel); }
 table.prod-grid tr.prod-pdv.sel td:first-child { box-shadow: inset 3px 0 0 var(--accent-ink); }
 .prod-pdv-t { min-width: 0; line-height: 1.3; }
+.prod-vende { color: var(--ui-ink-2); white-space: nowrap; }
+.prod-vende .avatar { margin-right: 5px; vertical-align: middle; }
 .prod-art-t { display: flex; align-items: center; gap: 6px; padding-left: 54px; color: var(--ui-ink); }
 /* Los artículos van corridos a la derecha, como las subtareas en ClickUp, con una línea que baja desde el PDV y un
    trazo hasta cada artículo: así se ve de qué PDV es cada uno. */
@@ -895,7 +897,8 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 .asignados-btn:hover, .asignados-btn:focus-visible { border-color: var(--ui-line-strong); background: var(--ui-surface); }
 /* Tablero de producción: una tarjeta por PDV, con sus artículos como hijos (con la línea del árbol, como en la lista). */
 .prod-board .col { flex-basis: 300px; }
-.prod-board .card { cursor: default; padding: 0; gap: 0; contain-intrinsic-size: auto 260px; }
+/* Sin content-visibility (el de .col-body .card): encierra las listas desplegables de adentro y quedaban fuera de la pantalla. */
+.prod-board .col-body .card { cursor: default; padding: 0; gap: 0; content-visibility: visible; contain: none; }
 .prod-board .card.abre { cursor: pointer; }
 .prod-pdv-card-head { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 9px; }
 .prod-npdv { font-weight: 700; font-size: 13px; color: var(--accent-ink); }

@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf, userOf } from '../lib';
 import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '../vistas';
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug } from '../components';
 import { Select } from '../Select';
@@ -40,10 +40,21 @@ const UNIDADES = [
 ];
 const CERRADOS = ['entregados', 'anulado'];
 
-// Lo que guarda una vista de Producción (pestañas, como en Pedidos): búsqueda, unidades, a quién está asignado, si se ven
-// los entregados y lista o tablero.
-interface ConfigProd { q: string; unidades: string[]; persona: string; cerrados: boolean; modo: 'lista' | 'tablero' }
-const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', !!c.cerrados, c.modo ?? 'lista']);
+// Lo que guarda una vista de Producción (pestañas, como en Pedidos): búsqueda, unidades, a quién está asignado, vendedor,
+// cliente, si se ven los entregados y lista o tablero.
+interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?: string; cliente?: string; cerrados: boolean; modo: 'lista' | 'tablero' }
+const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista']);
+
+// Quién vende el PDV (pedido de Rodrigo del 12/11/2026, con su foto y como filtro): el propietario del pedido en el CRM
+// y, si el PDV no tiene pedido, el VENDEDOR de ClickUp.
+const claveVendedor = (p: { owner_id: number | null; vendedor: string | null }) => (p.owner_id ? `u${p.owner_id}` : p.vendedor ? `n:${p.vendedor}` : '');
+function Vendedor({ p }: { p: { owner_id: number | null; vendedor: string | null } }) {
+  const { meta } = useMeta();
+  const u = p.owner_id ? userOf(meta, p.owner_id) : null;
+  const nombre = u?.name ?? p.vendedor;
+  if (!nombre) return null;
+  return <span className="prod-vende" title={`Vende ${nombre}`}>{u ? <UserAvatar id={u.id} size="xs" /> : <Avatar name={nombre} size="xs" />}{nombre}</span>;
+}
 
 // Preferencias de cada uno en este navegador (lista o tablero, colapsado). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
@@ -79,6 +90,8 @@ export default function ProduccionPage() {
   const [unidades, setUnidades] = useState<string[] | null>(null);
   const [base, setBase] = useState<string[] | null>(null);
   const [persona, setPersona] = useState(activa === 'mine' ? 'yo' : '');
+  const [vendedor, setVendedor] = useState('');
+  const [cliente, setCliente] = useState('');
   const [cerrados, setCerrados] = useState(false);
   const [buscar, setBuscar] = useState('');
   const q = useDebounced(buscar, 150);
@@ -129,10 +142,22 @@ export default function ProduccionPage() {
       // «Míos»: lo que tengo asignado en producción o los pedidos que son míos (para quien vende).
       if (persona === 'yo' && !((yo && p.asignados_todos.includes(yo.clickup_id)) || p.owner_id === meta.me.id)) return false;
       if (persona && persona !== 'nadie' && persona !== 'yo' && !p.asignados_todos.includes(Number(persona))) return false;
+      if (vendedor && claveVendedor(p) !== vendedor) return false;
+      if (cliente && (p.cliente ?? '') !== cliente) return false;
       if (!t) return true;
       return [p.npdv, p.cliente, p.vendedor, p.pedido, ...p.articulos.map((a) => a.nombre)].some((x) => String(x ?? '').toLowerCase().includes(t));
     });
-  }, [v, q, persona, yo?.clickup_id, meta.me.id]);
+  }, [v, q, persona, vendedor, cliente, yo?.clickup_id, meta.me.id]);
+  // Las opciones de vendedor y cliente: las que hay en los PDV que se ven (con las unidades y «entregados» elegidos).
+  const vendedores = useMemo(() => {
+    const m = new Map<string, { clave: string; nombre: string; p: Pdv }>();
+    for (const p of v?.pdvs ?? []) {
+      const k = claveVendedor(p);
+      if (k && !m.has(k)) m.set(k, { clave: k, nombre: (p.owner_id ? userOf(meta, p.owner_id)?.name : null) ?? p.vendedor ?? '', p });
+    }
+    return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+  }, [v, meta]);
+  const clientes = useMemo(() => [...new Set((v?.pdvs ?? []).map((p) => p.cliente).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b, 'es')), [v]);
 
   const cambiarUnidades = (u: string[]) => setUnidades(u);
   const cambiarPersona = (p: string) => setPersona(p);
@@ -144,10 +169,11 @@ export default function ProduccionPage() {
     setActiva(k);
     setParams((p) => { if (k === pestanas[0]) p.delete('v'); else p.set('v', k); return p; }, { replace: true });
     const vista = vistaDe(k);
-    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setCerrados(false); setBuscar(''); }
+    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setVendedor(''); setCliente(''); setCerrados(false); setBuscar(''); }
     else if (vista) {
       const c = vista.config;
-      setUnidades(c.unidades?.length ? c.unidades : base); setPersona(c.persona ?? ''); setCerrados(!!c.cerrados); setBuscar(c.q ?? '');
+      setUnidades(c.unidades?.length ? c.unidades : base); setPersona(c.persona ?? ''); setVendedor(c.vendedor ?? ''); setCliente(c.cliente ?? '');
+      setCerrados(!!c.cerrados); setBuscar(c.q ?? '');
       if (c.modo) setModo(c.modo);
     }
     // Una vista recién guardada que todavía no llegó: queda como se ve (es lo que se guardó).
@@ -160,7 +186,7 @@ export default function ProduccionPage() {
     if (!esFija(activa)) { if (vistaDe(activa)) elegir(activa); else elegir(pestanas[0]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vistas.data]);
-  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, cerrados, modo };
+  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo };
   const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista' })
     !== normConfig({ q: '', unidades: base, persona: activa === 'mine' ? 'yo' : '', cerrados: false, modo: 'lista' });
   const articulos = filtrados.reduce((n, p) => n + p.articulos.length, 0);
@@ -177,7 +203,7 @@ export default function ProduccionPage() {
       </div>
       <PestanasVistas tipo="produccion" vistas={vistas.data} pestanas={pestanas} guardarOrden={guardarOrden} activa={activa} onElegir={elegir}
         recargar={vistas.reload} actual={actual} igual={(a, b) => normConfig(a) === normConfig({ ...b, unidades: b.unidades?.length ? b.unidades : base ?? [] })}
-        filtrosCambiados={filtrosCambiados} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, si se ven los entregados y si se ve en lista o tablero." />
+        filtrosCambiados={filtrosCambiados} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, si se ven los entregados y si se ve en lista o tablero." />
       <div className="toolbar">
         <div className="search" style={{ minWidth: 220, flex: '0 1 280px' }}><Icon name="search" />
           <input className="input" placeholder="Buscar PDV, cliente o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
@@ -195,6 +221,20 @@ export default function ProduccionPage() {
             <option value="yo">{yo ? personaOpcion(yo, ' (yo)') : 'Míos (mis pedidos)'}</option>
             {personas.filter((p) => p !== yo).map((p) => <option key={p.clickup_id} value={String(p.clickup_id)}>{personaOpcion(p)}</option>)}
             <option value="nadie">Sin asignar</option>
+          </Select>
+        </div>
+        <div style={{ minWidth: 190 }}>
+          <Select value={vendedor} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className="input sm">
+            <option value="">Vendedor: todos</option>
+            {vendedor && !vendedores.some((x) => x.clave === vendedor) && <option value={vendedor}>{vendedor.replace(/^n:|^u/, '')}</option>}
+            {vendedores.map((x) => <option key={x.clave} value={x.clave}><Vendedor p={x.p} /></option>)}
+          </Select>
+        </div>
+        <div style={{ minWidth: 190, maxWidth: 260 }}>
+          <Select value={cliente} onChange={(e) => setCliente(e.target.value)} aria-label="Cliente" className="input sm">
+            <option value="">Cliente: todos</option>
+            {cliente && !clientes.includes(cliente) && <option value={cliente}>{cliente}</option>}
+            {clientes.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
         </div>
         <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={cerrados} onChange={(e) => setCerrados(e.target.checked)} />Ver entregados (30 días)</label>
@@ -490,8 +530,9 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
                 <span className="muted"> · {p.cliente ?? 'Sin cliente'}</span>
               </div>
               <div className="small muted ellipsis">
-                {[p.vendedor && `Vende ${p.vendedor}`, p.entrega_prometida && `Prometido ${dia(p.entrega_prometida.slice(0, 10))}`, p.unidad && UNIDADES.find((u) => u.value === p.unidad)?.label]
-                  .filter(Boolean).join(' · ')}
+                <Vendedor p={p} />
+                {[(p.owner_id || p.vendedor) ? '' : null, p.entrega_prometida ? `Prometido ${dia(p.entrega_prometida.slice(0, 10))}` : null, p.unidad ? UNIDADES.find((u) => u.value === p.unidad)?.label ?? null : null]
+                  .filter((x): x is string => x != null).join(' · ')}
                 {p.etiquetas.map((t) => <span key={t} className="tag" style={{ marginLeft: 6, height: 18 }}>{t}</span>)}
               </div>
             </div>
@@ -623,7 +664,7 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
         </div>
         <div className="prod-cliente ellipsis" title={p.cliente ?? undefined}>{p.cliente ?? 'Sin cliente'}</div>
         <div className="small muted ellipsis">
-          {[p.vendedor && `Vende ${p.vendedor}`, p.entrega_prometida && `Prometido ${dia(p.entrega_prometida.slice(0, 10))}`].filter(Boolean).join(' · ')}
+          <Vendedor p={p} />{p.entrega_prometida && `${p.owner_id || p.vendedor ? ' · ' : ''}Prometido ${dia(p.entrega_prometida.slice(0, 10))}`}
         </div>
         <div className="row" style={{ gap: 8, justifyContent: 'space-between', minWidth: 0 }}>
           <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />

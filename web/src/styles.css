@@ -1207,3 +1207,23 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 /* El PDF en el visor: las páginas en una columna blanca que se desplaza. */
 .visor-pdf { width: min(920px, 100%); height: 100%; overflow: auto; background: var(--ui-surface-sunken); border-radius: 6px; padding: 12px; cursor: auto; }
 .visor-pdf .boceto-paginas canvas { display: block; margin: 0 auto 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, .25); background: #fff; max-width: 100%; height: auto !important; }
+
+/* Direcciones de entrega del pedido (tarjeta «Entrega», web/src/pages/Direcciones.tsx). */
+.direcciones { display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--ui-line); }
+.direccion { display: flex; gap: 8px; align-items: flex-start; }
+.direccion > svg { flex: none; margin-top: 2px; color: var(--accent-ink); }
+.direccion-texto { font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.ok-text { color: var(--ok); }
+.direcciones-editor { gap: 12px; }
+.direccion-num { flex: none; width: 24px; height: 24px; margin-top: 6px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--accent-soft, var(--ui-surface-sunken)); color: var(--accent-ink); }
+.buscar-direccion { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.buscar-direccion .search .input { padding-left: 34px; width: 100%; }
+.buscar-direccion .search.validada svg { color: var(--ok); }
+.buscar-direccion .search.validada .input { border-color: color-mix(in srgb, var(--ok) 55%, var(--ui-line)); }
+.buscar-direccion .popover { left: 0; right: 0; top: 42px; z-index: 30; }
+.reparto { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.reparto h3 { margin: 0; font-size: 14px; }
+.reparto-tabla td, .reparto-tabla th { vertical-align: middle; }
+.reparto-input { width: 84px; text-align: right; }
+.reparto-tabla tr.pasado td { background: var(--ui-negative-soft); }

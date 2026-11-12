@@ -37,6 +37,10 @@ export interface Env {
   CLICKUP_API_URL?: string;
   SUBREQUESTS?: string;   // consultas a otros servicios por corrida (default 45; ver budget.ts)
   FINNEGANS_API_URL?: string;
+  // Google Maps (Places API): valida las direcciones de entrega de los pedidos (direcciones.ts). Sin la clave, las direcciones
+  // se cargan a mano y quedan «sin validar».
+  GOOGLE_MAPS_API_KEY?: string;
+  GOOGLE_PLACES_API_URL?: string;   // solo para pruebas: Google Maps simulado
   // API de Claude (Anthropic): lee los remitos (remitos.ts). Sin la clave, los remitos se guardan igual y esperan.
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, esVentas, useToast, userName, Icon, type CrmRecord, cabecerasVerComo } from '../lib';
 import { EstadoEntrega, Modal } from '../components';
 import { BotonArchivos } from './Bocetos';
+import { DireccionesEntrega } from './Direcciones';
 import { Select } from '../Select';
 
 // Remitos de entrega (src/worker/remitos.ts): la tarjeta de la ficha del pedido (qué se entregó, qué falta y los
@@ -106,6 +107,8 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
         {e?.estado && <EstadoEntrega value={e.estado} />}
         {puedeEditar && <BotonArchivos onArchivos={subir} title="Subir la foto o el PDF del remito firmado">{subiendo ? 'Leyendo…' : '+ Remito'}</BotonArchivos>}
       </div>
+      {/* La dirección (o las direcciones) de entrega, con qué va a cada una (Direcciones.tsx). */}
+      <DireccionesEntrega orderId={record.id} onChange={onChange} />
       {e?.alerta && <div className="panel-body"><div className="aviso warn" role="status">{e.alerta}</div></div>}
       {mostrarLineas && (
         <div className="entrega-lineas">

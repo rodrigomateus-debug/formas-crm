@@ -135,3 +135,26 @@ guardadas en el celular y se mandan solas cuando vuelve; reintentar nunca duplic
 ## Costo
 
 Una lectura es una llamada a Claude con una foto: del orden de 5 centavos de dólar por remito.
+
+## Dirección de entrega (pedido de Rodrigo del 12/11/2026)
+
+Arriba de la tarjeta «Entrega» del pedido está la dirección de entrega (`src/worker/direcciones.ts`,
+`web/src/pages/Direcciones.tsx`, migración 0045):
+
+- **Una dirección** por defecto: todo el pedido va ahí. Se elige de las sugerencias de **Google Maps** y queda
+  «Validada en Google Maps», con «Ver en el mapa». Si Google la ubica sin altura (solo la calle o el barrio), avisa
+  «Sin altura». Escrita a mano, sin elegirla de Google, queda «Sin validar». Lleva un detalle opcional (piso, depto,
+  horario, quién recibe). La primera vez sugiere la dirección de la empresa del pedido.
+- **Varias direcciones** («Entregar en varias direcciones»): una tabla con los productos del pedido y cuánto va a cada
+  dirección. Lo repartido se descuenta del total de cada producto («Falta repartir»); no se puede pasar de lo que tiene
+  el pedido (la pantalla no deja guardar y el servidor lo rechaza). «+ lo que falta» pasa a una dirección todo lo que queda.
+- La validación la hace el servidor: la pantalla manda el lugar elegido de Google y el CRM le vuelve a pedir a Google la
+  dirección, las coordenadas y la localidad. La clave de Google queda en el servidor.
+- El pedido guarda el resumen en «Dirección de entrega» (`direccion_entrega`): la dirección, o «N direcciones: …». Queda
+  en el historial.
+- Lo cargan quienes pueden editar el pedido (también la vendedora, en sus pedidos).
+
+**Para que valide con Google Maps** hace falta la clave `GOOGLE_MAPS_API_KEY` (Google Cloud → APIs y servicios →
+habilitar **Places API (New)** → Credenciales → Crear clave de API, restringida a esa API) en los secretos del repositorio
+de GitHub: el despliegue la carga en el Worker. Sin la clave, las direcciones se cargan a mano y quedan «Sin validar».
+Prueba: `test/direcciones.test.mjs` (Google Maps simulado).

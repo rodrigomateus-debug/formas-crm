@@ -1122,3 +1122,23 @@ a.prod-foto:hover { border-color: var(--accent-ink); }
 .ver-como-fila:hover, .ver-como-fila:focus-visible { background: var(--ui-surface-sunken); }
 .ver-como-fila + .ver-como-fila { border-top: 1px solid var(--ui-line); }
 .me-menu .opt svg { flex: none; }
+
+/* Filtros por columna de Producción (ProduccionFiltros.tsx). */
+.th-f { display: inline-flex; align-items: center; gap: 4px; }
+.fcol-btn { width: 20px; height: 20px; display: inline-grid; place-items: center; border: 0; border-radius: 4px; background: none; color: var(--ui-ink-3); cursor: pointer;
+  opacity: .55; transition: opacity var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); padding: 0; }
+th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { opacity: 1; }
+.fcol-btn:hover { background: var(--ui-surface); color: var(--ui-ink); }
+.fcol-btn.on { opacity: 1; color: var(--accent-ink); background: var(--accent-soft); }
+.fcol-pop { padding: 10px; }
+.fcol-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; text-transform: none; letter-spacing: 0; }
+.fcol-ops { display: flex; flex-direction: column; max-height: 300px; overflow: auto; margin: 0 -4px; }
+.fcol-ops .opt { gap: 8px; }
+.fcol-ops .opt.cero { color: var(--ui-ink-3); }
+.fcol-lista { display: flex; flex-direction: column; gap: 6px; }
+.fcol-n { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.fcol-entre { gap: 6px; padding: 4px 6px 2px 30px; }
+.fcol-entre .fecha-btn { min-width: 72px; border-color: var(--ui-line); }
+.fcol-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 12px; }
+.fcol-chip { padding: 0 4px 0 10px; max-width: 420px; }
+.fcol-chip button:first-child { display: inline-flex; gap: 4px; min-width: 0; max-width: 360px; font: inherit; color: inherit; }

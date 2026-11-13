@@ -8,7 +8,7 @@ import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
 import { MODELO } from './remitos';
-import { optimizar, simular, type Punto } from '../../web/src/ruta';
+import { optimizar, simular, type Destino, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
 // repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
@@ -300,7 +300,8 @@ export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; ti
 
 // Marca (o desmarca) como hecho: queda quién y cuándo, y el artículo cambia de estado en ClickUp. Si el artículo ya está
 // más adelante, el estado no se toca. Al desmarcar vuelve al estado que tenía, si nadie lo cambió después.
-export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string } = {}) {
+// `enFondo`: dónde dejar lo que puede terminar después de contestar (releer los PDV de ClickUp); sin él, se espera.
+export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string; enFondo?: (p: Promise<unknown>) => void } = {}) {
   if (!opts.chofer) exigir(ctx);
   if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
   const tipo = b.tipo, hecho = b.hecho !== false;
@@ -317,9 +318,11 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?:
     .bind(tipo, JSON.stringify(filas.map((f) => f.task_id))).all<{ task_id: string; estado_antes: string | null }>()).results.map((m) => [m.task_id, m]));
   let cambiados = 0;
   const pdvs: string[] = [], marcados: string[] = [];
-  for (const f of filas) {
+  // Cada artículo: su estado en ClickUp y la marca. Van de a varios a la vez: de a uno, una parada con muchos artículos
+  // hacía esperar varios segundos al chofer (o a Logística) cada vez que tocaba «Listo».
+  await deAVarios(filas, async (f) => {
     if (hecho) {
-      if (marcas.has(f.task_id)) continue;
+      if (marcas.has(f.task_id)) return;
       const cambia = existe && f.estado !== destino && !CERRADOS.includes(f.estado) && adelante(f.estado) && !(tipo !== 'entrega' && AVANZADOS.includes(f.estado));
       if (cambia) { await editarProduccion(env, c2, f.task_id, 'estado', destino, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
       // OR IGNORE: si otro pedido la marcó recién, no se pierde el estado que tenía antes.
@@ -331,9 +334,18 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?:
       if (m?.estado_antes && f.estado === destino) { await editarProduccion(env, c2, f.task_id, 'estado', m.estado_antes, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
       await db.prepare('DELETE FROM cronograma_hechos WHERE task_id = ? AND tipo = ?').bind(f.task_id, tipo).run();
     }
-  }
-  await refrescar(env, c2, pdvs);
+  });
+  // Releer los PDV (el estado del pedido) no hace falta para contestar: el estado de cada artículo ya quedó guardado.
+  if (opts.enFondo) opts.enFondo(refrescar(env, c2, pdvs)); else await refrescar(env, c2, pdvs);
   return { cambiados, estado: existe ? destino : null, marcados };
+}
+// Hace `fn` con todos, de a `n` a la vez. Si alguno falla, espera a que terminen los demás (lo hecho queda hecho) y avisa
+// el primer error.
+async function deAVarios<T>(items: T[], fn: (x: T) => Promise<void>, n = 4) {
+  let i = 0, error: unknown = null;
+  const uno = async () => { while (i < items.length) { const x = items[i++]; try { await fn(x); } catch (e) { error ??= e; } } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, uno));
+  if (error) throw error;
 }
 
 // ---------- Notas y feriados ----------
@@ -588,11 +600,19 @@ export interface Parada {
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
 // `a_mano`: alguien ordenó sus paradas en la Ruta del día. Si no, se ordena solo por el recorrido más corto.
-interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat: number | null; lng: number | null } | null; a_mano?: boolean }
+// `fin`: dónde termina (pedido de Rodrigo del 13/11/2026): 'igual' (vuelve a donde salió), el id de un depósito, 'ultima'
+// (en la última parada, sin volver) u 'otro' (`fin_otro`).
+type LugarRuta = { nombre: string; direccion: string; lat: number | null; lng: number | null };
+interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: LugarRuta | null; a_mano?: boolean; fin?: string; fin_otro?: LugarRuta | null }
+type BaseGeo = Base & { lat: number | null; lng: number | null };
 const puntoDe = (p: { lat: number | null; lng: number | null } | null | undefined): Punto | null => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
-// De dónde sale un recorrido, en el mapa: un depósito de Formas o el otro lugar que se eligió.
-const salidaDe = (r: RutaGuardada, bases: Array<{ id: string; lat: number | null; lng: number | null }>) =>
-  puntoDe(r.base === 'otro' && r.base_otro ? r.base_otro : bases.find((b) => b.id === r.base) ?? bases[0]);
+// De dónde sale un recorrido: un depósito de Formas o el otro lugar que se eligió.
+const lugarSalida = (r: RutaGuardada, bases: BaseGeo[]): LugarRuta => (r.base === 'otro' && r.base_otro ? r.base_otro : bases.find((b) => b.id === r.base) ?? bases[0]);
+const salidaDe = (r: RutaGuardada, bases: BaseGeo[]) => puntoDe(lugarSalida(r, bases));
+// Dónde termina: el lugar (null si termina en la última parada), y en el mapa.
+const lugarFin = (r: RutaGuardada, bases: BaseGeo[]): LugarRuta | null =>
+  r.fin === 'ultima' ? null : r.fin === 'otro' && r.fin_otro ? r.fin_otro : bases.find((b) => b.id === r.fin) ?? lugarSalida(r, bases);
+const destinoDe = (r: RutaGuardada, bases: BaseGeo[]): Destino => { const l = lugarFin(r, bases); return l ? puntoDe(l) : 'ultima'; };
 
 export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { buscar?: boolean } = {}) {
   const buscar = !!opts.buscar;
@@ -708,9 +728,11 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     if (p.lugar && !p.horario && horarioDe(p.lugar.horario)) { p.horario = horarioDe(p.lugar.horario); p.horario_texto = p.lugar.horario; }
     if (p.lugar && !buscar) p.lugar.coordinacion = null;
   }
-  const guardadas = (await db.prepare('SELECT n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
-    .all<{ n: number; chofer: string | null; base: string | null; base_nombre: string | null; base_direccion: string | null; salida: number; orden: string; a_mano: number }>()).results;
+  const guardadas = (await db.prepare('SELECT n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano, fin, fin_nombre, fin_direccion FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
+    .all<{ n: number; chofer: string | null; base: string | null; base_nombre: string | null; base_direccion: string | null; salida: number; orden: string; a_mano: number;
+      fin: string | null; fin_nombre: string | null; fin_direccion: string | null }>()).results;
   const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...guardadas.filter((r) => r.base === 'otro' && r.base_direccion).map((r) => r.base_direccion!),
+    ...guardadas.filter((r) => r.fin === 'otro' && r.fin_direccion).map((r) => r.fin_direccion!),
     ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)], buscar);
   for (const p of lista_) {
     const g = p.direccion ? geo.get(claveDireccion(p.direccion)) : null;
@@ -723,16 +745,20 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     .all<Visita & { clave: string }>()).results.map((x) => [x.clave, x]));
   for (const p of lista_) { const x = visitas.get(p.clave); p.visita = x ? { resultado: x.resultado, motivo: x.motivo, nota: x.nota, chofer: x.chofer, at: x.at } : null; }
 
-  // «Sale de»: un depósito de Formas o, con base «otro», el lugar que se eligió (con su punto en el mapa).
+  // «Sale de» y «Termina en»: un depósito de Formas o, con «otro», el lugar que se eligió (con su punto en el mapa).
   const rutas: RutaGuardada[] = guardadas.length
     ? guardadas.map((r) => {
       const otro = r.base === 'otro' && r.base_direccion ? r.base_direccion : null;
       const g = otro ? geo.get(claveDireccion(otro)) : null;
+      const finOtro = r.fin === 'otro' && r.fin_direccion ? r.fin_direccion : null;
+      const gf = finOtro ? geo.get(claveDireccion(finOtro)) : null;
       return { n: r.n, chofer: r.chofer, salida: r.salida, orden: lista(r.orden).map(String), a_mano: !!r.a_mano,
         base: otro ? 'otro' : cfg.bases.some((x) => x.id === r.base) ? r.base! : cfg.bases[0].id,
-        base_otro: otro ? { nombre: r.base_nombre || otro, direccion: otro, lat: g?.lat ?? null, lng: g?.lng ?? null } : null };
+        base_otro: otro ? { nombre: r.base_nombre || otro, direccion: otro, lat: g?.lat ?? null, lng: g?.lng ?? null } : null,
+        fin: finOtro ? 'otro' : r.fin === 'ultima' ? 'ultima' : r.fin && cfg.bases.some((x) => x.id === r.fin) ? r.fin : 'igual',
+        fin_otro: finOtro ? { nombre: r.fin_nombre || finOtro, direccion: finOtro, lat: gf?.lat ?? null, lng: gf?.lng ?? null } : null };
     })
-    : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [], a_mano: false }];
+    : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [], a_mano: false, fin: 'igual', fin_otro: null }];
   // Las paradas que no están en ningún recorrido (un movimiento que se pasó a este día después de armarlo) van al primero,
   // también para el chofer; las que ya no existen se sacan.
   const existen = new Set(lista_.map((p) => p.clave)), vistas = new Set<string>();
@@ -744,7 +770,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   const porClave = new Map(lista_.map((p) => [p.clave, p]));
   for (const r of rutas) {
     if (r.a_mano || r.orden.length < 2) continue;
-    r.orden = optimizar(salidaDe(r, bases), r.orden.map((c) => porClave.get(c)!), r.salida).map((p) => p.clave);
+    r.orden = optimizar(salidaDe(r, bases), r.orden.map((c) => porClave.get(c)!), r.salida, destinoDe(r, bases)).map((p) => p.clave);
   }
   const { choferes, con_link, expresos } = await choferesYExpresos(db, transportistas);
   return {
@@ -767,12 +793,19 @@ async function escribirRutas(db: D1Database, ctx: Ctx, fecha: string, rutas: Arr
   const ts = now();
   await db.batch([
     db.prepare('DELETE FROM cronograma_rutas WHERE fecha = ?').bind(fecha),
-    ...rutas.map((r, i) => db.prepare('INSERT INTO cronograma_rutas (fecha, n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base).slice(0, 40) : null,
-        r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.nombre ?? '').trim().slice(0, 120) || null : null,
-        r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.direccion).trim().slice(0, 300) : null,
-        Math.min(1439, Math.max(0, Math.round(Number(r.salida) || 510))), JSON.stringify((Array.isArray(r.orden) ? r.orden : []).map(String)),
-        r.a_mano === false ? 0 : 1, ctx.user.id, ts)),
+    ...rutas.map((r, i) => {
+      // Dónde termina: NULL vuelve a donde salió.
+      const fin = r.fin === 'ultima' ? 'ultima' : r.fin === 'otro' ? (r.fin_otro?.direccion ? 'otro' : null) : r.fin && r.fin !== 'igual' ? String(r.fin).slice(0, 40) : null;
+      return db.prepare(`INSERT INTO cronograma_rutas (fecha, n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano, fin, fin_nombre, fin_direccion, updated_by, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base).slice(0, 40) : null,
+          r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.nombre ?? '').trim().slice(0, 120) || null : null,
+          r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.direccion).trim().slice(0, 300) : null,
+          Math.min(1439, Math.max(0, Math.round(Number(r.salida) || 510))), JSON.stringify((Array.isArray(r.orden) ? r.orden : []).map(String)),
+          r.a_mano === false ? 0 : 1, fin,
+          fin === 'otro' ? String(r.fin_otro!.nombre ?? '').trim().slice(0, 120) || null : null,
+          fin === 'otro' ? String(r.fin_otro!.direccion).trim().slice(0, 300) : null, ctx.user.id, ts);
+    }),
   ]);
 }
 
@@ -798,24 +831,24 @@ export async function asignarChofer(env: Env, ctx: Ctx, b: { fecha?: unknown; id
   let destino = rutas.find((x) => (chofer ? !!x.chofer && norm(x.chofer) === norm(chofer) : !x.chofer));
   if (!destino) {
     if (rutas.length >= 8) throw new HttpError(400, 'Ese día ya tiene 8 recorridos: pasá la parada desde la Ruta del día.');
-    destino = { n: rutas.length + 1, chofer, base: rutas[0].base, base_otro: rutas[0].base_otro ?? null, salida: rutas[0].salida, orden: [], a_mano: false };
+    destino = { n: rutas.length + 1, chofer, base: rutas[0].base, base_otro: rutas[0].base_otro ?? null, salida: rutas[0].salida, orden: [], a_mano: false, fin: 'igual', fin_otro: null };
     rutas.push(destino);
   }
   if (destino.a_mano) {
     const porClave = new Map(r.paradas.map((p) => [p.clave, p]));
-    for (const p of paradas) destino.orden = dondeEntra(salidaDe(destino, r.bases), destino.orden, p, porClave, destino.salida);
+    for (const p of paradas) destino.orden = dondeEntra(salidaDe(destino, r.bases), destinoDe(destino, r.bases), destino.orden, p, porClave, destino.salida);
   } else destino.orden.push(...claves);
   const quedan = rutas.filter((x) => x === destino || x.chofer || x.orden.length);
   await escribirRutas(env.DB, ctx, fecha, quedan);
   return { ok: true, chofer: destino.chofer, recorrido: quedan.indexOf(destino) + 1, paradas: paradas.length, movimientos: paradas.reduce((n, p) => n + p.movimientos.length, 0) };
 }
 // Dónde entra una parada en un recorrido que alguien ordenó: en el lugar que menos lo alarga. Sin ubicar, al final.
-function dondeEntra(salida: Punto | null, orden: string[], p: Parada, porClave: Map<string, Parada>, hora: number) {
+function dondeEntra(salida: Punto | null, fin: Destino, orden: string[], p: Parada, porClave: Map<string, Parada>, hora: number) {
   const actual = orden.map((c) => porClave.get(c)).filter((x): x is Parada => !!x);
   if (!salida || p.lat == null || p.lng == null || actual.length !== orden.length) return [...orden, p.clave];
   let mejor = orden.length, costo = Infinity;
   for (let i = 0; i <= actual.length; i++) {
-    const c = simular(salida, [...actual.slice(0, i), p, ...actual.slice(i)], hora).costo;
+    const c = simular(salida, [...actual.slice(0, i), p, ...actual.slice(i)], hora, null, fin).costo;
     if (c < costo - 0.01) { costo = c; mejor = i; }
   }
   return [...orden.slice(0, mejor), p.clave, ...orden.slice(mejor)];
@@ -834,9 +867,11 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
   return {
     fecha: dia,
     recorridos: suyas.map((x) => {
-      const base = x.base === 'otro' && x.base_otro ? x.base_otro : r.bases.find((b) => b.id === x.base) ?? r.bases[0];
+      const base = lugarSalida(x, r.bases), fin = lugarFin(x, r.bases);
       return {
         n: x.n, salida: x.salida, base: { nombre: base.nombre, direccion: base.direccion, lat: base.lat, lng: base.lng },
+        // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
+        fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
           clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
@@ -859,7 +894,7 @@ export const MOTIVOS: Record<string, string> = {
 // El chofer marca una parada de su recorrido de hoy: la hizo (los artículos cambian de estado en ClickUp, a su nombre),
 // no se pudo (con el motivo) o la deja para más tarde. `resultado` vacío borra lo marcado. Al deshacer un «hecho» se
 // vuelve atrás solo lo que marcó él en esa parada, no lo que había marcado Logística. Repetir lo mismo no hace nada.
-export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }) {
+export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }, enFondo?: (p: Promise<unknown>) => void) {
   const fecha = hoyBsAs();
   const clave = String(b.clave ?? '');
   const resultado = b.resultado == null || b.resultado === '' ? null : String(b.resultado);
@@ -881,7 +916,7 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
   const porTipo = (xs: Array<{ id: string; tipo: Tipo }>) => { const m = new Map<Tipo, string[]>(); for (const x of xs) m.set(x.tipo, [...(m.get(x.tipo) ?? []), x.id]); return m; };
   const deATandas = async (ids: string[], tipo: Tipo, hecho: boolean) => {
     const hechos: string[] = [];
-    for (let i = 0; i < ids.length; i += MAX_POR_VEZ) hechos.push(...(await marcarHecho(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo, hecho }, { chofer })).marcados);
+    for (let i = 0; i < ids.length; i += MAX_POR_VEZ) hechos.push(...(await marcarHecho(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo, hecho }, { chofer, enFondo })).marcados);
     return hechos;
   };
   if (resultado === 'hecho' && antes?.resultado !== 'hecho') {

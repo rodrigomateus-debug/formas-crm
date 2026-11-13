@@ -97,6 +97,12 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   despacha, se carga el **número de guía** para seguir el envío. La parada pasa a ser el expreso (con su dirección) y dice
   para qué cliente es; en la semana la tarjeta lleva «Expreso … · guía …». Es del PDV: vale para todas sus entregas. «Va
   directo al cliente» lo deshace. El chofer ve «Dejé en el expreso: foto de la guía».
+- **Termina en** (pedido de Rodrigo del 13/11/2026): un recorrido no siempre vuelve a donde salió. Al lado de «Sale de»:
+  **Donde sale** (como hasta ahora), uno de los depósitos de Formas, **La última parada** (no vuelve a ningún lado) u
+  **Otro lugar**, que se busca en la libreta o se escribe la dirección, como en «Sale de». El último tramo, la hora a la
+  que termina («Termina» en vez de «Vuelve» cuando no es el mismo lugar), los kilómetros, el orden más corto y el mapa
+  (con una bandera donde termina) lo tienen en cuenta. El chofer lo ve en su app: «terminás en … cerca de las …».
+  Columnas `fin`, `fin_nombre` y `fin_direccion` de `cronograma_rutas` (migración `0060_recorrido_termina.sql`).
 - **Sale de → Otro lugar.** Además de los dos depósitos de Formas, un recorrido puede salir de otro lugar: se busca en la
   libreta por nombre o por dirección, o se escribe la dirección. Queda con su punto en el mapa.
 
@@ -146,7 +152,15 @@ que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay
 llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
 Entra con su **código de 8 números**, que escribe una sola vez y queda guardado en el celular, o con su link (los dos se
 crean en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
-En cada parada marca cómo le fue:
+**Cómo llegar** (pedido de Rodrigo del 13/11/2026): cada parada tiene a la derecha el botón de navegación, que abre la
+dirección sin abrir la parada. La primera vez pregunta con qué app va (Google Maps, Waze y, en el iPhone, Apple Maps) y
+después abre directo con esa; se cambia en «Cómo llegar con» de la parada abierta. Arriba de las paradas, **«Todo el
+recorrido en Google Maps»** abre la navegación desde donde está el chofer con las paradas que le faltan, en orden, y
+dónde termina el recorrido. Google Maps acepta hasta 9 paradas en el medio más el destino: si faltan más, abre las
+próximas 10 y, al hacerlas, el botón abre las que siguen. Waze no deja cargar varias paradas por link: con Waze se va
+parada por parada (la app lo avisa).
+
+En cada parada marca cómo le fue (se ve en el momento; si no se pudo guardar, vuelve a como estaba y lo avisa arriba):
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo
   marca Logística, pero a nombre del chofer en la conversación del pedido). Si era una entrega, se abre la cámara para

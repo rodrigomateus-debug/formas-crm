@@ -596,3 +596,41 @@ test('cronograma: el chofer se elige desde la tarjeta de la semana', async (t) =
   assert.equal((await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [ret.id], chofer: '' })).status, 403);
   asUser = null;
 });
+
+test('cronograma: un recorrido puede terminar en otro lugar que de donde sale, o en la última parada', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  const DIA = '2026-11-17';
+  const ruta = async (dia = DIA) => { let r = (await api('GET', `/cronograma/ruta?fecha=${dia}`)).data; for (let i = 0; i < 6 && r.buscando > 0; i++) r = (await api('GET', `/cronograma/ruta?fecha=${dia}`)).data; return r; };
+  const guardar = async (rec, dia = DIA) => { const g = await api('PUT', '/cronograma/ruta', { fecha: dia, rutas: [{ chofer: null, base: 'roca', salida: 510, orden: [], ...rec }] }); assert.equal(g.status, 200, JSON.stringify(g.data)); return ruta(dia); };
+  // Por defecto vuelve a donde sale.
+  let r = await guardar({});
+  assert.deepEqual([r.rutas[0].fin, r.rutas[0].fin_otro], ['igual', null]);
+  // Sale de Roca y termina en Matienzo.
+  r = await guardar({ fin: 'matienzo' });
+  assert.deepEqual([r.rutas[0].base, r.rutas[0].fin], ['roca', 'matienzo']);
+  // Termina en otro lugar de la libreta: queda con su nombre, su dirección y su punto en el mapa.
+  const otro = { nombre: `ZECAT ${RUN} (DEPOSITO)`, direccion: `JOSE INGENIEROS ${PDV}, RICARDO ROJAS, Buenos Aires` };
+  r = await guardar({ fin: 'otro', fin_otro: otro });
+  assert.deepEqual([r.rutas[0].fin, r.rutas[0].fin_otro], ['otro', { ...otro, lat: -34.514, lng: -58.497 }]);
+  // En la última parada, sin volver a ningún lado.
+  r = await guardar({ fin: 'ultima' });
+  assert.deepEqual([r.rutas[0].fin, r.rutas[0].fin_otro], ['ultima', null]);
+  // «Otro lugar» sin dirección, o un depósito que no existe: vuelve a donde sale.
+  assert.equal((await guardar({ fin: 'otro', fin_otro: null })).rutas[0].fin, 'igual');
+  assert.equal((await guardar({ fin: 'galpon-x' })).rutas[0].fin, 'igual');
+
+  // El chofer lo ve en su app: dónde termina, o que termina en la última parada.
+  const ch = (await api('POST', '/choferes', { name: `Mara ${RUN}` })).data;
+  const app = async () => (await (await fetch(`${BASE}/hooks/chofer/api/ruta`, { headers: { authorization: `Bearer ${ch.token}` } })).json()).recorridos;
+  await guardar({ chofer: `Mara ${RUN}`, fin: 'otro', fin_otro: otro }, HOY);
+  let rec = await app();
+  assert.ok(rec.length && rec[0].paradas.length, 'tiene su recorrido de hoy');
+  assert.deepEqual([rec[0].fin?.nombre, rec[0].vuelve], [otro.nombre, false]);
+  await guardar({ chofer: `Mara ${RUN}`, fin: 'ultima' }, HOY);
+  rec = await app();
+  assert.deepEqual([rec[0].fin, rec[0].vuelve], [null, false]);
+  await guardar({ chofer: `Mara ${RUN}` }, HOY);
+  rec = await app();
+  assert.deepEqual([rec[0].fin?.nombre, rec[0].vuelve], ['Depósito Gral. Roca', true]);
+});

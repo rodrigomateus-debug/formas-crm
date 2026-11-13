@@ -10,6 +10,9 @@ export interface Llegada { clave: string; llega: number; espera: number; tarde: 
 export interface Simulacion { paradas: Llegada[]; vuelta: Tramo; fin: number; km: number; tarde: number; sinUbicar: number; costo: number }
 // Lo que devolvió el servicio de rutas para un orden dado: por tramo, km y minutos con la calle libre.
 export interface TramosReales { clave: string; tramos: Array<{ km: number; min: number }> }
+// Dónde termina el recorrido (pedido de Rodrigo del 13/11/2026): un punto (el mismo de donde sale, otro depósito u otro
+// lugar; null si no se pudo ubicar) o 'ultima': termina en la última parada, sin volver a ningún lado.
+export type Destino = Punto | null | 'ultima';
 
 export function distanciaKm(a: Punto, b: Punto) {
   const r = Math.PI / 180, x = (b.lng - a.lng) * r * Math.cos(((a.lat + b.lat) / 2) * r), y = (b.lat - a.lat) * r;
@@ -23,10 +26,13 @@ export function factorTransito(t: number) {
 const nivelDe = (f: number): Tramo['nivel'] => (f >= 1.55 ? 'pesado' : f >= 1.3 ? 'moderado' : 'fluido');
 // Minutos en cada parada: estacionar, más cargar o descargar cada movimiento.
 export const servicioDe = (movs: number) => Math.min(35, 8 + 4 * movs);
-export const claveOrden = (base: Punto | null, orden: ParadaRuta[]) => [base, ...orden].map((p) => (p && p.lat != null ? `${p.lat!.toFixed(5)},${p.lng!.toFixed(5)}` : '?')).join(';');
+const coord = (p: Punto | ParadaRuta | null) => (p && p.lat != null ? `${p.lat!.toFixed(5)},${p.lng!.toFixed(5)}` : '?');
+export const claveOrden = (base: Punto | null, orden: ParadaRuta[], destino: Destino = base) =>
+  [...[base, ...orden].map(coord), destino === 'ultima' ? 'fin' : coord(destino)].join(';');
 
-export function simular(base: Punto | null, orden: ParadaRuta[], salida: number, reales?: TramosReales | null): Simulacion {
-  const usar = reales && reales.clave === claveOrden(base, orden) ? reales.tramos : null;
+// Sin `destino`, vuelve a donde salió.
+export function simular(base: Punto | null, orden: ParadaRuta[], salida: number, reales?: TramosReales | null, destino: Destino = base): Simulacion {
+  const usar = reales && reales.clave === claveOrden(base, orden, destino) ? reales.tramos : null;
   let t = salida, prev: Punto | null = base, km = 0, tarde = 0, sinUbicar = 0;
   const tramo = (a: Punto | null, b: Punto | null, i: number): Tramo => {
     const f = factorTransito(t);
@@ -52,7 +58,8 @@ export function simular(base: Punto | null, orden: ParadaRuta[], salida: number,
     t += servicio;
     if (aca) prev = aca;
   });
-  const vuelta = tramo(prev, base, orden.length);
+  // La vuelta: al lugar donde termina; si termina en la última parada, no hay.
+  const vuelta = destino === 'ultima' ? { km: 0, min: 0, nivel: nivelDe(factorTransito(t)), estimado: false, sinUbicar: false } : tramo(prev, destino, orden.length);
   km += vuelta.km;
   const fin = t + vuelta.min;
   return { paradas, vuelta, fin, km, tarde, sinUbicar, costo: fin - salida + tarde * 6 };
@@ -60,7 +67,7 @@ export function simular(base: Punto | null, orden: ParadaRuta[], salida: number,
 
 // El orden más corto: primero el vecino más cercano y después se prueba mover y dar vuelta tramos mientras mejore. Tiene
 // en cuenta el horario de cada lugar (llegar tarde cuesta). Las paradas sin ubicar quedan al final, como estaban.
-export function optimizar(base: Punto | null, paradas: ParadaRuta[], salida: number): ParadaRuta[] {
+export function optimizar(base: Punto | null, paradas: ParadaRuta[], salida: number, destino: Destino = base): ParadaRuta[] {
   const con = paradas.filter((p) => p.lat != null && p.lng != null), sin = paradas.filter((p) => p.lat == null || p.lng == null);
   if (con.length < 2) return [...con, ...sin];
   let o: ParadaRuta[] = [];
@@ -72,18 +79,18 @@ export function optimizar(base: Punto | null, paradas: ParadaRuta[], salida: num
     prev = s as Punto;
     o.push(s);
   }
-  let mejor = simular(base, o, salida).costo, sigue = true, vueltas = 0;
+  let mejor = simular(base, o, salida, null, destino).costo, sigue = true, vueltas = 0;
   while (sigue && vueltas++ < 40) {
     sigue = false;
     for (let i = 0; i < o.length; i++) for (let j = 0; j < o.length; j++) {
       if (i === j) continue;
       const n = [...o]; n.splice(j, 0, n.splice(i, 1)[0]);
-      const c = simular(base, n, salida).costo;
+      const c = simular(base, n, salida, null, destino).costo;
       if (c < mejor - 0.01) { o = n; mejor = c; sigue = true; }
     }
     for (let i = 0; i < o.length - 1; i++) for (let j = i + 1; j < o.length; j++) {
       const n = [...o.slice(0, i), ...o.slice(i, j + 1).reverse(), ...o.slice(j + 1)];
-      const c = simular(base, n, salida).costo;
+      const c = simular(base, n, salida, null, destino).costo;
       if (c < mejor - 0.01) { o = n; mejor = c; sigue = true; }
     }
   }

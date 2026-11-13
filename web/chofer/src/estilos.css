@@ -332,7 +332,15 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .ruta-sale, .ruta-nota { color: var(--tinta-2); font-size: 14px; }
 .ruta-lista { list-style: none; margin: 0; padding: 0; }
 .ruta-lista > li.hecha { opacity: .6; }
-.ruta-parada { width: 100%; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* La fila de la parada: lo que la abre y, al costado, «Cómo llegar» de un toque. */
+.ruta-fila { display: flex; align-items: center; gap: 4px; padding-right: 12px; }
+.ruta-parada { flex: 1; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 14px 4px 14px 16px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.ruta-ir {
+  flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; padding: 0; cursor: pointer;
+  border: 2px solid var(--acento); background: var(--superficie); color: var(--tinta-acento); text-decoration: none;
+}
+.ruta-ir:active { transform: scale(.94); }
+.hecha .ruta-ir { border-color: var(--linea); color: var(--tinta-2); }
 .ruta-n { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--acento); color: var(--sobre-acento); font-weight: 700; }
 .hecha .ruta-n { background: var(--bien); color: var(--sobre-bien); }
 .ruta-quien { display: flex; flex-direction: column; min-width: 0; }
@@ -342,14 +350,26 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .ruta-detalle { padding: 0 16px 16px 64px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; font-size: 15px; }
 .ruta-detalle ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ruta-detalle li.hecho { text-decoration: line-through; opacity: .7; }
-.ruta-detalle a.boton { text-decoration: none; display: inline-flex; align-items: center; }
+.ruta-detalle a.boton, .ruta-todo a.boton { text-decoration: none; display: inline-flex; align-items: center; }
+/* El recorrido entero en Google Maps, arriba de las paradas. */
+.ruta-todo { display: flex; flex-direction: column; gap: 6px; }
+.ruta-todo .boton { width: 100%; gap: 10px; }
+/* Cómo llegar, en la parada abierta: un botón por app, del mismo ancho; la que usa, llena. */
+.ruta-llegar { align-self: stretch; display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.ruta-llegar-tit { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--tinta-2); }
+.ruta-apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; }
+.ruta-apps .boton { width: 100%; padding: 0 8px; font-size: 15px; line-height: 1.15; text-decoration: none; }
+.ruta-apps .boton.elegida { background: color-mix(in srgb, var(--acento) 12%, var(--superficie)); color: var(--tinta-acento); box-shadow: inset 0 0 0 3px var(--acento); }
+.ruta-aviso { margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--mal-suave); color: var(--tinta-mal); font-weight: 600; }
 .ruta-tarde { color: var(--tinta-mal); font-weight: 600; }
 .ruta-lista > li.fallo .ruta-n { background: var(--mal); color: var(--sobre-mal); }
 .ruta-lista > li.salteada .ruta-n { background: var(--neutro); color: var(--sobre-neutro); }
 .ruta-quien em { font-style: normal; font-size: 14px; font-weight: 600; color: var(--tinta-mal); }
 .salteada .ruta-quien em { color: var(--tinta-2); }
-.ruta-acciones { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; align-self: stretch; }
-.ruta-acciones .boton.principal { flex: 1 1 100%; }
+/* Lo que hizo: el botón grande a todo el ancho y debajo los otros dos, del mismo tamaño (uno solo va a todo el ancho). */
+.ruta-acciones { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-self: stretch; padding-top: 6px; }
+.ruta-acciones .boton { width: 100%; }
+.ruta-acciones .boton.principal, .ruta-acciones .boton:only-child, .ruta-acciones .boton.chico:last-child:nth-child(2) { grid-column: 1 / -1; }
 .ruta-motivo { display: flex; flex-direction: column; gap: 10px; align-self: stretch; }
 .ruta-motivo fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ruta-motivo legend { font-weight: 600; margin-bottom: 6px; }
@@ -357,3 +377,13 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .ruta-motivo label.elegido { border-color: var(--acento); }
 .ruta-motivo .campo { min-height: 48px; padding: 0 14px; border-radius: 12px; border: 2px solid var(--linea); background: var(--superficie); color: inherit; font: inherit; }
 @media (max-width: 420px) { .ruta-detalle { padding-left: 16px; } }
+
+/* La hoja de abajo para elegir con qué app de mapas va (la primera vez). */
+.hoja-fondo { position: fixed; inset: 0; z-index: 1000; background: rgba(10, 12, 40, .45); display: flex; align-items: flex-end; justify-content: center; }
+.hoja {
+  width: 100%; max-width: 520px; background: var(--superficie); border-radius: 22px 22px 0 0; display: flex; flex-direction: column; gap: 12px;
+  padding: 22px 20px calc(16px + env(safe-area-inset-bottom)); animation: aparecer 180ms var(--suave);
+}
+.hoja .ruta-apps { grid-template-columns: 1fr; }
+.hoja .ruta-apps .boton { min-height: 56px; font-size: 18px; }
+.hoja .enlace { align-self: center; }

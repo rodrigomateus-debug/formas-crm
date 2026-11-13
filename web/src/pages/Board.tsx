@@ -32,6 +32,31 @@ export function useCollapsed(key: string) {
   return [set, toggle] as const;
 }
 
+// «Colapsar vacías» (pedido de Rodrigo del 13/11/2026), opcional y guardado con la vista: las columnas sin nada se ven
+// angostas. Es dinámico: en cuanto una recibe algo (se arrastra una tarjeta, cambia un filtro) se abre sola, y si se vacía
+// vuelve a cerrarse. Una vacía se puede abrir con un clic (hasta salir de la pantalla); las que tienen algo siguen
+// el colapso a mano de siempre (useCollapsed).
+export function useColapso(key: string, vacias: boolean) {
+  const [manual, toggleManual] = useCollapsed(key);
+  const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
+  const auto = (total: number) => vacias && total === 0;
+  const cerrada = (id: string, total: number) => (auto(total) ? !abiertas.has(id) : manual.has(id));
+  const alternar = (id: string, total: number) => (auto(total)
+    ? setAbiertas((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; })
+    : toggleManual(id));
+  return { cerrada, alternar };
+}
+
+// El botón del tablero para prenderlo o apagarlo.
+export function BotonVacias({ value, onChange }: { value: boolean; onChange?: (v: boolean) => void }) {
+  if (!onChange) return null;
+  return (
+    <button type="button" className={`btn qf-btn${value ? ' on' : ''}`} aria-pressed={value} onClick={() => onChange(!value)}
+      title={value ? 'Las columnas vacías se ven angostas y se abren solas cuando reciben algo. Clic para verlas todas abiertas.' : 'Achicar las columnas que no tienen nada (se abren solas cuando reciben algo). Se guarda con la vista.'}>
+      <Icon name="columns" size={14} />Colapsar vacías</button>
+  );
+}
+
 // El tablero ocupa el alto que queda en la pantalla (aunque la barra de filtros ocupe dos renglones), así el pie de
 // cada columna siempre se ve y cada columna se desplaza por dentro.
 export function useFillHeight() {
@@ -66,7 +91,8 @@ export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact'
 }
 
 // Tablero de negocios por pipeline: arrastrar una tarjeta a otra columna cambia la etapa.
-export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate }: {
+export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias }: {
+  vacias?: boolean; onVacias?: (v: boolean) => void;
   pipelineId: string; q: string; groups?: Filter[][]; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
   openId?: number | null; onOpen?: (id: number, compose?: Activity['type']) => void; reloadKey?: number;
@@ -79,7 +105,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
   const [over, setOver] = useState<string | null>(null);
   const [ask, setAsk] = useState<{ deal: CrmRecord; stage: Stage; missing: string[] } | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
-  const [collapsed, toggleCol] = useCollapsed(`crm.board.collapsed.${pipelineId}`);
+  const colapso = useColapso(`crm.board.collapsed.${pipelineId}`, vacias);
   const [boardRef, boardStyle] = useFillHeight();
   const params = { pipeline: pipelineId, q, closed_days: closedDays, groups: groups?.length ? groups : undefined, sort, dir };
   const url = `/board${qs(params)}`;
@@ -145,6 +171,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
           <option value={365}>Cerrados: 1 año</option>
         </Select>
         <SortPick type="deal" sort={sort} dir={dir} onSort={onSort} />
+        <BotonVacias value={vacias} onChange={onVacias} />
         {tools}
         {board.loading && <span className="muted small">Actualizando…</span>}
         <span className="board-sum">
@@ -154,8 +181,8 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
         </span>
       </div>
       <div className={`board${boardStyle ? ' fill' : ''}${board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
-        {cols.map((c) => (collapsed.has(c.stage.id) ? (
-          <div key={c.stage.id} className={`col collapsed${over === c.stage.id ? ' over' : ''}`} {...drop(c)} onClick={() => toggleCol(c.stage.id)}
+        {cols.map((c) => (colapso.cerrada(c.stage.id, c.total) ? (
+          <div key={c.stage.id} className={`col collapsed${over === c.stage.id ? ' over' : ''}`} {...drop(c)} onClick={() => colapso.alternar(c.stage.id, c.total)}
             title={`${c.stage.label}: ${c.total} · ${fmtMoney(c.amount) || '$ 0'}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.stage.label}`}>
             <Icon name="chevron" size={14} />
             <span className="n num">{c.total}</span>
@@ -167,7 +194,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
               <div className="t">
                 <span className="ellipsis">{c.stage.label}</span><span className="n num">{c.total}</span>
                 {onCreate && <button className="col-fold" title={`Crear un negocio en «${c.stage.label}»`} aria-label={`Crear un negocio en ${c.stage.label}`} onClick={() => onCreate({ pipeline: pipelineId, dealstage: c.stage.id })}><Icon name="plus" size={14} /></button>}
-                <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.stage.label}`} onClick={() => toggleCol(c.stage.id)}><Icon name="chevron" size={14} /></button>
+                <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.stage.label}`} onClick={() => colapso.alternar(c.stage.id, c.total)}><Icon name="chevron" size={14} /></button>
               </div>
               <div className="prob" title={`Probabilidad ${Math.round(c.stage.probability * 100)}%`}><i style={{ width: `${c.stage.probability * 100}%` }} /></div>
             </div>

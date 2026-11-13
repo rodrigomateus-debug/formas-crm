@@ -424,6 +424,8 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 /* Pedido: la unidad, «Evento» y la entrega (fecha y cuánto falta). Si la entrega no entra al lado, baja entera a la línea
    de abajo en vez de cortarse. */
 .card .order-line { gap: 4px 6px; min-width: 0; flex-wrap: wrap; }
+/* Renglón del pedido que no es un producto sino un cobro (envío, setup, un adicional). */
+.chip-servicio { display: inline-block; margin-left: 6px; vertical-align: 1px; font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: var(--ui-info-soft); color: var(--ui-info-ink); }
 .chip-evento { flex: none; font-size: 11px; font-weight: 600; line-height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .card .when { display: inline-flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; }
 .card .when svg { flex: none; }

@@ -1,10 +1,11 @@
 import type { Env } from './env';
 import { Budget, OutOfBudget } from './budget';
 import { finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
-import { articulosDelPdv, articulosLivianos, type Articulo } from './clickup';
+import { articulosDelPdv, articulosLivianos, generalStage, type Articulo } from './clickup';
 import { estadosPec, PRODUCCION_TARJETA_SQL, produccionDePedido, type Persona } from './produccion';
 import { clavePedido } from './totales';
 import { HttpError } from './env';
+import { estadosSinServicios, pedirRelectura, TIPO_SQL, tipoPorDefecto } from './servicios';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -75,8 +76,11 @@ async function fichas(env: Env, token: string, all: Array<string | null | undefi
     const known = new Set(results.map((r) => r.code));
     for (const code of codes.filter((c) => !known.has(c))) {
       const f = await finnegansProducto(env, token, code, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return null; });
-      await db.prepare('INSERT OR REPLACE INTO products (code, name, description, image_url, checked_at) VALUES (?, ?, ?, ?, ?)')
-        .bind(code, f?.Nombre?.trim() || null, f?.Descripcion?.trim() || null, /^https?:\/\//.test(f?.ProductoImagen ?? '') ? f!.ProductoImagen : null, new Date().toISOString()).run();
+      // El tipo (producto o servicio) sale del rubro de la ficha o de la lista de códigos de cobro (servicios.ts).
+      const rubro = f?.ProductoRubroCodigo?.trim() || null;
+      await db.prepare('INSERT OR REPLACE INTO products (code, name, description, image_url, rubro, tipo, checked_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .bind(code, f?.Nombre?.trim() || null, f?.Descripcion?.trim() || null, /^https?:\/\//.test(f?.ProductoImagen ?? '') ? f!.ProductoImagen : null,
+          rubro, tipoPorDefecto(code, rubro), new Date().toISOString()).run();
     }
   }
 }
@@ -102,27 +106,36 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     else {
       sync = { fetched_at: new Date().toISOString(), error, source };
       await db.prepare('INSERT OR REPLACE INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, ?, ?)').bind(recordId, sync.fetched_at, error, source).run();
+      // Recién ahora se sabe qué artículos del PDV son un servicio: si sin ellos el pedido queda en otra etapa (un adicional
+      // lo tenía en «Entregado parcial»), se pide volver a leer el PDV (servicios.ts).
+      if (!error && taskId) {
+        const s = await estadosSinServicios(db, recordId);
+        const etapa = s.conServicios && s.estados.length ? generalStage(s.estados) : null;
+        if (etapa && etapa !== props.hs_pipeline_stage) await pedirRelectura(db, taskId);
+      }
     }
   }
   const clave = clavePedido(props.pedido_finnegans);
   const [renglones, cot] = await db.batch([
     db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
-        li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description,
+        li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description, ${TIPO_SQL()} AS tipo,
         so.image_url AS foto_cot, p.image_url AS foto_fin, sk.image_url AS foto_sku
       FROM line_items li LEFT JOIN products p ON p.code = li.code ${FOTO_STP('?')} WHERE li.record_id = ? ORDER BY li.position`).bind(clave, recordId),
     db.prepare('SELECT sku, nombre, cantidades, image_url FROM stp_items WHERE pedido = ? ORDER BY pos').bind(clave ?? ''),
   ]);
   const results = renglones.results as Array<{ code: string | null; description: string | null; quantity: number | null; unit_price: number | null; discount: number; tax_included: number; currency: string | null;
-    li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null;
+    li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null; tipo: 'producto' | 'servicio';
     foto_cot: string | null; foto_fin: string | null; foto_sku: string | null }>;
   const { fotos, sueltas } = fotosDeRenglones(results, cot.results as StpItem[]);
   // Producción: quién tiene asignado cada artículo en ClickUp (y el PDV entero).
   const prod = await produccionDePedido(db, recordId);
   // El color de cada estado, el mismo que en ClickUp.
   const estados = results.some((r) => r.status) ? await estadosPec(db) : [];
+  // Un servicio (envío, setup, un adicional) no se produce: va sin estado de producción ni asignados (servicios.ts).
   const items = results.map((r, i) => ({
-    code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], status: r.status, clickup_task: r.clickup_task,
-    asignados: (r.clickup_task && prod?.porTarea.get(r.clickup_task)) || [],
+    code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], tipo: r.tipo,
+    status: r.tipo === 'servicio' ? null : r.status, clickup_task: r.clickup_task,
+    asignados: (r.tipo !== 'servicio' && r.clickup_task && prod?.porTarea.get(r.clickup_task)) || [],
     status_color: estados.find((e) => e.status === String(r.status ?? '').toLowerCase().trim())?.color ?? null,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,
@@ -369,7 +382,8 @@ export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
   ];
 }
 // Lo adjunto de cada pedido, para los iconitos de abajo de la tarjeta: facturas, remitos y bocetos (cuántos de sus
-// productos tienen al menos uno; el boceto va atado al código del producto o, si no tiene, a su nombre).
+// productos tienen al menos uno; el boceto va atado al código del producto o, si no tiene, a su nombre). Los renglones de
+// servicio (servicios.ts) no cuentan como producto.
 export interface Adjuntos {
   facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number;
   mensajes: number;   // de la conversación del pedido (conversacion.ts)
@@ -381,9 +395,9 @@ export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
       (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'factura') AS facturas,
       (SELECT COUNT(*) FROM remitos m WHERE m.record_id = r.id AND m.estado NOT IN ('descartado', 'duplicado')) AS remitos,
       (SELECT COUNT(*) FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0) AS bocetos,
-      (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id
+      (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id AND ${TIPO_SQL()} != 'servicio'
         AND EXISTS (SELECT 1 FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0 AND b.producto IN (li.code, li.name, p.name))) AS con_boceto,
-      (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS productos,
+      (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id AND ${TIPO_SQL()} != 'servicio') AS productos,
       (SELECT COUNT(*) FROM mensajes ms WHERE ms.record_id = r.id AND ms.borrado_at IS NULL) AS mensajes${PRODUCCION_TARJETA_SQL}
     FROM records r WHERE r.id IN (SELECT id FROM ids)`).bind(...binds);
 }

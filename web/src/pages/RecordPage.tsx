@@ -598,7 +598,8 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 // ---------- Columna derecha: asociaciones ----------
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
-interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[] }
+interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[];
+  tipo?: 'producto' | 'servicio' }   // servicio: envío, setup, un adicional… no se produce, así que va sin logo, boceto ni estado
 interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[];
   produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } | null }
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
@@ -619,7 +620,20 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const [subidos, setSubidos] = useState<Boceto[] | undefined>();
   const abrir = (b: Boceto | null, recien?: Boceto[]) => { setSubidos(recien); setVer(b); };
   const cambio = () => { bo.reload(); onCambio?.(); };
-  const productos: ProductoRef[] = items.map((it) => ({ key: it.code || it.name, nombre: it.name }));
+  // Los servicios (envío, setup de logo, un adicional) no llevan boceto ni logo.
+  const esServicio = (it: ProductRow) => it.tipo === 'servicio';
+  const productos: ProductoRef[] = items.filter((it) => !esServicio(it)).map((it) => ({ key: it.code || it.name, nombre: it.name }));
+  const nServicios = items.filter(esServicio).length;
+  const admin = useMeta().meta.me.role === 'admin';
+  // Solo un administrador cambia el tipo de un renglón; vale para ese código en este pedido.
+  const cambiarTipo = async (it: ProductRow) => {
+    const tipo = esServicio(it) ? 'producto' : 'servicio';
+    try {
+      await http('PUT', `/records/order/${recordId}/products/tipo`, { code: it.code, tipo });
+      toast(tipo === 'servicio' ? 'Queda como servicio: no se produce ni lleva logo' : 'Queda como producto');
+      res.reload(); onCambio?.();
+    } catch (e) { toast((e as Error).message, true); }
+  };
   // Al terminar de subir, se abre el primero en el visor para ver que quedó bien.
   const sub = useSubirBocetos('order', recordId, productos, (s) => { cambio(); abrir(s[0], s); });
   // El logo original de cada producto (logos.ts): el elegido o el principal de la empresa.
@@ -644,8 +658,8 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
     : 'Ni Finnegans ni ClickUp tienen productos para este pedido (pasa con los anulados).';
   return (
     <SoltarBocetos className="panel assoc-card soltar" onArchivos={(f) => (puedeSubir ? sub.elegir(f) : toast('Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).', true))}>
-      <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3>
-        {puedeSubir && items.length > 0 && <BotonArchivos onArchivos={sub.elegir} disabled={sub.subiendo} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
+      <div className="panel-head"><h3>Productos <span className="muted small">({items.length - nServicios}{nServicios ? ` + ${nServicios} ${nServicios === 1 ? 'servicio' : 'servicios'}` : ''})</span></h3>
+        {puedeSubir && productos.length > 0 && <BotonArchivos onArchivos={sub.elegir} disabled={sub.subiendo} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
       </div>
       {pg && !sub.cuadro && <div className="panel-body" style={{ paddingTop: 0 }}><AvisoSubida p={pg} /></div>}
       {/* Quién lo tiene en producción (asignado en ClickUp), con su foto: a quién preguntarle cómo viene. */}
@@ -656,7 +670,7 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
             ? <a href={it.image_url} target="_blank" rel="noreferrer" className="product-img" title="Ver la foto"><img src={it.image_url} alt="" loading="lazy" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).classList.add('broken'); }} /></a>
             : <span className="product-img none" aria-hidden><Icon name="order" size={18} /></span>}
           <div className="grow" style={{ minWidth: 0 }}>
-            <div className="product-name">{it.name}</div>
+            <div className="product-name">{it.name}{esServicio(it) && <span className="chip-servicio" title="No es un producto: no se produce ni se entrega, así que no lleva logo ni boceto y no cuenta en Producción. Suma en el total y se factura igual.">Servicio</span>}</div>
             <div className="small muted">{it.unit_price != null
               ? <>{qty(it.quantity)} × {fmtMoney(it.unit_price, it.currency)}{it.discount ? ` · ${qty(it.discount)} % de descuento` : ''}</>
               : it.quantity != null ? `${qty(it.quantity)} unidades` : 'Cantidad sin cargar'}{it.code && it.code !== it.name ? ` · ${it.code}` : ''}</div>
@@ -667,6 +681,11 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
               </div>
             )}
             {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
+            {esServicio(it) ? (admin && it.code && (
+              <div className="row" style={{ gap: 6, marginTop: 4 }}>
+                <button type="button" className="btn ghost sm" onClick={() => cambiarTipo(it)} title="En este pedido, este renglón es mercadería que se produce y se entrega">Pasar a producto</button>
+              </div>
+            )) : (
             <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
               <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={(b) => abrir(b)} />
               <LogoProducto type="order" recordId={recordId} producto={it.code || it.name} productoNombre={it.name} res={lg.data} onCambio={() => lg.reload()} />
@@ -674,7 +693,9 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
                 ? <span className="boceto-subiendo" aria-hidden><span className="spinner" />{pg.fase === 'subiendo' ? `Subiendo… ${Math.round(pg.pct * 100)} %` : 'Guardando en Drive…'}</span>
                 : puedeSubir && <BotonArchivos className="btn ghost sm boceto-mas" multiple={false} disabled={sub.subiendo} title={`Subir un boceto de ${it.name}`}
                   onArchivos={(f) => sub.elegir(f, { key: it.code || it.name, nombre: it.name })}>+ Boceto</BotonArchivos>}
+              {admin && it.code && <button type="button" className="btn ghost sm" onClick={() => cambiarTipo(it)} title="No es un producto sino un cobro (envío, setup, un adicional): no se produce ni lleva logo">Pasar a servicio</button>}
             </div>
+            )}
           </div>
           {it.subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>}
         </div>

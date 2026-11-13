@@ -77,6 +77,37 @@ Al lado, cuántos artículos están listos («2/3»; los anulados no cuentan). C
 artículo desde el CRM, el CRM relee el PDV y el pedido cambia de etapa en el momento, sin esperar la sincronización.
 En el historial del pedido el cambio queda a nombre de quien lo hizo.
 
+## Servicios: los renglones que no se producen
+
+Pedido de Rodrigo del 13/11/2026. Un pedido puede traer cobros que no son productos: el envío, el setup de logo, un
+servicio de arte o un adicional cargado como «Artículos varios». Venían como un producto más: pedían logo y boceto,
+contaban como artículo y dejaban el PDV en «Entregado parcial» por un adicional que nadie produce ni entrega.
+
+- **Vienen marcados como servicio** por su código de Finnegans: los de rubro Servicios de Arte, Servicios de Logística u
+  Otros servicios (`ProductoRubroCodigo` `SDA`, `SDL`, `OS`: Setup Logo, Tulogo en 24 hs, bordado, tampografía, DTF…) y
+  los códigos de cobro que no tienen rubro: `1161` Artículos varios, `1113` Costo de Envío, `1170` Costo de Envío al
+  Interior, `ML_SHIPPING`, `2008` Mercaderías servicios y `1218` Financiación. Son los que se usaron en los pedidos de
+  Finnegans desde 2024. La lista está en `src/worker/servicios.ts` (`CODIGOS_SERVICIO`).
+- **Un servicio** se ve en los productos del pedido con la marca «Servicio», sin estado de producción, logo ni boceto.
+  Suma en el total y se factura igual. No aparece en Producción, no cuenta en «2/3 listos» ni en los bocetos de la
+  tarjeta, y no pesa en el estado del pedido: con los productos entregados, el pedido queda Entregado aunque el
+  adicional siga en «ingreso de pedido» en ClickUp. Un PDV al que solo le quedan servicios abiertos no se ve en
+  Producción (sí con «Ver entregados»).
+- **Solo un administrador cambia el tipo**, desde los productos del pedido («Pasar a producto» / «Pasar a servicio»).
+  Vale para ese código en ese pedido (tabla `line_item_tipos`): «Artículos varios» casi siempre es un adicional, pero a
+  veces es mercadería, y cambiarlo en un pedido no lo cambia en los demás.
+- **El estado del pedido** se calcula al leer el PDV de ClickUp (`readPdv`), sin sus artículos de servicio (por el renglón
+  del pedido atado al artículo o por el «Código:» del artículo). Si se sabe que un renglón es un servicio después (al
+  leer los productos de Finnegans, o porque lo cambió un administrador), el CRM pide volver a leer ese PDV y la
+  sincronización de cada 10 minutos lo actualiza.
+
+| Qué | Dónde |
+|---|---|
+| Tipo de cada código (`products.tipo` y `rubro`) y excepciones por pedido (`line_item_tipos`) | `migrations/0056_servicios.sql` |
+| Reglas, cambio de tipo y relectura del PDV | `src/worker/servicios.ts` |
+| API: `PUT /api/records/order/:id/products/tipo` con `{ code, tipo }` (administrador) | `src/worker/api.ts` |
+| Prueba de punta a punta | `test/servicios.test.mjs` |
+
 ## Lo que ven las vendedoras
 
 - **Cabecera de la ficha y de la vista previa del pedido** (pedido de Rodrigo del 12/11/2026): la etapa y

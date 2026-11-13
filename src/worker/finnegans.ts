@@ -57,9 +57,9 @@ export async function finnegansPedidoVenta(env: Env, token: string, pedido: stri
   return null;
 }
 
-// La ficha de un producto: nombre, descripción y foto.
+// La ficha de un producto: nombre, descripción, foto y rubro (para saber si es un servicio, servicios.ts).
 export async function finnegansProducto(env: Env, token: string, code: string, b?: Budget) {
-  return fin<{ Nombre?: string; Descripcion?: string; ProductoImagen?: string }>(env, token, `producto/${encodeURIComponent(code)}`, {}, b);
+  return fin<{ Nombre?: string; Descripcion?: string; ProductoImagen?: string; ProductoRubroCodigo?: string }>(env, token, `producto/${encodeURIComponent(code)}`, {}, b);
 }
 
 // Cliente del pedido (para asociar la empresa por CUIT).

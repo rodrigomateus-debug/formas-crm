@@ -17,6 +17,7 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
+import { cambiarTipo, pedirRelectura } from './servicios';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
 import { marcarNotificaciones, notificaciones } from './notificaciones';
 import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
@@ -953,6 +954,17 @@ api.get('/records/order/:id/products', async (c) => {
   const rec = await getRow(c.env.DB, Number(c.req.param('id')));
   if (rec.object_type !== 'order') throw new HttpError(404, 'No es un pedido.');
   return c.json(await orderProducts(c.env, rec.id, JSON.parse(rec.props), { refresh: c.req.query('refresh') === '1' }));
+});
+
+// Un administrador cambia el tipo de un renglón del pedido: producto o servicio (servicios.ts). El estado del pedido se
+// vuelve a calcular en la próxima sincronización con ClickUp.
+api.put('/records/order/:id/products/tipo', async (c) => {
+  const rec = await getRow(c.env.DB, Number(c.req.param('id')));
+  if (rec.object_type !== 'order') throw new HttpError(404, 'No es un pedido.');
+  const b = await c.req.json<{ code?: string; tipo?: string }>();
+  const out = await cambiarTipo(c.env.DB, c.get('ctx').user, rec.id, String(b.code ?? ''), String(b.tipo ?? ''));
+  await pedirRelectura(c.env.DB, String(JSON.parse(rec.props).url_clickup ?? '').match(/\/t\/([A-Za-z0-9]+)/)?.[1]);
+  return c.json(out);
 });
 
 // Abrir un archivo: el PDF guardado, o el remito traído de ClickUp en el momento (los links de ClickUp vencen).

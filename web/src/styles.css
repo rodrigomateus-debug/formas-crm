@@ -1573,6 +1573,22 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .direcciones-editor { gap: 12px; }
 .direccion-num { flex: none; width: 24px; height: 24px; margin-top: 6px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 12px; font-weight: 700;
   background: var(--accent-soft, var(--ui-surface-sunken)); color: var(--accent-ink); }
+/* Retira en Formas (pages/Direcciones.tsx): el menú de la tarjeta y la elección de la dirección de Formas en el cuadro. */
+.retira-lista { display: flex; flex-direction: column; border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; animation: fade-in var(--dur) var(--ease-out); }
+.retira-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 0; background: var(--ui-surface); font: inherit; color: inherit; text-align: left; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease); }
+.retira-item + .retira-item { border-top: 1px solid var(--ui-line); }
+.retira-item:hover:not(:disabled) { background: var(--ui-surface-sunken); }
+.retira-item:disabled { cursor: progress; opacity: .6; }
+.retira-item > svg { flex: none; margin-top: 2px; color: var(--accent-ink); }
+.retira-item > span, .retira-op > span { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.retira-nombre { font-weight: 600; }
+.retira-opciones { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.retira-op { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--ui-line); border-radius: var(--r-control); background: var(--ui-surface);
+  cursor: pointer; transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.retira-op:hover { border-color: var(--accent-ink); }
+.retira-op.on { border-color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent-ink); }
+.retira-op input { margin-top: 3px; accent-color: var(--accent-ink); }
 .buscar-direccion { position: relative; display: flex; flex-direction: column; gap: 4px; }
 .buscar-direccion .search .input { padding-left: 34px; width: 100%; }
 .buscar-direccion .search.validada svg { color: var(--ok); }

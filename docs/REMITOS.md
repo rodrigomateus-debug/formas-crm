@@ -145,6 +145,13 @@ Arriba de la tarjeta «Entrega» del pedido está la dirección de entrega (`src
   «Validada en Google Maps», con «Ver en el mapa». Si Google la ubica sin altura (solo la calle o el barrio), avisa
   «Sin altura». Escrita a mano, sin elegirla de Google, queda «Sin validar». Lleva un detalle opcional (piso, depto,
   horario, quién recibe).
+- **Retira en Formas** (pedido de Rodrigo del 13/11/2026): en lugar de enviarlo, el cliente lo retira en una de las
+  direcciones de Formas: **Depósito Gral. Roca** (General Roca 4250) u **Oficina Matienzo** (Matienzo 1308), las mismas
+  bases del cronograma (settings `cronograma`). En la tarjeta sin dirección, «Retira en Formas» despliega las dos y se
+  guarda al elegir una; en «Cambiar», cada dirección tiene «Envío / Retira en Formas». Se ve como «Lo retira el cliente»,
+  con el detalle opcional (quién retira, día y horario). Es una dirección más (columna `retira` con el id de la base,
+  migración 0052): con varias, parte puede retirarla el cliente y parte enviarse. El resumen del pedido dice
+  «Retira en Formas: Oficina Matienzo». La dirección la pone el servidor; solo se aceptan las bases configuradas.
 - **Varias direcciones** («Entregar en varias direcciones»): una tabla con los productos del pedido y cuánto va a cada
   dirección. Lo repartido se descuenta del total de cada producto («Falta repartir»); no se puede pasar de lo que tiene
   el pedido (la pantalla no deja guardar y el servidor lo rechaza). «+ lo que falta» pasa a una dirección todo lo que queda.

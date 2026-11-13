@@ -83,6 +83,9 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   la del pedido de venta de Finnegans; la de la última entrega a ese cliente; la de la ficha de la empresa. Las validadas
   van al mapa con el punto de Google. Corregirla desde la parada (o aceptar la sugerencia) cambia la de la tarjeta; si el
   pedido va a varias direcciones, se cambian en la tarjeta.
+- **Retira en Formas** (tarjeta «Entrega»): no es una parada ni va en la app del chofer. Se lista aparte, abajo del mapa,
+  en «Retiran en Formas», con en cuál de las dos lo retira el cliente; si además una parte se envía, esa sí es parada y
+  el retiro dice «una parte; el resto se envía».
 - **Si las últimas entregas fueron a otro lado**: se compara la dirección de Finnegans con la de los últimos remitos
   leídos de ese cliente. Si a simple vista no son iguales, Claude decide si es el mismo lugar escrito distinto o es
   otro. Solo si es otro aparece la sugerencia en la parada, para usarla o descartarla. Se consulta una vez por pedido.

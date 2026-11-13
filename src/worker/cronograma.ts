@@ -75,6 +75,7 @@ export interface Movimiento {
   id: string; tipo: Tipo; fecha: string; task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null;
   record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
   hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null;
+  expreso?: { nombre: string; guia: string | null } | null;   // la entrega va por un expreso (entrega_expresos)
   dominio?: string | null;   // el dominio de la empresa de la tarjeta (el cliente en las entregas; si no, el proveedor o impresor), para su logo
 }
 type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null };
@@ -160,6 +161,9 @@ async function ponerDominios(db: D1Database, movs: Movimiento[]) {
   ]);
   const a = new Map(dePedido.results.map((x) => [x.id, x.dominio])), b = new Map(deEmpresa.results.map((x) => [x.id, x.dominio]));
   for (const m of movs) m.dominio = (m.tipo === 'entrega' ? a.get(m.record_id ?? -1) : b.get(m.company_id ?? -1)) || null;
+  // Las entregas que van por expreso, con su guía.
+  const exp = await expresosDe(db, movs.filter((m) => m.tipo === 'entrega').map((m) => `p:${m.pdv_task}`));
+  for (const m of movs) if (m.tipo === 'entrega') { const e = exp.get(`p:${m.pdv_task}`); m.expreso = e ? { nombre: e.expreso, guia: e.guia } : null; }
 }
 
 // La semana que se mira (`desde`–`hasta`) y, para la barra de semanas, cuánto hay y cuánto falta en cada día de un rango
@@ -526,16 +530,17 @@ export async function soltarPunto(db: D1Database, ctx: Ctx, direccion: string) {
 // ---------- La ruta del día ----------
 
 export interface Parada {
-  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | null;
+  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | 'expreso' | null;
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
   company_id: number | null; record_id: number | null; movimientos: Movimiento[];
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: Visita | null;   // lo que marcó el chofer en la app
+  expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
   lugar?: LugarInfo | null; // lo que dice la libreta de direcciones de ese lugar
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
-interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[] }
+interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat: number | null; lng: number | null } | null }
 
 export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { buscar?: boolean } = {}) {
   const buscar = !!opts.buscar;
@@ -631,6 +636,19 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   }
 
   const lista_ = [...paradas.values()];
+  // Las entregas que van por expreso: la parada es el expreso (con su dirección, o la de la libreta si se llama igual), no
+  // el cliente.
+  const transportistas = await listarTransportistas(db);
+  const porExpreso = await expresosDe(db, lista_.map((p) => p.clave));
+  for (const p of lista_) {
+    const e = porExpreso.get(p.clave);
+    if (!e) continue;
+    const t = transportistas.find((x) => x.tipo === 'expreso' && norm(x.nombre) === norm(e.expreso));
+    const deLibreta = t?.direccion ? null : unicoLugar((await lugaresPara(db, [e.expreso])).get(e.expreso)?.exactos ?? []);
+    p.expreso = { nombre: e.expreso, guia: e.guia, cliente: p.nombre };
+    p.nombre = e.expreso; p.direccion = t?.direccion || (deLibreta ? direccionLugar(deLibreta) : null); p.origen = p.direccion ? 'expreso' : null;
+    p.sugerencia = null; p.lugar = deLibreta ? infoLugar(deLibreta) : null; p.horario = null; p.horario_texto = null; p.company_id = null;
+  }
   // Lo que dice la libreta del lugar al que se va (horario, contacto, observaciones), reconocido por calle y altura.
   const porDir = await lugaresPorDireccion(db, lista_.filter((p) => p.direccion && !p.lugar).map((p) => p.direccion!));
   for (const p of lista_) {
@@ -638,7 +656,10 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     if (p.lugar && !p.horario && horarioDe(p.lugar.horario)) { p.horario = horarioDe(p.lugar.horario); p.horario_texto = p.lugar.horario; }
     if (p.lugar && !buscar) p.lugar.coordinacion = null;
   }
-  const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)], buscar);
+  const guardadas = (await db.prepare('SELECT n, chofer, base, base_nombre, base_direccion, salida, orden FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
+    .all<{ n: number; chofer: string | null; base: string | null; base_nombre: string | null; base_direccion: string | null; salida: number; orden: string }>()).results;
+  const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...guardadas.filter((r) => r.base === 'otro' && r.base_direccion).map((r) => r.base_direccion!),
+    ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)], buscar);
   for (const p of lista_) {
     const g = p.direccion ? geo.get(claveDireccion(p.direccion)) : null;
     if (g) { p.lat = g.lat; p.lng = g.lng; p.punto_manual = g.manual; }
@@ -650,19 +671,27 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     .all<Visita & { clave: string }>()).results.map((x) => [x.clave, x]));
   for (const p of lista_) { const x = visitas.get(p.clave); p.visita = x ? { resultado: x.resultado, motivo: x.motivo, nota: x.nota, chofer: x.chofer, at: x.at } : null; }
 
-  const guardadas = (await db.prepare('SELECT n, chofer, base, salida, orden FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
-    .all<{ n: number; chofer: string | null; base: string | null; salida: number; orden: string }>()).results;
+  // «Sale de»: un depósito de Formas o, con base «otro», el lugar que se eligió (con su punto en el mapa).
   const rutas: RutaGuardada[] = guardadas.length
-    ? guardadas.map((r) => ({ n: r.n, chofer: r.chofer, base: cfg.bases.some((x) => x.id === r.base) ? r.base! : cfg.bases[0].id, salida: r.salida, orden: lista(r.orden).map(String) }))
+    ? guardadas.map((r) => {
+      const otro = r.base === 'otro' && r.base_direccion ? r.base_direccion : null;
+      const g = otro ? geo.get(claveDireccion(otro)) : null;
+      return { n: r.n, chofer: r.chofer, salida: r.salida, orden: lista(r.orden).map(String),
+        base: otro ? 'otro' : cfg.bases.some((x) => x.id === r.base) ? r.base! : cfg.bases[0].id,
+        base_otro: otro ? { nombre: r.base_nombre || otro, direccion: otro, lat: g?.lat ?? null, lng: g?.lng ?? null } : null };
+    })
     : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [] }];
   // Las paradas que no están en ningún recorrido (un movimiento que se pasó a este día después de armarlo) van al primero,
   // también para el chofer; las que ya no existen se sacan.
   const existen = new Set(lista_.map((p) => p.clave)), vistas = new Set<string>();
   for (const r of rutas) r.orden = r.orden.filter((c) => existen.has(c) && !vistas.has(c) && (vistas.add(c), true));
   rutas[0].orden.push(...lista_.map((p) => p.clave).filter((c) => !vistas.has(c)));
-  const choferes = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
+  // Los choferes: los de la lista y los que tienen link de la app (Entregas → Choferes), sin repetir.
+  const conLink = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
+  const choferes = [...new Map([...transportistas.filter((x) => x.tipo === 'chofer').map((x) => x.nombre), ...conLink].map((n) => [norm(n), n])).values()].sort((a, b) => a.localeCompare(b));
   return {
-    fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes,
+    fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes, con_link: conLink,
+    expresos: transportistas.filter((x) => x.tipo === 'expreso').map((x) => ({ id: x.id, nombre: x.nombre, direccion: x.direccion })),
     bases: cfg.bases.map((x) => { const g = geo.get(claveDireccion(x.direccion)); return { ...x, lat: g?.lat ?? null, lng: g?.lng ?? null }; }),
     buscando: pendientes + fin.pendientes, puede_editar: puedeEditarCronograma(user),
   };
@@ -676,8 +705,10 @@ export async function guardarRutas(db: D1Database, ctx: Ctx, b: { fecha?: unknow
   const ts = now();
   await db.batch([
     db.prepare('DELETE FROM cronograma_rutas WHERE fecha = ?').bind(b.fecha),
-    ...rutas.map((r, i) => db.prepare('INSERT INTO cronograma_rutas (fecha, n, chofer, base, salida, orden, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(b.fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base) : null,
+    ...rutas.map((r, i) => db.prepare('INSERT INTO cronograma_rutas (fecha, n, chofer, base, base_nombre, base_direccion, salida, orden, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(b.fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base).slice(0, 40) : null,
+        r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.nombre ?? '').trim().slice(0, 120) || null : null,
+        r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.direccion).trim().slice(0, 300) : null,
         Math.min(1439, Math.max(0, Math.round(Number(r.salida) || 510))), JSON.stringify((Array.isArray(r.orden) ? r.orden : []).map(String)), ctx.user.id, ts)),
   ]);
   return { ok: true };
@@ -696,11 +727,12 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
   return {
     fecha: dia,
     recorridos: suyas.map((x) => {
-      const base = r.bases.find((b) => b.id === x.base) ?? r.bases[0];
+      const base = x.base === 'otro' && x.base_otro ? x.base_otro : r.bases.find((b) => b.id === x.base) ?? r.bases[0];
       return {
         n: x.n, salida: x.salida, base: { nombre: base.nombre, direccion: base.direccion, lat: base.lat, lng: base.lng },
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
           clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario,
+          expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
           movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.cantidad, hecho: m.hecho })),
@@ -760,6 +792,52 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
       .bind(fecha, clave, resultado, motivo, nota, chofer, ctx.tokenId ?? null, JSON.stringify(marcados), now()).run();
   } else await db.prepare('DELETE FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave).run();
   return { ok: true, entrega };
+}
+
+// ---------- Choferes y expresos ----------
+
+export interface Transportista { id: number; nombre: string; tipo: 'chofer' | 'expreso'; direccion: string | null }
+export async function listarTransportistas(db: D1Database) {
+  return (await db.prepare('SELECT id, nombre, tipo, direccion FROM transportistas WHERE activo = 1 ORDER BY nombre').all<Transportista>()).results;
+}
+// Agrega un chofer o un expreso a la lista (o, si ya estaba, le cambia el tipo o la dirección y lo vuelve a activar).
+export async function guardarTransportista(db: D1Database, ctx: Ctx, b: { nombre?: unknown; tipo?: unknown; direccion?: unknown }) {
+  exigir(ctx);
+  const nombre = String(b.nombre ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const tipo = b.tipo === 'expreso' ? 'expreso' : 'chofer';
+  const direccion = tipo === 'expreso' ? String(b.direccion ?? '').replace(/\s+/g, ' ').trim().slice(0, 300) || null : null;
+  if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre.');
+  const todos = (await db.prepare('SELECT id, nombre FROM transportistas').all<{ id: number; nombre: string }>()).results;
+  const ya = todos.find((x) => norm(x.nombre) === norm(nombre));
+  if (ya) { await db.prepare('UPDATE transportistas SET nombre = ?, tipo = ?, direccion = COALESCE(?, direccion), activo = 1 WHERE id = ?').bind(nombre, tipo, direccion, ya.id).run(); return { id: ya.id, nombre, tipo }; }
+  const r = await db.prepare('INSERT INTO transportistas (nombre, tipo, direccion, created_by) VALUES (?, ?, ?, ?) RETURNING id').bind(nombre, tipo, direccion, ctx.user.id).first<{ id: number }>();
+  return { id: r!.id, nombre, tipo };
+}
+export async function quitarTransportista(db: D1Database, ctx: Ctx, id: number) {
+  exigir(ctx);
+  await db.prepare('UPDATE transportistas SET activo = 0 WHERE id = ?').bind(id).run();
+  return { ok: true };
+}
+
+async function expresosDe(db: D1Database, claves: string[]) {
+  const out = new Map<string, { expreso: string; guia: string | null }>();
+  const unicas = [...new Set(claves)];
+  if (!unicas.length) return out;
+  const { results } = await db.prepare('SELECT clave, expreso, guia FROM entrega_expresos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(unicas))
+    .all<{ clave: string; expreso: string; guia: string | null }>();
+  for (const r of results) out.set(r.clave, { expreso: r.expreso, guia: r.guia });
+  return out;
+}
+// Una entrega va por expreso (o vuelve a ir directo, con `expreso` vacío). El número de guía se puede cargar después.
+export async function guardarExpreso(db: D1Database, ctx: Ctx, b: { clave?: unknown; record_id?: unknown; expreso?: unknown; guia?: unknown }) {
+  exigir(ctx);
+  const clave = String(b.clave ?? '');
+  if (!/^p:[\w-]+(:\d+)?$/.test(clave)) throw new HttpError(400, 'Solo una entrega puede ir por expreso.');
+  const expreso = String(b.expreso ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!expreso) { await db.prepare('DELETE FROM entrega_expresos WHERE clave = ?').bind(clave).run(); return { ok: true }; }
+  await db.prepare('INSERT OR REPLACE INTO entrega_expresos (clave, record_id, expreso, guia, user_id, at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(clave, Number(b.record_id) || null, expreso, String(b.guia ?? '').trim().slice(0, 80) || null, ctx.user.id, now()).run();
+  return { ok: true };
 }
 
 // ---------- La libreta de direcciones ----------

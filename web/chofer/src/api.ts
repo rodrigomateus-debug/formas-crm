@@ -203,6 +203,8 @@ export function mandarRemito(f: FotoParaMandar, alSubir: (parte: number) => void
 export type ParadaChofer = {
   clave: string; nombre: string; direccion: string | null; lat: number | null; lng: number | null; horario: [number, number] | null;
   visita: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null } | null;
+  /** La entrega no va directo: se deja en este expreso, para ese cliente. */
+  expreso?: { guia: string | null; cliente: string } | null;
   /** Lo que dice la libreta de direcciones de ese lugar. */
   lugar?: { horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null } | null;
   movimientos: Array<{ id: string; tipo: string; npdv: string | null; cliente: string | null; articulo: string; cantidad: number | null; hecho: boolean }>;

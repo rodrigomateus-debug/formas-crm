@@ -418,6 +418,8 @@ const paths: Record<string, string> = {
   route: 'M6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM8 17h7a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h7',
   pin: 'M12 21s7-6.2 7-11.5a7 7 0 0 0-14 0C5 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   alert: 'M12 4l9 16H3zM12 10v4M12 17h.01',
+  star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z',
+  vector: 'M5 19C7 9 17 9 19 19M3.5 17.5h3v3h-3zM17.5 17.5h3v3h-3zM10.5 5.5h3v3h-3zM12 8.5v3',
 };
 export function Icon({ name, size }: { name: keyof typeof paths | string; size?: number }) {
   return (

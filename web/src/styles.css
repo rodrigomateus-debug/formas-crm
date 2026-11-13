@@ -792,6 +792,42 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .boceto-paginas canvas { max-width: 100%; height: auto; background: #fff; box-shadow: 0 0 0 1px var(--ui-line); border-radius: 4px; }
 .boceto-vista img { max-width: 100%; max-height: 100%; object-fit: contain; background: #fff; }
 .boceto-datos { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* Logos del cliente (pages/Logos.tsx): en la empresa, la fichita en cada producto y el cuadro para elegir. */
+.logo-mini { display: inline-grid; grid-template: 100% / 100%; place-items: center; width: 40px; height: 40px; flex: none; border-radius: var(--r-control); border: 1px solid var(--ui-line);
+  overflow: hidden; background: repeating-conic-gradient(var(--ui-surface-sunken) 0 25%, var(--ui-surface) 0 50%) 0 0 / 10px 10px; }
+.logo-mini img { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
+.logo-mini.grande { width: 100%; height: 96px; }
+.logo-mini.grande img { padding: 8px; }
+.logo-ext { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--ui-ink-2); }
+.logo-ext.grande { font-size: 22px; }
+.logo-item { width: 100%; border: 0; background: none; cursor: pointer; text-align: left; font: inherit; color: inherit; gap: 10px; align-items: center; }
+.logo-item:hover { background: var(--ui-surface-sunken); }
+.logo-item .product-name svg { margin-left: 4px; color: var(--ui-warning); vertical-align: -1px; }
+.tag.logo-tag { height: 20px; padding: 0 7px; font-size: 11px; flex: none; }
+.logo-chip { padding: 0 8px 0 6px; max-width: 100%; }
+.logo-chip.falta { color: var(--ui-warning-ink); border-color: color-mix(in srgb, var(--ui-warning) 50%, var(--ui-line)); }
+.logo-punto { width: 6px; height: 6px; border-radius: 3px; flex: none; background: var(--ui-ink-3, var(--ui-line)); }
+.logo-punto.bad { background: var(--ui-negative); }
+.logo-punto.warn { background: var(--ui-warning); }
+.logo-punto.info { background: var(--accent-ink); }
+.logo-grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.logo-op { position: relative; display: flex; flex-direction: column; border: 1px solid var(--ui-line); border-radius: var(--r-panel); background: var(--ui-surface);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.logo-op:hover { border-color: var(--accent-ink); }
+.logo-op.sel { border-color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent-ink); }
+.logo-op-btn { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; text-align: center; min-width: 0; }
+.logo-op-btn:disabled { cursor: default; }
+.logo-op-nombre { font-weight: 600; font-size: 13px; }
+.logo-op-nombre svg { margin-left: 4px; color: var(--ui-warning); vertical-align: -1px; }
+.logo-op-ver { position: absolute; top: 4px; right: 4px; background: var(--ui-surface); }
+.logo-op-nuevo { align-items: center; justify-content: center; gap: 4px; min-height: 160px; padding: 12px; border-style: dashed; color: var(--accent-ink); font: inherit;
+  font-weight: 600; cursor: pointer; }
+.logo-vista { background: repeating-conic-gradient(var(--ui-surface-sunken) 0 25%, var(--ui-surface) 0 50%) 0 0 / 16px 16px; }
+.logo-vista > img { padding: 24px; align-self: center; }
+.logo-sin-vista { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 48px 24px; text-align: center; align-self: center; }
+.prod-logo-aviso { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: 6px; padding: 1px 5px; border-radius: var(--r-pill); font-size: 11px;
+  font-weight: 500; line-height: 16px; background: var(--ui-warning-soft); color: var(--ui-warning-ink); white-space: nowrap; }
+.prod-logo-aviso.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 @media (max-width: 860px) {
   .boceto-visor { grid-template-columns: 1fr; }
   .boceto-vista { height: 60vh; }

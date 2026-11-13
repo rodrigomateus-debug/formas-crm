@@ -202,6 +202,15 @@ donde trabaja producción. También se suben en el negocio, antes del pedido, y 
 empresa. Se guardan en una unidad compartida de Drive (Configuración → Integraciones → Bocetos en Drive; la cuenta de
 servicio necesita el permiso de Drive en la delegación). Detalle en [docs/PEDIDOS.md](docs/PEDIDOS.md#bocetos-de-producción).
 
+## Logos del cliente (en curvas)
+
+El logo original de cada cliente (AI, EPS, CDR, SVG, PDF; PNG/JPG/PSD quedan marcados «no vectorial») se guarda una vez en la
+ficha de la empresa, en Drive (`<empresa>/Logos`), con varias versiones y una principal. En cada producto del pedido o negocio
+(y en su boceto) se elige cuál va; sin elegir, va el principal; subir uno nuevo desde un producto lo guarda en la empresa y lo
+deja elegido. Al subirlo se revisa si los textos están en curvas. Con el boceto aprobado, el logo se adjunta en ClickUp a la
+misma subtarea, y Producción avisa «Sin logo» o «Logo» (con textos o no vectorial) en los artículos que faltan producir.
+Detalle en [docs/LOGOS.md](docs/LOGOS.md).
+
 ## Preparar la reunión con Claude
 
 En la ficha de una empresa, contacto o negocio, «Preparar reunión con Claude» abre claude.ai con el pedido escrito. Claude usa

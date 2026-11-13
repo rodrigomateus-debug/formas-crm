@@ -24,6 +24,7 @@ interface Articulo {
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
   foto?: string | null;
+  logo?: string | null;   // ok, textos, no_vectorial, sin_verificar o falta (logos.ts)
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
@@ -599,7 +600,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
     <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
-      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span></div></td>
+      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span><AvisoLogo estado={a.logo} /></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
@@ -613,6 +614,19 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
       <td>{a.url && <a href={a.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir ${a.nombre} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
     </tr>
   );
+}
+
+// Si el logo del producto no está listo para producir (falta, tiene textos sin curvas o no es vectorial), un aviso al lado
+// del nombre; se resuelve en el pedido (Productos → Logo).
+const AVISOS_LOGO: Record<string, string> = {
+  falta: 'Falta el logo original en curvas (cargalo en el pedido o en la empresa)',
+  textos: 'El logo tiene textos sin pasar a curvas',
+  no_vectorial: 'El logo no es vectorial (es una imagen)',
+};
+function AvisoLogo({ estado }: { estado?: string | null }) {
+  const t = estado ? AVISOS_LOGO[estado] : null;
+  if (!t) return null;
+  return <span className={`prod-logo-aviso${estado === 'falta' ? '' : ' mal'}`} title={t} aria-label={t}><Icon name="vector" size={12} />{estado === 'falta' ? 'Sin logo' : 'Logo'}</span>;
 }
 
 // La foto del producto a la izquierda del nombre, como en los productos del pedido (la misma foto). Un clic la abre
@@ -721,7 +735,7 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
       <div className="row" style={{ gap: 8, minWidth: 0, alignItems: 'flex-start' }}>
         <FotoProducto url={a.foto} nombre={a.nombre} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}</div>
+          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}<AvisoLogo estado={a.logo} /></div>
           <div className="small muted ellipsis prod-card-provs">
             {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>]
               .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}

@@ -10,6 +10,9 @@ export async function googleFalso() {
   const PERFIL = 'https://www.googleapis.com/auth/userinfo.profile';
   const DRIVE = 'https://www.googleapis.com/auth/drive';
   const quien = (req) => (req.headers.authorization ?? '').split(':')[1];
+  // Los ids llevan un prefijo por corrida: el CRM recuerda las carpetas (settings) y, si no, una corrida nueva chocaría con
+  // las de la anterior.
+  const corrida = Date.now().toString(36);
   let n = 0;
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -39,18 +42,18 @@ export async function googleFalso() {
       }
       if (url.pathname === '/drive/v3/files' && req.method === 'POST') {
         const m = JSON.parse(body.toString());
-        const c = { id: `carpeta${++n}`, name: m.name, parent: m.parents[0] };
+        const c = { id: `carpeta${corrida}-${++n}`, name: m.name, parent: m.parents[0] };
         drive.carpetas.push(c);
         return send({ id: c.id });
       }
       if (url.pathname === '/upload/drive/v3/files' && url.searchParams.get('uploadType') === 'resumable') {
-        const id = `subida${++n}`;
+        const id = `subida${corrida}-${++n}`;
         drive.subidas.set(id, { ...JSON.parse(body.toString()), auth: req.headers.authorization });
         return send({}, 200, { location: `http://localhost:8799/subidas/${id}` });
       }
       if (url.pathname.startsWith('/subidas/') && req.method === 'PUT') {
         const s = drive.subidas.get(url.pathname.slice(9));
-        const f = { id: `archivo${++n}`, name: s.name, parent: s.parents[0], mime: req.headers['content-type'], data: body, auth: s.auth };
+        const f = { id: `archivo${corrida}-${++n}`, name: s.name, parent: s.parents[0], mime: req.headers['content-type'], data: body, auth: s.auth };
         drive.archivos.push(f);
         return send({ id: f.id, webViewLink: `https://drive.google.com/file/d/${f.id}/view` });
       }

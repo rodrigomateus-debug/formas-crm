@@ -472,5 +472,22 @@ test('bocetos: el aprobado se adjunta en ClickUp a la subtarea de su artículo, 
     await api('PATCH', `/bocetos/${bo.id}`, { estado: 'aprobado' });
     await new Promise((r) => setTimeout(r, 800));
     assert.equal(cu.adjuntos.length, 1);
+    // El logo original del producto (logos.ts) va a la misma subtarea: subido desde el producto con el boceto ya en
+    // ClickUp, sale solo; elegirlo otra vez no lo vuelve a mandar.
+    const lg = (await api('GET', `/records/order/${b.id}/logos`)).data;
+    assert.ok(lg.company_id, 'el pedido tiene empresa');
+    const fdl = new FormData();
+    fdl.append('archivo', new File([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1z"/></svg>')], `Logo taza ${RUN}.svg`));
+    fdl.append('producto', 'TAZA_0');
+    const rl = await fetch(`${BASE}/api/records/order/${b.id}/logos`, { method: 'POST', body: fdl });
+    const logo = await rl.json();
+    assert.equal(rl.status, 201, JSON.stringify(logo));
+    for (let i = 0; i < 40 && cu.adjuntos.length < 2; i++) await new Promise((r) => setTimeout(r, 250));
+    assert.equal(cu.adjuntos.length, 2, 'el logo, adjunto');
+    assert.equal(cu.adjuntos[1].id, 'cuB-0', 'en la misma subtarea que el boceto');
+    assert.ok(cu.adjuntos[1].body.includes(`Logo taza ${RUN}.svg`));
+    await api('PUT', `/records/order/${b.id}/logos/producto`, { producto: 'TAZA_0', logo_id: logo.id });
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal(cu.adjuntos.length, 2);
   } finally { await g.cerrar(); }
 });

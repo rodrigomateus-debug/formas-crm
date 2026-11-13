@@ -75,6 +75,7 @@ export interface Movimiento {
   id: string; tipo: Tipo; fecha: string; task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null;
   record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
   hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null;
+  dominio?: string | null;   // el dominio de la empresa de la tarjeta (el cliente en las entregas; si no, el proveedor o impresor), para su logo
 }
 type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null };
 interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
@@ -144,6 +145,23 @@ async function movimientos(db: D1Database, desde: string, hasta: string) {
   return { movs: armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta), feriados: fer };
 }
 
+// El dominio de la empresa de cada movimiento, para mostrar su logo: en las entregas, la empresa del pedido; en lo demás,
+// el proveedor o el impresor. Dos consultas para toda la semana.
+async function ponerDominios(db: D1Database, movs: Movimiento[]) {
+  const pedidos = [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
+  const empresas = [...new Set(movs.filter((m) => m.tipo !== 'entrega' && m.company_id).map((m) => m.company_id!))];
+  const [dePedido, deEmpresa] = await Promise.all([
+    pedidos.length ? db.prepare(`SELECT r.id, (SELECT json_extract(c.props, '$.domain') FROM associations s
+          JOIN records c ON c.id = CASE WHEN s.from_id = r.id THEN s.to_id ELSE s.from_id END AND c.object_type = 'company' AND c.archived = 0
+        WHERE s.from_id = r.id OR s.to_id = r.id ORDER BY s.is_primary DESC LIMIT 1) AS dominio
+      FROM records r WHERE r.id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(pedidos)).all<{ id: number; dominio: string | null }>() : { results: [] },
+    empresas.length ? db.prepare("SELECT id, json_extract(props, '$.domain') AS dominio FROM records WHERE id IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(empresas)).all<{ id: number; dominio: string | null }>() : { results: [] },
+  ]);
+  const a = new Map(dePedido.results.map((x) => [x.id, x.dominio])), b = new Map(deEmpresa.results.map((x) => [x.id, x.dominio]));
+  for (const m of movs) m.dominio = (m.tipo === 'entrega' ? a.get(m.record_id ?? -1) : b.get(m.company_id ?? -1)) || null;
+}
+
 // La semana que se mira (`desde`–`hasta`) y, para la barra de semanas, cuánto hay y cuánto falta en cada día de un rango
 // más ancho (`rd`–`rh`).
 export async function vistaCronograma(db: D1Database, user: User, q: { desde: string; hasta: string; rd?: string; rh?: string }) {
@@ -165,9 +183,11 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
       ORDER BY p.npdv LIMIT 150`).all<FilaMov>(),
   ]);
   for (const n of notas.results) { const d = (dias[n.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 }); d.total++; if (!n.hecho) { d.pendientes++; if (n.fecha < hoy) d.atrasados++; } }
+  const deLaSemana = movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta);
+  await ponerDominios(db, deLaSemana);
   return {
     hoy, desde: q.desde, hasta: q.hasta,
-    movimientos: movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta),
+    movimientos: deLaSemana,
     notas: notas.results.filter((n) => n.fecha >= q.desde && n.fecha <= q.hasta),
     feriados: Object.fromEntries(feriados), dias,
     sin_fecha: sinFecha.results.map((f) => ({

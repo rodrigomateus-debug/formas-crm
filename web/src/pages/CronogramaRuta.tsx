@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
 import { claveOrden, duracion, hhmm, optimizar, simular, type Simulacion, type TramosReales } from '../ruta';
-import { carrilDe, cantidad, diaCorto, diaLargo, sumar, type Mov, type Tipo } from './Cronograma';
+import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, type Mov, type Tipo } from './Cronograma';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -260,7 +260,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                 onDrop={(e) => { e.preventDefault(); const de = arrastre.current; arrastre.current = null; setSobre(null); if (de) mover(de, i); }}>
                 <div className="cr-n num">{todo ? <Icon name="check" size={13} /> : i + 1}</div>
                 <div className="cr-p-quien">
-                  <div className="cr-p-nombre">{p.nombre}</div>
+                  <div className="cr-p-nombre">{lindo(p.nombre)}</div>
                   <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ?? 'Sin dirección cargada'}</div>
                 </div>
                 <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></div>
@@ -276,7 +276,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   {p.movimientos.map((m) => (
                     <div key={m.id} className={`cr-k-${carrilDe(m.tipo).k}${m.hecho ? ' ok' : ''}`}>
                       <i /><span><b>{carrilDe(m.tipo).uno}</b>{m.record_id ? <button type="button" className="cr-link" onClick={() => onAbrir(m.record_id!)}>PDV {m.npdv}</button> : `PDV ${m.npdv ?? '—'}`}
-                        {m.tipo !== 'entrega' && m.cliente ? ` ${m.cliente}` : ''}{m.articulo ? ` · ${cantidad(m)}` : ''}{m.evento ? ' · evento' : ''}</span>
+                        {m.tipo !== 'entrega' && m.cliente ? ` ${lindo(m.cliente)}` : ''}{m.articulo ? ` · ${cantidad(m)}` : ''}{m.evento ? ' · evento' : ''}</span>
                     </div>
                   ))}
                 </div>

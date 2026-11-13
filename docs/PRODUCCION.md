@@ -24,13 +24,23 @@ se edita desde ahí.
 | Estado | Estado de la tarea (los de la lista PEC, con su color) | Sí (en el tablero, también arrastrando la tarjeta) |
 | Asignado | Asignados de la tarea (con la foto de su usuario del CRM, o la de ClickUp) | Sí, en el artículo y en el PDV |
 | Cantidad | CANTIDAD | No |
-| Entrega | ENTREGAS (FECHA REAL) | Sí, en el PDV y en cada artículo |
+| Pactada | La fecha de entrega del pedido de venta en Finnegans (la que puso el comercial) | No: se cambia en Finnegans |
+| Real | ENTREGAS (FECHA REAL), la de producción | Sí, en el PDV y en cada artículo |
 | Proveedor | PROVEEDOR | Sí |
 | Impresor | IMPRESOR | Sí |
 | Ingreso prov. | INGRESO (PROVEEDOR): llega del proveedor | Sí |
 | Retiro prov. | RETIROS (PROVEEDOR): se retira del proveedor | Sí |
 | Egreso imp. | EGRESO (IMPRESOR): va al impresor | Sí |
 | Retiro imp. | RETIRO (IMPRESOR): se retira del impresor | Sí |
+
+**Entrega pactada y entrega real** (pedido de Rodrigo del 13/11/2026). La pactada es la del comercial: la fecha de
+entrega del pedido de venta en Finnegans. Es del PDV entero y puede cambiar después de creado: cada vez que el CRM relee
+el pedido de Finnegans (al menos una vez por día mientras está activo), si la fecha es otra la actualiza en «Fecha de
+entrega» del pedido, y queda en su historial. La real es la de producción, por artículo. Cuando la real queda para
+después de la pactada, al lado dice cuántos días se corrió («+5 d»); «Pasadas de lo pactado» filtra esos PDV. En el
+Cronograma la tarjeta de la entrega avisa «Pactada para el …». El nombre del campo en Finnegans no está documentado: se
+toma el que habla de la fecha de entrega (`fechaEntregaDeFinnegans` en `finnegans.ts`); si un pedido no lo trae, queda la
+fecha que tenía el PDV al crearse y el registro del Worker anota qué campos de fecha llegaron.
 
 «INGRESO (IMPRESOR)» no se usa (Ceci lo tiene oculto en su vista); la API acepta además «CANTIDAD CONTROLADA».
 

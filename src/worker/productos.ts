@@ -1,7 +1,8 @@
 import type { Env } from './env';
 import { Budget, OutOfBudget } from './budget';
-import { finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
-import { articulosDelPdv, articulosLivianos, generalStage, type Articulo } from './clickup';
+import { fechaEntregaDeFinnegans, finnegansPedidoVenta, finnegansProducto, finnegansToken } from './finnegans';
+import { updateRecord } from './records';
+import { articulosDelPdv, articulosLivianos, generalStage, systemCtx, type Articulo } from './clickup';
 import { estadosPec, PRODUCCION_TARJETA_SQL, produccionDePedido, type Persona } from './produccion';
 import { clavePedido } from './totales';
 import { HttpError } from './env';
@@ -17,10 +18,28 @@ const RENGLONES_HORAS = 6;
 const FICHA_DIAS = 30;
 const MONEDA: Record<string, string> = { PES: 'ARS', DOL: 'USD' };
 
+// La entrega pactada (la fecha de entrega del pedido en Finnegans, la que puso el comercial) puede cambiar después de
+// creado el PDV: cada vez que se relee el pedido de Finnegans, si la fecha es otra, se actualiza en el pedido del CRM
+// («Fecha de entrega»). Queda en el historial y en la conversación del pedido. La entrega real es la de producción, en
+// ClickUp (produccion.ts).
+async function entregaPactada(env: Env, recordId: number, p: unknown) {
+  const fecha = fechaEntregaDeFinnegans(p);
+  if (!fecha) {
+    // Para saber cómo se llama el campo si Finnegans lo trae con otro nombre: los que parecen una fecha.
+    const fechas = Object.keys(p as object).filter((k) => /fecha|entrega/i.test(k));
+    if (fechas.length) console.warn('productos: el pedido de Finnegans no trae una fecha de entrega reconocible. Campos:', fechas.join(', '));
+    return;
+  }
+  const r = await env.DB.prepare("SELECT json_extract(props, '$.fecha_de_entrega') AS actual FROM records WHERE id = ?").bind(recordId).first<{ actual: string | null }>();
+  if (!r || String(r.actual ?? '').slice(0, 10) === fecha) return;
+  await updateRecord(env.DB, { ...(await systemCtx(env)), source: 'finnegans', sourceDetail: 'Pedido de venta' }, 'order', recordId, { fecha_de_entrega: fecha }, { system: true, strict: false });
+}
+
 async function refresh(env: Env, recordId: number, pedido: string | null, taskId: string | null, b: Budget): Promise<'finnegans' | 'clickup' | null> {
   const db = env.DB;
   const token = await finnegansToken(env, b);
   const p = token && pedido ? await finnegansPedidoVenta(env, token, pedido, b) : null;
+  if (p) await entregaPactada(env, recordId, p).catch((e) => console.error('productos: entrega pactada', recordId, (e as Error).message));
   const items = p?.Items ?? [];
   if (!items.length && taskId && env.CLICKUP_TOKEN) {
     const arts = await articulosDelPdv(env, taskId, b);

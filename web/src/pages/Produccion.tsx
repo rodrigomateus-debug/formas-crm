@@ -105,6 +105,8 @@ export default function ProduccionPage() {
   const [cliente, setCliente] = useState('');
   const [columnas, setColumnas] = useState<FiltrosCol>({});
   const [cerrados, setCerrados] = useState(false);
+  // Solo los PDV con la entrega real (la del PDV o la de algún artículo abierto) después de la pactada.
+  const [pasadas, setPasadas] = useState(false);
   const [buscar, setBuscar] = useState('');
   const q = useDebounced(buscar, 150);
   const [v, setV] = useState<Vista | null>(null);
@@ -182,10 +184,11 @@ export default function ProduccionPage() {
       if (persona && persona !== 'nadie' && persona !== 'yo' && !p.asignados_todos.includes(Number(persona))) return false;
       if (vendedor && claveVendedor(p) !== vendedor) return false;
       if (cliente && (p.cliente ?? '') !== cliente) return false;
+      if (pasadas) { const pac = p.entrega_prometida?.slice(0, 10); if (!pasada(pac, p.entrega_real) && !p.articulos.some((a) => !CERRADOS.includes(a.estado) && pasada(pac, a.entrega_real))) return false; }
       if (!t) return true;
       return [p.npdv, p.cliente, p.vendedor, p.pedido, ...p.articulos.map((a) => a.nombre)].some((x) => String(x ?? '').toLowerCase().includes(t));
     });
-  }, [v, q, persona, vendedor, cliente, columnas, ctxFiltros, yo?.clickup_id, meta.me.id]);
+  }, [v, q, persona, vendedor, cliente, pasadas, columnas, ctxFiltros, yo?.clickup_id, meta.me.id]);
   // Las opciones de vendedor y cliente: las que hay en los PDV que se ven (con las unidades y «entregados» elegidos).
   const vendedores = useMemo(() => {
     const m = new Map<string, { clave: string; nombre: string; p: Pdv }>();
@@ -283,6 +286,8 @@ export default function ProduccionPage() {
         </div>
         <button type="button" className={`btn qf-btn${cerrados ? ' on' : ''}`} aria-pressed={cerrados} onClick={() => setCerrados(!cerrados)}
           title="Suma los PDV entregados o anulados en los últimos 30 días">Ver entregados (30 días)</button>
+        <button type="button" className={`btn qf-btn${pasadas ? ' on' : ''}`} aria-pressed={pasadas} onClick={() => setPasadas(!pasadas)}
+          title="Los PDV con la entrega real (la de producción) después de la pactada (la del comercial)">Pasadas de lo pactado</button>
         {v && <FiltrosActivos f={columnas} onChange={setColumnas} ctx={ctxFiltros} />}
         <div className="bar-end">
           {modo === 'tablero' && <BotonVacias value={vacias} onChange={cambiarVacias} />}
@@ -444,6 +449,15 @@ function useOpcionesEstado(estados: Estado[]) {
 // La fecha se ve como texto («mié 18/11»); con permiso, un clic abre el calendario y se guarda al elegir. Vacía se borra.
 // Una fecha editable: la celda queda igual (sin campo del navegador que ensanche la columna) y el calendario del CRM se
 // abre flotando (Fecha.tsx). Elegir un día lo guarda; «Quitar fecha» la borra.
+// Cuántos días después de lo pactado quedó la entrega real. Nada si está en fecha o antes.
+const diasEntre = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000);
+const pasada = (pactada: string | null | undefined, real: string | null | undefined) => (pactada && real && real > pactada ? diasEntre(pactada, real) : 0);
+function Corrida({ pactada, real }: { pactada: string | null; real: string | null }) {
+  const n = pasada(pactada, real);
+  if (!n) return null;
+  return <span className="prod-corrida" title={`La entrega real es ${n} día${n === 1 ? '' : 's'} después de la pactada (${dia(pactada!)})`}>+{n} d</span>;
+}
+
 function FechaCelda({ valor, editable, onChange, label, alerta }: { valor: string | null; editable: boolean; onChange: (v: string) => void; label: string; alerta?: boolean }) {
   const texto = dia(valor);
   if (!editable) return <span className={alerta ? 'fecha-alerta' : undefined}>{texto || <span className="muted">—</span>}</span>;
@@ -522,7 +536,8 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
             <th className="nosort"><span className="th-f">Estado{fil('estado')}</span></th>
             <th className="nosort">Asignado</th>
             <th className="nosort numcol"><span className="th-f">Cantidad{fil('cantidad')}</span></th>
-            <th className="nosort" title="ENTREGAS (FECHA REAL) en ClickUp"><span className="th-f">Entrega{fil('entrega_real')}</span></th>
+            <th className="nosort" title="La fecha de entrega que puso el comercial en el pedido de Finnegans">Pactada</th>
+            <th className="nosort" title="La fecha de producción: ENTREGAS (FECHA REAL) en ClickUp"><span className="th-f">Real{fil('entrega_real')}</span></th>
             <th className="nosort"><span className="th-f">Proveedor{fil('proveedor')}</span></th>
             <th className="nosort"><span className="th-f">Impresor{fil('impresor')}</span></th>
             <th className="nosort" title="Llega del proveedor"><span className="th-f">Ingreso prov.{fil('ingreso_proveedor')}</span></th>
@@ -551,6 +566,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
   const etapa = p.etapa ? formatValue(meta, 'order', 'hs_pipeline_stage', p.etapa) : '';
   const listo = p.total > 0 && p.listos >= p.total;
   const atrasado = (f: string | null) => !!f && f < hoyIso() && !listo;
+  const pactada = p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null;
   return (
     <>
       <tr className={`prod-pdv${cls}`} onClick={clic} title={p.record_id ? `Ver el pedido del PDV ${p.npdv}` : undefined}>
@@ -566,7 +582,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
               </div>
               <div className="small muted ellipsis">
                 <Vendedor p={p} />
-                {[(p.owner_id || p.vendedor) ? '' : null, p.entrega_prometida ? `Prometido ${dia(p.entrega_prometida.slice(0, 10))}` : null, p.unidad ? UNIDADES.find((u) => u.value === p.unidad)?.label ?? null : null]
+                {[(p.owner_id || p.vendedor) ? '' : null, p.unidad ? UNIDADES.find((u) => u.value === p.unidad)?.label ?? null : null]
                   .filter((x): x is string => x != null).join(' · ')}
                 {p.etiquetas.map((t) => <span key={t} className="tag" style={{ marginLeft: 6, height: 18 }}>{t}</span>)}
               </div>
@@ -585,7 +601,8 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
           <OtrosEnArticulos p={p} personas={v.personas} />
         </span> : <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />}</td>
         <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>
-        <td><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /></td>
+        <td className="prod-pactada" title="Entrega pactada: la que puso el comercial en Finnegans">{pactada ? dia(pactada) : <span className="muted">—</span>}</td>
+        <td><span className="prod-real"><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega real del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /><Corrida pactada={pactada} real={p.entrega_real} /></span></td>
         <td colSpan={6} className="small muted">
           {!ed && !p.editable && <span>Se trabaja en ClickUp</span>}
         </td>
@@ -594,7 +611,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
       {abierto && p.articulos.map((a) => (
         <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={12} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={13} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
@@ -612,7 +629,8 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
-      <td><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega de ${a.nombre}`} alerta={atras(a.entrega_real)} /></td>
+      <td />
+      <td><span className="prod-real"><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega real de ${a.nombre}`} alerta={atras(a.entrega_real)} /><Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={a.entrega_real} /></span></td>
       <td className="opcion-cell"><OpcionCelda v={v} campo="proveedor" valor={a.proveedor} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${a.nombre}`} /></td>
       <td className="opcion-cell"><OpcionCelda v={v} campo="impresor" valor={a.impresor} editable={ed} onChange={set('impresor')} opciones={imps} label={`Impresor de ${a.nombre}`} /></td>
       <td><FechaCelda valor={a.ingreso_proveedor} editable={ed} onChange={set('ingreso_proveedor')} label={`Ingreso del proveedor de ${a.nombre}`} /></td>
@@ -726,11 +744,11 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
         </div>
         <div className="prod-cliente ellipsis" title={p.cliente ?? undefined}>{p.cliente ?? 'Sin cliente'}</div>
         <div className="small muted ellipsis">
-          <Vendedor p={p} />{p.entrega_prometida && `${p.owner_id || p.vendedor ? ' · ' : ''}Prometido ${dia(p.entrega_prometida.slice(0, 10))}`}
+          <Vendedor p={p} />{p.entrega_prometida && `${p.owner_id || p.vendedor ? ' · ' : ''}Pactada ${dia(p.entrega_prometida.slice(0, 10))}`}
         </div>
         <div className="row" style={{ gap: 8, justifyContent: 'space-between', minWidth: 0 }}>
           <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />
-          {p.entrega_real && <span className={`small${atrasada ? ' fecha-alerta' : ' muted'}`} title="Entrega">Entrega {dia(p.entrega_real)}</span>}
+          {p.entrega_real && <span className={`small${atrasada ? ' fecha-alerta' : ' muted'}`} title="Entrega real, la de producción">Real {dia(p.entrega_real)}<Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={p.entrega_real} /></span>}
         </div>
       </div>
       <div className="prod-hijos">

@@ -1704,3 +1704,8 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .emoji-pop button:hover, .emoji-pop button:focus-visible { background: var(--ui-surface-sunken); transform: scale(1.18); }
 /* Mientras el selector está abierto, la barra de acciones del mensaje no se esconde. */
 .conv-msg:has(.emoji-pop) .msg-acciones { display: flex; }
+
+/* Producción: la entrega pactada (del comercial, en Finnegans) y la real (de producción), con cuánto se corrió. */
+.prod-pactada { white-space: nowrap; color: var(--ui-ink-2); font-variant-numeric: tabular-nums; }
+.prod-real { display: inline-flex; align-items: center; gap: 6px; }
+.prod-corrida { flex: none; font-size: 10.5px; font-weight: 600; line-height: 1.5; padding: 0 6px; border-radius: var(--r-pill); background: var(--ui-negative-soft); color: var(--ui-negative-ink); white-space: nowrap; font-variant-numeric: tabular-nums; margin-left: 4px; }

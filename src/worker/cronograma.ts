@@ -87,7 +87,7 @@ export interface Movimiento {
 export const claveParada = (m: Pick<Movimiento, 'tipo' | 'pdv_task' | 'company_id' | 'lugar'>) =>
   m.tipo === 'entrega' ? `p:${m.pdv_task}` : m.company_id ? `e:${m.company_id}` : `o:${norm(m.lugar ?? 'Sin proveedor')}`;
 const esDeLaParada = (clave: string, base: string) => clave === base || clave.startsWith(`${base}:`);
-type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null };
+type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null; pactada: string | null };
 interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
 
 const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -97,7 +97,7 @@ export const hoyBsAs = () => new Date(Date.now() - 3 * 3600_000).toISOString().s
 const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stock)\s*$/i, '').trim();
 
 const SELECT_MOV = `SELECT a.*, p.npdv AS pdv_npdv, p.cliente AS pdv_cliente, p.unidad AS pdv_unidad, p.record_id AS pdv_record, p.entrega_real AS pdv_entrega,
-    json_extract(r.props, '$.tipo_de_pedido') AS evento
+    json_extract(r.props, '$.tipo_de_pedido') AS evento, json_extract(r.props, '$.fecha_de_entrega') AS pactada
   FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0
   WHERE (a.es_pdv = 0 OR NOT EXISTS (SELECT 1 FROM produccion h WHERE h.pdv_task = a.task_id AND h.es_pdv = 0))
     AND a.estado NOT IN ('anulado', 'anulada', 'cancelado') AND p.estado NOT IN ('anulado', 'anulada', 'cancelado')`;
@@ -126,6 +126,9 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
       const avisos: string[] = [];
       if (feriados.has(fecha)) avisos.push(`Cae en feriado (${feriados.get(fecha)})`);
       else if ([0, 6].includes(diaSemana(fecha))) avisos.push('Cae en fin de semana');
+      // La entrega real (la de producción) quedó para después de la pactada (la del comercial, en Finnegans).
+      const pactada = String(f.pactada ?? '').slice(0, 10);
+      if (tipo === 'entrega' && esDia(pactada) && fecha > pactada) avisos.push(`Pactada para el ${Number(pactada.slice(8))}/${Number(pactada.slice(5, 7))}`);
       if (tipo === 'entrega' && previos.length) {
         const ultimo = previos[previos.length - 1];
         if (ultimo > fecha) avisos.push('La entrega es anterior al último retiro');

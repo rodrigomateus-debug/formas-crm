@@ -116,7 +116,10 @@ export default {
         await safe(() => syncAll(env, b));
       }
       else {
-        await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env) : syncClickup(env)));
+        // Facturas: siempre las que avisó el informe de cada hora; el barrido de todos los pedidos, solo de 3 a 4 de la mañana
+        // (Finnegans cobra por cantidad de consultas).
+        const barrido = new Date(event.scheduledTime).getUTCHours() === 6;
+        await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env, { barrido }) : syncClickup(env)));
         if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día
       }
     })());

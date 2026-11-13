@@ -99,7 +99,8 @@ const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
 // `facturas` ({"EMPRE01|FCVTAELECT - 2583": {pedido: "PEDVTAFP - 2413", factor: 1.2345}}): de qué pedido es cada comprobante
 // y su total/neto exacto, del análisis de facturas (scripts/pedidos-totales.mjs). Manda sobre las otras formas de cruzarlo.
 const IVA = 1.21;
-type FacturaCrm = { pedido?: string | null; factor?: number | null };
+// `ie` y `cae`: la identificación de la factura en Finnegans y si ya tiene CAE (para adjuntarla al pedido, finnegans.ts).
+type FacturaCrm = { pedido?: string | null; factor?: number | null; ie?: string | null; cae?: boolean };
 export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFacturar?: Record<string, number>; factores?: Record<string, number>;
   facturas?: Record<string, FacturaCrm>; completo?: boolean }): Promise<SaldosEstado> {
   if (!Array.isArray(body?.filas)) throw new HttpError(400, 'Falta filas: [{ie, doc, desc, importe}, …].');
@@ -222,6 +223,17 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     if (a || b) actualizados++;
   }
   for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
+  // Las facturas con CAE que todavía no están adjuntas a su pedido: la sincronización de facturas (finnegans.ts) lee solo
+  // esos pedidos. Solo Formas Publicitarias; las notas de crédito y débito no se adjuntan.
+  const adjuntas = new Set(fac.map((f) => `${f.record_id}|${String(f.source_ref ?? '').trim().toUpperCase()}`));
+  const nuevas: D1PreparedStatement[] = [];
+  for (const [k, f] of Object.entries(facturasCrm)) {
+    const [emp, doc] = k.split('|');
+    const id = f?.cae && f.ie && f.pedido ? porPedido.get(clavePedido(f.pedido)) : undefined;
+    if (id === undefined || emp !== 'EMPRE01' || /^(NC|ND)/i.test(doc ?? '') || adjuntas.has(`${id}|${f.ie!.trim().toUpperCase()}`)) continue;
+    nuevas.push(db.prepare('INSERT OR IGNORE INTO facturas_pendientes (record_id, ie) VALUES (?, ?)').bind(id, f.ie!.trim()));
+  }
+  for (let i = 0; i < nuevas.length; i += 200) await db.batch(nuevas.slice(i, i + 200));
   const conSaldo = [...saldo.values()].filter((v) => v > 0.005);
   const out = { filas: filas.length, cruzadas, sin_cruce: filas.length - cruzadas, pedidos_con_saldo: conSaldo.length,
     total: Math.round(conSaldo.reduce((t, v) => t + v, 0)), actualizados, at: ts };

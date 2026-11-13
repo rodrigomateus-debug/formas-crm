@@ -54,6 +54,7 @@ export default function RecordPage() {
           {!ventas && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
           {type === 'deal' && <FacturarCard record={record} />}
           {type === 'deal' && <BocetosNegocioCard dealId={record.id} empresas={claveEmpresas(associations)} />}
+          {(type === 'order' || type === 'deal' || type === 'company') && <RazonSocialCard type={type} recordId={record.id} clave={claveEmpresas(associations)} onCambio={refresh} />}
           {type === 'order' && <ProductsCard recordId={record.id} max={5} empresas={claveEmpresas(associations)} />}
           {type === 'order' && <RemitosCard record={record} onChange={refresh} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
@@ -336,7 +337,7 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
   const curIdx = pipe.stages.findIndex((s) => s.id === record.props.dealstage);
   const cur = pipe.stages[curIdx];
   const go = async (stage: Stage, extra: Record<string, unknown> = {}) => {
-    const missing = missingFor(stage, { ...record.props, ...extra });
+    const missing = missingFor(stage, { ...record.props, ...extra }, extra);
     if (missing.length) { setAsk({ stage, missing }); return; }
     try { await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stage.id, ...extra } }); toast('Etapa actualizada'); onChange(); }
     catch (e) {
@@ -598,6 +599,69 @@ function Composer({ type, record, associations, onClose, onSaved }: {
 // ---------- Columna derecha: asociaciones ----------
 
 // Factura (de Finnegans, cuando tiene CAE) y remito (la foto que suben a ClickUp al entregar), adjuntados solos.
+// La razón social con que se factura (razones.ts). En el pedido y en su negocio: la que vino de Finnegans y, si todavía no
+// tiene empresa, la sugerencia para crearla, asignarla a una empresa que ya está o crear una con otro nombre que la tenga.
+// En la empresa: sus razones sociales (puede facturar con varias). `clave`: las empresas asociadas, para volver a pedirla.
+interface RazonRes { pedido?: { id: number; razon: string; cuit: string | null } | null; empresa?: { id: number; name: string } | null; de?: { id: number; name: string } | null;
+  sugerida?: boolean; razones?: Array<{ cuit: string; razon: string }> }
+const fmtCuit = (c: string | null | undefined) => (c && c.length === 11 ? `${c.slice(0, 2)}-${c.slice(2, 10)}-${c.slice(10)}` : c ?? '');
+function RazonSocialCard({ type, recordId, clave, onCambio }: { type: ObjectType; recordId: number; clave: string; onCambio: () => void }) {
+  const res = useAsync(() => http<RazonRes>('GET', `/records/${type}/${recordId}/razon-social`), [type, recordId, clave]);
+  const toast = useToast();
+  const [modo, setModo] = useState<'' | 'asignar' | 'nombre'>('');
+  const [nombre, setNombre] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const d = res.data;
+  if (type === 'company') {
+    if (!d?.razones?.length) return null;
+    return (
+      <div className="panel assoc-card">
+        <div className="panel-head"><h3>Razones sociales <span className="muted small">({d.razones.length})</span></h3></div>
+        {d.razones.map((z) => <div key={z.cuit} className="assoc-item"><div className="grow" style={{ minWidth: 0 }}><div className="ellipsis">{z.razon}</div><div className="small muted">CUIT {fmtCuit(z.cuit)}</div></div></div>)}
+      </div>
+    );
+  }
+  const p = d?.pedido;
+  if (!p) return null;
+  const resolver = async (body: Record<string, unknown>) => {
+    setOcupado(true);
+    try { await http('POST', `/records/order/${p.id}/razon-social`, body); toast('Empresa asociada al pedido y a su negocio'); setModo(''); res.reload(); onCambio(); }
+    catch (e) { toast((e as Error).message, true); }
+    setOcupado(false);
+  };
+  return (
+    <div className="panel assoc-card">
+      <div className="panel-head"><h3>Razón social</h3>{d?.sugerida && <span className="tag warn">Sin empresa</span>}</div>
+      <div className="assoc-item">
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div>{p.razon}</div>
+          <div className="small muted">{p.cuit ? `CUIT ${fmtCuit(p.cuit)} · ` : ''}de Finnegans{type === 'deal' ? ', por su pedido' : ''}</div>
+          {!d?.sugerida && d?.empresa && <div className="small muted">Factura como una razón social de <Link to={recordUrl('company', d.empresa.id)}>{d.empresa.name}</Link>{d.de && d.de.id !== d.empresa.id ? ` (ese CUIT también figura en ${d.de.name})` : ''}</div>}
+        </div>
+      </div>
+      {d?.sugerida && (
+        <div className="panel-body stack" style={{ paddingTop: 0 }}>
+          <div className="small muted">Este pedido todavía no tiene empresa. Con la razón social se puede:</div>
+          {d.de
+            ? <button className="btn sm primary" disabled={ocupado} onClick={() => resolver({ accion: 'asignar', company_id: d.de!.id })}>Asignar a {d.de.name} (ya tiene ese CUIT)</button>
+            : <button className="btn sm primary" disabled={ocupado} onClick={() => resolver({ accion: 'crear' })} title={`Crea la empresa «${p.razon}» con ese CUIT`}>Crear la empresa con este nombre</button>}
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            <button className="btn sm" disabled={ocupado} onClick={() => setModo(modo === 'asignar' ? '' : 'asignar')} title="La razón social queda como una de las de esa empresa">Es de una empresa que ya está…</button>
+            {!d.de && <button className="btn sm" disabled={ocupado} onClick={() => { setNombre(''); setModo(modo === 'nombre' ? '' : 'nombre'); }} title="Una empresa nueva con otro nombre (la marca), que factura con esta razón social">Crear empresa con otro nombre…</button>}
+          </div>
+          {modo === 'asignar' && <RecordPicker type="company" placeholder="Buscar la empresa…" onPick={(c) => resolver({ accion: 'asignar', company_id: c.id })} />}
+          {modo === 'nombre' && (
+            <div className="row" style={{ gap: 6 }}>
+              <input className="input grow" autoFocus placeholder="Nombre de la empresa (la marca)" value={nombre} onChange={(e) => setNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && nombre.trim()) resolver({ accion: 'crear_con_nombre', name: nombre.trim() }); }} />
+              <button className="btn sm primary" disabled={ocupado || !nombre.trim()} onClick={() => resolver({ accion: 'crear_con_nombre', name: nombre.trim() })}>Crear</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[];
   tipo?: 'producto' | 'servicio' }   // servicio: envío, setup, un adicional… no se produce, así que va sin logo, boceto ni estado
 interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[];
@@ -959,7 +1023,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   const moveTo = async (stageId: string, extra: Record<string, unknown> = {}) => {
     const st = stageOf(meta, stageId)?.stage;
     if (!record || !st || stageId === record.props.dealstage) return;
-    const missing = missingFor(st, { ...record.props, ...extra });
+    const missing = missingFor(st, { ...record.props, ...extra }, extra);
     if (missing.length) { setAsk({ stage: st, missing }); return; }
     try {
       await http('PATCH', `/records/deal/${id}`, { props: { dealstage: stageId, ...extra } });
@@ -1040,6 +1104,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {type === 'company' && <LogosCard companyId={record.id} />}
         {!esVentas(meta.me) && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
+        {(type === 'order' || type === 'deal' || type === 'company') && <RazonSocialCard type={type} recordId={id} clave={claveEmpresas(associations)} onCambio={changed} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} onCambio={onChange} empresas={claveEmpresas(associations)} />}
         {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}
         {type === 'order' && <RemitosCard record={record} onChange={changed} />}

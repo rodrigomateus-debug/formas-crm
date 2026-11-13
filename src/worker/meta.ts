@@ -19,6 +19,7 @@ export interface Property {
 export interface StageConfig {
   // Propiedades que hay que completar para pasar a esta etapa (HubSpot: «propiedades condicionales de etapa»).
   required_props?: string[];
+  ask_props?: string[];   // se piden al entrar a la etapa, sin ser obligatorias
   // Tarea que se crea sola al entrar a la etapa, para el propietario del negocio.
   task?: { subject: string; due_days?: number; task_type?: string } | null;
 }

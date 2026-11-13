@@ -56,6 +56,8 @@ const base = {
   orden_compra: 'T26C830000778', bultos: 2, firmado: true, sello_recepcion: null, fecha_recepcion: '2026-10-21', aclaracion_firma: null,
   recibido_con_reservas: false, notas: null, otros_remitos_en_foto: false, dudas: [],
 };
+// La guía de un expreso (pedido de Rodrigo del 13/11/2026): Vía Cargo, encima del remito de Formas, que queda tapado.
+const GUIA_VC = { empresa: 'VIA CARGO', numero: '999039601732', remito: '5275-52944', destinatario: 'LIDIA MARIANA RAMIREZ', localidad: 'RESISTENCIA' };
 const LECTURAS = {
   OK1: { ...base, numero_remito: NRO(BASE_NRO), pdv_pedido_web: `000${PDV}`, pdv_observaciones: PDV, cliente: `CLIENTE A ${RUN} S A`, cuit_cliente: CUIT_A,
     items: [item('SIM10001273', 'Llavero corto | Merchandising', 1000)], sello_recepcion: 'Target Agencia de Marketing S.A.', recibido_con_reservas: true,
@@ -71,6 +73,12 @@ const LECTURAS = {
   // Como contesta la API real: lo que no se lee viene vacío ("") y la cantidad que no se lee, -1.
   BORROSA: { ...base, legible: false, problemas_foto: ['cortada', 'sombra'], repetir_foto: true, motivo_repetir: 'El número de PDV quedó cortado. Que se vea el remito entero.',
     numero_remito: '', pdv_pedido_web: '', pdv_observaciones: '', cliente: '', cuit_cliente: '', bultos: '', items: [{ codigo: '', descripcion: '', cantidad: -1, cantidad_texto: '' }] },
+  GUIA: { ...base, numero_remito: NRO(BASE_NRO + 80), pdv_pedido_web: PDV_B, pdv_observaciones: '', cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: '', items: [],
+    firmado: false, repetir_foto: true, motivo_repetir: 'La guía tapa el remito.', guia_expreso: GUIA_VC },
+  GUIA_OTRA: { ...base, numero_remito: NRO(BASE_NRO + 81), pdv_pedido_web: PDV_B, pdv_observaciones: '', cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: '', items: [],
+    firmado: false, guia_expreso: { ...GUIA_VC, numero: '999000000001' } },
+  GUIA_SOLA: { ...base, es_remito: false, numero_remito: '', pdv_pedido_web: '', pdv_observaciones: '', cliente: '', cuit_cliente: '', items: [], firmado: false,
+    guia_expreso: { ...GUIA_VC, numero: '999000000777' } },
   NOREM: { ...base, es_remito: false, numero_remito: null, pdv_pedido_web: null, pdv_observaciones: null, cliente: null, cuit_cliente: null, items: [] },
   OTROCUIT: { ...base, numero_remito: NRO(BASE_NRO + 8), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `OTRA EMPRESA ${RUN} SA`, cuit_cliente: CUIT_OTRO, items: [item('GOR-1', 'Gorra', 50)] },
   B1: { ...base, numero_remito: NRO(BASE_NRO + 10), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra bordada', 50)] },
@@ -598,6 +606,31 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.equal((await api('POST', `/remitos/${otraVez.data.id}/revisar`, { accion: 'confirmar', pedido: B.id })).data.estado, 'duplicado');
   asUser = null;
   assert.equal((await remitosDe(B.id)).entrega.lineas[0].entregado, enB, 'contado una sola vez');
+  // La guía del expreso (pedido de Rodrigo del 13/11/2026). El pedido B va por Vía Cargo: el chofer saca la foto de la
+  // guía encima del remito. La guía queda en la entrega por expreso y no se le pide otra foto aunque el remito no se lea entero.
+  asUser = logi.email;
+  assert.equal((await api('PUT', '/cronograma/expreso', { clave: `p:guia-b-${RUN}`, record_id: B.id, expreso: 'Vía Cargo' })).status, 200);
+  asUser = null;
+  const g1 = await api('POST', '/hooks/chofer/api/remitos', form('GUIA'), H);
+  assert.equal(g1.data.repetir, false, 'con la guía no se pide otra foto');
+  assert.match(g1.data.mensaje, /^Guía de VIA CARGO 999039601732: quedó cargada para seguir el envío\./);
+  const enPedido = (await api('GET', `/records/order/${B.id}/remitos`)).data.remitos.find((x) => x.id === g1.data.id);
+  assert.equal(enPedido.guia.numero, '999039601732');
+  assert.ok(enPedido.controles.some((c) => c.dato === 'Guía del expreso' && c.ok === true && /quedó cargada en la entrega por Vía Cargo/.test(c.detalle)), JSON.stringify(enPedido.controles));
+  // Otra foto con otra guía para la misma entrega: no pisa la que ya estaba; queda avisado.
+  const g2 = await api('POST', '/hooks/chofer/api/remitos', form('GUIA_OTRA'), H);
+  const otra = (await api('GET', `/records/order/${B.id}/remitos`)).data.remitos.find((x) => x.id === g2.data.id);
+  assert.ok(otra.controles.some((c) => c.dato === 'Guía del expreso' && c.ok === null && /ya tenía la guía 999039601732/.test(c.detalle)), JSON.stringify(otra.controles));
+  // Solo la guía, sin el remito: va a la única entrega por expreso sin guía del recorrido de hoy de ese chofer.
+  const HOY = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+  asUser = logi.email;
+  assert.equal((await api('PUT', '/cronograma/expreso', { clave: `p:guia-sola-${RUN}`, expreso: 'Vía Cargo' })).status, 200);
+  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: HOY, rutas: [{ chofer: `Juan ${RUN}`, base: 'roca', salida: 480, orden: [`p:guia-sola-${RUN}`] }] })).status, 200);
+  asUser = null;
+  const g3 = await api('POST', '/hooks/chofer/api/remitos', form('GUIA_SOLA'), H);
+  assert.deepEqual([g3.data.repetir, g3.data.pide_pdv], [false, false], 'no pide otra foto ni el PDV: ya se sabe de qué entrega es');
+  assert.match(g3.data.mensaje, /^Guía de VIA CARGO 999000000777: quedó cargada/);
+
   // Dar de baja el link: deja de andar.
   asUser = logi.email;
   const lista = (await api('GET', '/choferes')).data;

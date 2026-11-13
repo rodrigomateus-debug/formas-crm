@@ -5,6 +5,7 @@ import { EstadoEntrega, Modal } from '../components';
 import { BotonArchivos } from './Bocetos';
 import { DireccionesEntrega } from './Direcciones';
 import { Select } from '../Select';
+import { seguimientoExpreso } from '../expresos';
 
 // Remitos de entrega (src/worker/remitos.ts): la tarjeta de la ficha del pedido (qué se entregó, qué falta y los
 // remitos, vengan de ClickUp, del CRM o de la app del chofer) y la bandeja de Logística (lo que hay que revisar y los
@@ -20,6 +21,8 @@ export interface Remito {
   duplicado_de: number | null; otros_remitos_en_foto: boolean; dudas: string[]; leido_at: string | null; created_at: string;
   items: Array<{ code: string | null; description: string | null; quantity: number | null }>;
   pdv_chofer: string | null;   // el PDV que escribió el chofer en la app
+  // La guía del expreso que se leyó en la foto (el chofer la saca al dejar la mercadería en el expreso).
+  guia?: { empresa: string | null; numero: string; remito: string | null; destinatario: string | null; localidad: string | null } | null;
   pedido_nombre?: string | null;   // en la bandeja: el nombre del pedido donde está
   revisado_por?: number | null; revisado_at?: string | null;
   revisor?: string | null;   // en «Revisados»: quién lo revisó
@@ -284,6 +287,22 @@ function FinalizarModal({ orderId, faltan, onClose, onDone }: { orderId: number;
   );
 }
 
+// La guía del expreso, para seguir el envío: el número (para copiar) y, si el expreso tiene, el link al seguimiento.
+function GuiaExpreso({ g }: { g: NonNullable<Remito['guia']> }) {
+  const toast = useToast();
+  const url = seguimientoExpreso(g.empresa, g.numero);
+  const copiar = async () => { try { await navigator.clipboard.writeText(g.numero); toast('Número de guía copiado'); } catch { toast('No se pudo copiar: seleccionalo y copialo a mano.', true); } };
+  return (
+    <div className="guia-expreso small">
+      <span className="tag info">Guía {g.empresa ?? 'del expreso'}</span>
+      <b className="num">{g.numero}</b>
+      {g.destinatario && <span className="muted">para {g.destinatario}{g.localidad ? ` (${g.localidad})` : ''}</span>}
+      <button type="button" className="link-btn" onClick={copiar}>Copiar</button>
+      {url && <a className="link-btn" href={url} target="_blank" rel="noreferrer">Ver el seguimiento</a>}
+    </div>
+  );
+}
+
 function RemitoFila({ r, orderId, onCambio, soloVer }: { r: Remito; orderId?: number; onCambio: () => void; soloVer?: boolean }) {
   const toast = useToast();
   const [ocupado, setOcupado] = useState(false);
@@ -310,6 +329,7 @@ function RemitoFila({ r, orderId, onCambio, soloVer }: { r: Remito; orderId?: nu
       <div className="remito-cuerpo">
         <div className="small muted">{[r.pdv && `PDV ${r.pdv}${r.pdv_chofer ? ' (escrito por el chofer)' : ''}`, r.fecha && fmtDate(r.fecha), origenDe(r), r.recibido_por && `recibió ${r.recibido_por}`].filter(Boolean).join(' · ')}</div>
         {productos && <div className="small">{productos}{r.items.length > 3 ? ` y ${r.items.length - 3} más` : ''}</div>}
+        {r.guia && <GuiaExpreso g={r.guia} />}
         {otrosPedidos.length > 0 && (
           <div className="small">Remito de varios pedidos: también {otrosPedidos.map((p, k) => <span key={p.id}>{k ? ' y ' : ''}<Link to={recordUrl('order', p.id)}>{p.nombre}</Link></span>)}</div>
         )}
@@ -527,6 +547,7 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
           {r.fecha && <><dt>Fecha</dt><dd>{fmtDate(r.fecha)}</dd></>}
           {r.recibido_por && <><dt>Recibió</dt><dd>{r.recibido_por}{r.reservas ? ' · a controlar' : ''}</dd></>}
           {r.items.length > 0 && <><dt>Productos</dt><dd>{r.items.map((i) => `${cant(i.quantity)} ${i.description ?? i.code ?? ''}`.trim()).join(' · ')}</dd></>}
+          {r.guia && <><dt>Guía</dt><dd><GuiaExpreso g={r.guia} /></dd></>}
         </dl>
         {r.controles.length > 0 && <ul className="controles small">{r.controles.map((c, i) => <li key={i} className={c.ok === true ? 'ok' : c.ok === false ? 'bad' : ''}>{c.ok === true ? '✓' : c.ok === false ? '✗' : '•'} {c.detalle}</li>)}</ul>}
         {r.otros_remitos_en_foto && <div className="small warn-text">En la foto se ve otro remito: se leyó solo el de adelante.</div>}

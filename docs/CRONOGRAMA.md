@@ -103,6 +103,14 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   que termina («Termina» en vez de «Vuelve» cuando no es el mismo lugar), los kilómetros, el orden más corto y el mapa
   (con una bandera donde termina) lo tienen en cuenta. El chofer lo ve en su app: «terminás en … cerca de las …».
   Columnas `fin`, `fin_nombre` y `fin_direccion` de `cronograma_rutas` (migración `0060_recorrido_termina.sql`).
+- **La guía, sola desde la foto** (pedido de Rodrigo del 13/11/2026): cuando el chofer deja la mercadería en el expreso
+  saca la foto de la guía (muchas veces apoyada encima del remito). Al leerla, Claude saca la empresa y el número de guía
+  y la guía queda cargada en la entrega por expreso del pedido de ese remito; si el remito no se ve, en la del pedido de
+  ese PDV si va por expreso; si no, en la única entrega por expreso sin guía del recorrido de ese día del chofer. Una
+  guía ya cargada no se pisa (si es otra, queda avisado en el remito). Al chofer no se le pide otra foto por eso.
+- **Seguimiento**: con Vía Cargo, la guía es un link a su seguimiento (`viacargo.com.ar/seguimiento-de-envio/<guía>`,
+  el mismo que abre su buscador) en la tarjeta de la semana, en la parada y en el remito; de los demás expresos queda el
+  número para copiar (`web/src/expresos.ts`, donde se suma otro expreso con link).
 - **Sale de → Otro lugar.** Además de los dos depósitos de Formas, un recorrido puede salir de otro lugar: se busca en la
   libreta por nombre o por dirección, o se escribe la dirección. Queda con su punto en el mapa.
 

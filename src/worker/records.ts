@@ -4,7 +4,7 @@ import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
 import { emitDealEvent } from './events';
-import { esVentas, visibleSql } from './alcance';
+import { esVentas, restringido, visibleSql } from './alcance';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 import { RELACIONES, propagarRelacion, relacionSola } from './relacion';
 
@@ -675,8 +675,8 @@ export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params:
     const visible = await visiblePipelineIds(meta, ctx.user);
     if (visible) { where.push('r.pipeline_id IN (SELECT value FROM json_each(?))'); binds.push(JSON.stringify(visible)); }
   }
-  // Perfil Ventas: lo suyo, lo sin propietario y lo asociado a lo suyo (alcance.ts).
-  if (esVentas(ctx.user)) where.push(visibleSql('r', ctx.user));
+  // Perfiles Ventas y Producción: lo que ve cada uno (alcance.ts).
+  if (restringido(ctx.user)) where.push(visibleSql('r', ctx.user));
   if (!params.includeArchived) where.push('r.archived = 0');
   if (params.q?.trim()) {
     const q = params.q.trim();

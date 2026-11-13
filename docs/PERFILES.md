@@ -7,7 +7,7 @@ Configuración → Usuarios.
 |---|---|
 | Admin | Todo, incluida Configuración. |
 | Comercial (Ventas) | Lo suyo (ver abajo). |
-| Producción | Por ahora, todo. Edita Producción. |
+| Producción | Lo suyo: pedidos, Producción, Entregas y Cronograma (ver abajo). Edita Producción. |
 | Logística | Por ahora, todo. Revisa remitos y cierra entregas. |
 
 Permisos (para los que no son Admin): **Edita** crea y edita; **Edita y borra** además borra y restaura; **Solo mira** no
@@ -44,6 +44,20 @@ No ve ni hace:
 
 Lo que crea queda a su nombre (también si lo crea con Claude).
 
+## Perfil Producción (pedido de Rodrigo del 13/11/2026)
+
+Producción trabaja con los pedidos, no con la parte comercial:
+
+- **Pedidos**: todos. **Producción**, **Entregas** y **Cronograma**, como siempre.
+- **Negocios**: ninguno (no los ve, no los busca, no los crea).
+- **Contactos y empresas**: no tiene sus listas en el menú. Abre solo los que necesita para trabajar: los
+  **proveedores e impresores** (tipo de relación «Proveedor») y los que están **en algún pedido** (el cliente y sus
+  contactos). En la ficha del cliente no aparecen sus negocios.
+- **Inicio**: sus tareas, sin los números de ventas. **Crear**: solo pedidos.
+- **Tareas, actividad y conversaciones**: las suyas y las de lo que ve.
+
+Se controla en el mismo lugar que Ventas (`src/worker/alcance.ts`, `esProduccion`), también con Claude.
+
 ### Dónde se controla
 
 Todo en el servidor, en `src/worker/alcance.ts`, así vale igual para la pantalla, la API, **Claude por MCP** y lo que
@@ -66,4 +80,4 @@ Pruebas: `test/ventas.test.mjs`.
 ### Pendiente / a revisar
 
 - Si alguien menciona a una vendedora en la conversación de un pedido que no es suyo, ella no lo ve (ni en la bandeja).
-- Producción y Logística siguen viendo todo; cuando se definan, van en el mismo `alcance.ts`.
+- Logística sigue viendo todo; cuando se defina, va en el mismo `alcance.ts`.

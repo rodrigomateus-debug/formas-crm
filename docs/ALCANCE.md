@@ -111,7 +111,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Función | Estado | Dónde |
 |---|---|---|
 | Ingreso con el mail de Formas (Cloudflare Access); quién entra lo decide Configuración → Usuarios | 🔧 | La aplicación de Access ya está; falta la política «Mails de Formas (CRM)» (a mano o con el workflow «Login de Cloudflare», que necesita el permiso de Access en el token) |
-| Usuarios, equipos, perfiles (Admin, Comercial, Producción, Logística) y permisos (edita, edita y borra, solo mira) | ✅ | Configuración → Usuarios. Producción y Logística por ahora ven todo |
+| Usuarios, equipos, perfiles (Admin, Comercial, Producción, Logística) y permisos (edita, edita y borra, solo mira) | ✅ | Configuración → Usuarios. Producción ve pedidos y proveedores, sin la parte comercial; Logística por ahora ve todo |
 | Qué pipelines ve cada uno: por pipeline, «Todos» o «Solo estos equipos»; equipos extra por usuario; los administradores ven todo | ✅ | Configuración → Pipelines (Quién lo ve) y Usuarios (Otros equipos, Pipelines que ve). En HubSpot esto es del plan Enterprise |
 | Perfil Ventas (Comercial): cada vendedora ve lo suyo, lo sin propietario y lo asociado a lo suyo; sin Producción, la bandeja de Entregas (los remitos de sus pedidos sí los ve y descarga), ranking del equipo, importar ni exportar | ✅ | `src/worker/alcance.ts`, también por Claude (MCP); detalle en [PERFILES.md](PERFILES.md) |
 

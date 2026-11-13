@@ -126,7 +126,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
     const deal = from?.deals.find((d) => d.id === dealId);
     if (!from || !deal || from.stage.id === stage.id) return;
     // Lo que la etapa pide para entrar (por ejemplo, el motivo al perder), como las propiedades condicionales de HubSpot.
-    const missing = missingFor(stage, { ...deal.props, ...extra });
+    const missing = missingFor(stage, { ...deal.props, ...extra }, extra);
     if (missing.length) { setAsk({ deal, stage, missing }); return; }
     const amt = Number(deal.props.amount || 0);
     setCols((cs) => cs.map((c) => c.stage.id === from.stage.id
@@ -283,15 +283,19 @@ export function StageProps({ deal, stage, missing, onClose, onSave }: { deal: Cr
   const lost = !!stage.is_closed && !stage.is_won;   // is_closed es 0/1: sin el !! se veía un «0» suelto en la ventana
   const detail = propOf(meta, 'deal', 'closed_lost_reason');
   const [vals, setVals] = useState<Record<string, unknown>>({});
-  const ready = props.every((p) => !faltaDato(p.name, vals[p.name]));
+  // Lo opcional (ask_props) se puede dejar vacío: se manda igual con su clave, así no se vuelve a preguntar.
+  const opcional = (p: Property) => !(stage.config?.required_props ?? []).includes(p.name) && (stage.config?.ask_props ?? []).includes(p.name);
+  const soloOpcionales = props.length > 0 && props.every(opcional);
+  const ready = props.every((p) => opcional(p) || !faltaDato(p.name, vals[p.name]));
+  const guardar = () => onSave({ ...Object.fromEntries(props.filter(opcional).map((p) => [p.name, ''])), ...vals });
   return (
     <Modal title={`${stage.label}: ${deal.name}`} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Cancelar</button>
-      <button className="btn primary" disabled={!ready} onClick={() => onSave(vals)}>Guardar</button>
+      <button className="btn primary" disabled={!ready} onClick={guardar}>{soloOpcionales && props.every((p) => faltaDato(p.name, vals[p.name])) ? 'Seguir sin cargarlo' : 'Guardar'}</button>
     </>}>
-      <p className="muted small" style={{ margin: 0 }}>Para pasar a «{stage.label}» hay que completar:</p>
+      <p className="muted small" style={{ margin: 0 }}>{soloOpcionales ? `Al pasar a «${stage.label}», si ya lo tenés:` : `Para pasar a «${stage.label}» hay que completar:`}</p>
       {props.map((p, i) => (
-        <label key={p.name} className="field">{p.label} *<PropertyInput prop={p} type="deal" value={vals[p.name]} onChange={(v) => setVals((x) => ({ ...x, [p.name]: v }))} autoFocus={i === 0} /></label>
+        <label key={p.name} className="field">{p.label}{opcional(p) ? <span className="muted small"> (opcional){p.description ? ` · ${p.description}` : ''}</span> : ' *'}<PropertyInput prop={p} type="deal" value={vals[p.name]} onChange={(v) => setVals((x) => ({ ...x, [p.name]: v }))} autoFocus={i === 0} /></label>
       ))}
       {lost && detail && !missing.includes('closed_lost_reason') && (
         <label className="field">{detail.label}<PropertyInput prop={detail} type="deal" value={vals.closed_lost_reason} onChange={(v) => setVals((x) => ({ ...x, closed_lost_reason: v }))} /></label>

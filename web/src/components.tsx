@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, missingFor, UNIDADES, type UnidadKey,
+  http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, faltanObligatorias, UNIDADES, type UnidadKey,
   userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney,
 } from './lib';
 import { Select } from './Select';
@@ -349,7 +349,7 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
     if (needsCompany && !elegidos('company').length && !elegidos('contact').length) {
       toast(`En «${pipeline!.label}» el negocio tiene que tener una empresa asociada.`, true); return;
     }
-    const missing = stage ? missingFor(stage, form) : [];
+    const missing = stage ? faltanObligatorias(stage, form) : [];
     if (missing.length) { toast(`Para crear en «${stage!.label}» falta: ${missing.map((m) => propOf(meta, type, m)?.label ?? m).join(', ')}.`, true); return; }
     setBusy(true);
     try {

@@ -56,10 +56,45 @@ export function vendedoresPorPedido(filasPorEmpresa) {
   }
   return out;
 }
+// Finnegans cobra por cantidad de consultas: se cuentan y se informan al final de cada corrida.
+export const consultas = { n: 0 };
+// Los pedidos de venta recientes de Formas Publicitarias, para darlos de alta en el CRM sin esperar a ClickUp
+// (src/worker/pedidosfin.ts): del primer renglón de cada pedido, el cliente, su CUIT, el vendedor, la fecha, la entrega y
+// si es evento. Sin los anulados, Mercado Libre, MarketShell ni los objetivos de venta. `desde`: AAAA-MM-DD.
+const aIso = (s) => { const m = String(s ?? '').match(/^(\d{2})[-/](\d{2})[-/](\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : String(s ?? '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null; };
+// `prefijo`: «DEMO » para los de FP DEMO (la empresa de pruebas), que van aparte.
+export function pedidosNuevos(filas, desde, prefijo = '') {
+  const out = {};
+  const anulados = new Set();
+  for (const r of filas) {
+    const k = clavePedido(r.DOCNROINT);
+    if (!k || !/^PEDVTA(STP|FP|NE) - /.test(k)) continue;
+    if (/anulad/i.test(r.ESTADO ?? '')) { anulados.add(k); continue; }
+    const fecha = aIso(r.FECHA);
+    if (k in out || !fecha || fecha < desde) continue;
+    out[k] = { cliente: String(r.CLIENTE ?? '').trim(), cuit: String(r.NRODEIDENTIFICACION ?? '').trim(), vendedor: String(r.VENDEDOR ?? '').trim(), fecha,
+      entrega: aIso(r.USRFECHAENTREGA), evento: r.USRESEVENTO === true || /^(s[ií]|true|1)$/i.test(String(r.USRESEVENTO ?? '')) };
+  }
+  for (const k of anulados) delete out[k];
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [prefijo + k, v]));
+}
+// Los pedidos anulados en Finnegans (todos sus renglones anulados): en el CRM pasan a «Anulado».
+export function pedidosAnulados(filas, prefijo = '') {
+  const vivos = new Set();
+  const anulados = new Set();
+  for (const r of filas) {
+    const k = clavePedido(r.DOCNROINT);
+    if (!k || !/^PEDVTA(STP|FP|NE) - /.test(k)) continue;
+    (/anulad/i.test(r.ESTADO ?? '') ? anulados : vivos).add(k);
+  }
+  return [...anulados].filter((k) => !vivos.has(k)).map((k) => prefijo + k);
+}
+
 async function getJson(url, init, intentos = 4) {
   let ultimo;
   for (let i = 0; i < intentos; i++) {
     try {
+      consultas.n++;
       const res = await fetch(url, init);
       const txt = await res.text();
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -73,6 +108,7 @@ export async function finToken() {
   const id = process.env.FINNEGANS_CLIENT_ID || process.env.FIN_CLIENT_ID;
   const secret = process.env.FINNEGANS_CLIENT_SECRET || process.env.FIN_SECRET;
   if (!id || !secret) throw new Error('Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.');
+  consultas.n++;
   const res = await fetch(`${FIN}/oauth/token?grant_type=client_credentials&client_id=${encodeURIComponent(id)}&client_secret=${encodeURIComponent(secret)}`);
   if (!res.ok) throw new Error(`Finnegans token: HTTP ${res.status}`);
   return (await res.text()).trim().replace(/^"|"$/g, '');
@@ -164,7 +200,7 @@ export function origenesDe(filasPorEmpresa) {
     // Una factura puede salir de varios documentos (un pedido y un remito, o varios remitos): se guardan todos.
     const k = `${emp}|${ie}`;
     out.set(k, [...(out.get(k) ?? []), { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
-      pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null }]);
+      pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null, cae: x.OBTUVOCAE === 'SI' }]);
   }
   return out;
 }
@@ -278,13 +314,16 @@ export function porFacturarDe(resumen, pendRemitos = new Map(), anticipos = new 
 }
 
 // Para el CRM: cada comprobante, de qué pedido es y su total/neto (con eso pasa a sin IVA lo que falta cobrar de él).
-export function facturasParaCrm(docs, asignadas) {
+// `origenes` (informe de facturas): con él va también la identificación de la factura y si ya tiene CAE, así el CRM
+// adjunta al pedido solo las facturas nuevas en vez de consultar todos los pedidos (Finnegans cobra por consulta).
+export function facturasParaCrm(docs, asignadas, origenes = new Map()) {
   const out = {};
   for (const [k, d] of docs) {
     const r = d.neto ? d.total / d.neto : 0;
     const factor = r >= 1 && r < 2 ? Math.round(r * 1e6) / 1e6 : null;
     const pedido = asignadas.get(k) ?? null;
-    if (pedido || factor) out[k] = { pedido, factor };
+    const cae = (origenes.get(`${d.emp}|${d.ie}`) ?? []).some((o) => o.cae);
+    if (pedido || factor) out[k] = { pedido, factor, ...(cae && pedido ? { ie: d.ie, cae: true } : {}) };
   }
   return out;
 }
@@ -347,10 +386,14 @@ async function main() {
   const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');
   if (!base || !process.env.CRM_TOKEN) throw new Error('Faltan CRM_URL y CRM_TOKEN.');
   const res = await fetch(`${base}/hooks/pedidos/totales`, { method: 'POST', redirect: 'manual',
-    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas) }) });
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas),
+      // Formas Publicitarias y FP DEMO (EMPRESAS[1], la de pruebas, que entra aparte).
+      pedidos: { ...pedidosNuevos(filas[0], masDias(hoy, -15)), ...pedidosNuevos(filas[1] ?? [], masDias(hoy, -15), 'DEMO ') },
+      anulados: [...pedidosAnulados(filas[0]), ...pedidosAnulados(filas[1] ?? [], 'DEMO ')] }) });
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
   console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans).`);
+  if (r.nuevos) console.log(`Pedidos nuevos de Finnegans: ${r.nuevos.recibidos} recientes, ${r.nuevos.creados} dados de alta, ${r.nuevos.completados} completados, ${r.nuevos.con_negocio} asociados a su negocio, ${r.nuevos.anulados ?? 0} pasados a anulado; ${r.nuevos.duplicados} números de PDV repetidos.`);
   // Si un informe falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
   const filasSaldo = await saldos(tok, hoy);
   const resumen = resumenPedidos(filas);
@@ -377,13 +420,14 @@ async function main() {
   const porFacturar = porFacturarDe(resumen, pend.porPedido, anticiposDe(docs, asignadas), netoFacturado(docs, asignadas));
   const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ filas: filasSaldo, porFacturar, factores: factoresDe(resumen), facturas: facturasParaCrm(docs, asignadas), completo: true }) });
+    body: JSON.stringify({ filas: filasSaldo, porFacturar, factores: factoresDe(resumen), facturas: facturasParaCrm(docs, asignadas, orig), completo: true }) });
   if (!rs.ok) throw new Error(`CRM /hooks/pedidos/saldos: HTTP ${rs.status}`);
   const s = await rs.json();
   const sinFacturar = Object.values(porFacturar).filter((v) => v > 0);
   const sinPedido = [...docs.keys()].filter((k) => !asignadas.get(k)).length;
   console.log(`Facturas: ${docs.size} comprobantes desde ${desde}, ${docs.size - sinPedido} con su pedido (${sinPedido} sin: Mercado Libre, de pedidos anteriores, otros). Remitos sin facturar: ${remitos.size}, ${pend.sinPedido.length} sin pedido.`);
   console.log(`Saldos: ${s.filas} comprobantes con saldo, ${s.cruzadas} cruzan con un pedido; ${sinFacturar.length} pedidos con algo por facturar ($ ${Math.round(sinFacturar.reduce((a, b) => a + b, 0)).toLocaleString('es-AR')} sin IVA); ${s.actualizados} actualizados.`);
+  console.log(`Consultas a Finnegans en esta corrida: ${consultas.n}.`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch((e) => { console.error(e.message); process.exit(1); });

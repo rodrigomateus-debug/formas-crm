@@ -257,3 +257,79 @@ Configuración → Integraciones → «Pedidos: ClickUp y Finnegans», con boton
 - Los remitos se traen de ClickUp cada vez que se abren (son fotos de hasta 3 MB y ClickUp da links que vencen).
 - El PDF de la factura depende de la sesión de Finnegans GO: si cambia la pantalla de inicio de sesión o la dirección de
   Teamplace, el workflow falla y avisa por mail de GitHub; la factura sigue en el pedido con su número y CAE.
+
+## Negocio, pedido y Finnegans
+
+Pedido de Rodrigo del 13/11/2026. El circuito: la oportunidad se trabaja en el negocio; cuando se confirma, el pedido se
+carga desde el cotizador, queda en Finnegans y de Finnegans va a ClickUp. Finnegans se mantiene; ClickUp, en algún
+momento, se saca. El objetivo: que el negocio quede relacionado con su pedido y que el pedido sea lo que se cargó en
+Finnegans.
+
+### El pedido entra desde Finnegans, sin esperar a ClickUp
+
+- El informe de pedidos de venta por producto que ya se baja cada hora para los totales (`scripts/pedidos-totales.mjs`)
+  trae los pedidos nuevos. Con los de los últimos 15 días de Formas Publicitarias (sin anulados, Mercado Libre,
+  MarketShell ni objetivos de venta) el CRM da de alta los que no tiene: nombre, N° de PDV, pedido de Finnegans, unidad
+  de negocio (por el tipo de documento: `PEDVTASTP` Formas Shop, `PEDVTAFP` Corporate, `PEDVTANE` No Estrés), fecha de
+  entrega, si es evento, vendedora, razón social y CUIT. **No suma ninguna consulta a Finnegans**
+  (`src/worker/pedidosfin.ts`, `aplicarPedidos`; llega por `POST /hooks/pedidos/totales` en `pedidos`).
+- **No se duplica con ClickUp.** La llave es el pedido de Finnegans («PEDVTASTP - 31277») o, si el pedido todavía no lo
+  tiene, el número de PDV en la misma unidad. El que llega primero lo crea; el otro lo completa: la sincronización de
+  ClickUp busca por número de PDV y le suma el link del PDV y el estado de producción; el informe de Finnegans le suma el
+  pedido de Finnegans, la unidad y la razón social. El mismo número en otra unidad es otro pedido.
+- **Control de repetidos:** `GET /api/integrations/pedidos` trae en `finnegans.duplicados` los pedidos con el mismo
+  pedido de Finnegans o el mismo número en la misma unidad (no debería haber; si aparece alguno, se combinan). El script
+  informa cuántos hay en cada corrida.
+- **Aviso de Finnegans (webhook).** En Finnegans hay un proceso de tipo Transacción en modo Webhook,
+  `FORMAS_HUB_PEDIDOS`, para los pedidos de venta de Shop, Corporate y No Estrés (`PEDVTASTP`, `PEDVTAFP`, `PEDVTANE`),
+  que llama al CRM cuando se crea o se anula uno; avisa también cuando el pedido se carga por API, como hace el cotizador
+  (probado el 13/11/2026). `POST /api/integrations/finnegans/webhook` (administrador) da la dirección, con su llave:
+  `/hooks/finnegans/<llave>`. El aviso trae el tipo de documento, la identificación externa del pedido y el evento; con
+  eso el CRM lee el pedido de Finnegans (tres consultas) y, si es de Formas Publicitarias o de FP DEMO y no lo tiene, lo da de alta
+  en el momento. Si el pedido se anula, pasa a «Anulado». El registro de entradas guarda cada aviso sin los tokens que
+  manda Finnegans. Se prende y se apaga en Finnegans (`PATCH custom/BProc/FORMAS_HUB_PEDIDOS/config`
+  con `{"activo": true}`).
+- **Anulados.** Un pedido anulado en Finnegans pasa a «Anulado» en el CRM: por el aviso, o por el informe de cada hora
+  (los pedidos con todos sus renglones anulados). ClickUp lo anula por su lado, con su propia integración con Finnegans.
+- **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
+  los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
+  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni
+  los filtros por unidad de los pedidos de verdad; sí se pueden asociar a un negocio por su número.
+
+### El N° de PDV en el negocio
+
+- Al pasar un negocio a **«Pasos operativos»** (Formas Shop, No Estrés) o a **«Cierre Ganado»** (Corporate), el CRM
+  pregunta el **N° de PDV**. Es opcional: se puede seguir sin cargarlo. Es una pregunta de etapa (`stages.config.ask_props`),
+  que se elige en Configuración → Pipelines, columna «Pregunta (opcional)».
+- Con el número, el pedido queda asociado al negocio: en el momento si ya está en el CRM, o cuando llega. El monto del
+  negocio pasa a ser el total de sus pedidos (`montos.ts`). Si ese PDV ya está en otro negocio, rebota sin cambiar nada.
+- **Sin número**, un pedido nuevo se asocia solo cuando no hay dudas: su empresa tiene un único negocio de esa unidad
+  esperando pedido (en una etapa que pregunta el PDV, o ganado), sin pedidos y movido en los últimos 90 días. Si no, queda
+  con el filtro «Sin negocio» de la lista de pedidos. Cada hora se vuelve a intentar con los pedidos de los últimos 30 días.
+- `src/worker/vinculos.ts`.
+
+### Razón social y empresa
+
+Una empresa del CRM puede facturar con varias razones sociales (cada una con su CUIT); cada CUIT es de una sola empresa
+(tabla `razones_sociales`; las empresas con CUIT cargado arrancan con esa). El pedido guarda la razón social y el CUIT
+que trae de Finnegans, y su empresa se decide así (`src/worker/razones.ts`):
+
+1. **Si el negocio ya tiene una empresa, queda esa**, aunque el pedido venga con otra razón social: esa razón social pasa
+   a ser una de las de esa empresa.
+2. Si no, la empresa que el pedido ya tiene o la que ya tiene ese CUIT; queda también en el negocio.
+3. **Si nadie tiene ese CUIT, no se adivina:** el pedido y su negocio muestran la razón social como empresa sugerida
+   («Sin empresa»), para crear la empresa con ese nombre, asignarla a una que ya está (la razón social se suma a las
+   suyas) o crear una empresa con otro nombre, la marca, que factura con esa razón social. La empresa queda en el pedido
+   y en el negocio.
+
+La ficha de la empresa muestra sus razones sociales. Al combinar dos empresas, pasan a la que queda.
+
+### Cuánto se consulta a Finnegans
+
+Finnegans cobra por cantidad de consultas (paquete mensual por escala, todo el espacio de trabajo junto).
+
+- **Facturas.** Antes el CRM recorría los pedidos abiertos cada media hora, una consulta por pedido (40 por corrida, unas
+  58.000 por mes). Ahora el informe de cada hora avisa qué pedidos tienen una factura nueva con CAE (tabla
+  `facturas_pendientes`) y se consultan solo esos: una o dos consultas por factura. El recorrido completo queda de 3 a 4
+  de la mañana, como red, y en el botón «Sincronizar» de Configuración.
+- **El script de cada hora** informa al final cuántas consultas hizo («Consultas a Finnegans en esta corrida»).

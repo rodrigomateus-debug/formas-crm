@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { http, qs, useMeta, useToast, propsOf, propOf, stageOf, missingFor, OBJECTS, Icon, type Filter, type ObjectType, type Property } from '../lib';
+import { http, qs, useMeta, useToast, propsOf, propOf, stageOf, faltanObligatorias, OBJECTS, Icon, type Filter, type ObjectType, type Property } from '../lib';
 import { Modal, PropertyInput, StageSelect, userOption } from '../components';
 import { Select } from '../Select';
 
@@ -104,7 +104,7 @@ function BulkEdit({ type, count, onClose, onSave }: { type: ObjectType; count: n
   const [extra, setExtra] = useState<Record<string, unknown>>({});
   const p = editable.find((x) => x.name === prop)!;
   const stage = type === 'deal' && prop === 'dealstage' && value ? stageOf(meta, value)?.stage : undefined;
-  const needs = stage ? missingFor(stage, {}).map((n) => propOf(meta, 'deal', n)).filter(Boolean) as Property[] : [];
+  const needs = stage ? faltanObligatorias(stage, {}).map((n) => propOf(meta, 'deal', n)).filter(Boolean) as Property[] : [];
   const ready = value != null && value !== '' ? needs.every((n) => extra[n.name] != null && extra[n.name] !== '') : true;
   return (
     <Modal title={`Editar ${count.toLocaleString('es-AR')}`} onClose={onClose} footer={<>

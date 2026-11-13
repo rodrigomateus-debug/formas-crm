@@ -339,7 +339,7 @@ function Pipelines() {
       <div className="panel"><div className="panel-head"><h2>Etapas</h2>
         <button className="btn sm" onClick={() => setDraft({ ...draft, stages: [...draft.stages.filter((s) => !s.is_closed), { id: `nueva-${Date.now()}`, _new: true, pipeline_id: draft.id, label: 'Nueva etapa', display_order: 0, probability: 0.5, is_closed: 0, is_won: 0, config: {} }, ...draft.stages.filter((s) => s.is_closed)] })}>+ Etapa</button></div>
         <div className="table-wrap" style={{ border: 0, overflow: 'visible' }}><table className="grid">
-          <thead><tr><th className="nosort" /><th className="nosort">Etapa</th><th className="nosort">Probabilidad</th><th className="nosort">Tipo</th><th className="nosort">Para entrar pide</th><th className="nosort">Tarea automática al entrar</th><th className="nosort" /></tr></thead>
+          <thead><tr><th className="nosort" /><th className="nosort">Etapa</th><th className="nosort">Probabilidad</th><th className="nosort">Tipo</th><th className="nosort">Para entrar pide</th><th className="nosort" title="Se pregunta al entrar a la etapa, pero se puede seguir sin completarlo">Pregunta (opcional)</th><th className="nosort">Tarea automática al entrar</th><th className="nosort" /></tr></thead>
           <tbody>{draft.stages.map((s, i) => (
             <tr key={s.id}>
               <td style={{ whiteSpace: 'nowrap' }}><button className="btn ghost sm" disabled={i === 0} onClick={() => moveStage(i, -1)} aria-label="Subir">↑</button><button className="btn ghost sm" disabled={i === draft.stages.length - 1} onClick={() => moveStage(i, 1)} aria-label="Bajar">↓</button></td>
@@ -348,6 +348,7 @@ function Pipelines() {
               <td><Select className="input" style={{ width: 120 }} value={s.is_closed ? (s.is_won ? 'won' : 'lost') : 'open'} onChange={(e) => setStage(i, { is_closed: e.target.value === 'open' ? 0 : 1, is_won: e.target.value === 'won' ? 1 : 0, probability: e.target.value === 'won' ? 1 : e.target.value === 'lost' ? 0 : s.probability })}>
                 <option value="open">Abierta</option><option value="won">Ganada</option><option value="lost">Perdida</option></Select></td>
               <td style={{ minWidth: 220, overflow: 'visible' }}><MultiPick options={propOpts} values={s.config?.required_props ?? []} onChange={(v) => setStage(i, { config: { ...s.config, required_props: v } })} /></td>
+              <td style={{ minWidth: 200, overflow: 'visible' }}><MultiPick options={propOpts} values={s.config?.ask_props ?? []} onChange={(v) => setStage(i, { config: { ...s.config, ask_props: v } })} /></td>
               <td style={{ minWidth: 300 }}><div className="row">
                 <input className="input" placeholder="Ej.: Seguimiento de {negocio}" value={s.config?.task?.subject ?? ''} onChange={(e) => setStage(i, { config: { ...s.config, task: e.target.value ? { ...(s.config?.task ?? {}), subject: e.target.value } : null } })} />
                 <input className="input num" style={{ width: 70 }} type="number" min={0} title="Vence en días" value={s.config?.task?.due_days ?? 1} disabled={!s.config?.task?.subject} onChange={(e) => setStage(i, { config: { ...s.config, task: { ...(s.config?.task ?? { subject: '' }), due_days: Number(e.target.value) } } })} />

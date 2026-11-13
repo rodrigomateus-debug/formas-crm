@@ -44,7 +44,7 @@ export function pedidoIds(p: string) {
 }
 
 export interface PedidoVenta {
-  Cliente?: string; MonedaCodigo?: string;
+  Cliente?: string; MonedaCodigo?: string; Fecha?: string; VendedorCodigo?: string; USR_FechaEntrega?: string; USR_EsEvento?: boolean;
   Items?: Array<{ ProductoCodigo?: string; Cantidad?: number; Precio?: number; Descuento1?: number; Descuento2?: number; Descripcion?: string; IncluyeImpuesto?: boolean }>;
 }
 
@@ -125,25 +125,27 @@ export async function finnegansState(db: D1Database): Promise<FinnegansState> {
   return r ? JSON.parse(r.value) : {};
 }
 
-export async function syncFacturas(env: Env) {
+// Cada cuánto se lee Finnegans (que cobra por cantidad de consultas):
+// - Siempre: los pedidos con una factura nueva que avisó el informe de cada hora (tabla facturas_pendientes, la llena
+//   aplicarSaldos en totales.ts). Una o dos consultas por factura nueva.
+// - `barrido`: además, recorrer de a tandas los pedidos abiertos de los últimos 4 meses, por si al informe se le escapó
+//   alguna. Antes se hacía cada media hora (40 consultas por corrida, unas 58.000 por mes); ahora una hora por noche y
+//   cuando se toca «Sincronizar» en Configuración.
+export async function syncFacturas(env: Env, opts: { barrido?: boolean } = {}) {
   const db = env.DB;
   const state = await finnegansState(db);
   const out: FinnegansState = { ...state, at: new Date().toISOString(), revisados: 0, facturas: 0, error: null };
   const b = Budget.of(env);
   try {
+    const pendientes = (await db.prepare(`SELECT DISTINCT p.record_id AS id, r.props FROM facturas_pendientes p JOIN records r ON r.id = p.record_id AND r.archived = 0
+      WHERE p.intentos < 5 ORDER BY p.created_at LIMIT ?`).bind(POR_CORRIDA).all<{ id: number; props: string }>()).results;
+    if (!pendientes.length && !opts.barrido) return { ...state, sin_novedades: true };
     const token = await finnegansToken(env, b);
     if (!token) return { skipped: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
-    // Pedidos de los últimos 4 meses que no están anulados ni entregados y facturados; se recorren de a tandas (cursor
-    // por id) y se vuelve a empezar.
-    const pick = (after: number) => db.prepare(`SELECT id, props FROM records WHERE object_type = 'order' AND archived = 0 AND id > ?
-      AND json_extract(props, '$.pedido_finnegans') IS NOT NULL AND COALESCE(json_extract(props, '$.hs_pipeline_stage'), '') != ?
-      AND NOT (json_extract(props, '$.hs_pipeline_stage') = ? AND json_extract(props, '$.factura_numero') IS NOT NULL)
-      AND updated_at >= ? ORDER BY id LIMIT ?`).bind(after, ANULADO, ENTREGADO, new Date(Date.now() - 120 * 86_400_000).toISOString(), POR_CORRIDA).all<{ id: number; props: string }>();
-    let rows = (await pick(state.cursor ?? 0)).results;
-    if (!rows.length && state.cursor) rows = (await pick(0)).results;
     const sys = await db.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<User>();
     const ctx: Ctx = { user: sys!, source: 'finnegans', sourceDetail: 'Facturas' };
-    for (const r of rows) {
+    // Las facturas con CAE de un pedido que todavía no están adjuntas.
+    const revisar = async (r: { id: number; props: string }) => {
       const props = JSON.parse(r.props) as Record<string, string>;
       const facturas = await facturasDelPedido(env, token, props.pedido_finnegans, b);
       for (const f of facturas) {
@@ -160,11 +162,34 @@ export async function syncFacturas(env: Env) {
         await updateRecord(db, ctx, 'order', r.id, { factura_numero: numero }, { system: true, strict: false });
         out.facturas!++;
       }
-      // El pedido queda revisado recién cuando están todas sus facturas (si se corta antes, se repite en la próxima).
       out.revisados!++;
-      out.cursor = r.id;
+    };
+    // 1. Los pedidos con factura nueva. Lo que ya quedó adjunto sale de la lista; lo que no, se reintenta (hasta 5 veces).
+    for (const r of pendientes) {
+      if (!JSON.parse(r.props).pedido_finnegans) { await db.prepare('DELETE FROM facturas_pendientes WHERE record_id = ?').bind(r.id).run(); continue; }
+      await revisar(r);
+      await db.batch([
+        db.prepare(`DELETE FROM facturas_pendientes WHERE record_id = ?1 AND EXISTS (SELECT 1 FROM files f WHERE f.record_id = ?1 AND f.source = 'finnegans'
+          AND UPPER(TRIM(f.source_ref)) = UPPER(TRIM(facturas_pendientes.ie)))`).bind(r.id),
+        db.prepare('UPDATE facturas_pendientes SET intentos = intentos + 1 WHERE record_id = ?').bind(r.id),
+      ]);
     }
-    if (rows.length < POR_CORRIDA) out.cursor = 0;
+    if (opts.barrido) {
+      // 2. Pedidos de los últimos 4 meses que no están anulados ni entregados y facturados; se recorren de a tandas (cursor
+      // por id) y se vuelve a empezar.
+      const pick = (after: number) => db.prepare(`SELECT id, props FROM records WHERE object_type = 'order' AND archived = 0 AND id > ?
+        AND json_extract(props, '$.pedido_finnegans') IS NOT NULL AND COALESCE(json_extract(props, '$.hs_pipeline_stage'), '') != ?
+        AND NOT (json_extract(props, '$.hs_pipeline_stage') = ? AND json_extract(props, '$.factura_numero') IS NOT NULL)
+        AND updated_at >= ? ORDER BY id LIMIT ?`).bind(after, ANULADO, ENTREGADO, new Date(Date.now() - 120 * 86_400_000).toISOString(), POR_CORRIDA).all<{ id: number; props: string }>();
+      let rows = (await pick(state.cursor ?? 0)).results;
+      if (!rows.length && state.cursor) rows = (await pick(0)).results;
+      for (const r of rows) {
+        await revisar(r);
+        // El pedido queda revisado recién cuando están todas sus facturas (si se corta antes, se repite en la próxima).
+        out.cursor = r.id;
+      }
+      if (rows.length < POR_CORRIDA) out.cursor = 0;
+    }
   } catch (e) {
     if (!(e instanceof OutOfBudget)) out.error = (e as Error).message;
   }

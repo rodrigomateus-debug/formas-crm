@@ -21,9 +21,13 @@ export const TIPO_LABEL = { referencia: 'Referencia', tecnico: 'Técnico' } as c
 const esPdf = (b: { mime: string | null; nombre: string }) => b.mime === 'application/pdf' || /\.pdf$/i.test(b.nombre);
 const urlArchivo = (b: Boceto, descargar = false) => `/api/bocetos/${b.id}/archivo${descargar ? '?descargar=1' : ''}`;
 
-export function useBocetos(type: ObjectType, id: number) {
-  return useAsync(() => http<BocetosRes>('GET', `/records/${type}/${id}/bocetos`), [type, id]);
+// `empresas` (ids de las empresas asociadas): los «bocetos de negocios de esta empresa» dependen de cuál es; si cambia, se
+// vuelven a pedir.
+export function useBocetos(type: ObjectType, id: number, empresas = '') {
+  return useAsync(() => http<BocetosRes>('GET', `/records/${type}/${id}/bocetos`), [type, id, empresas]);
 }
+// Las empresas asociadas a un registro, como clave para volver a pedir lo que depende de ellas.
+export const claveEmpresas = (assoc: { company?: Array<{ id: number }> } | null | undefined) => (assoc?.company ?? []).map((c) => c.id).join(',');
 
 // ---------- Leer el boceto para saber a qué producto va ----------
 
@@ -379,13 +383,13 @@ export function BocetoVisor({ b, productos, esPedido, onClose, onCambio, logos, 
 
 // Bocetos del negocio (antes de que exista el pedido): se suben con el nombre del producto; cuando llega el pedido, se
 // usan desde la ficha del pedido.
-export function BocetosNegocioCard({ dealId }: { dealId: number }) {
+export function BocetosNegocioCard({ dealId, empresas = '' }: { dealId: number; empresas?: string }) {
   const res = useBocetos('deal', dealId);
   const [ver, setVer] = useState<Boceto | null>(null);
   const [subidos, setSubidos] = useState<Boceto[] | undefined>();
   const abrir = (b: Boceto | null, recien?: Boceto[]) => { setSubidos(recien); setVer(b); };
   const sub = useSubirBocetos('deal', dealId, null, (s) => { res.reload(); abrir(s[0], s); });
-  const lg = useLogos('deal', dealId);
+  const lg = useLogos('deal', dealId, empresas);
   const logos = { type: 'deal' as const, recordId: dealId, res: lg.data, onCambio: () => lg.reload() };
   const lista = res.data?.bocetos ?? [];
   const grupos = new Map<string, Boceto[]>();

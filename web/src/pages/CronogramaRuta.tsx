@@ -22,7 +22,9 @@ const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Est
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[] }
 interface BaseGeo { id: string; nombre: string; direccion: string; lat: number | null; lng: number | null }
-interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; rutas: Recorrido[]; guardada: boolean; choferes: string[]; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
+// `retiran`: las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido); `parcial`: el resto del pedido se envía.
+interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
+  choferes: string[]; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
 interface Real extends TramosReales { linea: Array<[number, number]> }
 
 // Con el número en blanco encima: todos pasan 4,5:1.
@@ -341,6 +343,15 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             {datos.llegan.length ? datos.llegan.map((m) => <div key={m.id} className={m.hecho ? 'ok' : ''}><i /><span><b>{m.lugar ?? 'Proveedor'}</b>PDV {m.npdv ?? '—'} {m.cliente ?? ''}{m.articulo ? ` · ${cantidad(m)}` : ''}</span></div>)
               : <div className="muted small">Nada para recibir este día.</div>}
           </section>
+          {(datos.retiran?.length ?? 0) > 0 && (
+            <section className="cr-llegan cr-k-E">
+              <h3>Retiran en Formas <span className="muted">(lo retira el cliente: no es parte del recorrido)</span></h3>
+              {datos.retiran!.map((m) => (
+                <div key={m.id} className={m.hecho ? 'ok' : ''}><i /><span><b>{m.cliente ?? `PDV ${m.npdv ?? '—'}`}</b>PDV {m.npdv ?? '—'} · en {m.retira_en}
+                  {m.parcial ? ' (una parte; el resto se envía)' : ''}{m.articulo ? ` · ${cantidad(m)}` : ''}</span></div>
+              ))}
+            </section>
+          )}
         </div>
       </div>
     </div>

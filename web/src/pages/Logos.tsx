@@ -28,8 +28,10 @@ export const CURVAS: Record<Curvas, { label: string; cls: string; ayuda: string 
   no_vectorial: { label: 'No vectorial', cls: 'warn', ayuda: 'Es una imagen (PNG, JPG, PSD…): sirve de referencia, pero para producir hace falta el vectorial.' },
 };
 
-export function useLogos(type: ObjectType, id: number) {
-  return useAsync(() => http<LogosRes>('GET', `/records/${type}/${id}/logos`), [type, id]);
+// `empresas`: las empresas asociadas al pedido o negocio (sus ids). Si cambian (se asocia o se crea la empresa desde la vista
+// previa), los logos se vuelven a pedir: antes quedaba «no tiene empresa» hasta cerrar y abrir (aviso de Rodrigo del 13/11/2026).
+export function useLogos(type: ObjectType, id: number, empresas = '') {
+  return useAsync(() => http<LogosRes>('GET', `/records/${type}/${id}/logos`), [type, id, empresas]);
 }
 
 // El logo que va en un producto: el elegido o, si no, el principal (el primero de la lista).

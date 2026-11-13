@@ -26,6 +26,7 @@ interface Articulo {
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
   foto?: string | null;
   logo?: string | null;   // ok, textos, no_vectorial, sin_verificar o falta (logos.ts)
+  proveedor_sku?: string | null;   // el SKU, si el proveedor lo puso el CRM por el SKU (completarProveedores)
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
@@ -631,7 +632,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
       <td />
       <td><span className="prod-real"><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega real de ${a.nombre}`} alerta={atras(a.entrega_real)} /><Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={a.entrega_real} /></span></td>
-      <td className="opcion-cell"><OpcionCelda v={v} campo="proveedor" valor={a.proveedor} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${a.nombre}`} /></td>
+      <td className="opcion-cell" title={a.proveedor_sku ? `Por el SKU ${a.proveedor_sku}` : undefined}><OpcionCelda v={v} campo="proveedor" valor={a.proveedor} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${a.nombre}`} /></td>
       <td className="opcion-cell"><OpcionCelda v={v} campo="impresor" valor={a.impresor} editable={ed} onChange={set('impresor')} opciones={imps} label={`Impresor de ${a.nombre}`} /></td>
       <td><FechaCelda valor={a.ingreso_proveedor} editable={ed} onChange={set('ingreso_proveedor')} label={`Ingreso del proveedor de ${a.nombre}`} /></td>
       <td><FechaCelda valor={a.retiro_proveedor} editable={ed} onChange={set('retiro_proveedor')} label={`Retiro del proveedor de ${a.nombre}`} /></td>

@@ -8,6 +8,7 @@ const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
 const PDV = String(40000 + Math.floor(Math.random() * 20000));
 const PDV_C = String(Number(PDV) + 1);   // de Corporate: se ve, pero se sigue trabajando en ClickUp
+const PDV_Z = String(Number(PDV) + 2);   // de Formas Shop, con artículos sin proveedor: sale del SKU
 let asUser = null;
 async function api(method, path, body) {
   const res = await fetch(`${BASE}/api${path}`, {
@@ -62,7 +63,17 @@ const ARTS = {
     { nombre: `Set pinturas ${RUN}`, codigo: 'SET_1', cantidad: 250, status: 'listo para entergar', proveedor: OP_PROV[0].id, assignees: [], updated: 0 },
     { nombre: `Taza anulada ${RUN}`, codigo: 'TAZ_1', cantidad: 10, status: 'anulado', updated: 0 },
   ],
-  corp: [{ nombre: `Mochila ${RUN}`, codigo: 'MOC_1', cantidad: 100, status: 'en revision', impresor: OP_IMP[2].id, assignees: [CECI], updated: 0 }],
+  corp: [{ nombre: `Mochila ${RUN}`, codigo: 'MOC_1', cantidad: 100, status: 'en revision', impresor: OP_IMP[2].id, assignees: [CECI], updated: 0 },
+    { nombre: `Remera ${RUN}`, codigo: `ZEC-R${RUN}`, cantidad: 5, status: 'pdv', updated: 0 }],
+  // El proveedor por el SKU: ZEC es Zecat (hay opción); MYA es Maya (no hay opción); el que ya tiene proveedor, el
+  // anulado y el que no empieza con un prefijo de importador no se tocan.
+  sku: [
+    { nombre: `Mochila Zecat ${RUN}`, codigo: `ZEC-${RUN}`, cantidad: 50, status: 'pdv', updated: 0 },
+    { nombre: `Botella Maya ${RUN}`, codigo: `MYA\\_${RUN}`, cantidad: 20, status: 'pdv', updated: 0 },
+    { nombre: `Gorro ${RUN}`, codigo: `ZEC-G${RUN}`, cantidad: 30, status: 'pdv', proveedor: OP_PROV[1].id, updated: 0 },
+    { nombre: `Lapicera ${RUN}`, codigo: `ZEC-L${RUN}`, cantidad: 10, status: 'anulado', updated: 0 },
+    { nombre: `Taza ${RUN}`, codigo: `TAZ_Z${RUN}`, cantidad: 10, status: 'pdv', updated: 0 },
+  ],
 };
 function pdvTask(id, npdv, unidad, arts) {
   const updated = Date.now();
@@ -78,7 +89,7 @@ function pdvTask(id, npdv, unidad, arts) {
     subtasks,
   };
 }
-const PDVS = () => [pdvTask(`pa${RUN}`, PDV, 'FORMAS SHOP', ARTS.shop), pdvTask(`pc${RUN}`, PDV_C, 'CORPORATE', ARTS.corp)];
+const PDVS = () => [pdvTask(`pa${RUN}`, PDV, 'FORMAS SHOP', ARTS.shop), pdvTask(`pc${RUN}`, PDV_C, 'CORPORATE', ARTS.corp), pdvTask(`pz${RUN}`, PDV_Z, 'FORMAS SHOP', ARTS.sku)];
 
 let server;
 before(async () => {
@@ -286,4 +297,32 @@ test('producción: la vendedora ve quién lo tiene asignado, en la tarjeta y en 
   const card = tablero.columns.flatMap((c) => c.records).find((r) => r.id === pdv.record_id);
   assert.ok(card?.adjuntos?.produccion, 'la tarjeta trae producción');
   assert.ok(card.adjuntos.produccion.asignados.some((p) => p.nombre === `Ceci ${RUN}`));
+});
+
+test('producción: el proveedor que falta sale del SKU y se escribe en ClickUp', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  await sync();
+  const z = pdvDe(await vista(), PDV_Z);
+  assert.ok(z, 'está el PDV');
+  const art = (n) => z.articulos.find((a) => a.nombre.startsWith(n));
+  const moch = art('Mochila Zecat');
+  assert.match(moch.proveedor ?? '', /^prov-zecat-/, 'ZEC: la opción de Zecat');
+  assert.equal(estado.arts[moch.task_id]?.proveedor, moch.proveedor, 'escrito en ClickUp');
+  assert.equal(moch.proveedor_sku, `ZEC-${RUN}`, 'se ve que salió del SKU');
+  assert.equal(art('Botella Maya').proveedor, null, 'Maya no tiene opción en el desplegable: queda vacío');
+  assert.equal(estado.arts[art('Botella Maya').task_id]?.proveedor, undefined);
+  assert.equal(art('Gorro').proveedor, OP_PROV[1].id, 'lo que eligió una persona no se toca');
+  assert.equal(art('Gorro').proveedor_sku, null);
+  assert.equal(art('Taza').proveedor, null, 'sin prefijo de importador');
+  assert.equal(estado.arts[`pz${RUN}-a3`]?.proveedor, undefined, 'el anulado no');
+  const remera = pdvDe(await vista('?unidades=CORPORATE'), PDV_C).articulos.find((a) => a.nombre.startsWith('Remera'));
+  assert.equal(remera.proveedor, null, 'Corporate se sigue trabajando en ClickUp');
+  // Si en ClickUp lo vacían (o lo cambian), el CRM no lo vuelve a poner.
+  estado.arts[moch.task_id] = { ...estado.arts[moch.task_id], proveedor: null, updated: Date.now() };
+  await sync();
+  const despues = pdvDe(await vista(), PDV_Z).articulos.find((a) => a.task_id === moch.task_id);
+  assert.equal(despues.proveedor, null);
+  assert.equal(estado.arts[moch.task_id].proveedor, null);
+  assert.equal(despues.proveedor_sku, null);
 });

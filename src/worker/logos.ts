@@ -112,7 +112,7 @@ export async function logoDelProducto(db: D1Database, recordId: number, producto
 
 // ---------- Cambiar ----------
 
-export async function subirLogo(env: Env, ctx: Ctx, companyId: number, archivo: File, datos: { etiqueta?: string | null; curvas?: string | null }) {
+export async function subirLogo(env: Env, ctx: Ctx, companyId: number, archivo: File, datos: { etiqueta?: string | null; curvas?: string | null; recordId?: number | null }) {
   if (archivo.size > MAX) throw new HttpError(400, 'El archivo es muy grande (máximo 50 MB).');
   const db = env.DB;
   const emp = await db.prepare("SELECT name FROM records WHERE id = ? AND object_type = 'company'").bind(companyId).first<{ name: string }>();
@@ -122,9 +122,9 @@ export async function subirLogo(env: Env, ctx: Ctx, companyId: number, archivo: 
   const f = await subirArchivo(env, [emp.name, 'Logos'], archivo.name || `logo.${r.formato}`, r.mime, bytes.buffer as ArrayBuffer);
   // El primero de la empresa queda como principal.
   const hay = await db.prepare('SELECT 1 FROM logos WHERE company_id = ? AND archived = 0 LIMIT 1').bind(companyId).first();
-  const row = await db.prepare(`INSERT INTO logos (company_id, etiqueta, nombre, formato, mime, size, vectorial, vista, curvas, principal, drive_id, drive_link, user_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(companyId, datos.etiqueta?.trim() || null, archivo.name || `logo.${r.formato}`, r.formato, r.mime,
-    archivo.size, r.vectorial ? 1 : 0, r.vista, r.curvas, hay ? 0 : 1, f.id, f.link, ctx.user.id).first<{ id: number }>();
+  const row = await db.prepare(`INSERT INTO logos (company_id, etiqueta, nombre, formato, mime, size, vectorial, vista, curvas, principal, drive_id, drive_link, user_id, record_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(companyId, datos.etiqueta?.trim() || null, archivo.name || `logo.${r.formato}`, r.formato, r.mime,
+    archivo.size, r.vectorial ? 1 : 0, r.vista, r.curvas, hay ? 0 : 1, f.id, f.link, ctx.user.id, datos.recordId ?? null).first<{ id: number }>();
   return logoPorId(db, row!.id);
 }
 

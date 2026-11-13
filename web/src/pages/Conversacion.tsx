@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue,
 import { Avatar, EstadoClickup, UserAvatar } from '../components';
 import { RecordPreview } from './RecordPage';
 import { VistaPdf } from './Bocetos';
+import { EstadoCurvas, LogoMini, type Curvas, type Logo } from './Logos';
 import { CrearTareaDesdeMensaje } from '../TareaDesdeMensaje';
 
 // Conversación de un pedido o negocio (src/worker/conversacion.ts): un chat grupal entre el vendedor, producción y
@@ -22,6 +23,8 @@ type Evento =
   | { key: string; kind: 'articulo'; at: string; articulo: string; es_pdv: boolean; antes: string | null; despues: string | null; user_id: number | null; actor: string | null; source: string }
   | { key: string; kind: 'boceto'; at: string; accion: 'subido' | 'aprobado'; boceto_id: number; nombre: string; producto: string | null; version: number; tipo: string; mime: string | null; user_id: number | null }
   | { key: string; kind: 'remito'; at: string; remito_id: number; numero: string | null; estado: string; origen: string; chofer: string | null; user_id: number | null }
+  | { key: string; kind: 'logo'; at: string; accion: 'subido' | 'elegido'; logo_id: number; nombre: string; archivo: string; formato: string; vista: 'pdf' | 'svg' | 'imagen' | null;
+      curvas: Curvas; producto: string | null; user_id: number | null }
   | { key: string; kind: 'actividad'; at: string; activity_id: number; tipo: string; subject: string; body: string; direction: string | null; status: string | null; due_at: string | null; user_id: number | null };
 type Item = Mensaje | Evento;
 interface Participante { user_id: number; leido_hasta: number; siguiendo: boolean; motivo: string | null }
@@ -124,7 +127,7 @@ function Cuerpo({ body, meId }: { body: string; meId: number }) {
 const FUENTE: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API', remitos: 'remitos', pedidos: 'pedidos' };
 const CAMBIO: Record<string, string> = { hs_pipeline_stage: 'la etapa', dealstage: 'la etapa', pipeline: 'el pipeline', owner_id: 'el propietario', amount: 'el monto',
   hs_total_price: 'el total sin IVA', closedate: 'la fecha de cierre', fecha_de_entrega: 'la fecha de entrega', estado_entrega: 'el estado de entrega', factura_numero: 'la factura' };
-const ICONO: Record<string, string> = { cambio: 'history', articulo: 'printer', boceto: 'boceto', remito: 'truck' };
+const ICONO: Record<string, string> = { cambio: 'history', articulo: 'printer', boceto: 'boceto', remito: 'truck', logo: 'vector' };
 
 function Quien({ meta, id, actor, source }: { meta: Meta; id: number | null; actor?: string | null; source?: string }) {
   const u = userOf(meta, id);
@@ -158,6 +161,18 @@ function EventoLinea({ e, type, estados }: { e: Evento; type: ObjectType; estado
       ? <><Quien meta={meta} id={e.user_id} /> aprobó el boceto {link}{e.producto ? <> de <b>{e.producto}</b></> : null}</>
       : <><Quien meta={meta} id={e.user_id} /> subió {e.tipo === 'referencia' ? 'una referencia' : 'el boceto técnico'} {link}{e.version > 1 ? ` (versión ${e.version})` : ''}{e.producto ? <> para <b>{e.producto}</b></> : null}</>;
     if (e.accion === 'aprobado') icono = 'check';
+  } else if (e.kind === 'logo') {
+    // Con la miniatura del logo (la misma de Logos), que abre el archivo; y si está en curvas.
+    const nombre = <a href={`/api/logos/${e.logo_id}/archivo`} target="_blank" rel="noreferrer">{e.nombre}</a>;
+    texto = e.accion === 'subido'
+      ? <><Quien meta={meta} id={e.user_id} /> subió el logo {nombre} ({e.formato.toUpperCase()}){e.producto ? <> para <b>{e.producto}</b></> : null}</>
+      : <><Quien meta={meta} id={e.user_id} /> eligió el logo {nombre}{e.producto ? <> para <b>{e.producto}</b></> : null}</>;
+    detalle = (
+      <a className="ev-logo-mini" href={`/api/logos/${e.logo_id}/archivo`} target="_blank" rel="noreferrer" title={`Abrir ${e.archivo}`}>
+        <LogoMini logo={{ id: e.logo_id, vista: e.vista, formato: e.formato } as Logo} grande />
+        <EstadoCurvas curvas={e.curvas} corto />
+      </a>
+    );
   } else if (e.kind === 'remito') {
     const quien = e.origen === 'chofer' ? <b>{e.chofer || 'El chofer'}</b> : e.origen === 'clickup' ? <b>ClickUp</b> : <Quien meta={meta} id={e.user_id} />;
     texto = <>{quien} subió <a href={`/api/remitos/${e.remito_id}/archivo`} target="_blank" rel="noreferrer">{e.numero ? `el remito N° ${e.numero}` : 'un remito'}</a>{e.estado === 'revisar' ? ' · para revisar' : ''}</>;
@@ -174,11 +189,76 @@ function EventoLinea({ e, type, estados }: { e: Evento; type: ObjectType; estado
     if (e.body) detalle = <div className={`ev-detalle${abierto ? ' abierto' : ''}`} onClick={() => setAbierto(true)}>{e.body}</div>;
   }
   return (
-    <div className={`conv-ev ev-${e.kind}`}>
-      <span className="ev-ic"><Icon name={icono} size={12} /></span>
+    <div className={`conv-ev ev-${e.kind}${e.kind === 'boceto' && e.accion === 'aprobado' ? ' ev-ok' : ''}`}>
+      <span className="ev-ic"><Icon name={icono} size={11} /></span>
       <div className="ev-txt">{texto}{detalle}</div>
       <time dateTime={e.at} title={fmtDate(e.at, true)}>{hora}</time>
     </div>
+  );
+}
+
+// ---------- Actualizaciones agrupadas (pedido de Rodrigo del 13/11/2026) ----------
+
+// Tres o más actualizaciones seguidas (sin mensajes en el medio) se juntan en una fila: cuántas son y de qué («Etapa:
+// Listo para producción · 2 bocetos subidos · 1 aprobado»). Un clic las despliega en el riel.
+export const AGRUPAR_DESDE = 3;
+const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+function resumenEventos(evs: Evento[], meta: Meta, type: ObjectType) {
+  const chips: string[] = [];
+  const cambios = evs.filter((e): e is Extract<Evento, { kind: 'cambio' }> => e.kind === 'cambio');
+  const etapa = [...cambios].reverse().find((e) => e.prop === 'hs_pipeline_stage' || e.prop === 'dealstage');
+  if (etapa) chips.push(`Etapa: ${formatValue(meta, type, etapa.prop, etapa.despues) || etapa.despues || '—'}`);
+  const otros = cambios.filter((e) => e !== etapa && e.prop !== 'hs_pipeline_stage' && e.prop !== 'dealstage').length;
+  const arts = evs.filter((e): e is Extract<Evento, { kind: 'articulo' }> => e.kind === 'articulo');
+  if (arts.length) {
+    const finales = new Set(arts.map((a) => a.despues));
+    chips.push(finales.size === 1 && arts[0].despues ? `${plural(arts.length, 'artículo', 'artículos')} → ${arts[0].despues.charAt(0).toUpperCase()}${arts[0].despues.slice(1)}` : plural(arts.length, 'cambio en producción', 'cambios en producción'));
+  }
+  const subidos = evs.filter((e) => e.kind === 'boceto' && e.accion === 'subido').length;
+  const aprobados = evs.filter((e) => e.kind === 'boceto' && e.accion === 'aprobado').length;
+  if (subidos) chips.push(plural(subidos, 'boceto subido', 'bocetos subidos'));
+  if (aprobados) chips.push(subidos ? plural(aprobados, 'aprobado', 'aprobados') : plural(aprobados, 'boceto aprobado', 'bocetos aprobados'));
+  const logos = evs.filter((e) => e.kind === 'logo').length;
+  if (logos) chips.push(plural(logos, 'logo', 'logos'));
+  const remitos = evs.filter((e) => e.kind === 'remito').length;
+  if (remitos) chips.push(plural(remitos, 'remito', 'remitos'));
+  const acts = evs.filter((e): e is Extract<Evento, { kind: 'actividad' }> => e.kind === 'actividad');
+  const tareas = acts.filter((a) => a.tipo === 'task').length, notas = acts.filter((a) => a.tipo === 'note').length, mails = acts.filter((a) => a.tipo === 'email').length;
+  if (tareas) chips.push(plural(tareas, 'tarea', 'tareas'));
+  if (notas) chips.push(plural(notas, 'nota', 'notas'));
+  if (mails) chips.push(plural(mails, 'mail', 'mails'));
+  const resto = acts.length - tareas - notas - mails;
+  if (resto) chips.push(plural(resto, 'actividad', 'actividades'));
+  if (otros) chips.push(plural(otros, 'cambio', 'cambios'));
+  return chips;
+}
+
+function GrupoEventos({ evs, type, estados, abierto, onToggle }: {
+  evs: Evento[]; type: ObjectType; estados: Array<{ status: string; color: string }>; abierto: boolean; onToggle: () => void;
+}) {
+  const { meta } = useMeta();
+  const chips = resumenEventos(evs, meta, type);
+  const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const desde = hora(evs[0].at), hasta = hora(evs[evs.length - 1].at);
+  // Quiénes: las fotos de los que hicieron algo (hasta 3).
+  const quienes = [...new Set(evs.map((e) => e.user_id).filter((x): x is number => x != null))].slice(0, 3);
+  return (
+    <>
+      <button type="button" className={`ev-grupo${abierto ? ' abierto' : ''}`} onClick={onToggle} aria-expanded={abierto}
+        title={abierto ? 'Juntar las actualizaciones' : 'Ver cada actualización'}>
+        <span className="ev-ic"><Icon name="history" size={11} /></span>
+        <span className="ev-grupo-caja">
+          <b>{evs.length} actualizaciones</b>
+          {chips.slice(0, 3).map((c) => <span key={c} className="ev-chip">{c}</span>)}
+          {chips.length > 3 && <span className="ev-chip">+{chips.length - 3}</span>}
+          <span className="grow" />
+          {quienes.length > 0 && <span className="avatar-stack ev-quienes">{quienes.map((u) => <UserAvatar key={u} id={u} size="xs" />)}</span>}
+          <time>{desde === hasta ? desde : `${desde}–${hasta}`}</time>
+          <Icon name="down" size={14} />
+        </span>
+      </button>
+      {abierto && evs.map((e) => <EventoLinea key={e.key} e={e} type={type} estados={estados} />)}
+    </>
   );
 }
 
@@ -630,6 +710,9 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
   const [visor, setVisor] = useState<number | null>(null);
   const [nombre, setNombre] = useState('');
   const [tarea, setTarea] = useState<Mensaje | null>(null);
+  // Los grupos de actualizaciones que se abrieron (por la primera de cada uno).
+  const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
+  const alternar = (k: string) => setAbiertos((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   // Soltar imágenes en cualquier parte del panel: van al cuadro de escribir.
   const soltar = useRef<((files: File[]) => void) | null>(null);
   const registrarSoltar = useCallback((f: ((files: File[]) => void) | null) => { soltar.current = f; }, []);
@@ -777,7 +860,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
           aria-label={estado.siguiendo ? 'Dejar de seguir' : 'Seguir'} aria-pressed={estado.siguiendo}><Icon name="bell" size={15} /></button>
         {onClose && <button className="btn ghost sm icon" onClick={onClose} aria-label="Cerrar la conversación"><Icon name="x" size={16} /></button>}
       </header>
-      <div className="conv-lista" ref={lista} onScroll={alScroll}>
+      <div className={`conv-lista${filtro === 'todo' ? ' con-riel' : ''}`} ref={lista} onScroll={alScroll}>
         {error && <div className="empty plain">{error}</div>}
         {!cargado && !error && <div className="muted small conv-vacio">Cargando…</div>}
         {cargado && !visibles.length && (
@@ -786,31 +869,43 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
             <p><b>Todavía no hay comentarios.</b><br />Escribí lo que haga falta del {OBJECTS[type].single.toLowerCase()} y mencioná con @ a quien tenga que enterarse: le llega un aviso. Podés pegar capturas o adjuntar fotos.</p>
           </div>
         )}
-        {visibles.map((it) => {
-          const dia = DIA(it.at);
-          const sep = dia !== diaAnt ? <div className="conv-dia"><span>{dia}</span></div> : null;
-          if (sep) { diaAnt = dia; autorAnt = null; }
-          let raya: ReactNode = null;
-          if (!rayaPuesta && leidoAlAbrir != null && it.kind === 'mensaje' && it.id > leidoAlAbrir && it.user_id !== me.id) {
-            rayaPuesta = true;
-            raya = <div className="conv-nuevos"><span>Nuevos</span></div>;
-          }
-          if (it.kind !== 'mensaje') {
-            autorAnt = null;
-            return <Fragment key={it.key}>{sep}<EventoLinea e={it} type={type} estados={estado.estados} /></Fragment>;
-          }
-          const t = Date.parse(it.created_at);
-          const cont = !raya && !it.responde_a && !!autorAnt && autorAnt.id === it.user_id && t - autorAnt.at < 5 * 60_000;
-          autorAnt = { id: it.user_id, at: t };
-          return (
-            <Fragment key={it.key}>{sep}{raya}
-              <MensajeVista m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'} puedeReaccionar={puedeEscribir && !meta.real_user}
+        {(() => {
+          // Mensajes como tarjetas; las actualizaciones, en el riel. Tres o más seguidas (del mismo día, sin mensajes en el
+          // medio), juntas en una fila que se despliega.
+          const out: ReactNode[] = [];
+          let tanda: Evento[] = [];
+          const vaciar = () => {
+            if (!tanda.length) return;
+            const evs = tanda;
+            tanda = [];
+            if (evs.length >= AGRUPAR_DESDE) {
+              const k = evs[0].key;
+              out.push(<GrupoEventos key={`g${k}`} evs={evs} type={type} estados={estado.estados} abierto={abiertos.has(k)} onToggle={() => alternar(k)} />);
+            } else for (const e of evs) out.push(<EventoLinea key={e.key} e={e} type={type} estados={estado.estados} />);
+          };
+          for (const it of visibles) {
+            const dia = DIA(it.at);
+            if (dia !== diaAnt) { vaciar(); out.push(<div key={`d${it.key}`} className="conv-dia"><span>{dia}</span></div>); diaAnt = dia; autorAnt = null; }
+            if (it.kind !== 'mensaje') { autorAnt = null; tanda.push(it); continue; }
+            vaciar();
+            if (!rayaPuesta && leidoAlAbrir != null && it.id > leidoAlAbrir && it.user_id !== me.id) {
+              rayaPuesta = true;
+              out.push(<div key={`n${it.key}`} className="conv-nuevos"><span>Nuevos</span></div>);
+              autorAnt = null;
+            }
+            const t = Date.parse(it.created_at);
+            const cont = !it.responde_a && !!autorAnt && autorAnt.id === it.user_id && t - autorAnt.at < 5 * 60_000;
+            autorAnt = { id: it.user_id, at: t };
+            out.push(
+              <MensajeVista key={it.key} m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'} puedeReaccionar={puedeEscribir && !meta.real_user}
                 vistoPor={ultimo && it.id === ultimo.id ? vistoUltimo : undefined}
                 onResponder={() => setRespondiendo(it)} onIrA={irA} onAbrirImagen={setVisor}
-                onEditado={(m) => mezclar([m])} onTarea={() => setTarea(it)} />
-            </Fragment>
-          );
-        })}
+                onEditado={(m) => mezclar([m])} onTarea={() => setTarea(it)} />,
+            );
+          }
+          vaciar();
+          return out;
+        })()}
       </div>
       {abajoNuevos > 0 && <button className="btn sm conv-hay-nuevos" onClick={irAbajo}>↓ {abajoNuevos === 1 ? 'Hay algo nuevo' : `${abajoNuevos} novedades`}</button>}
       {puedeEscribir

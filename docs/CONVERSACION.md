@@ -92,3 +92,15 @@ del registro (`activities`).
   quien escribió el mensaje respondido (si no lo mencionan en la respuesta).
 
 Pruebas: `test/notificaciones.test.mjs`.
+
+## Chat y actualizaciones, bien separados (13/11/2026)
+
+- **Mensajes**: tarjetas blancas con borde (amarillas si te mencionan); la foto queda sobre el riel.
+- **Actualizaciones** (cambios de etapa, artículos, bocetos, logos, remitos, notas y tareas): corren por un **riel** a la
+  izquierda, una línea que pasa por el centro de las fotos, con un nodo chico (azul para bocetos, artículos y logos; verde
+  para lo aprobado) y el texto en gris.
+- **Agrupadas**: 3 o más actualizaciones seguidas (del mismo día, sin mensajes en el medio) se juntan en una fila con el
+  resumen («5 actualizaciones · Etapa: En producción · 1 boceto subido · 1 aprobado»), quiénes y el horario; un clic las
+  despliega. «Mensajes» sigue mostrando solo el chat.
+- **Logos**: subir un logo desde un producto del pedido o negocio (o elegir otro) aparece en su conversación con la
+  miniatura y si está en curvas; la miniatura abre el archivo. `logos.record_id` (migración 0052) guarda desde dónde se subió.

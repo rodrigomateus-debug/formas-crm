@@ -41,6 +41,16 @@ test('crea empresa, contacto con dominio corporativo y se asocian solos', async 
   assert.equal(rec.data.associations.company[0].primary, true);
 });
 
+test('el dominio de una empresa se guarda limpio: sin https://, sin www. y sin lo que sigue a la barra', async () => {
+  const c = await api('POST', '/records/company', { props: { name: `Ilumin ${RUN}`, domain: `https://go.illumin-${RUN}.com/` } });
+  assert.equal(c.status, 201, JSON.stringify(c.data));
+  const dominio = async () => (await api('GET', `/records/company/${c.data.id}`)).data.record.props.domain;
+  assert.equal(await dominio(), `go.illumin-${RUN}.com`);
+  const e = await api('PATCH', `/records/company/${c.data.id}`, { props: { domain: ` HTTP://WWW.Otro-${RUN}.com.ar/contacto?x=1 ` } });
+  assert.equal(e.status, 200, JSON.stringify(e.data));
+  assert.equal(await dominio(), `otro-${RUN}.com.ar`);
+});
+
 test('tipo de relación: los proveedores, el equipo de Formas y otros no se mezclan con los clientes', async () => {
   const props = (await api('GET', '/meta')).data.properties;
   for (const t of ['contact', 'company']) {

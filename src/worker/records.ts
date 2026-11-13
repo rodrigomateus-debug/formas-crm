@@ -242,6 +242,9 @@ export async function validateProps(meta: Meta, type: ObjectType, input: Props, 
     }
     if (p.read_only && !opts.system) continue;
     out[name] = coerce(p, v);
+    // El dominio de una empresa se guarda limpio, venga de donde venga (pantalla, importación, Claude): sin «https://», sin
+    // «www.» y sin lo que sigue a la barra («https://go.illumin.com/» → «go.illumin.com»).
+    if (type === 'company' && name === 'domain' && typeof out[name] === 'string') out[name] = normDomain(out[name]);
   }
   return { props: out, ignored };
 }

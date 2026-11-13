@@ -61,13 +61,15 @@ async function curvasPdf(file: File): Promise<Curvas | null> {
   } catch { return null; }
 }
 
-export async function subirLogo(type: ObjectType, recordId: number, file: File, extra: { etiqueta?: string; producto?: string } = {}) {
+export async function subirLogo(type: ObjectType, recordId: number, file: File, extra: { etiqueta?: string; producto?: string; productoNombre?: string } = {}) {
   const fd = new FormData();
   fd.append('archivo', file);
   const c = await curvasPdf(file);
   if (c) fd.append('curvas', c);
   if (extra.etiqueta) fd.append('etiqueta', extra.etiqueta);
   if (extra.producto) fd.append('producto', extra.producto);
+  // El nombre del producto, para el aviso al vendedor («Subió el logo … para Taza térmica»).
+  if (extra.productoNombre) fd.append('producto_nombre', extra.productoNombre);
   const res = await fetch(`/api/records/${type}/${recordId}/logos`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
   const data = (await res.json().catch(() => null)) as (Logo & { error?: string }) | null;
   if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
@@ -238,7 +240,7 @@ function ElegirLogo({ type, recordId, producto, productoNombre, res, onClose, on
   const elegidoId = res.elegidos.find((e) => e.producto === producto)?.logo_id ?? null;
   const elegir = async (logoId: number | null) => {
     try {
-      await http('PUT', `/records/${type}/${recordId}/logos/producto`, { producto, logo_id: logoId });
+      await http('PUT', `/records/${type}/${recordId}/logos/producto`, { producto, producto_nombre: productoNombre, logo_id: logoId });
       toast(logoId ? 'Logo elegido' : 'Va el logo principal');
       onCambio(); onClose();
     } catch (e) { toast((e as Error).message, true); }
@@ -247,7 +249,7 @@ function ElegirLogo({ type, recordId, producto, productoNombre, res, onClose, on
     if (!files[0]) return;
     setSubiendo(true);
     try {
-      const l = await subirLogo(type, recordId, files[0], { producto });
+      const l = await subirLogo(type, recordId, files[0], { producto, productoNombre });
       toast(l.curvas === 'textos' ? 'Logo guardado, pero tiene textos sin pasar a curvas.' : `Logo guardado en ${res.empresa ?? 'la empresa'} y elegido para este producto`, l.curvas === 'textos');
       onCambio(); onClose();
     } catch (e) { toast((e as Error).message, true); }

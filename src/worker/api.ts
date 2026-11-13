@@ -27,6 +27,8 @@ import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
+import { avisarCambio, textoBoceto, textoLogo } from './cambios';
+import { compartidosDe, compartir } from './compartidos';
 import { assertActividadVisible, assertVisible, esProduccion, esVentas, idsVisibles, restringido, sinVentas } from './alcance';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
@@ -268,7 +270,19 @@ api.get('/records/:type/:id', async (c) => {
   // previa (lo mismo que la tarjeta del tablero de pedidos).
   const prod = type === 'order' && !esVentas(c.get('ctx').user) ? await produccionDePedido(c.env.DB, row.id) : null;
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
-  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
+  // Pedidos: con quiénes está compartido, además del propietario (compartidos.ts).
+  const compartidos = type === 'order' ? await compartidosDe(c.env.DB, row.id) : undefined;
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user),
+    ...(produccion ? { produccion } : {}), ...(compartidos ? { compartidos } : {}) });
+});
+
+// Compartir un pedido con más personas (además del propietario): { users: [ids] } deja exactamente esa lista.
+api.put('/records/order/:id/compartidos', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const rec = await getRow(c.env.DB, Number(c.req.param('id')), 'order');
+  const body = await c.req.json<{ users?: unknown }>().catch(() => ({} as { users?: unknown }));
+  return c.json({ compartidos: await compartir(c.env.DB, ctx, rec, body.users) });
 });
 
 api.patch('/records/:type/:id', async (c) => {
@@ -1132,7 +1146,10 @@ api.post('/records/:type/:id/bocetos', async (c) => {
   const archivo = form.get('archivo');
   if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del boceto.');
   const s = (k: string) => (typeof form.get(k) === 'string' ? (form.get(k) as string) : null);
-  return c.json(await subirBoceto(c.env, c.get('ctx'), rec, archivo, { producto: s('producto'), producto_nombre: s('producto_nombre'), tipo: s('tipo') ?? undefined }), 201);
+  const b = await subirBoceto(c.env, c.get('ctx'), rec, archivo, { producto: s('producto'), producto_nombre: s('producto_nombre'), tipo: s('tipo') ?? undefined });
+  // Lo subió otra persona (producción, por ejemplo): al vendedor le llega el aviso (cambios.ts).
+  await avisarCambio(c.env.DB, c.get('ctx'), rec.id, textoBoceto.subido(b));
+  return c.json(b, 201);
 });
 api.patch('/bocetos/:id', async (c) => {
   canWrite(c.get('ctx'));
@@ -1141,6 +1158,10 @@ api.patch('/bocetos/:id', async (c) => {
   const b = await actualizarBoceto(c.env.DB, b0.id, await c.req.json(), c.get('ctx').user.id);
   // Aprobado en un pedido: a ClickUp (a la subtarea del artículo) enseguida, sin esperar la próxima corrida.
   if (rec.object_type === 'order' && b.estado === 'aprobado' && !b.clickup_at) c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  // Lo que cambió, al vendedor (si lo cambió otra persona).
+  if (b.estado !== b0.estado) await avisarCambio(c.env.DB, c.get('ctx'), rec.id, b.estado === 'aprobado' ? textoBoceto.aprobado(b) : textoBoceto.paraAprobar(b));
+  if (b.producto !== b0.producto) await avisarCambio(c.env.DB, c.get('ctx'), rec.id, textoBoceto.otroProducto(b));
+  if (b.tipo !== b0.tipo) await avisarCambio(c.env.DB, c.get('ctx'), rec.id, textoBoceto.tipo(b));
   return c.json(b);
 });
 api.post('/bocetos/:id/usar', async (c) => {
@@ -1150,6 +1171,7 @@ api.post('/bocetos/:id/usar', async (c) => {
   const body = await c.req.json<{ order_id: number; producto?: string | null; producto_nombre?: string | null }>();
   const b = await usarEnPedido(c.env.DB, c.get('ctx'), b0.id, Number(body.order_id), body.producto ?? null, body.producto_nombre ?? null);
   if (b.estado === 'aprobado') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  await avisarCambio(c.env.DB, c.get('ctx'), b.record_id, textoBoceto.usado(b));
   return c.json(b, 201);
 });
 api.delete('/bocetos/:id', async (c) => {
@@ -1157,6 +1179,7 @@ api.delete('/bocetos/:id', async (c) => {
   const b0 = await bocetoPorId(c.env.DB, Number(c.req.param('id')));
   await registroVisible(c, b0.record_id);
   await quitarBoceto(c.env.DB, b0.id);
+  await avisarCambio(c.env.DB, c.get('ctx'), b0.record_id, textoBoceto.quitado(b0));
   return c.json({ ok: true });
 });
 // El archivo, desde Drive (para verlo en el CRM aunque no se tenga acceso a la unidad de Drive).
@@ -1202,6 +1225,8 @@ api.post('/records/:type/:id/logos', async (c) => {
     await elegirLogo(c.env.DB, ctx, rec, producto, logo.id);
     if (rec.object_type === 'order') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
   }
+  // Al vendedor del pedido (o al propietario de la empresa, si se subió en la empresa).
+  await avisarCambio(c.env.DB, ctx, rec.id, textoLogo.subido(logo, producto ? s('producto_nombre')?.trim() || producto : null));
   return c.json(logo, 201);
 });
 // Elegir el logo de un producto ({ producto, logo_id }; logo_id null: el principal).
@@ -1209,22 +1234,26 @@ api.put('/records/:type/:id/logos/producto', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const rec = await registroVisible(c, Number(c.req.param('id')));
-  const body = await c.req.json<{ producto?: string; logo_id?: number | null }>();
+  const body = await c.req.json<{ producto?: string; producto_nombre?: string | null; logo_id?: number | null }>();
   const logo = await elegirLogo(c.env.DB, ctx, rec, String(body.producto ?? ''), body.logo_id == null ? null : Number(body.logo_id));
   if (rec.object_type === 'order') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  await avisarCambio(c.env.DB, ctx, rec.id, textoLogo.elegido(body.logo_id == null ? null : logo, String(body.producto_nombre ?? '').trim() || String(body.producto ?? '').trim()));
   return c.json({ logo });
 });
 api.patch('/logos/:id', async (c) => {
   canWrite(c.get('ctx'));
   const l = await logoPorId(c.env.DB, Number(c.req.param('id')));
   await registroVisible(c, l.company_id);
-  return c.json(await actualizarLogo(c.env.DB, l.id, await c.req.json()));
+  const nuevo = await actualizarLogo(c.env.DB, l.id, await c.req.json());
+  if (nuevo.principal && !l.principal) await avisarCambio(c.env.DB, c.get('ctx'), l.company_id, textoLogo.principal(nuevo));
+  return c.json(nuevo);
 });
 api.delete('/logos/:id', async (c) => {
   canWrite(c.get('ctx'));
   const l = await logoPorId(c.env.DB, Number(c.req.param('id')));
   await registroVisible(c, l.company_id);
   await quitarLogo(c.env.DB, l.id);
+  await avisarCambio(c.env.DB, c.get('ctx'), l.company_id, textoLogo.quitado(l));
   return c.json({ ok: true });
 });
 // El archivo, desde Drive. Lo que el CRM sabe mostrar va «inline» (el SVG, encerrado: sin scripts ni nada de afuera);

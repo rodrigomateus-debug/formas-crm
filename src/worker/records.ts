@@ -1,4 +1,5 @@
 import { avisarAsignacion } from './avisos';
+import { avisarCambio, fechaCorta } from './cambios';
 import { controlAlGanar } from './facturar';
 import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
@@ -428,6 +429,16 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   await db.batch(stmts);
   if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
+  // Cambios sensibles de un pedido hechos a mano por otra persona (no la sincronización): al vendedor (cambios.ts).
+  if (type === 'order' && !opts.system) {
+    if (changed.includes('fecha_de_entrega')) {
+      await avisarCambio(db, ctx, id, next.fecha_de_entrega ? `Cambió la fecha de entrega a ${fechaCorta(next.fecha_de_entrega)}` : 'Quitó la fecha de entrega');
+    }
+    if (changed.includes('hs_pipeline_stage')) {
+      const etapa = (await meta.property('order', 'hs_pipeline_stage'))?.options.find((o) => o.value === next.hs_pipeline_stage)?.label ?? next.hs_pipeline_stage;
+      await avisarCambio(db, ctx, id, `Pasó el pedido a «${etapa ?? 'sin etapa'}»`);
+    }
+  }
   // La empresa cambió de tipo de relación: sus contactos lo siguen (relacion.ts).
   if (type === 'company' && changed.includes('tipo_de_relacion')) await propagarRelacion(db, ctx, id, current.tipo_de_relacion, next.tipo_de_relacion);
   // La vendedora pasó el pedido a «Listo para producción» (desde «Pedido confirmado», «$ Pendiente de Anticipo» o
@@ -597,7 +608,14 @@ function unidadSql(type: ObjectType, keys: string[], binds: unknown[]) {
   return ownersOfUnitsSql(keys, binds);
 }
 
-async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, binds: unknown[]): Promise<string> {
+async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, binds: unknown[], conCompartidos = true): Promise<string> {
+  // Pedidos: «propietario: yo» (la pestaña «Míos») también trae los que me compartieron (compartidos.ts).
+  if (conCompartidos && type === 'order' && f.prop === 'owner_id' && (f.op === 'eq' ? String(f.value) === 'me'
+    : f.op === 'in' && (f.values ?? String(f.value ?? '').split(';')).map(String).includes('me'))) {
+    const cond = await filterSql(meta, ctx, type, f, binds, false);
+    binds.push(ctx.user.id);
+    return `(${cond} OR r.id IN (SELECT record_id FROM compartidos WHERE user_id = ?))`;
+  }
   // Tipo de relación de contactos y empresas: vacío cuenta como «cliente» (relacion.ts).
   if (f.prop === '__relacion') {
     const want = (f.values ?? String(f.value ?? '').split(';')).map(String).filter((v) => (RELACIONES as readonly string[]).includes(v));

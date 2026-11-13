@@ -5,6 +5,7 @@ import { Budget } from './budget';
 import { createRecord, updateRecord } from './records';
 import { API, cu, generalStage, LIST, norm, STAGE, upsertPdv, usuarioPorNombre, type CuTask } from './clickup';
 import { fotosDeArticulos } from './productos';
+import { avisarCambio, fechaCorta } from './cambios';
 
 // Producción en el CRM (pedido de Rodrigo del 12/11/2026). Producción (Ceci y Sole) trabaja en ClickUp con la vista «Estado
 // PDV CECI»: cada PDV con sus artículos abiertos abajo, y en cada artículo su estado, proveedor, impresor y las fechas de
@@ -526,6 +527,11 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
     // Si lo hizo otro por el usuario (el chofer, desde su app: ctx.actor), queda a nombre de quien lo hizo.
     await db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, actor, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, ?, 'crm')`)
       .bind(fila.record_id, taskId, fila.nombre, fila.es_pdv, fila.estado, local.estado, ctx.actor ? ctx.actor.userId : ctx.user.id, ctx.actor && !ctx.actor.userId ? ctx.actor.name : null).run();
+  }
+  // La fecha de entrega que cambia producción, al vendedor (cambios.ts).
+  if (c === 'entrega_real' && fila.record_id && (local.entrega_real ?? null) !== (fila.entrega_real ? String(fila.entrega_real).slice(0, 10) : null)) {
+    const que = fila.es_pdv ? 'del pedido' : `de «${fila.nombre}»`;
+    await avisarCambio(db, ctx, fila.record_id, local.entrega_real ? `Cambió la fecha de entrega ${que} a ${fechaCorta(local.entrega_real)}` : `Quitó la fecha de entrega ${que}`);
   }
   // El estado (o la fecha real de entrega) del PDV cambia el pedido: se relee el PDV y se actualiza ya, sin esperar la
   // sincronización. Si falla, queda para la próxima corrida.

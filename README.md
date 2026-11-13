@@ -135,6 +135,10 @@ delegación de todo el dominio. Los avisos:
 - **Asignaciones:** cuando alguien le asigna a otra persona un registro o una tarea desde la pantalla o desde Claude,
   le llega un mail en los 10 minutos siguientes (lo que mueven las integraciones no avisa).
 - **Faltantes de entrega** (a Logística y a los administradores): ver `docs/REMITOS.md`.
+- **Cambios en tus pedidos:** cuando otra persona (producción, logística…) sube o cambia un boceto o un logo, o cambia la
+  dirección o la fecha de entrega, al vendedor y a quienes tienen el pedido compartido. Ver «Pedidos compartidos» en
+  [docs/PERFILES.md](docs/PERFILES.md#pedidos-compartidos-y-avisos-de-cambios-pedido-de-rodrigo-del-13112026).
+- **Te compartieron un pedido.**
 
 Solo les llegan a los usuarios con **«Avisos por mail»** prendido (Configuración → Usuarios, columna «Avisos por mail»;
 `users.avisos_mail`, migración 0038). Arranca **apagado** para todos, también para los usuarios nuevos: se prende por

@@ -123,7 +123,8 @@ function Cuerpo({ body, meId }: { body: string; meId: number }) {
 
 const FUENTE: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API', remitos: 'remitos', pedidos: 'pedidos' };
 const CAMBIO: Record<string, string> = { hs_pipeline_stage: 'la etapa', dealstage: 'la etapa', pipeline: 'el pipeline', owner_id: 'el propietario', amount: 'el monto',
-  hs_total_price: 'el total sin IVA', closedate: 'la fecha de cierre', fecha_de_entrega: 'la fecha de entrega', estado_entrega: 'el estado de entrega', factura_numero: 'la factura' };
+  hs_total_price: 'el total sin IVA', closedate: 'la fecha de cierre', fecha_de_entrega: 'la fecha de entrega', estado_entrega: 'el estado de entrega', factura_numero: 'la factura',
+  direccion_entrega: 'la dirección de entrega' };
 const ICONO: Record<string, string> = { cambio: 'history', articulo: 'printer', boceto: 'boceto', remito: 'truck' };
 
 function Quien({ meta, id, actor, source }: { meta: Meta; id: number | null; actor?: string | null; source?: string }) {
@@ -146,6 +147,17 @@ function EventoLinea({ e, type, estados }: { e: Evento; type: ObjectType; estado
   if (e.kind === 'cambio') {
     if (e.prop === 'archived') texto = <><Quien meta={meta} id={e.user_id} actor={e.actor} source={e.source} /> {e.despues === 'true' ? 'borró' : 'restauró'} el registro</>;
     else if (e.prop === 'merged') texto = <><Quien meta={meta} id={e.user_id} actor={e.actor} source={e.source} /> lo combinó con <b>{e.despues}</b></>;
+    else if (e.prop === 'compartido_con') {
+      // Con quiénes está compartido el pedido (los nombres, separados por coma): a quién se sumó y a quién se sacó.
+      const nombres = (v: string | null) => (v ? v.split(', ').filter(Boolean) : []);
+      const suma = nombres(e.despues).filter((x) => !nombres(e.antes).includes(x));
+      const saca = nombres(e.antes).filter((x) => !nombres(e.despues).includes(x));
+      icono = 'users';
+      texto = <><Quien meta={meta} id={e.user_id} actor={e.actor} source={e.source} />
+        {suma.length ? <> compartió el pedido con <b>{suma.join(', ')}</b></> : null}
+        {suma.length && saca.length ? ' y' : null}
+        {saca.length ? <> dejó de compartirlo con <b>{saca.join(', ')}</b></> : null}</>;
+    }
     else {
       const nombre = CAMBIO[e.prop] ?? (propOf(meta, type, e.prop)?.label ?? e.prop).toLowerCase();
       texto = <><Quien meta={meta} id={e.user_id} actor={e.actor} source={e.source} /> cambió {nombre}{e.antes != null && e.antes !== '' ? <> de {val(e.prop, e.antes)}</> : null} a <b>{val(e.prop, e.despues)}</b></>;

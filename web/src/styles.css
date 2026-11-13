@@ -1234,6 +1234,19 @@ a.prod-foto:hover { border-color: var(--accent-ink); }
 .notif-tipo.mencion { background: var(--ui-warning); }
 .notif-tipo.entrega { background: var(--ui-negative); }
 .notif-tipo.tarea, .notif-tipo.registro { background: var(--ui-positive); }
+.notif-tipo.cambio, .notif-tipo.compartido { background: var(--ui-info); }
+
+/* Compartir el pedido (Compartir.tsx): con quiénes está compartido y el cuadro para elegirlos. */
+.compartido-con { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.compartido-gente { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 220px; padding: 2px 6px 2px 2px; border: 0;
+  border-radius: var(--r-control); background: none; font: inherit; font-size: 13px; color: var(--ui-ink); cursor: pointer; }
+.compartido-gente:hover:not(:disabled) { background: var(--ui-surface-sunken); }
+.compartido-gente:disabled { cursor: default; }
+.compartir-lista { display: flex; flex-direction: column; max-height: min(50vh, 420px); overflow: auto; border: 1px solid var(--ui-line); border-radius: var(--r-control); }
+.compartir-op { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--ui-line); }
+.compartir-op:last-child { border-bottom: 0; }
+.compartir-op:hover { background: var(--ui-surface-sunken); }
+.compartir-op.sel { background: var(--accent-soft); }
 .notif-texto { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.35; }
 .notif-titulo { color: var(--ui-ink-2); }
 .notif-titulo b { color: var(--ui-ink); font-weight: 600; }

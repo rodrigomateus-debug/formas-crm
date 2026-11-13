@@ -1,12 +1,13 @@
 // Google simulado para las pruebas (puerto 8799, el de GOOGLE_TOKEN_URL, DRIVE_API_URL y GOOGLE_USERINFO_URL en .dev.vars;
-// ver test/gmail-dev-vars.mjs): el token de la cuenta de servicio, lo justo de Drive (carpetas, subida reanudable, bajada)
-// y la foto del perfil de cada usuario (por el perfil o por Drive). `perfil` cambia lo que contesta: sin el permiso de
+// ver test/gmail-dev-vars.mjs): el token de la cuenta de servicio, lo justo de Drive (carpetas, subida reanudable, bajada),
+// los mails que manda el CRM (avisos, en `mails`) y la foto del perfil de cada usuario (por el perfil o por Drive). `perfil` cambia lo que contesta: sin el permiso de
 // perfil o de Drive en la delegación, o mails que Google no conoce.
 import http from 'node:http';
 
 export async function googleFalso() {
   const drive = { carpetas: [], archivos: [], tokens: [], subidas: new Map() };
   const perfil = { negar: new Set(), sinCuenta: new Set() };
+  const mails = [];   // { auth, raw }
   const PERFIL = 'https://www.googleapis.com/auth/userinfo.profile';
   const DRIVE = 'https://www.googleapis.com/auth/drive';
   const quien = (req) => (req.headers.authorization ?? '').split(':')[1];
@@ -30,6 +31,10 @@ export async function googleFalso() {
         }
         if (perfil.sinCuenta.has(claims.sub)) return send({ error: 'invalid_grant', error_description: 'Invalid email or User ID' }, 400);
         return send({ access_token: `tok:${claims.sub}:${claims.scope}`, expires_in: 3600 });
+      }
+      if (url.pathname === '/gmail/v1/users/me/messages/send') {
+        mails.push({ auth: req.headers.authorization, raw: Buffer.from(JSON.parse(body.toString()).raw, 'base64url').toString() });
+        return send({ id: `m${mails.length}` });
       }
       // La misma foto por las dos formas (cada una con su tamaño): el CRM la deja en 96 px.
       if (url.pathname === '/oauth2/v3/userinfo') return send({ sub: '1', picture: `https://lh3.googleusercontent.com/a/foto-${quien(req)}=s96-c` });
@@ -73,5 +78,5 @@ export async function googleFalso() {
     });
   });
   await new Promise((r) => server.listen(8799, r));
-  return { drive, perfil, cerrar: () => new Promise((r) => server.close(r)) };
+  return { drive, perfil, mails, cerrar: () => new Promise((r) => server.close(r)) };
 }

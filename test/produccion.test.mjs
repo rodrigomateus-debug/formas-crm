@@ -226,6 +226,17 @@ test('producción: editar desde el CRM escribe en ClickUp y cambia el pedido', a
   r = await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'egreso_impresor', valor: '' });
   assert.equal(escrito[1].method, 'DELETE');
   assert.equal(r.data.pdv.articulos.find((a) => a.task_id === nec.task_id).egreso_impresor, null);
+  // La fecha de entrega que cambia producción le llega al vendedor del pedido (cambios.ts); las fechas internas
+  // (proveedor, impresor), no.
+  r = await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'entrega_real', valor: '2026-11-19' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  asUser = null;
+  const yo = (await api('GET', '/me')).data;
+  if (pedido.props.owner_id === yo.id) {
+    const avisos = (await api('GET', '/notificaciones?limite=100')).data.items.filter((n) => n.kind === 'cambio' && n.record_id === pdv.record_id);
+    assert.deepEqual(avisos[0]?.detalle, [`Cambió la fecha de entrega de «${nec.nombre}» a jue 19/11/2026`], JSON.stringify(avisos));
+  }
+  asUser = CECI.email;
   // Proveedor: la opción de ClickUp.
   escrito.length = 0;
   r = await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'proveedor', valor: OP_PROV[2].id });

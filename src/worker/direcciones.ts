@@ -2,6 +2,7 @@ import type { Ctx, Env } from './env';
 import { HttpError, now } from './env';
 import { getRow, updateRecord } from './records';
 import { claveDireccion } from './cronograma';
+import { avisarCambio } from './cambios';
 
 // Direcciones de entrega del pedido (pedido de Rodrigo del 12/11/2026), en la tarjeta «Entrega».
 //
@@ -146,7 +147,10 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
   await getRow(db, orderId, 'order');
   const lista = (b.direcciones ?? []).slice(0, 30);
   if ((b.direcciones ?? []).length > 30) throw new HttpError(400, 'Hasta 30 direcciones por pedido.');
-  const actuales = new Map((await db.prepare('SELECT * FROM entrega_direcciones WHERE record_id = ?').bind(orderId).all<FilaDireccion>()).results.map((d) => [d.id, d]));
+  const actuales = new Map((await db.prepare('SELECT * FROM entrega_direcciones WHERE record_id = ? ORDER BY position, id').bind(orderId).all<FilaDireccion>()).results.map((d) => [d.id, d]));
+  // Cómo estaban (direcciones y reparto), para avisarle al vendedor si cambió (cambios.ts).
+  const repartoAntes = (await db.prepare(`SELECT d.position, c.clave, c.cantidad FROM entrega_cantidades c JOIN entrega_direcciones d ON d.id = c.direccion_id
+    WHERE d.record_id = ? ORDER BY d.position, c.clave`).bind(orderId).all<{ position: number; clave: string; cantidad: number }>()).results;
 
   // Cada dirección: con place_id, la arma Google (se valida acá, no en la pantalla); sin place_id, la escrita, sin validar.
   const nuevas: Array<Omit<FilaDireccion, 'id' | 'position' | 'user_id' | 'updated_at'>> = [];
@@ -214,6 +218,17 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
   // El resumen en el pedido (queda en el historial como cualquier cambio).
   const resumen = !nuevas.length ? null : nuevas.length === 1 ? nuevas[0].direccion : `${nuevas.length} direcciones: ${nuevas.map((d) => d.direccion).join(' · ')}`.slice(0, 500);
   await updateRecord(db, ctx, 'order', orderId, { direccion_entrega: resumen }, { system: true, strict: false });
+  // Al vendedor, si la cambió otra persona (producción, logística…): qué dirección quedó, o que cambió el reparto.
+  const lugares = (ds: Array<{ direccion: string; detalle: string | null }>) => JSON.stringify(ds.map((d) => [d.direccion.trim().toLowerCase(), d.detalle ?? '']));
+  const reparto = (fs: Array<{ position: number; clave: string; cantidad: number }>) => JSON.stringify(fs.map((f) => [f.position, f.clave, f.cantidad]).sort());
+  if (lugares([...actuales.values()]) !== lugares(nuevas)) {
+    const con = (d: { direccion: string; detalle: string | null }) => `«${d.direccion}${d.detalle ? ` (${d.detalle})` : ''}»`;
+    await avisarCambio(db, ctx, orderId, !nuevas.length ? 'Quitó la dirección de entrega'
+      : nuevas.length === 1 ? `Cambió la dirección de entrega a ${con(nuevas[0])}`
+      : `Cambió las direcciones de entrega: ${nuevas.map(con).join(', ')}`);
+  } else if (reparto(repartoAntes) !== reparto(filas.map((f) => ({ position: f.direccion, clave: f.clave, cantidad: f.cantidad })))) {
+    await avisarCambio(db, ctx, orderId, 'Cambió cuánto va a cada dirección de entrega');
+  }
   return direccionesDe(env, orderId);
 }
 

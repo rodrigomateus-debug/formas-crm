@@ -2,6 +2,7 @@ import type { Ctx } from './env';
 import { HttpError, now } from './env';
 import { estadosPec } from './produccion';
 import { visibleSql } from './alcance';
+import { compartidosDe } from './compartidos';
 
 // Conversación de un pedido (o de un negocio), como los comentarios de una tarea de ClickUp (pedido de Rodrigo del
 // 12/11/2026): un chat grupal entre el vendedor, producción y logística, con @menciones, que queda registrado. Entre los
@@ -12,8 +13,8 @@ import { visibleSql } from './alcance';
 // - remitos subidos (remitos)
 // - notas, mails, llamadas, reuniones, tareas y WhatsApp del registro (activities)
 //
-// Quiénes la siguen (conversacion_participantes): quien escribe, a quien mencionan, el propietario y quien lo tiene
-// asignado en producción. A ellos se les cuentan los mensajes sin leer (el globito del menú y de la tarjeta); a quien
+// Quiénes la siguen (conversacion_participantes): quien escribe, a quien mencionan, el propietario, quienes lo tienen
+// compartido (compartidos.ts) y quien lo tiene asignado en producción. A ellos se les cuentan los mensajes sin leer (el globito del menú y de la tarjeta); a quien
 // mencionan, además, le llega un aviso por mail si lo tiene prendido (avisos.ts).
 //
 // La pantalla la tiene abierta y pide las novedades cada tanto (`desde`): son pocas filas por índice.
@@ -34,7 +35,7 @@ export const textoPlano = (body: string) => body.replace(MENCION, '@$1');
 
 // Lo que se muestra de cada cambio del registro.
 const PROPS_CAMBIO = ['hs_pipeline_stage', 'dealstage', 'pipeline', 'owner_id', 'amount', 'hs_total_price', 'closedate', 'fecha_de_entrega',
-  'estado_entrega', 'factura_numero', 'archived', 'merged'];
+  'estado_entrega', 'factura_numero', 'archived', 'merged', 'direccion_entrega', 'compartido_con'];
 
 export interface Mensaje {
   id: number; record_id: number; user_id: number | null; body: string; menciones: number[]; responde_a: number | null;
@@ -185,6 +186,7 @@ export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input
     .bind(recordId, ctx.user.id, body, JSON.stringify(menciones), respondeA, ctx.source === 'mcp' ? 'mcp' : 'crm', ts).first<MensajeRow>();
   const id = row!.id;
   const prod = await deProduccion(db, recordId);
+  const compartidos = rec.object_type === 'order' ? await compartidosDe(db, recordId) : [];
   const stmts: D1PreparedStatement[] = [
     // Quien escribe la sigue y ya leyó hasta acá.
     db.prepare(`INSERT INTO conversacion_participantes (record_id, user_id, leido_hasta, siguiendo, motivo) VALUES (?, ?, ?, 1, 'escribio')
@@ -193,8 +195,8 @@ export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input
     // Los que entran ahora tienen por leer desde este mensaje (no toda la conversación de antes).
     ...menciones.filter((u) => u !== ctx.user.id).map((u) => db.prepare(`INSERT INTO conversacion_participantes (record_id, user_id, leido_hasta, motivo) VALUES (?, ?, ?, 'mencion')
       ON CONFLICT(record_id, user_id) DO UPDATE SET siguiendo = 1`).bind(recordId, u, id - 1)),
-    // El propietario y producción: si no la dejaron de seguir antes.
-    ...[[rec.owner_id, 'propietario'] as const, ...prod.map((u) => [u, 'produccion'] as const)].filter(([u]) => u && u !== ctx.user.id)
+    // El propietario, quienes lo tienen compartido y producción: si no la dejaron de seguir antes.
+    ...[[rec.owner_id, 'propietario'] as const, ...compartidos.map((u) => [u, 'compartido'] as const), ...prod.map((u) => [u, 'produccion'] as const)].filter(([u]) => u && u !== ctx.user.id)
       .map(([u, motivo]) => db.prepare('INSERT OR IGNORE INTO conversacion_participantes (record_id, user_id, leido_hasta, motivo) VALUES (?, ?, ?, ?)').bind(recordId, u, id - 1, motivo)),
     // Aviso por mail a los mencionados (sale con los demás avisos, si lo tienen prendido).
     // (Los mensajes los escribe siempre una persona, desde la pantalla, Claude o la API con su token.)

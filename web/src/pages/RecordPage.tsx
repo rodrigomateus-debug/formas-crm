@@ -10,9 +10,10 @@ import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivo
 import { Select } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
+import { CompartidoCon } from '../Compartir';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
-interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
+interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number }; compartidos?: number[] }
 
 const RELATED: Record<ObjectType, ObjectType[]> = {
   contact: ['company', 'deal', 'order'],
@@ -38,7 +39,7 @@ export default function RecordPage() {
   return (
     <div className="content flush record-wrap">
       <div className="record">
-        <aside className="left"><LeftPanel type={type} record={record} onChange={refresh} produccion={data.data.produccion} /></aside>
+        <aside className="left"><LeftPanel type={type} record={record} onChange={refresh} produccion={data.data.produccion} compartidos={data.data.compartidos} /></aside>
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
@@ -162,7 +163,7 @@ function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r:
   return r.props.pdv_finnegans ? `PDV ${r.props.pdv_finnegans}` : '';
 }
 
-function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; record: CrmRecord; onChange: () => void; produccion?: Loaded['produccion'] }) {
+function LeftPanel({ type, record, onChange, produccion, compartidos }: { type: ObjectType; record: CrmRecord; onChange: () => void; produccion?: Loaded['produccion']; compartidos?: number[] }) {
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
@@ -218,6 +219,8 @@ function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; r
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
           {type === 'deal' && <ChatDarwin url={record.props.link_a_darwin} />}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
+          {/* Compartir el pedido con más personas (el backoffice de la vendedora…), además del propietario. */}
+          {type === 'order' && compartidos && <CompartidoCon orderId={record.id} ownerId={record.props.owner_id} compartidos={compartidos} onChange={onChange} />}
           {type !== 'order' && (
             <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas Hub para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
               href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} de Formas Hub). Usá la herramienta preparar_reunion del conector Formas Hub y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
@@ -976,6 +979,8 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],
     // Quién lo tiene en producción (asignados en ClickUp), como en la tarjeta del tablero y en la ficha.
     ...(data.data?.produccion ? [['Producción', <QuienProduce key="prod" {...data.data.produccion} />] as [string, ReactNode]] : []),
+    // Con quiénes está compartido, además del propietario (y para compartirlo desde acá).
+    ...(data.data?.compartidos ? [['Compartido', <CompartidoCon key="comp" orderId={id} ownerId={record.props.owner_id} compartidos={data.data.compartidos} onChange={changed} />] as [string, ReactNode]] : []),
     ['Tipo', record.props.tipo_de_pedido || '—'],
     ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
     ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],

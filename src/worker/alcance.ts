@@ -11,6 +11,8 @@ import { assertDealVisible } from './pipelines';
 //   - lo que no tiene propietario (para poder tomarlo: leads de Darwin, LinkedIn, formularios),
 //   - lo asociado a lo suyo: la empresa y los contactos de sus negocios, contactos y empresas; los pedidos de sus negocios.
 //   Un negocio de otra vendedora no se ve nunca por estar asociado a algo suyo (por ejemplo, a una empresa de ella).
+//   - Los pedidos que le compartieron (compartidos.ts, pedido de Rodrigo del 13/11/2026: el backoffice de una vendedora),
+//     como si fueran suyos: el pedido, su empresa y sus contactos (no el negocio).
 //   Encima de esto siguen los pipelines por equipo (pipelines.ts).
 // Pantallas: no ve Producción (ni quién tiene el pedido en producción), la bandeja de Entregas ni el ranking del equipo en
 // Inicio. Sí ve el saldo y la deuda del cliente (Finnegans) y los remitos de sus pedidos, para verlos y descargarlos.
@@ -46,9 +48,11 @@ export function visibleSql(al: string, user: User) {
   if (!esVentas(user)) return '1';
   const id = Number(user.id);
   if (!Number.isInteger(id)) throw new HttpError(500, 'Usuario inválido.');
-  return `(${al}.owner_id = ${id} OR ${al}.owner_id IS NULL OR ${al}.id IN (SELECT va.to_id FROM associations va
+  // Lo que le compartieron cuenta como suyo (también para ver lo asociado).
+  const compartido = `SELECT vc.record_id FROM compartidos vc WHERE vc.user_id = ${id}`;
+  return `(${al}.owner_id = ${id} OR ${al}.owner_id IS NULL OR ${al}.id IN (${compartido}) OR ${al}.id IN (SELECT va.to_id FROM associations va
     WHERE va.to_type != 'deal' AND (va.to_type != 'order' OR va.from_type = 'deal')
-      AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order') AND vo.owner_id = ${id})))`;
+      AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order') AND (vo.owner_id = ${id} OR vo.id IN (${compartido})))))`;
 }
 
 // Lo mismo para una actividad (nota, mail, tarea…) `al`: la ve si es suya (la tiene asignada o la cargó ella) o si está en
@@ -87,7 +91,9 @@ export async function assertVisible(db: D1Database, meta: Meta, user: User, row:
       : `${NOMBRE[row.object_type] ?? 'Este registro'} no está en ningún pedido ni es un proveedor: no está en el perfil Producción.`, { ajeno: true });
   }
   const de = await duenio(db, row.owner_id);
-  throw new HttpError(403, `${NOMBRE[row.object_type] ?? 'Este registro'} es de ${de ?? 'otra vendedora'}: lo ven ${de ? 'ella' : 'quien lo tiene'} y los administradores. Si lo necesitás, pedile a un administrador que te lo pase.`, { ajeno: true });
+  // Un pedido se puede compartir (compartidos.ts): se lo pide a quien lo tiene.
+  const pedir = row.object_type === 'order' ? `pedile a ${de ?? 'quien lo tiene'} que te lo comparta, o a un administrador` : 'pedile a un administrador que te lo pase';
+  throw new HttpError(403, `${NOMBRE[row.object_type] ?? 'Este registro'} es de ${de ?? 'otra vendedora'}: lo ven ${de ? 'ella' : 'quien lo tiene'} y los administradores. Si lo necesitás, ${pedir}.`, { ajeno: true });
 }
 
 // De una lista de ids, los que la vendedora ve (para filtrar bandejas y listas armadas por otro lado).

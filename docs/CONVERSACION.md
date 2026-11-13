@@ -34,8 +34,8 @@ que queda registrado, con @menciones y la actividad del pedido entremezclada.
 
 ## Quién se entera
 
-- Siguen la conversación: quien escribe, a quien mencionan (aunque la haya dejado), el propietario del registro y quienes
-  lo tienen asignado en producción (Ceci, Sole…, si tienen usuario del CRM). A ellos se les cuentan los sin leer.
+- Siguen la conversación: quien escribe, a quien mencionan (aunque la haya dejado), el propietario del registro, quienes lo
+  tienen compartido y quienes lo tienen asignado en producción (Ceci, Sole…, si tienen usuario del CRM). A ellos se les cuentan los sin leer.
 - A quien mencionan le llega además un mail con lo que le escribieron y el link a la conversación, con los demás avisos
   (cada 10 minutos), si tiene «Avisos por mail» prendido (Configuración → Usuarios). Si el mensaje se borra antes, no sale.
 
@@ -83,7 +83,9 @@ del registro (`activities`).
   negocio, así que aparece también en su conversación; guarda `meta.mensaje_id`.
 - **Campanita** (arriba a la derecha, `web/src/Notificaciones.tsx`, `src/worker/notificaciones.ts`): los avisos de cada uno
   (tabla `avisos`, la misma de los mails) con leído / no leído (`avisos.leido_at`, migración 0051): te mencionaron, te
-  respondieron (`kind 'respuesta'`, solo en el CRM, no por mail), te asignaron una tarea o un registro, faltan entregas.
+  respondieron (`kind 'respuesta'`, solo en el CRM, no por mail), te asignaron una tarea o un registro, faltan entregas,
+  otra persona cambió algo en tus pedidos (`kind 'cambio'`, con la lista de lo que cambió en `avisos.detalle`) y te
+  compartieron un pedido (`kind 'compartido'`); ver [PERFILES.md](PERFILES.md#pedidos-compartidos-y-avisos-de-cambios-pedido-de-rodrigo-del-13112026).
   Un clic lleva al mensaje (`?conversacion=1&mensaje=…`: la ficha abre la conversación y lo resalta), a Tareas o al pedido,
   y la marca leída. Leer la conversación marca leídas sus menciones y respuestas. «Marcar todas como leídas», y el puntito
   de cada una para marcarla leída o no leída. Se actualiza cada 45 segundos. No se muestran las de registros que ya no ves,

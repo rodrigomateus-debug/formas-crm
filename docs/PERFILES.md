@@ -55,6 +55,8 @@ Producción trabaja con los pedidos, no con la parte comercial:
   contactos). En la ficha del cliente no aparecen sus negocios.
 - **Inicio**: sus tareas, sin los números de ventas. **Crear**: solo pedidos.
 - **Tareas, actividad y conversaciones**: las suyas y las de lo que ve.
+- **Bocetos, logos, direcciones y fechas de entrega**: los sube y los cambia en el pedido (productos, «Entrega», la ficha,
+  la pantalla Producción y la parada del Cronograma). Lo que cambia le llega al vendedor (ver abajo, «Avisos de cambios»).
 
 Se controla en el mismo lugar que Ventas (`src/worker/alcance.ts`, `esProduccion`), también con Claude.
 
@@ -77,7 +79,47 @@ superadmin usa «Ver como» (Configuración → Usuarios, el ojito).
 
 Pruebas: `test/ventas.test.mjs`.
 
+## Pedidos compartidos y avisos de cambios (pedido de Rodrigo del 13/11/2026)
+
+### Compartir un pedido
+
+El propietario de un pedido es uno solo (la vendedora), pero se puede **compartir con más personas** para que lo vean y
+lo trabajen, por ejemplo con su backoffice. Botón **«Compartir»** en la ficha del pedido (abajo del nombre) y en la vista
+previa (renglón «Compartido»): se eligen las personas y se guarda. Con quien se comparte:
+
+- lo ve aunque tenga el perfil Ventas, con el cliente y sus contactos, como si fuera suyo (no el negocio);
+- le aparece en **«Míos»** de Pedidos (el filtro «Propietario: yo» de pedidos incluye los compartidos);
+- sigue la conversación del pedido y le llegan los avisos de cambios, igual que al propietario;
+- le llega un aviso «te compartió el pedido» (campanita y mail).
+
+Lo comparte cualquiera que puede editar el pedido. Queda en la conversación y en el historial («compartió el pedido con…»,
+«dejó de compartirlo con…»). Si una vendedora abre un pedido que no ve, el aviso le dice que se lo pida a la dueña.
+Hecho en `src/worker/compartidos.ts` (tabla `compartidos`, migración 0052), `alcance.ts` (qué ve) y `web/src/Compartir.tsx`.
+Por ahora solo pedidos; si hace falta, los negocios usarían lo mismo.
+
+### Avisos de cambios al vendedor
+
+Cuando **otra persona** cambia algo sensible de un pedido, al propietario y a quienes lo tienen compartido les llega a la
+campanita y, si tienen «Avisos por mail» prendido, por mail («Ceci cambió PDV 31277: Subió el boceto «…» de Taza térmica ·
+Cambió la dirección de entrega a «…»»). Lo que avisa (`src/worker/cambios.ts`):
+
+| Qué | Dónde se cambia |
+|---|---|
+| Boceto subido, aprobado o vuelto a «para aprobar», pasado a otro producto, marcado técnico o referencia, quitado | Productos del pedido, visor del boceto |
+| Logo subido o elegido para un producto, logo principal cambiado o quitado (en la empresa: a su propietaria) | Productos del pedido, Empresa → Logos |
+| Dirección de entrega (y cuánto va a cada una, con varias) | Tarjeta «Entrega», parada del Cronograma |
+| Fecha de entrega | Ficha del pedido; en Producción, «Entrega» del PDV o de un artículo |
+| Etapa del pedido movida a mano | Ficha, tablero de pedidos |
+
+No avisa a quien hizo el cambio, ni lo que trae la sincronización de ClickUp o Finnegans (solo personas: pantalla, Claude
+o la API con el token de alguien). Los cambios seguidos de la misma persona en el mismo pedido (15 minutos, mientras no se
+leyó ni salió el mail) van juntos en un solo aviso, para no llenar la campanita al subir varios bocetos. También en los
+negocios (a su propietario), por ejemplo un boceto que sube otra persona.
+
+Pruebas: `test/cambios.test.mjs` (y la fecha de Producción en `test/produccion.test.mjs`).
+
 ### Pendiente / a revisar
 
-- Si alguien menciona a una vendedora en la conversación de un pedido que no es suyo, ella no lo ve (ni en la bandeja).
+- Si alguien menciona a una vendedora en la conversación de un pedido que no es suyo, ella no lo ve (ni en la bandeja):
+  hay que compartírselo («Compartir» en el pedido).
 - Logística sigue viendo todo; cuando se defina, va en el mismo `alcance.ts`.

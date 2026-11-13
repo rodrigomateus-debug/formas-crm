@@ -5,13 +5,15 @@ import { UserAvatar } from './components';
 import { refrescarNoLeidas } from './pages/Conversacion';
 
 // La campanita de arriba a la derecha (pedido de Rodrigo del 13/11/2026; src/worker/notificaciones.ts): lo último que te
-// pasó en el CRM —te mencionaron, te respondieron, te asignaron una tarea o un registro, faltan entregas— con lo no leído
+// pasó en el CRM —te mencionaron, te respondieron, te asignaron una tarea o un registro, faltan entregas, otra persona
+// cambió algo en tus pedidos (boceto, logo, dirección o fecha de entrega), te compartieron un pedido— con lo no leído
 // marcado. Un clic lleva al mensaje (o a la tarea, o al pedido) y la marca leída. Se actualiza sola cada 45 segundos.
 
 export interface Notificacion {
-  id: number; kind: 'mencion' | 'respuesta' | 'tarea' | 'registro' | 'entrega' | string; record_id: number | null; object_type: ObjectType | null;
+  id: number; kind: 'mencion' | 'respuesta' | 'tarea' | 'registro' | 'entrega' | 'cambio' | 'compartido' | string; record_id: number | null; object_type: ObjectType | null;
   name: string | null; activity_id: number | null; subject: string | null; mensaje_id: number | null; texto: string | null; by_user: number | null;
   created_at: string; leido_at: string | null;
+  detalle?: string[] | null;   // kind 'cambio': qué cambió
 }
 interface Res { no_leidas: number; items: Notificacion[] }
 
@@ -48,6 +50,12 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
     case 'respuesta': return { titulo: <><b>{quien}</b> te respondió en {reg}</>, detalle: n.texto, icono: 'reply', destino: `${aReg}?conversacion=1&mensaje=${n.mensaje_id ?? ''}` };
     case 'tarea': return { titulo: <><b>{quien}</b> te asignó una tarea</>, detalle: n.subject, icono: 'task', destino: '/tasks' };
     case 'entrega': return { titulo: <>Faltan entregas en {reg}</>, detalle: 'Según los remitos, todavía falta entregar algo.', icono: 'truck', destino: aReg };
+    // Cambios que hizo otra persona en tus pedidos (cambios.ts): todos los de un rato, juntos.
+    case 'cambio': {
+      const lista = n.detalle ?? [];
+      return { titulo: <><b>{quien}</b> cambió {lista.length > 1 ? `${lista.length} cosas en ` : ''}{reg}</>, detalle: lista.join(' · ') || null, icono: 'edit', destino: aReg };
+    }
+    case 'compartido': return { titulo: <><b>{quien}</b> te compartió {reg}</>, detalle: 'Lo ves, seguís su conversación y te llegan sus avisos.', icono: 'users', destino: aReg };
     default: return { titulo: <><b>{quien}</b> te asignó {reg}</>, detalle: null, icono: n.object_type ?? 'note', destino: aReg };
   }
 }
@@ -107,7 +115,7 @@ export function Campanita() {
           <div className="notif-lista">
             {!lista.length && (
               <div className="notif-vacio"><Icon name="bell" size={22} /><div>{soloSinLeer ? 'Estás al día: no tenés nada sin leer.' : 'Todavía no hay notificaciones.'}</div>
-                <div className="small muted">Acá aparece cuando te mencionan, te responden o te asignan algo.</div></div>
+                <div className="small muted">Acá aparece cuando te mencionan, te responden, te asignan algo o cambian algo en tus pedidos.</div></div>
             )}
             {lista.map((n) => {
               const quien = n.by_user ? userOf(meta, n.by_user)?.name.split(' ')[0] ?? 'Alguien' : 'El CRM';
@@ -121,7 +129,7 @@ export function Campanita() {
                     </span>
                     <span className="notif-texto">
                       <span className="notif-titulo">{d.titulo}</span>
-                      {d.detalle && <span className="notif-detalle">{d.detalle}</span>}
+                      {d.detalle && <span className="notif-detalle" title={n.detalle && n.detalle.length > 1 ? n.detalle.join('\n') : undefined}>{d.detalle}</span>}
                       <span className="notif-hora" title={fmtDate(n.created_at, true)}>{fmtRelative(n.created_at, true)}</span>
                     </span>
                   </button>

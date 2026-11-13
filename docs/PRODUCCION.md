@@ -16,6 +16,11 @@ se edita desde ahí.
   minutos. Así se puede trabajar en los dos lados a la vez, y si algo falla se vuelve a ClickUp sin perder nada.
 - **Quién edita:** las usuarias con perfil **Producción** y los administradores. Las vendedoras ven la pantalla, sin
   editar.
+- **Bocetos, logos, direcciones y fechas:** Producción también los sube y los cambia en el pedido (la vista previa que se
+  abre desde acá tiene los productos, con sus bocetos y logos, y la tarjeta «Entrega»). Al vendedor le llega el aviso de lo
+  que cambió (campanita y mail; ver [PERFILES.md](PERFILES.md#pedidos-compartidos-y-avisos-de-cambios-pedido-de-rodrigo-del-13112026)).
+  Cambiar la fecha «Entrega» de un PDV o de un artículo desde esta pantalla también le avisa; las fechas de proveedor e
+  impresor, no (son de producción).
 
 ## Qué se ve y qué se edita
 

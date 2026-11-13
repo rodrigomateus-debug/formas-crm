@@ -152,6 +152,34 @@ la tarjeta del tablero (pedido de Rodrigo del 12/11/2026). Se reconocen por el n
 `web/src/proveedores.tsx` y los isotipos, recortados de los de `formas-shop-tablero/assets/proveedores`, en
 `web/public/proveedores/`. Si un importador aparece con otro nombre, se agrega en `alias`. La ficha de cada proveedor muestra **«En producción»**: los artículos abiertos que tiene, con sus fechas.
 
+### El proveedor que falta sale del SKU
+
+Pedido de Rodrigo del 13/11/2026. Si un artículo no tiene PROVEEDOR en ClickUp y su SKU empieza con el prefijo de un
+importador, el CRM le pone ese proveedor y lo escribe en ClickUp, así se ve igual en los dos lados:
+
+| Prefijo | Proveedor |
+|---|---|
+| ZEC | Zecat |
+| IMP | Promoproductos |
+| CDO | Stocksur |
+| ZOM | Irion |
+| NFM | Nuevas Formas |
+| XTR | X-Trade |
+| MYA | Maya |
+
+- **El SKU** es la línea «Código:» de la subtarea del artículo en ClickUp (columna `codigo`) o, si no la tiene, el
+  código del renglón del pedido atado a ese artículo.
+- **Cuándo:** en cada sincronización de ClickUp, de a 5 artículos por corrida (cada uno es una escritura en ClickUp y
+  deja lugar para revisar PDV). Solo los artículos abiertos (no entregados ni anulados) de las unidades que se editan
+  desde el CRM («Qué se edita acá»); los de las otras unidades se siguen completando en ClickUp.
+- **No pisa nada:** solo se completa si está vacío, y una sola vez por artículo (`proveedor_auto` guarda la opción que
+  puso el CRM). Si después lo cambian o lo vacían, el CRM no lo vuelve a poner.
+- **La opción:** la del desplegable PROVEEDOR con ese nombre o, si no, la atada a esa empresa del CRM
+  (`PROVEEDOR_POR_SKU` en `produccion.ts`, con los nombres con que puede aparecer). Si el desplegable no tiene opción
+  para ese importador, no se hace nada: hay que agregar la opción en ClickUp.
+- En la lista, al pasar por la celda del proveedor se ve «Por el SKU ZEC-…» mientras siga el que puso el CRM.
+- Migración `0058_proveedor_por_sku.sql`; prueba en `test/produccion.test.mjs`.
+
 ## Cómo está hecho
 
 | Qué | Dónde |

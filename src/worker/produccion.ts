@@ -5,6 +5,7 @@ import { Budget } from './budget';
 import { createRecord, updateRecord } from './records';
 import { API, cu, generalStage, LIST, norm, STAGE, upsertPdv, usuarioPorNombre, type CuTask } from './clickup';
 import { fotosDeArticulos } from './productos';
+import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
 
 // Producción en el CRM (pedido de Rodrigo del 12/11/2026). Producción (Ceci y Sole) trabaja en ClickUp con la vista «Estado
 // PDV CECI»: cada PDV con sus artículos abiertos abajo, y en cada artículo su estado, proveedor, impresor y las fechas de
@@ -385,7 +386,10 @@ export function etapaPdv(pdvEstado: string, estados: string[], etapaPedido: stri
 }
 
 function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }, arts: FilaDb[], editables: string[], verCerrados: boolean,
-  fotos: Map<string, string>, logos: Map<string, string> = new Map()): PdvVista {
+  fotos: Map<string, string>, logos: Map<string, string> = new Map(), servicios: Set<string> = new Set()): PdvVista {
+  // Los artículos que son un servicio (envío, setup, un adicional: servicios.ts) no se producen: no se listan, no cuentan
+  // y no pesan en el estado del PDV.
+  arts = arts.filter((a) => !servicios.has(a.task_id));
   const vivos = arts.filter((a) => !CERRADOS.slice(1).includes(a.estado));
   const { etapa, auto } = etapaPdv(p.estado, arts.map((a) => a.estado), p.etapa_pedido);
   const visibles = verCerrados ? arts : arts.filter((a) => !CERRADOS.includes(a.estado));
@@ -422,8 +426,14 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
   for (const a of arts) { const l = dePdv.get(a.pdv_task) ?? []; l.push(a); dePdv.set(a.pdv_task, l); }
   const pedidoDe = new Map(pdvs.map((p) => [p.task_id, p.record_id]));
   const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? pedidoDe.get(a.pdv_task) ?? null }));
-  const [fotos, logos] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido)]);
-  const out = pdvs.map((p) => armarPdv(p, dePdv.get(p.task_id) ?? [], cfg.unidades, !!q.cerrados, fotos, logos))
+  const [fotos, logos, servicios] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido), tareasServicio(db, pdvs.map((p) => p.record_id))]);
+  // Un PDV al que solo le queda abierto un servicio (o que es todo servicios) no tiene nada para producir: no se ve.
+  const conTrabajo = (p: FilaDb) => {
+    const suyos = dePdv.get(p.task_id) ?? [];
+    if (q.cerrados || !suyos.some((a) => servicios.has(a.task_id))) return true;
+    return suyos.some((a) => !servicios.has(a.task_id) && !CERRADOS.includes(a.estado));
+  };
+  const out = pdvs.filter(conTrabajo).map((p) => armarPdv(p, dePdv.get(p.task_id) ?? [], cfg.unidades, !!q.cerrados, fotos, logos, servicios))
     .sort((a, b) => (a.entrega_real ?? a.entrega_prometida ?? '9999').localeCompare(b.entrega_real ?? b.entrega_prometida ?? '9999') || Number(a.npdv) - Number(b.npdv));
   return { pdvs: out, ...(await referencias(db)), config: cfg, unidades, puede_editar: puedeEditarProduccion(user) };
 }
@@ -447,8 +457,8 @@ async function pdvVista(db: D1Database, pdvTask: string) {
   if (!p) return null;
   const arts = (await db.prepare('SELECT * FROM produccion WHERE es_pdv = 0 AND pdv_task = ?').bind(pdvTask).all<FilaDb>()).results;
   const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? p.record_id }));
-  const [fotos, logos] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido)]);
-  return armarPdv(p, arts, cfg.unidades, false, fotos, logos);
+  const [fotos, logos, servicios] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido), tareasServicio(db, [p.record_id])]);
+  return armarPdv(p, arts, cfg.unidades, false, fotos, logos, servicios);
 }
 
 // ---------- Editar: se escribe en ClickUp y después en el CRM ----------
@@ -560,7 +570,9 @@ export async function produccionDeEmpresa(db: D1Database, companyId: number) {
 // Quién tiene asignado cada artículo del pedido y el PDV entero (los productos del pedido, en su ficha).
 export interface Persona { id: number; nombre: string; user_id: number | null; foto: string | null }
 export async function produccionDePedido(db: D1Database, recordId: number) {
-  const { results } = await db.prepare(`SELECT p.task_id, p.es_pdv, p.estado, p.asignados FROM produccion p WHERE p.record_id = ?`).bind(recordId)
+  // Sin los artículos que son un servicio (servicios.ts): no cuentan en «2/3 listos».
+  const { results } = await db.prepare(`SELECT p.task_id, p.es_pdv, p.estado, p.asignados FROM produccion p WHERE p.record_id = ?1
+      AND p.task_id NOT IN ${TAREAS_SERVICIO_SQL('?1')}`).bind(recordId)
     .all<{ task_id: string; es_pdv: number; estado: string; asignados: string }>();
   if (!results.length) return null;
   const ids = [...new Set(results.flatMap((r) => lista(r.asignados).map(Number)))];
@@ -579,11 +591,13 @@ export async function produccionDePedido(db: D1Database, recordId: number) {
 }
 
 // Para la tarjeta del tablero de pedidos (productos.ts, adjuntosSql): quién lo tiene asignado en producción (el PDV y
-// sus artículos abiertos) y cuántos artículos están listos.
+// sus artículos abiertos) y cuántos artículos están listos. Los artículos que son un servicio no cuentan.
 export const PRODUCCION_TARJETA_SQL = `,
       (SELECT json_group_array(json_object('id', cp.clickup_id, 'nombre', COALESCE(u.name, cp.nombre), 'user_id', cp.user_id, 'foto', COALESCE(u.photo_url, cp.foto)))
         FROM clickup_personas cp LEFT JOIN users u ON u.id = cp.user_id
         WHERE cp.clickup_id IN (SELECT j.value FROM produccion pr, json_each(pr.asignados) j
-          WHERE pr.record_id = r.id AND (pr.es_pdv = 1 OR pr.estado NOT IN ('entregados', 'anulado')))) AS prod_asignados,
-      (SELECT COUNT(*) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado NOT IN ('anulado', 'anulada', 'cancelado')) AS prod_total,
-      (SELECT COUNT(*) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado IN ('listo para entergar', 'listo para entregar', 'entregados')) AS prod_listos`;
+          WHERE pr.record_id = r.id AND (pr.es_pdv = 1 OR pr.estado NOT IN ('entregados', 'anulado')) AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')})) AS prod_asignados,
+      (SELECT COUNT(*) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado NOT IN ('anulado', 'anulada', 'cancelado')
+        AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')}) AS prod_total,
+      (SELECT COUNT(*) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado IN ('listo para entergar', 'listo para entregar', 'entregados')
+        AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')}) AS prod_listos`;

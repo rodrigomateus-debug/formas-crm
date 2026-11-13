@@ -10,6 +10,7 @@ import { tareaPostEntrega } from './postentrega';
 import { montosDesdePedidos } from './montos';
 import { recalcularEntrega } from './remitos';
 import { enlazarPedido, guardarTareas, leerEstados, podarArticulos, vincularOpciones } from './produccion';
+import { articulosServicio, relecturasPedidas } from './servicios';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
@@ -261,14 +262,18 @@ export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)
 }
 
 // Datos del PDV que necesita el pedido.
-export function readPdv(t: CuTask) {
+// `servicios`: los artículos que son un servicio (envío, setup, un adicional: servicios.ts). No se producen ni se entregan,
+// así que no pesan en el estado del pedido (un adicional en «ingreso de pedido» no deja el PDV en «Entregado parcial»).
+export function readPdv(t: CuTask, servicios: Set<string> = new Set()) {
   const f = fields(t);
   const text = t.text_content || t.description || '';
   const line = (k: string) => text.match(new RegExp(`${k}:\\s*(.+)`, 'i'))?.[1]?.trim() ?? '';
   const npdv = (f['N° PDV'] || t.name).match(/(\d+)/)?.[1] ?? '';
   const unidad = UNIDADES[(f['UNIDAD DE NEGOCIO'] ?? '').trim().toUpperCase()];
   const fe = line('Fecha entrega').match(/(\d{2})-(\d{2})-(\d{4})/);
-  const items = t.subtasks?.length ? t.subtasks : [t];
+  const reales = (t.subtasks ?? []).filter((x) => !servicios.has(x.id));
+  // Si todo el PDV son servicios, vale el estado de la tarea del PDV.
+  const items = reales.length ? reales : [t];
   const statuses = ANULADOS.includes((t.status?.status ?? '').toLowerCase()) ? ['anulado'] : items.map((x) => x.status?.status ?? '');
   const count = new Map<string, number>();
   for (const st of statuses) count.set(st, (count.get(st) ?? 0) + 1);
@@ -373,12 +378,15 @@ async function findOrder(db: D1Database, pdv: ReturnType<typeof readPdv>) {
 // `actor`: quién hizo el cambio, cuando se sabe (lo que se edita en la vista de Producción del CRM).
 export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | null, b?: Budget, actor?: { name: string; userId: number | null }): Promise<'creado' | 'actualizado' | 'igual' | 'omitido'> {
   const db = env.DB;
-  const pdv = readPdv(t);
+  let pdv = readPdv(t);
   if (!pdv.npdv || !pdv.unidad) return 'omitido';
   // Lo que cambia ClickUp en este pedido queda a nombre de quien tiene asignado el PDV, no del usuario de la sincronización.
   const resp = actor ?? await responsableClickup(db, t);
   const pctx: Ctx = resp ? { ...ctx, actor: resp } : ctx;
   const existing = await findOrder(db, pdv);
+  // Los artículos que son un servicio no pesan en el estado (por el renglón del pedido o por el código del artículo).
+  const servicios = t.subtasks?.length ? await articulosServicio(db, existing?.id ?? null, t.subtasks.map((s) => ({ task_id: s.id, code: leerArticulo(s).code }))) : new Set<string>();
+  if (servicios.size) pdv = readPdv(t, servicios);
   let id: number;
   let result: 'creado' | 'actualizado' | 'igual' = 'igual';
   let entregadoAhora = false;   // pasó a «Entregado» en esta lectura: va la tarea post-entrega
@@ -573,6 +581,8 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
   const started = Date.now();
   const b = Budget.of(env);
   const queue = new Map(state.queue ?? []);
+  // Los PDV que hay que volver a leer porque cambió qué renglones son un servicio (servicios.ts).
+  for (const pid of await relecturasPedidas(db)) queue.set(pid, Math.max(queue.get(pid) ?? 0, started));
   const out: ClickupState = { ...state, at: new Date(started).toISOString(), creados: 0, actualizados: 0, error: null };
   // La vista de Producción necesita una lectura completa de la lista la primera vez (después, lo cambiado alcanza).
   const llenarProduccion = !state.produccion && !state.scan?.full;

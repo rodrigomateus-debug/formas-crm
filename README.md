@@ -9,6 +9,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Por qué Cloudflare, cuánto aguanta (prueba con el volumen de 5 años) y cuándo revisarlo: [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 - Remitos (ClickUp, ficha del pedido y app del chofer), lectura con Claude y qué falta entregar: [docs/REMITOS.md](docs/REMITOS.md).
 - Producción (la vista de ClickUp de Ceci y Sole en el CRM, editable; arranca con Formas Shop): [docs/PRODUCCION.md](docs/PRODUCCION.md).
+- Servicios (envío, setup de logo, «Artículos varios»: renglones que se cobran pero no se producen): [docs/PRODUCCION.md](docs/PRODUCCION.md#servicios-los-renglones-que-no-se-producen).
 - Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
 - Cronograma (reemplaza la planilla semanal de Logística: entregas, ingresos, retiros y egresos por día, la ruta del día en el mapa por chofer y el recorrido en la app del chofer): [docs/CRONOGRAMA.md](docs/CRONOGRAMA.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).

@@ -458,3 +458,53 @@ test('cronograma: la libreta de direcciones se copia de la planilla y completa l
   }
   asUser = null;
 });
+
+test('cronograma: choferes y expresos, una entrega por expreso con su guía y un recorrido que sale de otro lugar', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  // La lista de choferes y expresos, desde el desplegable de la ruta.
+  assert.equal((await api('POST', '/cronograma/transportistas', { nombre: ' ', tipo: 'chofer' })).status, 400);
+  assert.equal((await api('POST', '/cronograma/transportistas', { nombre: `Carlos ${RUN}`, tipo: 'chofer' })).status, 200);
+  const ex = await api('POST', '/cronograma/transportistas', { nombre: `Expreso ${RUN}`, tipo: 'expreso', direccion: `Vélez Sarsfield ${PDV}, Barracas, CABA` });
+  assert.equal(ex.status, 200, JSON.stringify(ex.data));
+  let r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  assert.ok(r.choferes.includes(`Carlos ${RUN}`), 'el chofer nuevo está en el desplegable');
+  assert.ok(r.choferes.includes(`Juan ${RUN}`), 'y los que tienen link de la app');
+  assert.deepEqual(r.expresos.filter((x) => x.nombre === `Expreso ${RUN}`).map((x) => x.direccion), [`Vélez Sarsfield ${PDV}, Barracas, CABA`]);
+
+  // La entrega de la mochila va por expreso: la parada pasa a ser el expreso, para ese cliente.
+  const antes = r.paradas.find((p) => p.movimientos.some((m) => m.tipo === 'entrega' && m.npdv === PDV));
+  assert.equal(antes.nombre, CLIENTE);
+  assert.equal((await api('PUT', '/cronograma/expreso', { clave: 'e:1', expreso: 'x' })).status, 400, 'solo una entrega va por expreso');
+  assert.equal((await api('PUT', '/cronograma/expreso', { clave: antes.clave, record_id: antes.record_id, expreso: `Expreso ${RUN}` })).status, 200);
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  let par = r.paradas.find((p) => p.clave === antes.clave);
+  assert.equal(par.nombre, `Expreso ${RUN}`);
+  assert.deepEqual(par.expreso, { nombre: `Expreso ${RUN}`, guia: null, cliente: CLIENTE });
+  assert.deepEqual([par.direccion, par.origen], [`Vélez Sarsfield ${PDV}, Barracas, CABA`, 'expreso']);
+  // La guía se carga después, y se ve también en la semana.
+  assert.equal((await api('PUT', '/cronograma/expreso', { clave: antes.clave, record_id: antes.record_id, expreso: `Expreso ${RUN}`, guia: 'A-000123' })).status, 200);
+  const sem = await semana();
+  assert.deepEqual(mov(sem, 'entrega', 'Mochila').expreso, { nombre: `Expreso ${RUN}`, guia: 'A-000123' });
+  // El expreso es del PDV: vale para todas sus entregas.
+  assert.equal(mov(sem, 'entrega', 'Termo').expreso.nombre, `Expreso ${RUN}`);
+  assert.equal(mov(sem, 'retiro_proveedor', 'Mochila').expreso ?? null, null, 'solo las entregas');
+  // Vuelve a ir directo.
+  assert.equal((await api('PUT', '/cronograma/expreso', { clave: antes.clave, expreso: '' })).status, 200);
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  par = r.paradas.find((p) => p.clave === antes.clave);
+  assert.deepEqual([par.nombre, par.expreso ?? null], [CLIENTE, null]);
+
+  // Un recorrido que sale de otro lugar, elegido de la libreta: queda con su nombre, su dirección y su punto en el mapa.
+  const otro = { nombre: `ZECAT ${RUN} (DEPOSITO)`, direccion: `JOSE INGENIEROS ${PDV}, RICARDO ROJAS, Buenos Aires` };
+  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: '2026-11-20', rutas: [{ chofer: `Carlos ${RUN}`, base: 'otro', base_otro: otro, salida: 540, orden: r.paradas.map((p) => p.clave) }] })).status, 200);
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  for (let i = 0; i < 6 && r.buscando > 0; i++) r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  assert.equal(r.rutas[0].base, 'otro');
+  assert.deepEqual(r.rutas[0].base_otro, { ...otro, lat: -34.514, lng: -58.497 });
+  assert.equal(r.rutas[0].chofer, `Carlos ${RUN}`);
+  // Volver a un depósito de Formas saca el otro lugar.
+  await api('PUT', '/cronograma/ruta', { fecha: '2026-11-20', rutas: [{ chofer: null, base: 'roca', salida: 540, orden: [] }] });
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  assert.deepEqual([r.rutas[0].base, r.rutas[0].base_otro ?? null], ['roca', null]);
+});

@@ -11,8 +11,9 @@ import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, type Mov, type Ti
 // son los de un día de tránsito moderado según la hora (ruta.ts); todavía no usan el tránsito del momento.
 
 interface Parada {
-  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | null;
+  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | 'expreso' | null;
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
+  expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
   company_id: number | null; record_id: number | null; movimientos: Mov[];
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
@@ -20,11 +21,11 @@ interface Parada {
 }
 const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontró la dirección', rechazo: 'No lo quisieron recibir', no_listo: 'No estaba listo', otro: 'No se pudo' };
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[] }
+interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat?: number | null; lng?: number | null } | null }
 interface BaseGeo { id: string; nombre: string; direccion: string; lat: number | null; lng: number | null }
 // `retiran`: las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido); `parcial`: el resto del pedido se envía.
 interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
-  choferes: string[]; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
+  choferes: string[]; con_link?: string[]; expresos?: Array<{ id: number; nombre: string; direccion: string | null }>; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
 interface Real extends TramosReales { linea: Array<[number, number]> }
 
 // Con el número en blanco encima: todos pasan 4,5:1.
@@ -32,7 +33,7 @@ const COLORES = ['#3b5bdb', '#c2410c', '#0b7285', '#862e9c', '#2b7a39', '#a61e4d
 // Los nombres vienen de ClickUp y de las fichas: al mapa van como texto, nunca como HTML.
 const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const TANDA = 25;   // el servidor acepta de a 25 artículos por vez
-const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedido', finnegans: 'Del pedido en Finnegans', ultima_entrega: 'De la última entrega a este cliente', empresa: 'De la ficha de la empresa', libreta: 'De la libreta de direcciones' };
+const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedido', finnegans: 'Del pedido en Finnegans', ultima_entrega: 'De la última entrega a este cliente', empresa: 'De la ficha de la empresa', libreta: 'De la libreta de direcciones', expreso: 'La dirección del expreso' };
 const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
 
@@ -57,6 +58,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [editando, setEditando] = useState<string | null>(null);
   // La parada a la que se le está corrigiendo la ubicación en el mapa (solo ese número se puede arrastrar) y dónde se soltó.
   const [ubicando, setUbicando] = useState<{ clave: string; lat?: number; lng?: number } | null>(null);
+  // Paneles de la barra del recorrido (agregar un chofer o un expreso, elegir otro lugar de salida) y la parada a la que
+  // se le está cargando el expreso.
+  const [panel, setPanel] = useState<'chofer' | 'salida' | null>(null);
+  const [expresando, setExpresando] = useState<string | null>(null);
   const arrastre = useRef<string | null>(null);
   const [sobre, setSobre] = useState<string | null>(null);
   const pedido = useRef(0);
@@ -108,7 +113,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   }, [rutas, puede, fecha, toast]);
 
   const armadas = useMemo(() => rutas.map((r, i) => {
-    const base = datos?.bases.find((b) => b.id === r.base) ?? datos?.bases[0] ?? null;
+    // Sale de un depósito de Formas o, con «Otro lugar», del que se eligió.
+    const base: BaseGeo | null = r.base === 'otro' && r.base_otro ? { id: `otro-${i}`, nombre: r.base_otro.nombre, direccion: r.base_otro.direccion, lat: r.base_otro.lat ?? null, lng: r.base_otro.lng ?? null }
+      : datos?.bases.find((b) => b.id === r.base) ?? datos?.bases[0] ?? null;
     const paradas = r.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p);
     const clave = claveOrden(punto(base), paradas);
     const real = reales[clave];
@@ -138,6 +145,15 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   }, [armadas, reales]);
 
   const act = armadas[Math.min(activa, armadas.length - 1)];
+  // Guarda ya y vuelve a pedir la ruta: hace falta cuando el cambio necesita algo del servidor (ubicar en el mapa el lugar
+  // de salida que se eligió).
+  async function guardarYa(nuevas: Recorrido[]) {
+    sucio.current = false; porGuardar.current = null; tocado.current = true;
+    setRutas(Object.assign(nuevas, { fecha }));
+    try { await http('PUT', '/cronograma/ruta', { fecha, rutas: nuevas }); } catch (e) { toast((e as Error).message, true); }
+    setRutas([]);
+    void cargar();
+  }
   const mover = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => {
     if (i !== act.i) return r;
     const o = [...r.orden], de = o.indexOf(clave);
@@ -213,16 +229,24 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
       <div className="toolbar cr-ruta-barra">
         <label className="cr-campo">Chofer
-          <select className="input sm" value={act.r.chofer ?? ''} disabled={!puede} onChange={(e) => cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, chofer: e.target.value || null } : r)))}>
+          <select className="input sm" value={act.r.chofer ?? ''} disabled={!puede}
+            onChange={(e) => { if (e.target.value === '+') { setPanel('chofer'); return; } cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, chofer: e.target.value || null } : r))); }}>
             <option value="">Sin asignar</option>
-            {[...new Set([...datos.choferes, ...(act.r.chofer ? [act.r.chofer] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
+            <optgroup label="Choferes">
+              {[...new Set([...datos.choferes, ...(act.r.chofer && !(datos.expresos ?? []).some((x) => x.nombre === act.r.chofer) ? [act.r.chofer] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
+            </optgroup>
+            {(datos.expresos ?? []).length > 0 && <optgroup label="Expresos">{datos.expresos!.map((x) => <option key={x.id} value={x.nombre}>{x.nombre}</option>)}</optgroup>}
+            <option value="+">+ Agregar chofer o expreso…</option>
           </select>
         </label>
         <label className="cr-campo">Sale de
-          <select className="input sm" value={act.r.base} disabled={!puede} onChange={(e) => cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, base: e.target.value } : r)))}>
+          <select className="input sm" value={act.r.base} disabled={!puede}
+            onChange={(e) => { if (e.target.value === 'otro') { setPanel('salida'); return; } setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, base: e.target.value, base_otro: null } : r))); }}>
             {datos.bases.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)}
+            <option value="otro">{act.r.base === 'otro' && act.r.base_otro ? act.r.base_otro.nombre : 'Otro lugar…'}</option>
           </select>
         </label>
+        {puede && act.r.base === 'otro' && <button type="button" className="cr-link" onClick={() => setPanel('salida')}>Cambiar lugar</button>}
         <label className="cr-campo">A las
           <input type="time" className="input sm" value={`${String(Math.floor(act.r.salida / 60)).padStart(2, '0')}:${String(act.r.salida % 60).padStart(2, '0')}`} disabled={!puede}
             onChange={(e) => { if (!e.target.value) return; const [h, m] = e.target.value.split(':').map(Number); if (Number.isFinite(h)) cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, salida: h * 60 + (m || 0) } : r))); }} />
@@ -231,6 +255,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
         <span className="grow" />
         {puede && rutas.length > 1 && <button type="button" className="btn sm ghost danger" onClick={() => { cambiar((rs) => { const fuera = rs[act.i].orden, q = rs.filter((_, i) => i !== act.i); q[0] = { ...q[0], orden: [...q[0].orden, ...fuera] }; return q; }); setActiva(0); }}>Quitar este recorrido</button>}
       </div>
+
+      {panel === 'chofer' && puede && <NuevoTransportista onCancelar={() => setPanel(null)} onListo={(nombre) => { setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, chofer: nombre } : r))); void cargar(); }} />}
+      {panel === 'salida' && puede && <OtroLugar onCancelar={() => setPanel(null)} onElegir={(l) => { setPanel(null); void guardarYa(rutas.map((r, i) => (i === act.i ? { ...r, base: 'otro', base_otro: l } : r))); }} />}
 
       <div className="cr-kpis">
         <div><span>Paradas</span><b className="num">{act.paradas.length}<small>{movs.length} movimientos</small></b></div>
@@ -263,6 +290,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                 <div className="cr-n num">{todo ? <Icon name="check" size={13} /> : i + 1}</div>
                 <div className="cr-p-quien">
                   <div className="cr-p-nombre">{lindo(p.nombre)}</div>
+                  {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia ? <> · guía <b className="num">{p.expreso.guia}</b></> : ' · sin guía todavía'}</div>}
                   <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ?? 'Sin dirección cargada'}</div>
                 </div>
                 <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></div>
@@ -299,7 +327,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   {p.lat == null && <span className="cr-tag riesgo"><Icon name="alert" size={11} />{p.direccion ? 'No se encontró en el mapa' : 'Falta la dirección'}</span>}
                   {p.visita?.resultado === 'hecho' && <span className="cr-tag">Lo marcó {p.visita.chofer ?? 'el chofer'} a las {horaDe(p.visita.at)}</span>}
                   {puede && <button type="button" className="cr-link" onClick={() => marcar(p)}>{todo ? 'Volver a pendiente' : 'Marcar hecho'}</button>}
-                  {puede && (p.company_id || entregas.length > 0) && <button type="button" className="cr-link" onClick={() => setEditando(editando === p.clave ? null : p.clave)}>{p.direccion ? 'Corregir dirección' : 'Cargar dirección'}</button>}
+                  {puede && !p.expreso && (p.company_id || entregas.length > 0) && <button type="button" className="cr-link" onClick={() => setEditando(editando === p.clave ? null : p.clave)}>{p.direccion ? 'Corregir dirección' : 'Cargar dirección'}</button>}
+                  {puede && /^p:/.test(p.clave) && <button type="button" className="cr-link" onClick={() => setExpresando(expresando === p.clave ? null : p.clave)}>{p.expreso ? (p.expreso.guia ? 'Cambiar expreso o guía' : 'Cargar la guía') : 'Mandar por expreso'}</button>}
                   {puede && p.direccion && p.lat != null && ubicando?.clave !== p.clave && <button type="button" className="cr-link" onClick={() => { setUbicando({ clave: p.clave }); setCaliente(p.clave); }}>Corregir ubicación</button>}
                   {p.lat != null && <a className="cr-link" href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Cómo llegar</a>}
                   <span className="grow" />
@@ -321,6 +350,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                     </div>
                   </div>
                 )}
+                {expresando === p.clave && <PorExpreso p={p} expresos={datos.expresos ?? []} onListo={() => { setExpresando(null); void cargar(); onCambio(); }} />}
                 {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
               </li>,
             ];
@@ -331,7 +361,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
         <div className="cr-ruta-lado">
           <div className="cr-mapa-caja">
-            <Mapa armadas={armadas} activa={act.i} bases={datos.bases} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
+            <Mapa armadas={armadas} activa={act.i} bases={[...datos.bases, ...armadas.filter((a) => a.base && a.base.id.startsWith('otro-')).map((a) => a.base!)]} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
             <div className="cr-mapa-pie small">
               <span>{act.real ? 'Recorrido por calles.' : 'Recorrido en línea recta (estimado).'} Tiempos con tránsito moderado según la hora, sin el tránsito del momento.</span>
               {puede && <span>Si un punto quedó mal, usá «Corregir ubicación» en su parada.</span>}
@@ -360,6 +390,101 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
 function Tramo({ t }: { t: Simulacion['vuelta'] }) {
   return <li className={`cr-tramo ${t.nivel}`}>{t.sinUbicar ? <span>Tramo sin calcular: falta ubicar una dirección</span> : <span className="num">{duracion(t.min)} · {t.km.toFixed(1).replace('.', ',')} km{t.estimado ? ' aprox.' : ''} · tránsito <b>{t.nivel}</b></span>}</li>;
+}
+
+// Agregar un chofer o un expreso a la lista, desde el desplegable «Chofer». Del expreso se pide además la dirección, que
+// es a donde se le lleva la mercadería (se puede buscar en la libreta).
+function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloExpreso?: boolean; onListo: (nombre: string) => void; onCancelar: () => void }) {
+  const toast = useToast();
+  const [nombre, setNombre] = useState('');
+  const [tipo, setTipo] = useState<'chofer' | 'expreso'>(soloExpreso ? 'expreso' : 'chofer');
+  const [direccion, setDireccion] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const lugares = useLugares(tipo === 'expreso' && !direccion ? nombre : '');
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault(); e.stopPropagation();
+    if (nombre.trim().length < 2) return;
+    setOcupado(true);
+    try { const r = await http<{ nombre: string }>('POST', '/cronograma/transportistas', { nombre, tipo, direccion }); toast(`${r.nombre} quedó en la lista de ${tipo === 'expreso' ? 'expresos' : 'choferes'}.`); onListo(r.nombre); }
+    catch (err) { toast((err as Error).message, true); setOcupado(false); }
+  }
+  return (
+    <form className="cr-panel" onSubmit={guardar}>
+      {!soloExpreso && (
+        <div className="row" role="group" aria-label="Qué es">
+          <button type="button" className={`chip${tipo === 'chofer' ? ' on' : ''}`} aria-pressed={tipo === 'chofer'} onClick={() => setTipo('chofer')}>Chofer</button>
+          <button type="button" className={`chip${tipo === 'expreso' ? ' on' : ''}`} aria-pressed={tipo === 'expreso'} onClick={() => setTipo('expreso')}>Expreso</button>
+        </div>
+      )}
+      <label>{tipo === 'expreso' ? 'Nombre del expreso' : 'Nombre del chofer'}<input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={80} /></label>
+      {tipo === 'expreso' && <label>Dirección del expreso (a dónde se le lleva)<input className="input sm" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" maxLength={300} /></label>}
+      {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => setDireccion(l.direccion)}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
+      {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, además hay que crearle el link en Entregas → Choferes, con el mismo nombre.</span>}
+      <div className="row"><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
+    </form>
+  );
+}
+
+// Lo que encuentra la libreta de direcciones para un texto (nombre del lugar, calle o localidad).
+function useLugares(q: string) {
+  const [lugares, setLugares] = useState<Array<{ id: number; nombre: string; direccion: string; horario: string | null }>>([]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setLugares([]); return; }
+    let vivo = true;
+    const t = window.setTimeout(() => { http<{ lugares: typeof lugares }>('GET', `/cronograma/lugares${qs({ q })}`).then((r) => { if (vivo) setLugares(r.lugares); }, () => undefined); }, 250);
+    return () => { vivo = false; window.clearTimeout(t); };
+  }, [q]);
+  return lugares;
+}
+
+// «Sale de → Otro lugar»: se busca en la libreta por nombre o por dirección, o se escribe la dirección a mano.
+function OtroLugar({ onElegir, onCancelar }: { onElegir: (l: { nombre: string; direccion: string }) => void; onCancelar: () => void }) {
+  const [buscar, setBuscar] = useState('');
+  const lugares = useLugares(buscar);
+  const texto = buscar.trim();
+  return (
+    <div className="cr-panel">
+      <label>De dónde sale este recorrido<input className="input sm" autoFocus value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar o dirección" /></label>
+      {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => onElegir({ nombre: l.nombre, direccion: l.direccion })}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
+      <div className="row">
+        {/\d/.test(texto) && texto.length > 5 && <button type="button" className="btn sm" onClick={() => onElegir({ nombre: texto, direccion: texto })}>Usar «{texto}» como dirección</button>}
+        <button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
+// Una entrega que no va directo al cliente: se lleva a un expreso. La guía se puede cargar después, cuando se despacha.
+function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id: number; nombre: string; direccion: string | null }>; onListo: () => void }) {
+  const toast = useToast();
+  const [expreso, setExpreso] = useState(p.expreso?.nombre ?? '');
+  const [guia, setGuia] = useState(p.expreso?.guia ?? '');
+  const [nuevo, setNuevo] = useState(false);
+  const [lista, setLista] = useState(expresos);
+  const guardar = async (nombre: string) => {
+    try {
+      await http('PUT', '/cronograma/expreso', { clave: p.clave, record_id: p.record_id, expreso: nombre, guia });
+      toast(nombre ? `Va por ${nombre}${guia ? `, guía ${guia}` : ''}.` : 'Vuelve a ir directo al cliente.');
+      onListo();
+    } catch (e) { toast((e as Error).message, true); }
+  };
+  if (nuevo) return <div className="cr-editar"><NuevoTransportista soloExpreso onCancelar={() => setNuevo(false)} onListo={(n) => { setLista((l) => (l.some((x) => x.nombre === n) ? l : [...l, { id: -Date.now(), nombre: n, direccion: null }])); setExpreso(n); setNuevo(false); }} /></div>;
+  return (
+    <form className="cr-editar" onSubmit={(e) => { e.preventDefault(); if (expreso) void guardar(expreso); }}>
+      <label>Expreso
+        <select className="input sm" value={expreso} onChange={(e) => { if (e.target.value === '+') setNuevo(true); else setExpreso(e.target.value); }}>
+          <option value="">Elegí un expreso</option>
+          {[...new Set([...lista.map((x) => x.nombre), ...(expreso ? [expreso] : [])])].map((n) => <option key={n} value={n}>{n}</option>)}
+          <option value="+">+ Agregar expreso…</option>
+        </select></label>
+      <label>Número de guía (se puede cargar después)<input className="input sm" value={guia} onChange={(e) => setGuia(e.target.value)} maxLength={80} /></label>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <button type="submit" className="btn sm primary" disabled={!expreso}>Guardar</button>
+        {p.expreso && <button type="button" className="btn sm ghost" onClick={() => guardar('')}>Va directo al cliente</button>}
+        <button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button>
+      </div>
+    </form>
+  );
 }
 
 // La libreta de direcciones: cuántos lugares tiene, de cuándo es la copia y «Actualizar» (la trae de nuevo de la planilla).

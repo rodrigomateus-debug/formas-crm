@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
@@ -1292,6 +1292,10 @@ api.get('/cronograma/ruta', async (c) => {
   return c.json(await rutaDelDia(c.env, ctx.user, String(c.req.query('fecha') ?? ''), { buscar: puedeEditarCronograma(ctx.user) && !ctx.realUser }));
 });
 api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
+// Choferes y expresos: la lista del desplegable «Chofer», y las entregas que van por expreso con su guía.
+api.post('/cronograma/transportistas', async (c) => c.json(await guardarTransportista(c.env.DB, c.get('ctx'), await c.req.json())));
+api.delete('/cronograma/transportistas/:id', async (c) => c.json(await quitarTransportista(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.put('/cronograma/expreso', async (c) => c.json(await guardarExpreso(c.env.DB, c.get('ctx'), await c.req.json())));
 api.put('/cronograma/punto', async (c) => c.json(await fijarPunto(c.env.DB, c.get('ctx'), await c.req.json())));
 api.delete('/cronograma/punto', async (c) => c.json(await soltarPunto(c.env.DB, c.get('ctx'), String(c.req.query('direccion') ?? ''))));
 api.put('/cronograma/direccion', async (c) => c.json(await guardarDireccion(c.env, c.get('ctx'), await c.req.json())));

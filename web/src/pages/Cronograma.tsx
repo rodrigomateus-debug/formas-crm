@@ -19,6 +19,7 @@ export interface Mov {
   id: string; tipo: Tipo; fecha: string; task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null;
   record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
   hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null; dominio?: string | null;
+  expreso?: { nombre: string; guia: string | null } | null;
 }
 interface Nota { id: number; fecha: string; texto: string; hecho: number }
 interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -353,6 +354,7 @@ function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: 
       <div className="cr-t-linea">
         <span className="cr-t-pdv num">{t.pdv}</span>
         {t.para && <span className="cr-t-para">{t.para}</span>}
+        {t.movs[0]?.expreso && <span className="cr-tag exp" title="No va directo al cliente: se lleva al expreso">Expreso {lindo(t.movs[0].expreso.nombre)}{t.movs[0].expreso.guia ? ` · guía ${t.movs[0].expreso.guia}` : ''}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
       {prods.length > 0 && (

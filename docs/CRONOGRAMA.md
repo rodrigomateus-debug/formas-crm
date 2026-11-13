@@ -74,6 +74,19 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   ubicado: «Corregir ubicación» en su parada, se arrastra solo ese número y se guarda con «Guardar ubicación» (vale para
   esa dirección en todas las rutas). «Volver a buscar en el mapa» saca la corrección.
 
+### Choferes, expresos y de dónde sale
+
+- **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido tiene los choferes, los expresos (transportes
+  de terceros) y «+ Agregar chofer o expreso…». Del expreso se guarda además su dirección, que es a donde se le lleva la
+  mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Entregas → Choferes, con
+  el mismo nombre): un chofer puede estar en la lista sin link.
+- **Una entrega por expreso.** En la parada de una entrega, «Mandar por expreso»: se elige el expreso y, cuando se
+  despacha, se carga el **número de guía** para seguir el envío. La parada pasa a ser el expreso (con su dirección) y dice
+  para qué cliente es; en la semana la tarjeta lleva «Expreso … · guía …». Es del PDV: vale para todas sus entregas. «Va
+  directo al cliente» lo deshace. El chofer ve «Dejé en el expreso: foto de la guía».
+- **Sale de → Otro lugar.** Además de los dos depósitos de Formas, un recorrido puede salir de otro lugar: se busca en la
+  libreta por nombre o por dirección, o se escribe la dirección. Queda con su punto en el mapa.
+
 ### Direcciones
 
 - **Proveedores e impresores**: la dirección de la ficha de su empresa; si no tiene, la de la libreta de direcciones
@@ -136,6 +149,7 @@ vuelve, como siempre.
 |---|---|
 | Correcciones de la revisión: qué marcó el chofer en cada parada, a nombre de quién, feriados que faltaban | `migrations/0046_cronograma_chofer.sql` |
 | La libreta de direcciones: tablas `lugares` y `lugares_claves`, y de qué planilla se copia (settings `lugares`) | `migrations/0047_lugares.sql` |
+| Choferes y expresos (`transportistas`), entregas por expreso con su guía (`entrega_expresos`) y el otro lugar de salida de un recorrido | `migrations/0054_transportistas.sql` |
 | Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0045_cronograma.sql` |
 | Movimientos, mover, marcar, notas, feriados, direcciones, ruta, chofer | `src/worker/cronograma.ts` |
 | API `/api/cronograma…` | `src/worker/api.ts` |

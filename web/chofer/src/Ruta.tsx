@@ -50,7 +50,7 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
                   <li key={p.clave} className={estado}>
                     <button type="button" className="ruta-parada" aria-expanded={ver} onClick={() => setAbierta(ver ? null : p.clave)}>
                       <span className="ruta-n">{hecha ? '✓' : estado === 'fallo' ? '!' : i + 1}</span>
-                      <span className="ruta-quien"><strong>{p.nombre}</strong><span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span>
+                      <span className="ruta-quien"><strong>{p.nombre}</strong>{p.expreso && <span>Expreso: dejar para {p.expreso.cliente}{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</span>}<span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span>
                         {estado === 'fallo' && <em>{MOTIVOS.find((m) => m[0] === p.visita!.motivo)?.[1] ?? 'No se pudo'}{p.visita!.nota ? `: ${p.visita!.nota}` : ''}</em>}
                         {estado === 'salteada' && <em>La dejaste para después</em>}</span>
                       <span className="ruta-hora">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</span>
@@ -110,7 +110,7 @@ function Detalle({ p, tarde, hecha, enLinea, alCambiar, alEntregar }: { p: Parad
         </div>
       ) : (
         <div className="ruta-acciones">
-          <button type="button" className="boton principal" disabled={ocupado || !enLinea} onClick={() => marcar('hecho')}>{esEntrega ? 'Entregué: sacar foto del remito' : soloRetiros ? 'Retiré todo' : 'Listo'}</button>
+          <button type="button" className="boton principal" disabled={ocupado || !enLinea} onClick={() => marcar('hecho')}>{p.expreso ? 'Dejé en el expreso: foto de la guía' : esEntrega ? 'Entregué: sacar foto del remito' : soloRetiros ? 'Retiré todo' : 'Listo'}</button>
           <button type="button" className="boton" disabled={ocupado || !enLinea} onClick={() => setPaso('motivo')}>No se pudo</button>
           <button type="button" className="enlace" disabled={ocupado || !enLinea} onClick={() => marcar('salteada')}>Dejar para después</button>
         </div>

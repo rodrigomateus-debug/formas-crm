@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
+  http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
 import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
@@ -980,7 +980,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
     ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],
     ['Comprador', [record.props.hs_billing_address_firstname, record.props.hs_billing_address_lastname].filter(Boolean).join(' ') || associations?.contact?.[0]?.name || '—'],
-    // De Finnegans, con IVA: lo facturado que falta cobrar más lo que falta facturar.
+    // De Finnegans, sin IVA: lo facturado que falta cobrar más lo que falta facturar; si es total o parcial.
     ['Saldo pendiente', saldoPedido(record.props)],
   ];
   return (
@@ -1039,13 +1039,16 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   );
 }
 
-// El saldo pendiente del pedido (Finnegans, con IVA) y, si una parte todavía no se facturó, cuánto.
+// El saldo pendiente del pedido (Finnegans, sin IVA): si es total (no pagó nada) o parcial (ya pagó algo, el anticipo, y
+// cuánto), como en la tarjeta del tablero; y, si una parte todavía no se facturó, cuánto.
 function saldoPedido(p: Record<string, any>) {
   const num = (v: unknown) => (v == null || v === '' ? null : Number(v));
   const saldo = num(p.saldo_pendiente_de_pago_mxn), pf = num(p.importe_por_facturar);
   if (saldo == null) return '—';
   if (saldo <= 0) return 'Cobrado';
-  if (!pf) return fmtMoney(saldo);
-  return `${fmtMoney(saldo)} · ${pf >= saldo - 1 ? 'sin facturar' : `${fmtMoney(pf)} sin facturar`}`;
+  const c = cobroPedido(p);
+  return [fmtMoney(saldo),
+    c && (c.parcial ? `parcial: ya pagó ${fmtMoney(c.pagado)} (${c.pct} %)` : 'total: no pagó nada'),
+    pf ? (pf >= saldo - 1 ? 'sin facturar' : `${fmtMoney(pf)} sin facturar`) : null].filter(Boolean).join(' · ');
 }
 

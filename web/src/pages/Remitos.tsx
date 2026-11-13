@@ -596,37 +596,40 @@ function Choferes() {
   const toast = useToast();
   const res = useAsync(() => http<Chofer[]>('GET', '/choferes'), []);
   const [nombre, setNombre] = useState('');
-  const [nuevo, setNuevo] = useState<{ nombre: string; link: string } | null>(null);
+  // El acceso de un chofer: su código (lo escribe una vez en la app) y su link (entra directo).
+  const [nuevo, setNuevo] = useState<{ nombre: string; link: string; codigo: string; app: string } | null>(null);
   const crear = async () => {
-    try { const r = await http<{ link: string }>('POST', '/choferes', { name: nombre }); setNuevo({ nombre, link: r.link }); setNombre(''); res.reload(); }
+    try { const r = await http<{ link: string; codigo: string; app: string }>('POST', '/choferes', { name: nombre }); setNuevo({ nombre, link: r.link, codigo: r.codigo, app: r.app }); setNombre(''); res.reload(); }
     catch (err) { toast((err as Error).message, true); }
   };
   const revocar = async (c: Chofer) => {
-    if (!confirm(`¿Dar de baja el link de ${c.name}? Deja de poder mandar remitos.`)) return;
+    if (!confirm(`¿Dar de baja el acceso de ${c.name}? Su código y su link dejan de andar: no puede ver su recorrido ni mandar remitos.`)) return;
     try { await http('DELETE', `/choferes/${c.id}`); res.reload(); } catch (err) { toast((err as Error).message, true); }
   };
-  const copiar = async (t: string) => { try { await navigator.clipboard.writeText(t); toast('Link copiado'); } catch { toast('No se pudo copiar: seleccionalo y copialo a mano.', true); } };
-  // El link de un chofer ya creado, para volver a mandárselo si lo perdió.
+  const copiar = async (t: string, que = 'Link') => { try { await navigator.clipboard.writeText(t); toast(`${que} copiado`); } catch { toast('No se pudo copiar: seleccionalo y copialo a mano.', true); } };
+  // El código y el link de un chofer ya creado, para volver a pasárselos si los perdió.
   const verLink = async (c: Chofer) => {
-    try { const r = await http<{ link: string }>('GET', `/choferes/${c.id}/link`); setNuevo({ nombre: c.name, link: r.link }); }
+    try { const r = await http<{ link: string; codigo: string; app: string }>('GET', `/choferes/${c.id}/link`); setNuevo({ nombre: c.name, link: r.link, codigo: r.codigo, app: r.app }); }
     catch (err) { toast((err as Error).message, true); }
   };
   return (
     <div className="stack" style={{ gap: 12, marginTop: 12 }}>
-      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su link personal a la app de remitos: lo abre en el celular, saca la foto del remito firmado y queda en el pedido. El link solo sirve para eso. Si lo pierde, «Ver link» te lo muestra para mandárselo de nuevo; si cambia de celular o el link quedó en manos de otro, dalo de baja y creá uno nuevo.</p>
+      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su acceso a la app de remitos y de su recorrido: un <b>código de 8 números</b> que escribe una sola vez en la app (después queda guardado en el celular), o su link, que entra directo. Solo sirve para eso. Si lo pierde, «Ver código» te lo muestra de nuevo; si cambia de celular o quedó en manos de otro, dalo de baja y creá uno nuevo.</p>
       <form className="row" style={{ gap: 6 }} onSubmit={(ev) => { ev.preventDefault(); crear(); }}>
         <input className="input" placeholder="Nombre del chofer" value={nombre} onChange={(ev) => setNombre(ev.target.value)} style={{ maxWidth: 280 }} />
-        <button className="btn primary" disabled={nombre.trim().length < 2}>Crear link</button>
+        <button className="btn primary" disabled={nombre.trim().length < 2}>Crear acceso</button>
       </form>
       {nuevo && (
         <div className="panel panel-body stack" style={{ gap: 8 }}>
-          <b>Link de {nuevo.nombre}</b>
-          <span className="small muted">Mandáselo por WhatsApp y que lo abra en el celular (conviene agregarlo a la pantalla de inicio). Si lo pierde, lo volvés a copiar desde la lista.</span>
-          <input className="input" readOnly value={nuevo.link} onFocus={(ev) => ev.target.select()} />
+          <b>Acceso de {nuevo.nombre}</b>
+          <div className="codigo-chofer num" aria-label={`Código ${nuevo.codigo.split('').join(' ')}`}>{nuevo.codigo.slice(0, 4)} {nuevo.codigo.slice(4)}</div>
+          <span className="small muted">Que abra <b>{nuevo.app.replace(/^https?:\/\//, '')}</b> en el celular y escriba este código. Es una sola vez: queda guardado (conviene agregar la app a la pantalla de inicio). O mandale el link, que entra directo.</span>
+          <input className="input" readOnly value={nuevo.link} onFocus={(ev) => ev.target.select()} aria-label="Link" />
           <div className="row wrap" style={{ gap: 6 }}>
-            <button className="btn sm" onClick={() => copiar(nuevo.link)}>Copiar</button>
+            <button className="btn sm" onClick={() => copiar(nuevo.codigo, 'Código')}>Copiar código</button>
+            <button className="btn sm" onClick={() => copiar(nuevo.link)}>Copiar link</button>
+            <a className="btn sm wa-link" href={`https://wa.me/?text=${encodeURIComponent(`Para la app de remitos de Formas abrí este link: ${nuevo.link}\nO entrá a ${nuevo.app} y escribí tu código: ${nuevo.codigo.slice(0, 4)} ${nuevo.codigo.slice(4)}`)}`} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Mandar por WhatsApp</a>
             <button className="btn sm ghost" onClick={() => setNuevo(null)}>Cerrar</button>
-            <a className="btn sm wa-link" href={`https://wa.me/?text=${encodeURIComponent(`Tu link para mandar los remitos firmados: ${nuevo.link}`)}`} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Mandar por WhatsApp</a>
           </div>
         </div>
       )}
@@ -637,7 +640,7 @@ function Choferes() {
               <div>{c.name}{c.revoked ? ' (dado de baja)' : ''}</div>
               <div className="small muted">{c.remitos} remitos{c.ultimo ? ` · el último ${fmtDate(c.ultimo, true)}` : ''} · creado por {c.user_name}</div>
             </div>
-            {!c.revoked && <button className="btn sm" onClick={() => verLink(c)}>Ver link</button>}
+            {!c.revoked && <button className="btn sm" onClick={() => verLink(c)}>Ver código</button>}
             {!c.revoked && <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>}
           </div>
         ))}

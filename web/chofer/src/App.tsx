@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { RutaHoy } from './Ruta';
 import {
-  LinkInvalido, Rechazo, corregirPdv, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
+  LinkInvalido, Rechazo, corregirPdv, entrarConCodigo, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
 import { envios, type Envio } from './envios';
 import { guardarEnTanda, leerTanda, sacarDeTanda, vaciarTanda, type FotoDeTanda } from './cola';
@@ -413,8 +413,9 @@ export default function App() {
   if (!hayToken || estado.linkInvalido) {
     return (
       <LinkRoto
+        sinLink={!token()}
         guardadas={esperando.length}
-        alPegar={(t) => { usarToken(t); setHayToken(true); envios.linkNuevo(); void refrescar(); pedirYo().then(setNombre).catch(() => {}); }}
+        alEntrar={(t) => { if (t) usarToken(t); setHayToken(true); setNombre(nombreGuardado()); envios.linkNuevo(); void refrescar(); pedirYo().then(setNombre).catch(() => {}); }}
       />
     );
   }
@@ -988,33 +989,45 @@ function TarjetaLote({ envios: lote, enLinea, alReintentar }: { envios: Envio[];
   );
 }
 
-function LinkRoto({ guardadas, alPegar }: { guardadas: number; alPegar: (token: string) => void }) {
+// Sin link, o con uno que ya no anda: el chofer escribe el código de 8 números que le pasó Logística. Es una sola vez:
+// queda guardado en el celular. El mismo lugar acepta el link pegado.
+function LinkRoto({ sinLink, guardadas, alEntrar }: { sinLink: boolean; guardadas: number; alEntrar: (token: string | null) => void }) {
   const [texto, setTexto] = useState('');
-  const [error, setError] = useState(false);
-  function entrar(e: FormEvent) {
+  const [error, setError] = useState('');
+  const [entrando, setEntrando] = useState(false);
+  async function entrar(e: FormEvent) {
     e.preventDefault();
     const t = tokenDeTexto(texto.trim());
-    if (t) alPegar(t); else setError(true);
+    if (t) { alEntrar(t); return; }
+    const digitos = texto.replace(/\D/g, '');
+    if (digitos.length !== 8) { setError('El código tiene 8 números. Fijate en el mensaje de Logística.'); return; }
+    setEntrando(true);
+    const r = await entrarConCodigo(digitos);
+    setEntrando(false);
+    if (r.ok) alEntrar(null); else setError(r.error);
   }
   return (
     <main className="link-roto">
       <img src={`${import.meta.env.BASE_URL}icono.svg`} alt="" width="56" height="56" />
-      <h1>Este link no funciona</h1>
-      <p className="grande">Pedile tu link a Logística.</p>
+      <h1>{sinLink ? 'Entrá con tu código' : 'Tu acceso ya no funciona'}</h1>
+      <p className="grande">{sinLink
+        ? 'Escribí los 8 números que te pasó Logística. Es una sola vez: después queda guardado en el celular.'
+        : 'Pedile un código nuevo a Logística y escribilo acá.'}</p>
       {guardadas > 0 && (
         <p className="nota">
-          {guardadas === 1 ? 'La foto que quedó guardada no se pierde: se manda' : `Las ${guardadas} fotos que quedaron guardadas no se pierden: se mandan`} cuando entres con tu link.
+          {guardadas === 1 ? 'La foto que quedó guardada no se pierde: se manda' : `Las ${guardadas} fotos que quedaron guardadas no se pierden: se mandan`} cuando entres.
         </p>
       )}
       <form onSubmit={entrar} noValidate>
-        <label htmlFor="link">¿Ya te lo pasaron? Pegalo acá</label>
+        <label htmlFor="codigo">Tu código</label>
         <input
-          id="link" type="text" inputMode="url" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
-          value={texto} onChange={(e) => { setTexto(e.target.value); setError(false); }}
-          aria-invalid={error} aria-describedby={error ? 'link-error' : undefined}
+          id="codigo" className="codigo" type="text" inputMode="numeric" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+          placeholder="0000 0000" value={texto} onChange={(e) => { setTexto(e.target.value); setError(''); }}
+          aria-invalid={!!error} aria-describedby={error ? 'codigo-error' : 'codigo-ayuda'}
         />
-        {error && <p id="link-error" className="error" role="alert">Eso no parece tu link. Copialo entero del mensaje de Logística.</p>}
-        <button type="submit" className="boton principal" disabled={!texto.trim()}>Entrar</button>
+        {error && <p id="codigo-error" className="error" role="alert">{error}</p>}
+        <button type="submit" className="boton principal" disabled={!texto.trim() || entrando}>{entrando ? 'Entrando…' : 'Entrar'}</button>
+        <p id="codigo-ayuda" className="nota">¿Te pasaron un link? Abrilo, o pegalo acá mismo.</p>
       </form>
     </main>
   );

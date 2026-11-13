@@ -77,6 +77,28 @@ export function token(): string | null { return tokenEnMemoria; }
 export function nombreGuardado(): string | null { return leer(CLAVE_NOMBRE); }
 
 export class LinkInvalido extends Error {}
+
+/** Entra con el código de 8 números que le pasó Logística: el servidor devuelve su link y queda guardado en este celular,
+    como si lo hubiera abierto. Si el código no es, devuelve por qué (para mostrárselo). */
+export async function entrarConCodigo(codigo: string): Promise<{ ok: true; nombre: string } | { ok: false; error: string }> {
+  let r: Response;
+  try {
+    r = await fetch(`${API}/entrar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo }), cache: 'no-store' });
+  } catch {
+    return { ok: false, error: 'No hay señal. Probá de nuevo cuando tengas.' };
+  }
+  try {
+    const j = (await r.json()) as { token?: string; nombre?: string; error?: string };
+    if (r.ok && j.token) {
+      usarToken(j.token);
+      if (j.nombre) guardar(CLAVE_NOMBRE, j.nombre);
+      return { ok: true, nombre: j.nombre ?? '' };
+    }
+    return { ok: false, error: j.error ?? 'No se pudo entrar. Probá de nuevo.' };
+  } catch {
+    return { ok: false, error: 'No se pudo entrar. Probá de nuevo.' };
+  }
+}
 /** Sin señal, corte o servidor caído: conviene reintentar. */
 export class SinSenal extends Error {}
 /** El servidor rechazó el pedido y reintentar igual no sirve. */

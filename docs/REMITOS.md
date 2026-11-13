@@ -108,9 +108,11 @@ sus renglones vuelven al principal; otra foto del mismo número que dice el PDV 
 - **Revisados:** los que ya revisó una persona, el más reciente primero (`GET /api/remitos/revisados`): qué se decidió
   (confirmado en tal pedido, descartado, repetido), quién y cuándo, y a qué producto va cada renglón. Desde acá se corrige
   con los mismos botones: otro pedido, cambiar los productos, leer de nuevo o descartar.
-- **Choferes:** Logística y los administradores crean el link de cada chofer (con un botón para mandarlo por WhatsApp), lo
-  vuelven a copiar con «Ver link» si el chofer lo pierde, y lo dan de baja si cambia de celular o quedó en manos de otro. El link es un token tipo «chofer» que solo sirve para la app de
-  remitos: no abre el resto del CRM ni las otras entradas.
+- **Choferes:** Logística y los administradores crean el acceso de cada chofer: su **código de 8 números** y su link
+  (con un botón para mandarlos por WhatsApp). Lo vuelven a ver con «Ver código» si el chofer lo pierde, y lo dan de baja
+  si cambia de celular o quedó en manos de otro (se dan de baja el código y el link juntos). El link es un token tipo
+  «chofer» que solo sirve para la app de remitos y del recorrido: no abre el resto del CRM ni las otras entradas; el
+  código es otra forma de ese mismo link.
 
 ## La app del chofer (`web/chofer/`)
 
@@ -126,11 +128,16 @@ guardadas en el celular y se mandan solas cuando vuelve; reintentar nunca duplic
    Actions). El despliegue la carga en el Worker. Sin la clave, los remitos se guardan igual y se leen cuando esté.
 2. **Logística:** los usuarios de Logística, con el perfil Logística (Configuración → Usuarios). Ellos y los
    administradores reciben los faltantes y pueden finalizar entregas y crear los links de los choferes.
-3. **Choferes:** crear el link de cada uno en Entregas → Choferes (con el nombre del chofer) y mandárselo por WhatsApp.
-   Es la misma app para todos; el link es la llave personal de cada uno: dice quién mandó cada remito y se puede dar de
-   baja sin tocar a los demás. La app misma les muestra cómo agregarla a la pantalla de inicio; guardada ahí, abre ya
-   con su link (el manifest lleva el link de cada chofer, porque el iPhone no comparte lo guardado entre Safari y la app
-   de inicio). Si igual abre sin el link, pide pegarlo una vez.
+3. **Choferes:** crear el acceso de cada uno en Entregas → Choferes (con el nombre del chofer) y pasarle el código o el
+   link. Los choferes no tienen mail de Formas, así que no entran con un usuario: abren la app (`/hooks/chofer/`),
+   escriben su **código de 8 números una sola vez** y queda guardado en el celular (pedido de Rodrigo del 13/11/2026); o
+   abren su link, que entra directo. Es la misma app para todos; el acceso es la llave personal de cada uno: dice quién
+   mandó cada remito y se puede dar de baja sin tocar a los demás. La app misma les muestra cómo agregarla a la pantalla
+   de inicio; guardada ahí, abre ya con su acceso (el manifest lo lleva, porque el iPhone no comparte lo guardado entre
+   Safari y la app de inicio). Si igual abre sin él, pide el código una vez.
+   - Contra quien prueba códigos al azar: hasta 10 intentos errados por conexión cada 15 minutos y 300 en total por
+     hora (`POST /hooks/chofer/api/entrar`, tabla `chofer_intentos`, migración `0059_codigo_chofer.sql`). Pasado eso,
+     la app dice que espere unos minutos; a los que ya entraron no les cambia nada.
 
 ## Costo
 

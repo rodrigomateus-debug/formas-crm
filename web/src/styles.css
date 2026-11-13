@@ -225,6 +225,8 @@ textarea.input { height: auto; min-height: 90px; padding: 8px 10px; resize: vert
 .select-grp:first-child { padding-top: 6px; }
 .select-empty { padding: 10px; color: var(--text-3); }
 /* Una opción que no elige un valor sino que agrega uno nuevo a la lista («Agregar chofer o expreso…»). */
+/* El código de un chofer para entrar a su app (Entregas → Choferes), grande para dictarlo. */
+.codigo-chofer { font-size: 30px; font-weight: 700; letter-spacing: .12em; color: var(--ui-ink); }
 .select-nuevo { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 500; }
 .select-nuevo svg { flex: none; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }

@@ -5,6 +5,7 @@ import {
 } from '../lib';
 import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
+import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
 import { RemitosCard } from './Remitos';
@@ -49,6 +50,7 @@ export default function RecordPage() {
         </section>
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
+          {type === 'company' && <LogosCard companyId={record.id} />}
           {!ventas && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
           {type === 'deal' && <FacturarCard record={record} />}
           {type === 'deal' && <BocetosNegocioCard dealId={record.id} />}
@@ -212,8 +214,8 @@ function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; r
           {type === 'deal' && <ChatDarwin url={record.props.link_a_darwin} />}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
           {type !== 'order' && (
-            <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas CRM para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
-              href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} del CRM de Formas). Usá la herramienta preparar_reunion del conector Formas CRM y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
+            <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas Hub para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
+              href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} de Formas Hub). Usá la herramienta preparar_reunion del conector Formas Hub y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
               target="_blank" rel="noreferrer">Preparar reunión con Claude</a>
           )}
           <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>
@@ -610,6 +612,8 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   const [ver, setVer] = useState<Boceto | null>(null);
   const productos: ProductoRef[] = items.map((it) => ({ key: it.code || it.name, nombre: it.name }));
   const sub = useSubirBocetos('order', recordId, productos, () => bo.reload());
+  // El logo original de cada producto (logos.ts): el elegido o el principal de la empresa.
+  const lg = useLogos('order', recordId);
   const bocetos = bo.data?.bocetos ?? [];
   const deProducto = (k: string) => bocetos.filter((b) => b.producto === k);
   const sinProducto = bocetos.filter((b) => !productos.some((p) => p.key === b.producto));
@@ -653,6 +657,7 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
             {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
             <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
               <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={setVer} />
+              <LogoProducto type="order" recordId={recordId} producto={it.code || it.name} productoNombre={it.name} res={lg.data} onCambio={() => lg.reload()} />
               {puedeSubir && <BotonArchivos className="btn ghost sm boceto-mas" multiple={false} title={`Subir un boceto de ${it.name}`}
                 onArchivos={(f) => sub.elegir(f, { key: it.code || it.name, nombre: it.name })}>+ Boceto</BotonArchivos>}
             </div>
@@ -703,7 +708,8 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
       )}
       {bo.data && !puedeSubir && items.length > 0 && <div className="panel-body small muted">Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).</div>}
       {sub.cuadro}
-      {ver && <BocetoVisor b={ver} esPedido productos={productos} onClose={() => setVer(null)} onCambio={() => bo.reload()} />}
+      {ver && <BocetoVisor b={ver} esPedido productos={productos} onClose={() => setVer(null)} onCambio={() => bo.reload()}
+        logos={{ type: 'order', recordId, res: lg.data, onCambio: () => lg.reload() }} />}
     </SoltarBocetos>
   );
 }
@@ -996,6 +1002,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
         {type === 'company' && <ComprasCard record={record} />}
+        {type === 'company' && <LogosCard companyId={record.id} />}
         {!esVentas(meta.me) && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
         {type === 'order' && <ProductsCard recordId={id} max={3} />}

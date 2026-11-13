@@ -8,7 +8,7 @@ desde Claude cada uno pueda editar solo lo suyo.
 Abajo a la izquierda, arriba del nombre: **Conectar con Claude**. La ventana explica los tres pasos:
 
 1. Abrir Claude → Configuración → Conectores.
-2. Tocar **Conectar** en «Formas CRM» (o, si no está, «Agregar conector personalizado» con nombre `Formas CRM` y la
+2. Tocar **Conectar** en «Formas Hub» (o, si no está, «Agregar conector personalizado» con nombre `Formas Hub` y la
    dirección `https://<crm>/mcp`).
 3. Claude lleva al CRM: tocar **Permitir**. Listo (claude.ai, Claude Desktop y Cowork).
 
@@ -24,7 +24,7 @@ En el botón se ve «Claude conectado» y, en la ventana, desde cuándo y cuánd
 
 ## Una sola vez, el administrador
 
-1. **En Claude** (plan de equipo): Configuración de la organización → Conectores → agregar «Formas CRM» con
+1. **En Claude** (plan de equipo): Configuración de la organización → Conectores → agregar «Formas Hub» con
    `https://<crm>/mcp`. Así a cada uno le aparece y solo toca «Conectar».
 2. **En Cloudflare Access** (mientras siga delante del CRM): sumar `/.well-known/*` a las rutas **sin** Access (Bypass),
    junto con `/mcp*`, que ya está. Claude lee ahí cómo pedir permiso. `/conectar/*` **sigue con Access** (es la página

@@ -12,6 +12,7 @@ import { VistaPdf } from './Bocetos';
 export interface Mensaje {
   key: string; kind: 'mensaje'; at: string; id: number; record_id: number; user_id: number | null; body: string; menciones: number[];
   responde_a: number | null; source: string; editado_at: string | null; borrado_at: string | null; created_at: string; adjuntos: Adjunto[];
+  reacciones?: Array<{ emoji: string; users: number[] }>;
 }
 export interface Adjunto { id: number; nombre: string; mime: string; size: number; ancho: number | null; alto: number | null }
 const urlImagen = (id: number, descargar = false) => `/api/mensaje-adjuntos/${id}${descargar ? '?descargar=1' : ''}`;
@@ -477,8 +478,59 @@ function Visor({ imagenes, inicio, onClose }: { imagenes: Array<Adjunto & { auto
   );
 }
 
-function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen }: {
-  m: Mensaje; cont: boolean; citado?: Mensaje; meId: number; esAdmin: boolean; vistoPor?: User[];
+// Reacciones con emojis (pedido de Rodrigo del 13/11/2026): los más usados en el equipo. Tocar uno lo pone o lo saca.
+const EMOJIS = ['👍', '❤️', '😂', '🎉', '🙏', '👀', '✅', '🔥'];
+
+// Las reacciones de un mensaje: cada emoji con cuántos (en color si estás vos) y, al pasar el mouse, quiénes.
+function Reacciones({ m, meId, puede, onReaccionar }: { m: Mensaje; meId: number; puede: boolean; onReaccionar: (emoji: string) => void }) {
+  const { meta } = useMeta();
+  const lista = m.reacciones ?? [];
+  if (!lista.length) return null;
+  const nombres = (ids: number[]) => ids.map((id) => (id === meId ? 'Vos' : userOf(meta, id)?.name.split(' ')[0] ?? 'Alguien')).join(', ');
+  return (
+    <div className="msg-reacciones">
+      {lista.map((r) => {
+        const mia = r.users.includes(meId);
+        return (
+          <button key={r.emoji} type="button" className={`reac${mia ? ' mia' : ''}`} disabled={!puede} onClick={() => onReaccionar(r.emoji)}
+            title={`${nombres(r.users)} ${r.users.length === 1 && !mia ? 'reaccionó' : 'reaccionaron'} con ${r.emoji}`} aria-pressed={mia}
+            aria-label={`${r.emoji} ${r.users.length}: ${nombres(r.users)}${puede ? `. ${mia ? 'Sacar' : 'Sumar'} la tuya` : ''}`}>
+            <span className="reac-e">{r.emoji}</span><span className="reac-n">{r.users.length}</span>
+          </button>
+        );
+      })}
+      {puede && <ElegirEmoji onElegir={onReaccionar} chico />}
+    </div>
+  );
+}
+
+// El botón de la carita que abre los emojis.
+function ElegirEmoji({ onElegir, chico }: { onElegir: (emoji: string) => void; chico?: boolean }) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!abierto) return;
+    const fuera = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setAbierto(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setAbierto(false); } };
+    document.addEventListener('mousedown', fuera);
+    window.addEventListener('keydown', esc, true);
+    return () => { document.removeEventListener('mousedown', fuera); window.removeEventListener('keydown', esc, true); };
+  }, [abierto]);
+  return (
+    <div className="emoji-elegir" ref={ref}>
+      <button type="button" className={chico ? 'reac reac-mas' : 'btn ghost sm icon'} title="Reaccionar" aria-label="Reaccionar" aria-expanded={abierto}
+        onClick={() => setAbierto(!abierto)}><Icon name="smile" size={chico ? 13 : 14} />{chico && <span className="reac-n">+</span>}</button>
+      {abierto && (
+        <div className="emoji-pop" role="menu" aria-label="Elegir una reacción">
+          {EMOJIS.map((e) => <button key={e} type="button" role="menuitem" onClick={() => { setAbierto(false); onElegir(e); }} aria-label={`Reaccionar con ${e}`}>{e}</button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen }: {
+  m: Mensaje; cont: boolean; citado?: Mensaje; meId: number; esAdmin: boolean; puedeReaccionar: boolean; vistoPor?: User[];
   onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void; onAbrirImagen: (id: number) => void;
 }) {
   const { meta } = useMeta();
@@ -488,6 +540,16 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, o
   const mio = m.user_id === meId;
   const hora = new Date(m.created_at).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
   const mencionado = m.menciones.includes(meId) && !mio;
+  // Se ve enseguida y se manda; si no se pudo, vuelve como estaba.
+  const reaccionar = async (emoji: string) => {
+    const antes = m.reacciones ?? [];
+    const yaEsta = antes.some((r) => r.emoji === emoji && r.users.includes(meId));
+    const luego = yaEsta ? antes.map((r) => (r.emoji === emoji ? { ...r, users: r.users.filter((x) => x !== meId) } : r)).filter((r) => r.users.length)
+      : antes.some((r) => r.emoji === emoji) ? antes.map((r) => (r.emoji === emoji ? { ...r, users: [...r.users, meId] } : r)) : [...antes, { emoji, users: [meId] }];
+    onEditado({ ...m, reacciones: luego });
+    try { const r = await http<{ reacciones: Mensaje['reacciones'] }>('POST', `/mensajes/${m.id}/reacciones`, { emoji }); onEditado({ ...m, reacciones: r.reacciones }); }
+    catch (e) { onEditado({ ...m, reacciones: antes }); toast((e as Error).message, true); }
+  };
   if (m.borrado_at) {
     return <div className={`conv-msg borrado${cont ? ' cont' : ''}`} id={`msg-${m.id}`}><div className="msg-av" /><div className="msg-main"><span className="muted small">Mensaje borrado</span></div></div>;
   }
@@ -508,6 +570,7 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, o
           }} />
           : m.body ? <Cuerpo body={m.body} meId={meId} /> : null}
         {!editando && <Adjuntos adjuntos={m.adjuntos ?? []} onAbrir={onAbrirImagen} />}
+        {!editando && <Reacciones m={m} meId={meId} puede={puedeReaccionar} onReaccionar={reaccionar} />}
         {(m.editado_at || (vistoPor && vistoPor.length > 0)) && !editando && (
           <div className="msg-pie">
             {m.editado_at && <span className="muted" title={fmtDate(m.editado_at, true)}>(editado)</span>}
@@ -519,6 +582,7 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, vistoPor, onResponder, o
       {!editando && (
         <div className="msg-acciones">
           {cont && <time className="msg-hora" dateTime={m.created_at}>{hora}</time>}
+          {puedeReaccionar && <ElegirEmoji onElegir={reaccionar} />}
           <button className="btn ghost sm icon" title="Responder" aria-label="Responder" onClick={onResponder}><Icon name="reply" size={14} /></button>
           {mio && <button className="btn ghost sm icon" title="Editar" aria-label="Editar" onClick={() => setEditando(true)}><Icon name="edit" size={14} /></button>}
           {(mio || esAdmin) && <button className="btn ghost sm icon" title="Borrar" aria-label="Borrar" onClick={async () => {
@@ -727,7 +791,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
           autorAnt = { id: it.user_id, at: t };
           return (
             <Fragment key={it.key}>{sep}{raya}
-              <MensajeVista m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'}
+              <MensajeVista m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'} puedeReaccionar={puedeEscribir && !meta.real_user}
                 vistoPor={ultimo && it.id === ultimo.id ? vistoUltimo : undefined}
                 onResponder={() => setRespondiendo(it)} onIrA={irA} onAbrirImagen={setVisor}
                 onEditado={(m) => mezclar([m])} />

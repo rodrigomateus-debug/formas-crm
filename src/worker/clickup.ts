@@ -5,6 +5,7 @@ import { associate } from './associations';
 import { finnegansPedido, finnegansToken } from './finnegans';
 import { Budget, OutOfBudget } from './budget';
 import { bajarArchivo } from './drive';
+import { encolarLogo, logoDelProducto } from './logos';
 import { tareaPostEntrega } from './postentrega';
 import { montosDesdePedidos } from './montos';
 import { recalcularEntrega } from './remitos';
@@ -197,17 +198,40 @@ async function adjuntarBoceto(env: Env, taskId: string, bocetoId: number, b: Bud
       ?? (arts.length === 1 ? arts[0].task_id : null);
   }
   const target = destino ?? taskId;
+  const adj = await adjuntarArchivo(env, target, bo.drive_id, bo.nombre, bo.mime ?? 'application/pdf', b);
+  await db.prepare('UPDATE bocetos SET clickup_task = ?, clickup_adjunto = ?, clickup_at = ? WHERE id = ?').bind(target, adj, new Date().toISOString(), bo.id).run();
+  // El logo original del producto va con el boceto (logos.ts); si no alcanza el presupuesto, queda en la cola.
+  if (bo.producto) {
+    if (b.left() >= 3) await adjuntarLogo(env, bo.record_id, bo.producto, b).catch((e) => { if (e instanceof OutOfBudget) throw e; return encolarLogo(db, bo.record_id, bo.producto!, null); });
+    else await encolarLogo(db, bo.record_id, bo.producto, null);
+  }
+  return { adjunto: target, en: destino ? 'artículo' : 'PDV' };
+}
+
+// Baja el archivo de Drive y lo adjunta a la tarea de ClickUp; devuelve el id del adjunto.
+async function adjuntarArchivo(env: Env, target: string, driveId: string, nombre: string, mime: string, b: Budget) {
   b.take();
-  const archivo = await bajarArchivo(env, bo.drive_id);
-  const datos = await archivo.arrayBuffer();
+  const datos = await (await bajarArchivo(env, driveId)).arrayBuffer();
   const fd = new FormData();
-  fd.append('attachment', new Blob([datos], { type: bo.mime ?? 'application/pdf' }), bo.nombre);
+  fd.append('attachment', new Blob([datos], { type: mime }), nombre);
   b.take();
   const res = await fetch(`${API(env)}/task/${encodeURIComponent(target)}/attachment`, { method: 'POST', headers: { Authorization: env.CLICKUP_TOKEN! }, body: fd });
-  if (!res.ok) throw new Error(`ClickUp no aceptó el boceto: HTTP ${res.status}`);
-  const adj = (await res.json().catch(() => ({}))) as { id?: string };
-  await db.prepare('UPDATE bocetos SET clickup_task = ?, clickup_adjunto = ?, clickup_at = ? WHERE id = ?').bind(target, adj.id ?? null, new Date().toISOString(), bo.id).run();
-  return { adjunto: target, en: destino ? 'artículo' : 'PDV' };
+  if (!res.ok) throw new Error(`ClickUp no aceptó «${nombre}»: HTTP ${res.status}`);
+  return ((await res.json().catch(() => ({}))) as { id?: string }).id ?? null;
+}
+
+// El logo que va en el producto, a la tarea donde está su boceto (si ese logo todavía no está ahí).
+async function adjuntarLogo(env: Env, orderId: number, producto: string, b: Budget) {
+  const db = env.DB;
+  const bo = await db.prepare(`SELECT clickup_task FROM bocetos WHERE record_id = ? AND producto = ? AND archived = 0 AND clickup_task IS NOT NULL
+    ORDER BY clickup_at DESC LIMIT 1`).bind(orderId, producto).first<{ clickup_task: string }>();
+  if (!bo) return { omitido: 'el boceto todavía no está en ClickUp' };
+  const logo = await logoDelProducto(db, orderId, producto);
+  if (!logo) return { omitido: 'la empresa no tiene logo' };
+  if (await db.prepare('SELECT 1 FROM logos_clickup WHERE logo_id = ? AND task_id = ?').bind(logo.id, bo.clickup_task).first()) return { omitido: 'ya estaba adjunto' };
+  const adj = await adjuntarArchivo(env, bo.clickup_task, logo.drive_id, logo.nombre, logo.mime ?? 'application/octet-stream', b);
+  await db.prepare('INSERT OR IGNORE INTO logos_clickup (logo_id, task_id, adjunto) VALUES (?, ?, ?)').bind(logo.id, bo.clickup_task, adj).run();
+  return { logo: logo.id, adjunto: bo.clickup_task };
 }
 
 export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)) {
@@ -222,7 +246,9 @@ export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)
     const taskId = String(row.url ?? '').match(/\/t\/([A-Za-z0-9]+)/)?.[1];
     try {
       if (!taskId) throw new Error('El pedido no tiene PDV de ClickUp.');
-      const result = row.action === 'adjuntar_boceto' ? await adjuntarBoceto(env, taskId, Number(row.ref), b) : { movidas: await pasarAPdv(env, taskId, b) };
+      const result = row.action === 'adjuntar_boceto' ? await adjuntarBoceto(env, taskId, Number(row.ref), b)
+        : row.action === 'adjuntar_logo' ? await adjuntarLogo(env, row.record_id, row.ref ?? '', b)
+        : { movidas: await pasarAPdv(env, taskId, b) };
       await db.prepare('UPDATE clickup_salida SET done_at = ?, result = ?, error = NULL, attempts = attempts + 1 WHERE id = ?')
         .bind(new Date().toISOString(), JSON.stringify(result), row.id).run();
       hechas++;

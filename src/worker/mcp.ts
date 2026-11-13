@@ -457,7 +457,7 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
       return ok({
         protocolVersion: msg.params?.protocolVersion && ['2025-06-18', '2025-03-26', '2024-11-05'].includes(msg.params.protocolVersion) ? msg.params.protocolVersion : PROTOCOL,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'formas-crm', title: 'Formas CRM', version: '1.0.0' },
+        serverInfo: { name: 'formas-crm', title: 'Formas Hub', version: '1.0.0' },
         instructions: 'CRM propio de Formas Publicitarias (reemplazo de HubSpot). Objetos: contact, company, deal, order. '
           + 'Antes de crear, buscá (search_records) para no duplicar, o usá upsert_bundle. Usá list_properties para nombres internos y opciones válidas, '
           + 'list_pipelines para etapas y list_users para propietarios. Todo lo que hagas queda en el historial con origen "mcp". '

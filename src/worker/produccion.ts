@@ -1,3 +1,4 @@
+import { logosDeArticulos } from './logos';
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { Budget } from './budget';
@@ -360,6 +361,7 @@ export interface ArticuloVista {
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
   foto?: string | null;   // la foto del producto, la misma que en el pedido (fotosDeArticulos en productos.ts)
+  logo?: string | null;   // cómo está el logo del producto: ok, textos, no_vectorial, sin_verificar o falta (logos.ts)
 }
 export interface PdvVista extends ArticuloVista {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
@@ -383,7 +385,7 @@ export function etapaPdv(pdvEstado: string, estados: string[], etapaPedido: stri
 }
 
 function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }, arts: FilaDb[], editables: string[], verCerrados: boolean,
-  fotos: Map<string, string>): PdvVista {
+  fotos: Map<string, string>, logos: Map<string, string> = new Map()): PdvVista {
   const vivos = arts.filter((a) => !CERRADOS.slice(1).includes(a.estado));
   const { etapa, auto } = etapaPdv(p.estado, arts.map((a) => a.estado), p.etapa_pedido);
   const visibles = verCerrados ? arts : arts.filter((a) => !CERRADOS.includes(a.estado));
@@ -393,7 +395,9 @@ function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; 
     ...articulo(p), npdv: p.npdv, unidad: p.unidad, vendedor: p.vendedor, record_id: p.record_id, pedido: p.pedido, owner_id: p.owner_id,
     entrega_prometida: p.entrega_prometida, etapa, etapa_auto: auto, editable: editables.includes(p.unidad ?? ''),
     listos: vivos.filter((a) => LISTOS.includes(a.estado)).length, total: vivos.length, asignados_todos: [...todos],
-    articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), foto: fotos.get(a.task_id) ?? null })),
+    articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), foto: fotos.get(a.task_id) ?? null,
+      // El aviso del logo, solo mientras falta producirlo (ya listo, entregado o anulado no importa).
+      logo: LISTOS.includes(a.estado) || CERRADOS.includes(a.estado) ? null : logos.get(a.task_id) ?? null })),
   };
 }
 
@@ -417,8 +421,9 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
   const dePdv = new Map<string, FilaDb[]>();
   for (const a of arts) { const l = dePdv.get(a.pdv_task) ?? []; l.push(a); dePdv.set(a.pdv_task, l); }
   const pedidoDe = new Map(pdvs.map((p) => [p.task_id, p.record_id]));
-  const fotos = await fotosDeArticulos(db, arts.map((a) => ({ ...a, record_id: a.record_id ?? pedidoDe.get(a.pdv_task) ?? null })));
-  const out = pdvs.map((p) => armarPdv(p, dePdv.get(p.task_id) ?? [], cfg.unidades, !!q.cerrados, fotos))
+  const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? pedidoDe.get(a.pdv_task) ?? null }));
+  const [fotos, logos] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido)]);
+  const out = pdvs.map((p) => armarPdv(p, dePdv.get(p.task_id) ?? [], cfg.unidades, !!q.cerrados, fotos, logos))
     .sort((a, b) => (a.entrega_real ?? a.entrega_prometida ?? '9999').localeCompare(b.entrega_real ?? b.entrega_prometida ?? '9999') || Number(a.npdv) - Number(b.npdv));
   return { pdvs: out, ...(await referencias(db)), config: cfg, unidades, puede_editar: puedeEditarProduccion(user) };
 }
@@ -441,8 +446,9 @@ async function pdvVista(db: D1Database, pdvTask: string) {
     .first<FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }>();
   if (!p) return null;
   const arts = (await db.prepare('SELECT * FROM produccion WHERE es_pdv = 0 AND pdv_task = ?').bind(pdvTask).all<FilaDb>()).results;
-  const fotos = await fotosDeArticulos(db, arts.map((a) => ({ ...a, record_id: a.record_id ?? p.record_id })));
-  return armarPdv(p, arts, cfg.unidades, false, fotos);
+  const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? p.record_id }));
+  const [fotos, logos] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido)]);
+  return armarPdv(p, arts, cfg.unidades, false, fotos, logos);
 }
 
 // ---------- Editar: se escribe en ClickUp y después en el CRM ----------

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { http, useAsync, useToast, fmtDate, Icon, type ObjectType, cabecerasVerComo } from '../lib';
 import { Modal } from '../components';
 import { Select } from '../Select';
+import { LogoProducto, useLogos, type LogosRes } from './Logos';
 
 // Bocetos de producción (pedido de Rodrigo del 6/11/2026): por producto del pedido, PDF o imagen, guardados en Drive.
 // Referencia (una foto o un boceto rápido para avanzar) o técnico (el final, con las medidas); varias versiones; el aprobado
@@ -153,7 +154,7 @@ export function useSubirBocetos(type: ObjectType, recordId: number, productos: P
 }
 
 // Botón «Subir bocetos» (elige archivos) y zona para soltarlos encima (todo el recuadro).
-export function SoltarBocetos({ onArchivos, children, className }: { onArchivos: (f: File[]) => void; children: ReactNode; className?: string }) {
+export function SoltarBocetos({ onArchivos, children, className, aviso = 'Soltá los bocetos acá' }: { onArchivos: (f: File[]) => void; children: ReactNode; className?: string; aviso?: string }) {
   const [encima, setEncima] = useState(false);
   const tieneArchivos = (e: React.DragEvent) => [...e.dataTransfer.types].includes('Files');
   return (
@@ -162,17 +163,19 @@ export function SoltarBocetos({ onArchivos, children, className }: { onArchivos:
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setEncima(false); }}
       onDrop={(e) => { if (!tieneArchivos(e)) return; e.preventDefault(); setEncima(false); onArchivos([...e.dataTransfer.files]); }}>
       {children}
-      {encima && <div className="soltar-aviso">Soltá los bocetos acá</div>}
+      {encima && <div className="soltar-aviso">{aviso}</div>}
     </div>
   );
 }
 
-export function BotonArchivos({ children, onArchivos, multiple = true, className = 'btn sm', title }: { children: ReactNode; onArchivos: (f: File[]) => void; multiple?: boolean; className?: string; title?: string }) {
+export function BotonArchivos({ children, onArchivos, multiple = true, className = 'btn sm', title, accept = 'application/pdf,image/*', disabled }: {
+  children: ReactNode; onArchivos: (f: File[]) => void; multiple?: boolean; className?: string; title?: string; accept?: string; disabled?: boolean;
+}) {
   const ref = useRef<HTMLInputElement>(null);
   return (
     <>
-      <button type="button" className={className} title={title} onClick={() => ref.current?.click()}>{children}</button>
-      <input ref={ref} type="file" hidden multiple={multiple} accept="application/pdf,image/*"
+      <button type="button" className={className} title={title} disabled={disabled} onClick={() => ref.current?.click()}>{children}</button>
+      <input ref={ref} type="file" hidden multiple={multiple} accept={accept}
         onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) onArchivos(f); }} />
     </>
   );
@@ -235,8 +238,9 @@ export function BocetoChips({ lista, onAbrir }: { lista: Boceto[]; onAbrir: (b: 
 }
 
 // El boceto grande, con lo que se puede hacer: aprobar, cambiar tipo o producto, abrir en Drive, descargar, quitar.
-export function BocetoVisor({ b, productos, esPedido, onClose, onCambio }: {
+export function BocetoVisor({ b, productos, esPedido, onClose, onCambio, logos }: {
   b: Boceto; productos?: ProductoRef[]; esPedido: boolean; onClose: () => void; onCambio: () => void;
+  logos?: { type: ObjectType; recordId: number; res: LogosRes | null | undefined; onCambio: () => void };
 }) {
   const toast = useToast();
   const [x, setX] = useState(b);
@@ -282,6 +286,13 @@ export function BocetoVisor({ b, productos, esPedido, onClose, onCambio }: {
               <option value="referencia">Referencia (foto o boceto rápido)</option>
             </Select>
           </label>
+          {logos && (
+            <div className="field">Logo
+              {x.producto || x.producto_nombre
+                ? <span><LogoProducto type={logos.type} recordId={logos.recordId} producto={(x.producto || x.producto_nombre)!} productoNombre={(x.producto_nombre || x.producto)!} res={logos.res} onCambio={logos.onCambio} /></span>
+                : <span className="small muted">Elegí el producto para elegir su logo.</span>}
+            </div>
+          )}
           <div className="field">Estado
             <span>{x.estado === 'aprobado' ? <span className="tag ok">Aprobado</span> : <span className="tag warn">Para aprobar</span>}</span>
           </div>
@@ -289,7 +300,7 @@ export function BocetoVisor({ b, productos, esPedido, onClose, onCambio }: {
             <div className="small muted">
               {x.clickup_at ? <>Adjunto en ClickUp el {fmtDate(x.clickup_at)}.</>
                 : x.estado === 'aprobado' ? 'Se está adjuntando en ClickUp al artículo de este producto.'
-                : 'Al aprobarlo, se adjunta solo en ClickUp, en la subtarea del artículo.'}
+                : 'Al aprobarlo, se adjunta solo en ClickUp, en la subtarea del artículo, junto con el logo original.'}
             </div>
           )}
         </div>
@@ -306,6 +317,8 @@ export function BocetosNegocioCard({ dealId }: { dealId: number }) {
   const res = useBocetos('deal', dealId);
   const [ver, setVer] = useState<Boceto | null>(null);
   const sub = useSubirBocetos('deal', dealId, null, () => res.reload());
+  const lg = useLogos('deal', dealId);
+  const logos = { type: 'deal' as const, recordId: dealId, res: lg.data, onCambio: () => lg.reload() };
   const lista = res.data?.bocetos ?? [];
   const grupos = new Map<string, Boceto[]>();
   for (const b of lista) { const k = b.producto_nombre || 'Sin producto'; grupos.set(k, [...(grupos.get(k) ?? []), b]); }
@@ -319,12 +332,15 @@ export function BocetosNegocioCard({ dealId }: { dealId: number }) {
       {[...grupos].map(([k, l]) => (
         <div key={k} className="assoc-item" style={{ flexDirection: 'column', gap: 4 }}>
           <div className="product-name">{k}</div>
-          <BocetoChips lista={l} onAbrir={setVer} />
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            <BocetoChips lista={l} onAbrir={setVer} />
+            {(l[0].producto || l[0].producto_nombre) && <LogoProducto {...logos} producto={(l[0].producto || l[0].producto_nombre)!} productoNombre={k} />}
+          </div>
         </div>
       ))}
       {res.data?.configurado && !lista.length && <div className="panel-body small muted">Arrastrá acá los PDF o las fotos de referencia. Cuando llegue el pedido, los usás desde su ficha.</div>}
       {sub.cuadro}
-      {ver && <BocetoVisor b={ver} esPedido={false} onClose={() => setVer(null)} onCambio={() => res.reload()} />}
+      {ver && <BocetoVisor b={ver} esPedido={false} onClose={() => setVer(null)} onCambio={() => res.reload()} logos={logos} />}
     </SoltarBocetos>
   );
 }

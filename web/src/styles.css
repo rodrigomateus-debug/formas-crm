@@ -1129,6 +1129,54 @@ a.prod-foto:hover { border-color: var(--accent-ink); }
 .conv-msg.borrado { font-style: italic; }
 .conv-hay-nuevos { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); box-shadow: var(--shadow-pop); z-index: 2; }
 
+/* Chat y actualizaciones bien separados (pedido del 13/11/2026): los mensajes son tarjetas blancas; las actualizaciones
+   corren por un riel a la izquierda (la línea pasa por el centro de las fotos) y, de a tres o más seguidas, se juntan en
+   una fila con el resumen que se despliega. */
+.conv-lista { --conv-fondo: color-mix(in srgb, var(--ui-surface-sunken) 50%, var(--ui-surface)); background: var(--conv-fondo); }
+.conv-lista.con-riel { background: linear-gradient(var(--ui-line), var(--ui-line)) 31px 0 / 2px 100% no-repeat local, var(--conv-fondo); }
+.conv-lista .conv-msg, .conv-lista .conv-msg:hover, .conv-lista .conv-msg.mencionado, .conv-lista .conv-msg.destello { background: none; }
+.conv-lista .conv-msg { padding: 0; margin: 12px 0 0; }
+.conv-lista .conv-msg.cont { margin-top: 4px; }
+.conv-msg .msg-av { position: relative; z-index: 1; }
+.conv-msg .msg-av .avatar { box-shadow: 0 0 0 3px var(--conv-fondo); }
+.conv-lista .conv-msg .msg-main { min-width: 0; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: 10px; padding: 7px 12px 8px;
+  box-shadow: 0 1px 2px rgba(18, 20, 58, .05); transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.conv-lista .conv-msg:hover .msg-main { border-color: var(--ui-line-strong); }
+.conv-lista .conv-msg.mencionado .msg-main { background: var(--ui-warning-soft); border-color: color-mix(in srgb, var(--ui-warning) 45%, var(--ui-line)); }
+.conv-lista .conv-msg.destello .msg-main { background: var(--accent-soft); border-color: var(--accent-ink); }
+.conv-lista .conv-msg.borrado .msg-main { background: none; border-style: dashed; box-shadow: none; }
+.conv-lista .conv-msg .msg-acciones { top: -12px; right: 8px; }
+.conv-lista .conv-msg + .conv-ev, .conv-lista .conv-msg + .ev-grupo { margin-top: 8px; }
+.conv-lista .conv-ev + .conv-msg, .conv-lista .ev-grupo + .conv-msg { margin-top: 10px; }
+/* Las actualizaciones: un nodo chico sobre el riel, el texto gris y la hora a la derecha. */
+.conv-lista .conv-ev { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; padding: 3px 0; font-size: 12px; color: var(--ui-ink-2); }
+.conv-lista .conv-ev .ev-ic, .ev-grupo .ev-ic { width: 20px; height: 20px; justify-self: center; margin-top: 0; border-radius: 50%; display: grid; place-items: center; position: relative; z-index: 1;
+  background: var(--ui-surface); color: var(--ui-ink-3); box-shadow: 0 0 0 1.5px var(--ui-line-strong), 0 0 0 4px var(--conv-fondo); }
+.conv-lista .conv-ev.ev-boceto .ev-ic, .conv-lista .conv-ev.ev-articulo .ev-ic, .conv-lista .conv-ev.ev-logo .ev-ic { background: var(--ui-surface); color: var(--accent-ink);
+  box-shadow: 0 0 0 1.5px var(--accent-ink), 0 0 0 4px var(--conv-fondo); }
+.conv-lista .conv-ev.ev-ok .ev-ic { color: var(--ui-positive-ink); box-shadow: 0 0 0 1.5px var(--ui-positive), 0 0 0 4px var(--conv-fondo); }
+.conv-lista .conv-ev .ev-txt { padding-top: 1px; }
+/* El grupo: una fila con borde punteado; al pasar el mouse, sólido. */
+.ev-grupo { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 10px; align-items: center; width: 100%; padding: 4px 0; border: 0; background: none;
+  font: inherit; text-align: left; cursor: pointer; color: var(--ui-ink-2); }
+.ev-grupo-caja { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; padding: 5px 10px; border: 1px dashed var(--ui-line-strong); border-radius: 8px;
+  background: var(--ui-surface); font-size: 12px; transition: border-color var(--dur) var(--ease); }
+.ev-grupo:hover .ev-grupo-caja, .ev-grupo:focus-visible .ev-grupo-caja { border-style: solid; border-color: var(--accent-ink); }
+.ev-grupo:focus-visible { outline: none; }
+.ev-grupo-caja b { color: var(--ui-ink); font-weight: 600; }
+.ev-chip { font-size: 11px; line-height: 18px; padding: 0 7px; border-radius: var(--r-pill); background: var(--ui-surface-sunken); color: var(--ui-ink-2); white-space: nowrap; }
+.ev-grupo-caja time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ev-grupo-caja > svg { color: var(--ui-ink-3); transition: transform var(--dur) var(--ease); }
+.ev-grupo.abierto .ev-grupo-caja > svg { transform: rotate(180deg); }
+.ev-grupo.abierto .ev-grupo-caja { border-style: solid; }
+.ev-quienes { display: inline-flex; }
+.ev-quienes .avatar { box-shadow: 0 0 0 2px var(--ui-surface); }
+.ev-quienes .avatar + .avatar { margin-left: -5px; }
+/* El logo agregado, con su miniatura. */
+.ev-logo-mini { display: flex; align-items: center; gap: 8px; margin-top: 5px; text-decoration: none; }
+.ev-logo-mini .logo-mini.grande { width: 132px; height: 72px; border-radius: 8px; }
+.ev-logo-mini:hover .logo-mini { border-color: var(--accent-ink); }
+
 /* Escribir */
 .conv-escribir { flex: none; border-top: 1px solid var(--ui-line); padding: 10px 12px 12px; background: var(--ui-surface); }
 .conv-msg .conv-escribir { border: 0; padding: 4px 0 0; background: none; }

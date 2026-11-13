@@ -71,6 +71,8 @@ export type Item =
   | { key: string; kind: 'articulo'; at: string; articulo: string; es_pdv: boolean; antes: string | null; despues: string | null; user_id: number | null; actor: string | null; source: string }
   | { key: string; kind: 'boceto'; at: string; accion: 'subido' | 'aprobado'; boceto_id: number; nombre: string; producto: string | null; version: number; tipo: string; mime: string | null; user_id: number | null }
   | { key: string; kind: 'remito'; at: string; remito_id: number; numero: string | null; estado: string; origen: string; chofer: string | null; user_id: number | null }
+  | { key: string; kind: 'logo'; at: string; accion: 'subido' | 'elegido'; logo_id: number; nombre: string; archivo: string; formato: string; vista: string | null; curvas: string;
+      producto: string | null; user_id: number | null }
   | { key: string; kind: 'actividad'; at: string; activity_id: number; tipo: string; subject: string; body: string; direction: string | null; status: string | null; due_at: string | null; user_id: number | null };
 
 async function registro(db: D1Database, recordId: number) {
@@ -86,7 +88,7 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
   const ahora = now();
   const desde = opts.desde && !Number.isNaN(Date.parse(opts.desde)) ? new Date(opts.desde).toISOString() : '';
   const lim = Math.min(Math.max(opts.limite ?? 300, 1), 500);
-  const [msgs, chs, arts, bocs, rems, acts, parts, adjs, reacs] = await db.batch([
+  const [msgs, chs, arts, bocs, rems, acts, parts, adjs, reacs, lgs, elegs] = await db.batch([
     // Con `desde`: lo nuevo, lo editado o borrado y aquello a lo que le cambió una reacción.
     db.prepare(`SELECT * FROM (SELECT * FROM mensajes WHERE record_id = ?1 AND (COALESCE(borrado_at, editado_at, created_at) > ?2 OR reaccion_at > ?2)
       ORDER BY id DESC LIMIT ?3) ORDER BY id`).bind(recordId, desde, lim),
@@ -107,6 +109,13 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
     db.prepare(`SELECT ${COLS_ADJUNTO} FROM mensaje_adjuntos WHERE record_id = ? AND mensaje_id IS NOT NULL ORDER BY id`).bind(recordId),
     db.prepare(`SELECT r.mensaje_id, r.emoji, r.user_id FROM mensaje_reacciones r JOIN mensajes m ON m.id = r.mensaje_id
       WHERE m.record_id = ? ORDER BY r.created_at, r.rowid`).bind(recordId),
+    // Logos (logos.ts): los subidos desde este pedido o negocio y los elegidos para sus productos, con lo necesario para
+    // la miniatura.
+    db.prepare(`SELECT id, etiqueta, nombre, formato, vista, curvas, user_id, created_at FROM logos WHERE record_id = ? AND archived = 0 AND created_at > ? ORDER BY id DESC LIMIT 50`)
+      .bind(recordId, desde),
+    db.prepare(`SELECT pl.producto, pl.logo_id, pl.user_id, pl.updated_at, l.etiqueta, l.nombre, l.formato, l.vista, l.curvas, l.record_id AS l_record, l.created_at AS l_created,
+        (SELECT b.producto_nombre FROM bocetos b WHERE b.record_id = pl.record_id AND b.producto = pl.producto AND b.producto_nombre IS NOT NULL LIMIT 1) AS producto_nombre
+      FROM producto_logos pl JOIN logos l ON l.id = pl.logo_id AND l.archived = 0 WHERE pl.record_id = ? AND pl.updated_at > ? LIMIT 100`).bind(recordId, desde),
   ]);
   const reaccionesPor = agrupar(reacs.results as Array<{ mensaje_id: number; emoji: string; user_id: number }>);
   const adjuntosDe = new Map<number, Adjunto[]>();
@@ -130,6 +139,23 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
   for (const a of acts.results as Array<{ id: number; type: string; subject: string; body: string; direction: string | null; status: string | null; due_at: string | null; occurred_at: string; created_at: string; owner_id: number | null; created_by: number | null }>) {
     items.push({ key: `a${a.id}`, kind: 'actividad', at: a.type === 'task' ? a.created_at : a.occurred_at, activity_id: a.id, tipo: a.type, subject: a.subject, body: a.body,
       direction: a.direction, status: a.status, due_at: a.due_at, user_id: a.type === 'task' ? (a.created_by ?? a.owner_id) : a.owner_id });
+  }
+  type LogoFila = { id: number; etiqueta: string | null; nombre: string; formato: string; vista: string | null; curvas: string; user_id: number | null; created_at: string };
+  type Elegido = { producto: string; logo_id: number; user_id: number | null; updated_at: string; etiqueta: string | null; nombre: string; formato: string; vista: string | null;
+    curvas: string; l_record: number | null; l_created: string; producto_nombre: string | null };
+  const elegidos = elegs.results as Elegido[];
+  // Subido desde un producto: un solo evento «subió el logo … para …» (no también «eligió»).
+  const juntos = new Set<string>();
+  for (const l of lgs.results as LogoFila[]) {
+    const e = elegidos.find((x) => x.logo_id === l.id && Math.abs(Date.parse(x.updated_at) - Date.parse(l.created_at)) < 60_000);
+    if (e) juntos.add(`${e.producto}|${e.logo_id}`);
+    items.push({ key: `lg${l.id}`, kind: 'logo', at: l.created_at, accion: 'subido', logo_id: l.id, nombre: l.etiqueta || l.nombre, archivo: l.nombre, formato: l.formato,
+      vista: l.vista, curvas: l.curvas, producto: e ? e.producto_nombre ?? e.producto : null, user_id: l.user_id });
+  }
+  for (const e of elegidos) {
+    if (juntos.has(`${e.producto}|${e.logo_id}`)) continue;
+    items.push({ key: `le${e.logo_id}-${e.producto}`, kind: 'logo', at: e.updated_at, accion: 'elegido', logo_id: e.logo_id, nombre: e.etiqueta || e.nombre, archivo: e.nombre,
+      formato: e.formato, vista: e.vista, curvas: e.curvas, producto: e.producto_nombre ?? e.producto, user_id: e.user_id });
   }
   items.sort((x, y) => x.at.localeCompare(y.at) || x.key.localeCompare(y.key));
   const participantes = (parts.results as Array<{ user_id: number; leido_hasta: number; siguiendo: number; motivo: string | null }>).map((p) => ({ ...p, siguiendo: !!p.siguiendo }));

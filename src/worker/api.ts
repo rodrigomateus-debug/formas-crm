@@ -1196,7 +1196,7 @@ api.post('/records/:type/:id/logos', async (c) => {
   const archivo = form.get('archivo');
   if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del logo.');
   const s = (k: string) => (typeof form.get(k) === 'string' ? (form.get(k) as string) : null);
-  const logo = await subirLogo(c.env, ctx, company, archivo, { etiqueta: s('etiqueta'), curvas: s('curvas') });
+  const logo = await subirLogo(c.env, ctx, company, archivo, { etiqueta: s('etiqueta'), curvas: s('curvas'), recordId: rec.object_type === 'company' ? null : rec.id });
   const producto = s('producto')?.trim();
   if (producto && rec.object_type !== 'company') {
     await elegirLogo(c.env.DB, ctx, rec, producto, logo.id);

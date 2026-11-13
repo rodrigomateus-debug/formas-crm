@@ -95,6 +95,11 @@ test('logos del cliente: en la empresa, revisados, y elegidos en cada producto',
   enPedido = (await api('GET', `/records/order/${ord.id}/logos`)).data;
   assert.deepEqual(enPedido.elegidos.sort((a, b) => a.producto.localeCompare(b.producto)), [{ producto: 'GORRA-1', logo_id: nuevo.data.id }, { producto: 'TAZA-1', logo_id: svg.data.id }]);
   assert.ok((await api('GET', `/records/company/${emp.id}/logos`)).data.logos.some((l) => l.id === nuevo.data.id), 'guardado entre los de la empresa');
+  // En la conversación del pedido: «subió el logo … para GORRA-1» (uno solo, no también «eligió») y «eligió el logo … para
+  // TAZA-1», con lo necesario para la miniatura.
+  const conv = (await api('GET', `/records/order/${ord.id}/conversacion`)).data.items.filter((i) => i.kind === 'logo');
+  assert.deepEqual(conv.map((i) => [i.accion, i.producto, i.logo_id]).sort(), [['elegido', 'TAZA-1', svg.data.id], ['subido', 'GORRA-1', nuevo.data.id]]);
+  assert.deepEqual([conv.find((i) => i.accion === 'subido').vista, conv.find((i) => i.accion === 'subido').curvas], ['svg', 'ok']);
   // Volver al principal.
   assert.equal((await api('PUT', `/records/order/${ord.id}/logos/producto`, { producto: 'TAZA-1', logo_id: null })).data.logo.id, cdr.id);
 

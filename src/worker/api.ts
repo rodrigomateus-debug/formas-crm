@@ -1306,7 +1306,7 @@ api.get('/cronograma', async (c) => {
   return c.json(await vistaCronograma(c.env.DB, c.get('ctx').user, { desde: q.desde, hasta: q.hasta, rd: q.rd, rh: q.rh }));
 });
 api.post('/cronograma/mover', async (c) => c.json(await moverMovimiento(c.env, c.get('ctx'), await c.req.json())));
-api.post('/cronograma/hecho', async (c) => c.json(await marcarHecho(c.env, c.get('ctx'), await c.req.json())));
+api.post('/cronograma/hecho', async (c) => c.json(await marcarHecho(c.env, c.get('ctx'), await c.req.json(), { enFondo: (p) => c.executionCtx.waitUntil(p) })));
 api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), null, await c.req.json())));
 api.patch('/cronograma/notas/:id', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 api.delete('/cronograma/notas/:id', async (c) => c.json(await borrarNota(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));

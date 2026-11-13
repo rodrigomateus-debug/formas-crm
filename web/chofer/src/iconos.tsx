@@ -7,6 +7,11 @@ const TRAZOS: Record<string, ReactNode> = {
     <circle cx="12" cy="12.5" r="3.4" />
   </>),
   bien: <path d="m5 12.5 4.5 4.5L19 7.5" />,
+  // Cómo llegar: el rombo con la flecha de giro, como el de los mapas.
+  navegar: (<>
+    <path d="M12 2.8 21.2 12 12 21.2 2.8 12z" />
+    <path d="M9 15v-2.6a1.6 1.6 0 0 1 1.6-1.6H15.5M13.3 8.6l2.2 2.2-2.2 2.2" />
+  </>),
   aviso: (<>
     <path d="M12 4.5 3.5 19h17z" />
     <path d="M12 10v4.2M12 16.6v.2" />

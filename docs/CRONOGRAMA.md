@@ -152,7 +152,15 @@ que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay
 llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
 Entra con su **código de 8 números**, que escribe una sola vez y queda guardado en el celular, o con su link (los dos se
 crean en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
-En cada parada marca cómo le fue:
+**Cómo llegar** (pedido de Rodrigo del 13/11/2026): cada parada tiene a la derecha el botón de navegación, que abre la
+dirección sin abrir la parada. La primera vez pregunta con qué app va (Google Maps, Waze y, en el iPhone, Apple Maps) y
+después abre directo con esa; se cambia en «Cómo llegar con» de la parada abierta. Arriba de las paradas, **«Todo el
+recorrido en Google Maps»** abre la navegación desde donde está el chofer con las paradas que le faltan, en orden, y
+dónde termina el recorrido. Google Maps acepta hasta 9 paradas en el medio más el destino: si faltan más, abre las
+próximas 10 y, al hacerlas, el botón abre las que siguen. Waze no deja cargar varias paradas por link: con Waze se va
+parada por parada (la app lo avisa).
+
+En cada parada marca cómo le fue (se ve en el momento; si no se pudo guardar, vuelve a como estaba y lo avisa arriba):
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo
   marca Logística, pero a nombre del chofer en la conversación del pedido). Si era una entrega, se abre la cámara para

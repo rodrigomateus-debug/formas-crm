@@ -356,7 +356,7 @@ hooks.get('/chofer/api/ruta', async (c) => {
 // El chofer marca una parada: hecha, no se pudo (con el motivo) o la deja para más tarde.
 hooks.post('/chofer/api/ruta/parada', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
-  return c.json(await marcarParada(c.env, ctx, ctx.sourceDetail ?? '', await c.req.json()));
+  return c.json(await marcarParada(c.env, ctx, ctx.sourceDetail ?? '', await c.req.json(), (p) => c.executionCtx.waitUntil(p)));
 });
 hooks.get('/chofer/api/remitos', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);

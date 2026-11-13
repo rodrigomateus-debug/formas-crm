@@ -300,7 +300,8 @@ export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; ti
 
 // Marca (o desmarca) como hecho: queda quién y cuándo, y el artículo cambia de estado en ClickUp. Si el artículo ya está
 // más adelante, el estado no se toca. Al desmarcar vuelve al estado que tenía, si nadie lo cambió después.
-export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string } = {}) {
+// `enFondo`: dónde dejar lo que puede terminar después de contestar (releer los PDV de ClickUp); sin él, se espera.
+export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string; enFondo?: (p: Promise<unknown>) => void } = {}) {
   if (!opts.chofer) exigir(ctx);
   if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
   const tipo = b.tipo, hecho = b.hecho !== false;
@@ -317,9 +318,11 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?:
     .bind(tipo, JSON.stringify(filas.map((f) => f.task_id))).all<{ task_id: string; estado_antes: string | null }>()).results.map((m) => [m.task_id, m]));
   let cambiados = 0;
   const pdvs: string[] = [], marcados: string[] = [];
-  for (const f of filas) {
+  // Cada artículo: su estado en ClickUp y la marca. Van de a varios a la vez: de a uno, una parada con muchos artículos
+  // hacía esperar varios segundos al chofer (o a Logística) cada vez que tocaba «Listo».
+  await deAVarios(filas, async (f) => {
     if (hecho) {
-      if (marcas.has(f.task_id)) continue;
+      if (marcas.has(f.task_id)) return;
       const cambia = existe && f.estado !== destino && !CERRADOS.includes(f.estado) && adelante(f.estado) && !(tipo !== 'entrega' && AVANZADOS.includes(f.estado));
       if (cambia) { await editarProduccion(env, c2, f.task_id, 'estado', destino, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
       // OR IGNORE: si otro pedido la marcó recién, no se pierde el estado que tenía antes.
@@ -331,9 +334,18 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?:
       if (m?.estado_antes && f.estado === destino) { await editarProduccion(env, c2, f.task_id, 'estado', m.estado_antes, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }
       await db.prepare('DELETE FROM cronograma_hechos WHERE task_id = ? AND tipo = ?').bind(f.task_id, tipo).run();
     }
-  }
-  await refrescar(env, c2, pdvs);
+  });
+  // Releer los PDV (el estado del pedido) no hace falta para contestar: el estado de cada artículo ya quedó guardado.
+  if (opts.enFondo) opts.enFondo(refrescar(env, c2, pdvs)); else await refrescar(env, c2, pdvs);
   return { cambiados, estado: existe ? destino : null, marcados };
+}
+// Hace `fn` con todos, de a `n` a la vez. Si alguno falla, espera a que terminen los demás (lo hecho queda hecho) y avisa
+// el primer error.
+async function deAVarios<T>(items: T[], fn: (x: T) => Promise<void>, n = 4) {
+  let i = 0, error: unknown = null;
+  const uno = async () => { while (i < items.length) { const x = items[i++]; try { await fn(x); } catch (e) { error ??= e; } } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, uno));
+  if (error) throw error;
 }
 
 // ---------- Notas y feriados ----------
@@ -882,7 +894,7 @@ export const MOTIVOS: Record<string, string> = {
 // El chofer marca una parada de su recorrido de hoy: la hizo (los artículos cambian de estado en ClickUp, a su nombre),
 // no se pudo (con el motivo) o la deja para más tarde. `resultado` vacío borra lo marcado. Al deshacer un «hecho» se
 // vuelve atrás solo lo que marcó él en esa parada, no lo que había marcado Logística. Repetir lo mismo no hace nada.
-export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }) {
+export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clave?: unknown; resultado?: unknown; motivo?: unknown; nota?: unknown }, enFondo?: (p: Promise<unknown>) => void) {
   const fecha = hoyBsAs();
   const clave = String(b.clave ?? '');
   const resultado = b.resultado == null || b.resultado === '' ? null : String(b.resultado);
@@ -904,7 +916,7 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
   const porTipo = (xs: Array<{ id: string; tipo: Tipo }>) => { const m = new Map<Tipo, string[]>(); for (const x of xs) m.set(x.tipo, [...(m.get(x.tipo) ?? []), x.id]); return m; };
   const deATandas = async (ids: string[], tipo: Tipo, hecho: boolean) => {
     const hechos: string[] = [];
-    for (let i = 0; i < ids.length; i += MAX_POR_VEZ) hechos.push(...(await marcarHecho(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo, hecho }, { chofer })).marcados);
+    for (let i = 0; i < ids.length; i += MAX_POR_VEZ) hechos.push(...(await marcarHecho(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo, hecho }, { chofer, enFondo })).marcados);
     return hechos;
   };
   if (resultado === 'hecho' && antes?.resultado !== 'hecho') {

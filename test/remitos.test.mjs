@@ -281,10 +281,25 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   // Si lo pierde, Logística lo vuelve a copiar (una vendedora no).
   asUser = logi.email;
   assert.equal((await api('GET', `/choferes/${ch.id}/link`)).data.link, ch.link);
+  assert.match(ch.codigo, /^\d{8}$/, 'con su código de 8 números');
+  assert.equal((await api('GET', `/choferes/${ch.id}/link`)).data.codigo, ch.codigo);
   asUser = `vende.rem.${RUN}@formas.ar`;
   assert.equal((await api('GET', `/choferes/${ch.id}/link`)).status, 403);
   asUser = null;
   assert.ok(!JSON.stringify((await api('GET', '/choferes')).data).includes(ch.token), 'la lista no trae los links');
+  assert.ok(!JSON.stringify((await api('GET', '/choferes')).data).includes(ch.codigo), 'ni los códigos');
+  // El código: el chofer lo escribe una vez en la app (con espacios o como sea) y la app se queda con su link.
+  const ip = (n) => ({ 'cf-connecting-ip': `10.${n}.${RUN.length}.${Math.floor(Math.random() * 250)}` });
+  const IP = ip(1), entrar = (codigo, desde = IP) => api('POST', '/hooks/chofer/api/entrar', { codigo }, desde);
+  assert.deepEqual((await entrar(`${ch.codigo.slice(0, 4)} ${ch.codigo.slice(4)}`)).data, { nombre: `Juan ${RUN}`, token: ch.token });
+  assert.equal((await entrar('1234')).status, 404, 'tiene 8 números');
+  const errado = String((Number(ch.codigo) + 50_000_000) % 100_000_000).padStart(8, '0');
+  assert.equal((await entrar(errado)).status, 404);
+  // Quien prueba códigos al azar: después de 10 errores, esa conexión espera (aunque acierte); las demás siguen.
+  const ajena = ip(2);
+  for (let i = 0; i < 10; i++) await entrar(String(10_000_000 + i), ajena);
+  assert.equal((await entrar(ch.codigo, ajena)).status, 429);
+  assert.equal((await entrar(ch.codigo)).status, 200);
   const H = { authorization: `Bearer ${ch.token}` };
   assert.deepEqual((await api('GET', '/hooks/chofer/api/yo', undefined, H)).data, { nombre: `Juan ${RUN}` });
   assert.equal((await api('GET', '/records/order', undefined, H)).status, 403, 'el link del chofer no abre el CRM');
@@ -592,6 +607,7 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   assert.equal((await api('GET', `/choferes/${yo.id}/link`)).status, 410, 'dado de baja, el link ya no se muestra');
   asUser = null;
   assert.equal((await api('GET', '/hooks/chofer/api/yo', undefined, H)).status, 401);
+  assert.equal((await entrar(ch.codigo, ip(3))).status, 404, 'ni el código');
 
   // 10. La página de la app se sirve desde /hooks (sin el login de Access), con sus archivos.
   const pag = await fetch(`${BASE}/hooks/chofer/`);

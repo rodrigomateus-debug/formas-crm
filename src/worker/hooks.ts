@@ -319,6 +319,28 @@ hooks.post('/remitos/leer', async (c) => {
 async function chofer(env: Env, req: Request) {
   return authenticate(env, req, undefined, { chofer: true });
 }
+// Entrar con el código (pedido de Rodrigo del 13/11/2026): el chofer escribe una vez los 8 números que le pasó Logística
+// y la app se queda con su link, como si lo hubiera abierto. Para que nadie pruebe códigos al azar: hasta 10 intentos
+// errados por conexión cada 15 minutos y 300 en total por hora; pasado eso, hay que esperar.
+const MAX_INTENTOS_IP = 10, MAX_INTENTOS = 300;
+hooks.post('/chofer/api/entrar', async (c) => {
+  const db = c.env.DB;
+  const ip = c.req.header('cf-connecting-ip') ?? 'sin-ip';
+  const ahora = Date.now();
+  await db.prepare('DELETE FROM chofer_intentos WHERE at < ?').bind(ahora - 3600_000).run();
+  const n = await db.prepare('SELECT COALESCE(SUM(ip = ? AND at > ?), 0) AS ip, COUNT(*) AS total FROM chofer_intentos').bind(ip, ahora - 900_000)
+    .first<{ ip: number; total: number }>();
+  if ((n?.ip ?? 0) >= MAX_INTENTOS_IP || (n?.total ?? 0) >= MAX_INTENTOS) throw new HttpError(429, 'Probaste muchas veces con un código que no es. Esperá unos minutos y volvé a probar, o pedile tu código a Logística.');
+  const { codigo } = await c.req.json<{ codigo?: unknown }>().catch(() => ({ codigo: '' }));
+  const limpio = String(codigo ?? '').replace(/\D/g, '');
+  const t = limpio.length === 8 ? await db.prepare("SELECT name, chofer_token FROM api_tokens WHERE codigo = ? AND source = 'chofer' AND revoked = 0 AND chofer_token IS NOT NULL")
+    .bind(limpio).first<{ name: string; chofer_token: string }>() : null;
+  if (!t) {
+    await db.prepare('INSERT INTO chofer_intentos (ip, at) VALUES (?, ?)').bind(ip, ahora).run();
+    throw new HttpError(404, limpio.length === 8 ? 'Ese código no es de ningún chofer. Fijate que esté bien, o pedíselo a Logística.' : 'El código tiene 8 números.');
+  }
+  return c.json({ nombre: t.name, token: t.chofer_token });
+});
 async function pedidoNombre(db: D1Database, id: number | null) {
   return id ? (await db.prepare('SELECT name FROM records WHERE id = ?').bind(id).first<{ name: string }>())?.name ?? null : null;
 }

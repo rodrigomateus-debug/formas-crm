@@ -144,6 +144,8 @@ coordinación). La planilla sigue siendo donde se cargan y corrigen los lugares.
 En la misma app de los remitos (`/hooks/chofer/`, ver [REMITOS.md](REMITOS.md)), arriba: **«Tu recorrido de hoy»**, el
 que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay que retirar, dejar o entregar y «Cómo
 llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
+Entra con su **código de 8 números**, que escribe una sola vez y queda guardado en el celular, o con su link (los dos se
+crean en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
 En cada parada marca cómo le fue:
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo

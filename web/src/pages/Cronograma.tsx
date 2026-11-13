@@ -538,7 +538,7 @@ export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloE
       <label>{tipo === 'expreso' ? 'Nombre del expreso' : 'Nombre del chofer'}<input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={80} /></label>
       {tipo === 'expreso' && <label>Dirección del expreso (a dónde se le lleva)<input className="input sm" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" maxLength={300} /></label>}
       {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => setDireccion(l.direccion)}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
-      {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, además hay que crearle el link en Entregas → Choferes, con el mismo nombre.</span>}
+      {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, creale su código en Entregas → Choferes, con el mismo nombre.</span>}
       <div className="row"><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
     </form>
   );

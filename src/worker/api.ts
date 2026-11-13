@@ -17,7 +17,7 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
-import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
+import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
@@ -450,6 +450,14 @@ api.put('/records/:type/:id/conversacion/seguir', async (c) => {
 api.patch('/mensajes/:id', async (c) => {
   canWrite(c.get('ctx'));
   return c.json(await editarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ body?: string }>()).body));
+});
+// Poner o sacar una reacción con emoji (tocar el mismo otra vez la saca).
+api.post('/mensajes/:id/reacciones', async (c) => {
+  canWrite(c.get('ctx'));
+  const m = await c.env.DB.prepare('SELECT record_id FROM mensajes WHERE id = ?').bind(Number(c.req.param('id'))).first<{ record_id: number }>();
+  if (!m) throw new HttpError(404, 'No existe el mensaje.');
+  await registroVisible(c, m.record_id);
+  return c.json(await reaccionar(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ emoji?: string }>()).emoji));
 });
 api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
 // Las conversaciones que sigue el usuario (la bandeja) o, con no_leidas=1, solo las que tienen algo sin leer (el globito).

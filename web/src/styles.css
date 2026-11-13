@@ -1433,3 +1433,24 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .reparto-tabla td, .reparto-tabla th { vertical-align: middle; }
 .reparto-input { width: 84px; text-align: right; }
 .reparto-tabla tr.pasado td { background: var(--ui-negative-soft); }
+
+/* Reacciones con emojis en la conversación. */
+.msg-reacciones { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; align-items: center; }
+.reac { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--r-pill); border: 1px solid var(--ui-line);
+  background: var(--ui-surface); color: var(--ui-ink-2); font: inherit; font-size: 12px; cursor: pointer; line-height: 1; }
+.reac:hover:not(:disabled) { border-color: var(--ui-line-strong); }
+.reac:disabled { cursor: default; }
+.reac.mia { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent-ink) 40%, transparent); color: var(--accent-ink); font-weight: 600; }
+.reac .reac-e { font-size: 14px; }
+.reac .reac-n { font-variant-numeric: tabular-nums; }
+.reac.reac-mas { color: var(--text-3); padding: 0 6px; opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
+.conv-msg:hover .reac.reac-mas, .reac.reac-mas:focus-visible, .reac.reac-mas[aria-expanded="true"] { opacity: 1; }
+.emoji-elegir { position: relative; display: inline-flex; }
+.emoji-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 6; display: flex; gap: 2px; padding: 4px; background: var(--ui-surface);
+  border: 1px solid var(--ui-line); border-radius: var(--r-pill); box-shadow: var(--shadow-pop); animation: fade-in var(--dur) var(--ease-out); }
+.msg-reacciones .emoji-pop { right: auto; left: 0; }
+.emoji-pop button { width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; font-size: 18px; cursor: pointer; line-height: 1;
+  transition: transform var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.emoji-pop button:hover, .emoji-pop button:focus-visible { background: var(--ui-surface-sunken); transform: scale(1.18); }
+/* Mientras el selector está abierto, la barra de acciones del mensaje no se esconde. */
+.conv-msg:has(.emoji-pop) .msg-acciones { display: flex; }

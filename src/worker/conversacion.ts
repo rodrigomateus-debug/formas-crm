@@ -38,14 +38,32 @@ const PROPS_CAMBIO = ['hs_pipeline_stage', 'dealstage', 'pipeline', 'owner_id', 
 
 export interface Mensaje {
   id: number; record_id: number; user_id: number | null; body: string; menciones: number[]; responde_a: number | null;
-  source: string; editado_at: string | null; borrado_at: string | null; created_at: string; adjuntos: Adjunto[];
+  source: string; editado_at: string | null; borrado_at: string | null; created_at: string; adjuntos: Adjunto[]; reacciones: Reaccion[];
 }
+// Las reacciones de un mensaje, por emoji (en el orden en que se pusieron) con quiénes.
+export interface Reaccion { emoji: string; users: number[] }
 export interface Adjunto { id: number; mensaje_id: number | null; nombre: string; mime: string; size: number; ancho: number | null; alto: number | null }
 const COLS_ADJUNTO = 'id, mensaje_id, nombre, mime, size, ancho, alto';
-interface MensajeRow extends Omit<Mensaje, 'menciones' | 'adjuntos'> { menciones: string }
-const mensaje = (r: MensajeRow, adjuntos: Adjunto[] = []): Mensaje => ({
+interface MensajeRow extends Omit<Mensaje, 'menciones' | 'adjuntos' | 'reacciones'> { menciones: string }
+const mensaje = (r: MensajeRow, adjuntos: Adjunto[] = [], reacciones: Reaccion[] = []): Mensaje => ({
   ...r, menciones: JSON.parse(r.menciones || '[]'), body: r.borrado_at ? '' : r.body, adjuntos: r.borrado_at ? [] : adjuntos,
+  reacciones: r.borrado_at ? [] : reacciones,
 });
+function agrupar(filas: Array<{ mensaje_id: number; emoji: string; user_id: number }>) {
+  const por = new Map<number, Reaccion[]>();
+  for (const f of filas) {
+    const lista = por.get(f.mensaje_id) ?? [];
+    const r = lista.find((x) => x.emoji === f.emoji);
+    if (r) r.users.push(f.user_id); else lista.push({ emoji: f.emoji, users: [f.user_id] });
+    por.set(f.mensaje_id, lista);
+  }
+  return por;
+}
+async function reaccionesDe(db: D1Database, mensajeId: number) {
+  const { results } = await db.prepare('SELECT mensaje_id, emoji, user_id FROM mensaje_reacciones WHERE mensaje_id = ? ORDER BY created_at, rowid').bind(mensajeId)
+    .all<{ mensaje_id: number; emoji: string; user_id: number }>();
+  return agrupar(results).get(mensajeId) ?? [];
+}
 
 export type Item =
   | ({ key: string; kind: 'mensaje'; at: string } & Mensaje)
@@ -68,9 +86,10 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
   const ahora = now();
   const desde = opts.desde && !Number.isNaN(Date.parse(opts.desde)) ? new Date(opts.desde).toISOString() : '';
   const lim = Math.min(Math.max(opts.limite ?? 300, 1), 500);
-  const [msgs, chs, arts, bocs, rems, acts, parts, adjs] = await db.batch([
-    db.prepare(`SELECT * FROM (SELECT * FROM mensajes WHERE record_id = ? AND COALESCE(borrado_at, editado_at, created_at) > ? ORDER BY id DESC LIMIT ?) ORDER BY id`)
-      .bind(recordId, desde, lim),
+  const [msgs, chs, arts, bocs, rems, acts, parts, adjs, reacs] = await db.batch([
+    // Con `desde`: lo nuevo, lo editado o borrado y aquello a lo que le cambió una reacción.
+    db.prepare(`SELECT * FROM (SELECT * FROM mensajes WHERE record_id = ?1 AND (COALESCE(borrado_at, editado_at, created_at) > ?2 OR reaccion_at > ?2)
+      ORDER BY id DESC LIMIT ?3) ORDER BY id`).bind(recordId, desde, lim),
     db.prepare(`SELECT id, prop, old_value, new_value, changed_at, user_id, actor, source FROM changes
       WHERE record_id = ? AND changed_at > ? AND prop IN (SELECT value FROM json_each(?)) ORDER BY changed_at DESC LIMIT ?`)
       .bind(recordId, desde, JSON.stringify(PROPS_CAMBIO), lim),
@@ -86,11 +105,14 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
     db.prepare('SELECT user_id, leido_hasta, siguiendo, motivo FROM conversacion_participantes WHERE record_id = ?').bind(recordId),
     // Las imágenes de los mensajes (sin el archivo: se baja aparte, /api/mensaje-adjuntos/:id).
     db.prepare(`SELECT ${COLS_ADJUNTO} FROM mensaje_adjuntos WHERE record_id = ? AND mensaje_id IS NOT NULL ORDER BY id`).bind(recordId),
+    db.prepare(`SELECT r.mensaje_id, r.emoji, r.user_id FROM mensaje_reacciones r JOIN mensajes m ON m.id = r.mensaje_id
+      WHERE m.record_id = ? ORDER BY r.created_at, r.rowid`).bind(recordId),
   ]);
+  const reaccionesPor = agrupar(reacs.results as Array<{ mensaje_id: number; emoji: string; user_id: number }>);
   const adjuntosDe = new Map<number, Adjunto[]>();
   for (const a of adjs.results as unknown as Adjunto[]) adjuntosDe.set(a.mensaje_id!, [...(adjuntosDe.get(a.mensaje_id!) ?? []), a]);
   const items: Item[] = [];
-  for (const m of msgs.results as unknown as MensajeRow[]) items.push({ key: `m${m.id}`, kind: 'mensaje', at: m.created_at, ...mensaje(m, adjuntosDe.get(m.id)) });
+  for (const m of msgs.results as unknown as MensajeRow[]) items.push({ key: `m${m.id}`, kind: 'mensaje', at: m.created_at, ...mensaje(m, adjuntosDe.get(m.id), reaccionesPor.get(m.id)) });
   for (const c of chs.results as Array<{ id: number; prop: string; old_value: string | null; new_value: string | null; changed_at: string; user_id: number | null; actor: string | null; source: string }>) {
     items.push({ key: `c${c.id}`, kind: 'cambio', at: c.changed_at, prop: c.prop, antes: c.old_value, despues: c.new_value, user_id: c.user_id, actor: c.actor, source: c.source });
   }
@@ -198,7 +220,8 @@ export async function editarMensaje(db: D1Database, ctx: Ctx, id: number, body: 
   const adjuntos = (await db.prepare(`SELECT ${COLS_ADJUNTO} FROM mensaje_adjuntos WHERE mensaje_id = ? ORDER BY id`).bind(id).all<Adjunto>()).results;
   // Un mensaje con imágenes puede quedar sin texto.
   const texto = adjuntos.length && !String(body ?? '').trim() ? '' : limpiar(body);
-  if (texto === m.body) return mensaje(m, adjuntos);
+  const reacciones = await reaccionesDe(db, id);
+  if (texto === m.body) return mensaje(m, adjuntos, reacciones);
   const antes = JSON.parse(m.menciones || '[]') as number[];
   const menciones = await validarMenciones(db, mencionesDe(texto));
   const row = await db.prepare('UPDATE mensajes SET body = ?, menciones = ?, editado_at = ? WHERE id = ? RETURNING *').bind(texto, JSON.stringify(menciones), now(), id).first<MensajeRow>();
@@ -211,7 +234,22 @@ export async function editarMensaje(db: D1Database, ctx: Ctx, id: number, body: 
       db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, mensaje_id) VALUES (?, 'mencion', ?, ?, ?)").bind(u, m.record_id, ctx.user.id, id),
     ]));
   }
-  return mensaje(row!, adjuntos);
+  return mensaje(row!, adjuntos, reacciones);
+}
+
+// Poner o sacar una reacción (tocar el mismo emoji otra vez la saca). Un emoji solo, no texto.
+export async function reaccionar(db: D1Database, ctx: Ctx, id: number, emoji: unknown) {
+  const e = String(emoji ?? '').trim();
+  if (!e || e.length > 16 || !/^\p{Extended_Pictographic}/u.test(e) || /[\p{L}\p{N}]/u.test(e)) throw new HttpError(400, 'La reacción tiene que ser un emoji.');
+  const m = await db.prepare('SELECT id, borrado_at FROM mensajes WHERE id = ?').bind(id).first<{ id: number; borrado_at: string | null }>();
+  if (!m || m.borrado_at) throw new HttpError(404, 'No existe el mensaje.');
+  const ya = await db.prepare('SELECT 1 FROM mensaje_reacciones WHERE mensaje_id = ? AND user_id = ? AND emoji = ?').bind(id, ctx.user.id, e).first();
+  await db.batch([
+    ya ? db.prepare('DELETE FROM mensaje_reacciones WHERE mensaje_id = ? AND user_id = ? AND emoji = ?').bind(id, ctx.user.id, e)
+      : db.prepare('INSERT INTO mensaje_reacciones (mensaje_id, user_id, emoji) VALUES (?, ?, ?)').bind(id, ctx.user.id, e),
+    db.prepare('UPDATE mensajes SET reaccion_at = ? WHERE id = ?').bind(now(), id),
+  ]);
+  return { reacciones: await reaccionesDe(db, id) };
 }
 
 export async function borrarMensaje(db: D1Database, ctx: Ctx, id: number) {

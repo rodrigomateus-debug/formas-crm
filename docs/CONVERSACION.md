@@ -24,6 +24,10 @@ que queda registrado, con @menciones y la actividad del pedido entremezclada.
   grande; varias, en grilla); los demás, como tarjetas (el PDF con la miniatura de su primera página). Imágenes y PDF se
   abren a pantalla completa (el PDF con pdf.js, igual en todos los navegadores), con flechas, «Descargar» y «Abrir»; lo
   demás se descarga.
+- Reaccionar con emojis (👍 ❤️ 😂 🎉 🙏 👀 ✅ 🔥): la carita al pasar el mouse por el mensaje, o el «+» al lado de las que ya
+  hay. Abajo del mensaje se ve cada emoji con cuántos (en color si está el tuyo) y, al pasar el mouse, quiénes; tocar uno
+  pone o saca el tuyo. Tabla `mensaje_reacciones` (migración 0049); `mensajes.reaccion_at` hace que lleguen con las
+  novedades a los demás.
 - «Todo» muestra los mensajes con la actividad; «Mensajes», solo el chat.
 - La campanita: seguir o dejar de seguir la conversación.
 - «Visto por» abajo del último mensaje y la raya de «Nuevos» desde donde había leído.

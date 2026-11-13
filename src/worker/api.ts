@@ -14,7 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
-import { actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
@@ -24,6 +24,7 @@ import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
+import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { assertActividadVisible, assertVisible, esVentas, idsVisibles, sinVentas } from './alcance';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
@@ -948,6 +949,21 @@ api.get('/files/:id', async (c) => {
   throw new HttpError(404, 'El PDF de la factura todavía no se bajó de Finnegans (se baja solo en la próxima hora).');
 });
 
+// ---------- Direcciones de entrega del pedido (direcciones.ts) ----------
+
+// Las direcciones, los productos y cuánto de cada uno va a cada dirección (y cuánto falta repartir).
+api.get('/records/order/:id/direcciones', async (c) => c.json(await direccionesDe(c.env, Number(c.req.param('id')))));
+// Se guardan todas de una vez. Las elegidas de Google se validan acá contra Google Maps.
+api.put('/records/order/:id/direcciones', async (c) => {
+  canWrite(c.get('ctx'));
+  return c.json(await guardarDirecciones(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json<GuardarInput>()));
+});
+// Lo que sugiere Google Maps mientras se escribe la dirección (la clave de Google queda en el servidor).
+api.get('/maps/sugerencias', async (c) => {
+  if (!mapsConfigurado(c.env)) return c.json({ maps: false, sugerencias: [] });
+  return c.json({ maps: true, sugerencias: await sugerencias(c.env, c.req.query('q') ?? '', c.req.query('sesion')) });
+});
+
 // ---------- Remitos y estado de entrega (remitos.ts) ----------
 
 // Los remitos del pedido (de ClickUp, del CRM y del chofer), lo que se entregó y lo que falta. Los que todavía no se
@@ -1179,6 +1195,7 @@ api.get('/cronograma/ruta', async (c) => {
 });
 api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
 api.put('/cronograma/punto', async (c) => c.json(await fijarPunto(c.env.DB, c.get('ctx'), await c.req.json())));
+api.delete('/cronograma/punto', async (c) => c.json(await soltarPunto(c.env.DB, c.get('ctx'), String(c.req.query('direccion') ?? ''))));
 api.put('/cronograma/direccion', async (c) => c.json(await guardarDireccion(c.env, c.get('ctx'), await c.req.json())));
 api.post('/cronograma/sugerencia', async (c) => {
   const b = await c.req.json<{ record_id?: number; aceptar?: boolean }>();

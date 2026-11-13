@@ -285,6 +285,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['hs_order_status', 'Estado (web)', 'string', 'Pedido', [], CORE],
     ['tipo_de_pedido', 'Tipo de pedido', 'enum', 'Pedido', ['PEDIDO NORMAL', 'EVENTO'], FORM],
     ['fecha_de_entrega', 'Fecha de entrega', 'date', 'Pedido', [], FORM],
+    ['direccion_entrega', 'Dirección de entrega', 'string', 'Entrega', [], RO],
     ['url_pdv_finnegans', 'URL PDV Finnegans', 'url', 'Pedido'],
     ['saldo_pendiente_de_pago_mxn', 'Saldo pendiente de pago (ARS)', 'currency', 'Pedido'],
     ['progreso_pdv', 'Progreso PDV', 'number', 'Pedido'],

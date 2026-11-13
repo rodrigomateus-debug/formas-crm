@@ -70,15 +70,19 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 - **Horario de recepción** («9 a 13», propiedad nueva de la empresa): si el orden deja una parada fuera de horario,
   queda en rojo.
 - **Mapa**: OpenStreetMap. El dibujo y la distancia por calles salen del servicio público de OSRM; si no contesta, el
-  recorrido se ve en línea recta y los tiempos son estimados (dice cuál de los dos es). Un punto mal ubicado se arrastra
-  a su lugar y queda ahí.
+  recorrido se ve en línea recta y los tiempos son estimados (dice cuál de los dos es). Los números del mapa no se arrastran. Para corregir un punto mal
+  ubicado: «Corregir ubicación» en su parada, se arrastra solo ese número y se guarda con «Guardar ubicación» (vale para
+  esa dirección en todas las rutas). «Volver a buscar en el mapa» saca la corrección.
 
 ### Direcciones
 
 - **Proveedores e impresores**: la dirección de la ficha de su empresa; si no tiene, la de la libreta de direcciones
   cuando hay un lugar que se llama igual (ver abajo).
-- **Entregas**, en este orden: la «Dirección de entrega» cargada en el pedido (propiedad nueva); la del pedido de venta
-  de Finnegans; la de la última entrega a ese cliente; la de la ficha de la empresa.
+- **Entregas**, en este orden: las direcciones de la tarjeta «Entrega» del pedido (validadas con Google Maps; con
+  varias, **una parada por dirección**, ver [REMITOS.md](REMITOS.md#dirección-de-entrega-pedido-de-rodrigo-del-12112026));
+  la del pedido de venta de Finnegans; la de la última entrega a ese cliente; la de la ficha de la empresa. Las validadas
+  van al mapa con el punto de Google. Corregirla desde la parada (o aceptar la sugerencia) cambia la de la tarjeta; si el
+  pedido va a varias direcciones, se cambian en la tarjeta.
 - **Si las últimas entregas fueron a otro lado**: se compara la dirección de Finnegans con la de los últimos remitos
   leídos de ese cliente. Si a simple vista no son iguales, Claude decide si es el mismo lugar escrito distinto o es
   otro. Solo si es otro aparece la sugerencia en la parada, para usarla o descartarla. Se consulta una vez por pedido.

@@ -133,8 +133,9 @@ test('perfil Ventas: lo suyo, lo sin dueño y lo asociado; nada de otra vendedor
   assert.equal((await call('GET', `/records/order/${pedOlga.id}/remitos`, undefined, V)).status, 403);
   assert.equal((await call('POST', `/remitos/${remVera.id}/revisar`, { accion: 'descartar' }, V)).status, 403, 'revisar es de Logística');
 
-  // Producción (y los administradores) siguen viendo todo.
-  assert.equal((await call('GET', `/records/deal/${negOlga.id}`, undefined, { 'x-dev-user': pia.email })).status, 200);
+  // Los administradores siguen viendo todo; Producción, los negocios no (abajo, su propia prueba).
+  assert.equal((await call('GET', `/records/deal/${negOlga.id}`)).status, 200);
+  assert.equal((await call('GET', `/records/deal/${negOlga.id}`, undefined, { 'x-dev-user': pia.email })).status, 403);
   assert.equal((await call('GET', '/export/company?q=x')).status, 200);
 
   // Con Claude (MCP), lo mismo.
@@ -154,4 +155,43 @@ test('perfil Ventas: lo suyo, lo sin dueño y lo asociado; nada de otra vendedor
   // Y la API compatible con HubSpot no la deja entrar.
   const compat = await fetch(`${CRM}/crm/v3/objects/deals/${negOlga.id}`, { headers: { authorization: `Bearer ${tok}` } });
   assert.equal(compat.status, 403);
+});
+
+// Perfil Producción (alcance.ts): los pedidos sí; negocios no; de contactos y empresas, solo los proveedores y los que
+// están en algún pedido. Producción, Entregas y Cronograma, como siempre.
+test('perfil Producción: pedidos y proveedores; nada de la parte comercial', async () => {
+  const R = `${RUN}p`;
+  const pia = (await call('POST', '/users', { email: `pia.prod.${R}@formas.ar`, name: `Pia Prod ${R}`, profile: 'produccion', role: 'member' })).data;
+  const P = { 'x-dev-user': pia.email };
+  const cliente = await crear('company', { name: `Cliente Prod ${R}` });
+  const contacto = await crear('contact', { firstname: 'Ana', lastname: `Cliente ${R}` }, [cliente.id]);
+  const pedido = await crear('order', { hs_order_name: `PDV Prod ${R}` }, [cliente.id, contacto.id]);
+  const negocio = await crear('deal', { dealname: `Negocio Prod ${R}`, pipeline: 'default', dealstage: 'appointmentscheduled' }, [cliente.id]);
+  const proveedor = await crear('company', { name: `Imprenta Prod ${R}`, tipo_de_relacion: 'proveedor' });
+  const prospecto = await crear('company', { name: `Prospecto Prod ${R}` });
+  const suelto = await crear('contact', { firstname: 'Beto', lastname: `Prospecto ${R}` }, [prospecto.id]);
+
+  // Los pedidos, todos; el cliente y el contacto del pedido y el proveedor se abren.
+  assert.ok(ids((await call('GET', `/records/order?q=${R}`, undefined, P)).data.results).includes(pedido.id));
+  for (const [t, r] of [['order', pedido], ['company', cliente], ['contact', contacto], ['company', proveedor]]) {
+    assert.equal((await call('GET', `/records/${t}/${r.id}`, undefined, P)).status, 200, `${t} ${r.name}`);
+  }
+  // Negocios y lo que no tiene que ver con un pedido, no.
+  const neg = await call('GET', `/records/deal/${negocio.id}`, undefined, P);
+  assert.deepEqual([neg.status, neg.data.error], [403, 'Los negocios no están en el perfil Producción.']);
+  assert.equal((await call('GET', `/records/deal?q=${R}`, undefined, P)).data.total, 0);
+  assert.equal((await call('GET', `/records/company/${prospecto.id}`, undefined, P)).status, 403);
+  assert.equal((await call('GET', `/records/contact/${suelto.id}`, undefined, P)).status, 403);
+  assert.deepEqual(ids((await call('GET', `/records/company?q=${R}`, undefined, P)).data.results).sort(), [cliente.id, proveedor.id].sort());
+  // En la ficha del cliente no aparece el negocio; la búsqueda tampoco lo trae.
+  assert.deepEqual((await call('GET', `/records/company/${cliente.id}`, undefined, P)).data.associations.deal, []);
+  const busqueda = (await call('GET', `/search?q=${encodeURIComponent(`Prod ${R}`)}`, undefined, P)).data;
+  assert.deepEqual([busqueda.deal.length, busqueda.order.length], [0, 1]);
+  assert.ok(!busqueda.company.some((c) => c.id === prospecto.id));
+  // No crea negocios.
+  assert.equal((await call('POST', '/records/deal', { props: { dealname: 'x', pipeline: 'default', dealstage: 'appointmentscheduled' } }, P)).status, 403);
+  // Sus pantallas de trabajo siguen.
+  for (const p of ['/produccion', '/remitos/revisar', '/cronograma?desde=2026-11-09&hasta=2026-11-15']) {
+    assert.equal((await call('GET', p, undefined, P)).status, 200, p);
+  }
 });

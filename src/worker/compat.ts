@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType } from './env';
 import { HttpError } from './env';
-import { esVentas } from './alcance';
+import { restringido } from './alcance';
 import { Meta } from './meta';
 import { createRecord, getRow, updateRecord, searchRecords, rowToRecord, type Filter, type RecordRow } from './records';
 import { associate } from './associations';
@@ -20,7 +20,7 @@ export const compat = new Hono<App>();
 // Solo en sus rutas (/crm/…): el compat también está montado en la raíz y no tiene que tocar el resto.
 compat.use('/crm/*', async (c, next) => {
   const ctx = c.get('ctx');
-  if (ctx && esVentas(ctx.user)) throw new HttpError(403, 'La API compatible con HubSpot no está en el perfil Ventas.');
+  if (ctx && restringido(ctx.user)) throw new HttpError(403, 'La API compatible con HubSpot es para los tableros y las integraciones: no está en los perfiles Ventas ni Producción.');
   await next();
 });
 

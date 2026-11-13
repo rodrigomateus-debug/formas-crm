@@ -26,7 +26,7 @@ import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
-import { assertActividadVisible, assertVisible, esVentas, idsVisibles, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, esProduccion, esVentas, idsVisibles, restringido, sinVentas } from './alcance';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -57,6 +57,10 @@ api.use('*', async (c, next) => {
     const verRemitos = c.req.method === 'GET' && REMITOS_VENTAS.some((re) => re.test(c.req.path));
     const sin = verRemitos ? undefined : SIN_VENTAS.find(([re]) => re.test(c.req.path));
     if (sin) sinVentas(ctx, sin[1]);
+  }
+  // Perfil Producción: no crea negocios (no los ve).
+  if (esProduccion(ctx.user) && c.req.method === 'POST' && /\/records\/deal$/.test(c.req.path)) throw new HttpError(403, 'Los negocios no están en el perfil Producción.');
+  if (restringido(ctx.user)) {
     const m = RUTA_REGISTRO.exec(c.req.path);
     if (m) await registroVisible(c, Number(m[1]));
   }
@@ -739,7 +743,7 @@ api.get('/dashboard', async (c) => {
   const db = c.env.DB;
   const ctx = c.get('ctx');
   // Perfil Ventas: Inicio con sus números, no los del equipo (alcance.ts).
-  const owner = esVentas(ctx.user) ? 'me' : c.req.query('owner');
+  const owner = restringido(ctx.user) ? 'me' : c.req.query('owner');
   const ownerId = owner === 'all' ? null : owner ? Number(owner === 'me' ? ctx.user.id : owner) : null;
   const month = new Date(); month.setUTCDate(1); month.setUTCHours(3, 0, 0, 0);
   const m = month.toISOString();

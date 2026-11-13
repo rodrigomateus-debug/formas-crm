@@ -26,6 +26,9 @@ export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'E
 // Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta. Lo controla el servidor (src/worker/alcance.ts);
 // la pantalla solo esconde lo que no va a poder abrir.
 export const esVentas = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'comercial' && u.role !== 'admin';
+// Perfil Producción: los pedidos, Producción, Entregas y Cronograma; sin la parte comercial (contactos, empresas y negocios
+// solo los que están en un pedido o son proveedores, y sin sus listas). Lo controla el servidor (alcance.ts).
+export const esProduccion = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'produccion' && u.role !== 'admin';
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
 export interface Meta {

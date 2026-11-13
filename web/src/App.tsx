@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, esProduccion, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
 import { Avatar, CreateRecord, Modal, UserChip } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
@@ -29,6 +29,8 @@ export default function App() {
   // Remitos para revisar (bandeja de Logística, pestaña «Entregas»).
   const [remitos, setRemitos] = useState<number | null>(null);
   const ventas = esVentas(meta.me);
+  // Perfil Producción: sin la parte comercial (contactos, empresas y negocios).
+  const produccion = esProduccion(meta.me);
   useEffect(() => {
     if (ventas) { setRemitos(null); return; }
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
@@ -45,9 +47,9 @@ export default function App() {
         <NavLink to="/conversaciones" className="nav-link"><Icon name="chat" />Conversaciones
           {sinLeer.no_leidos ? <span className={`count badge${sinLeer.menciones ? ' mencion' : ''}`} title={sinLeer.menciones ? `${sinLeer.no_leidos} sin leer · te mencionaron` : `${sinLeer.no_leidos} sin leer`}>{sinLeer.menciones ? '@ ' : ''}{sinLeer.no_leidos}</span> : null}</NavLink>
         <div className="nav-group">CRM</div>
-        <NavLink to="/contacts" className="nav-link"><Icon name="contact" />Contactos</NavLink>
-        <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>
-        <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>
+        {!produccion && <NavLink to="/contacts" className="nav-link"><Icon name="contact" />Contactos</NavLink>}
+        {!produccion && <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>}
+        {!produccion && <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>}
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
         {/* Perfil Ventas: sin Producción ni Entregas. */}
         {!ventas && <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>}
@@ -77,7 +79,7 @@ export default function App() {
           {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
           <Route path="/settings/*" element={<Settings />} />
-          <Route path="/:objectPath" element={<ObjectIndex />} />
+          <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />
         </Routes>
       </div>
@@ -117,7 +119,7 @@ function GlobalSearch() {
   return (
     <div className="gsearch" ref={ref}>
       <div className="search"><Icon name="search" />
-        <input ref={input} className="input" placeholder="Buscar contactos, empresas, negocios… (Ctrl+K)" value={q}
+        <input ref={input} className="input" placeholder={esProduccion(useMeta().meta.me) ? 'Buscar pedidos, clientes, proveedores… (Ctrl+K)' : 'Buscar contactos, empresas, negocios… (Ctrl+K)'} value={q}
           onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
           onKeyDown={(e) => { if (e.key === 'Enter' && primero) go(primero[0], primero[1]); }} />
       </div>
@@ -149,7 +151,14 @@ function GlobalSearch() {
   );
 }
 
+// Perfil Producción: de las listas, solo Pedidos (las fichas de un cliente o proveedor se abren desde el pedido).
+function SoloPedidos() {
+  const { objectPath } = useParams();
+  return objectPath === 'orders' ? <ObjectIndex /> : <Navigate to="/orders" replace />;
+}
+
 function CreateMenu() {
+  const produccion = esProduccion(useMeta().meta.me);
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<ObjectType | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -163,7 +172,7 @@ function CreateMenu() {
       <button className="btn primary" onClick={() => setOpen(!open)}><Icon name="plus" size={16} />Crear</button>
       {open && (
         <div className="popover" style={{ right: 0, top: 42 }}>
-          {(Object.keys(OBJECTS) as ObjectType[]).map((t) => (
+          {(Object.keys(OBJECTS) as ObjectType[]).filter((t) => !produccion || t === 'order').map((t) => (
             <div key={t} className="opt" onClick={() => { setType(t); setOpen(false); }}><Icon name={t} size={16} />{OBJECTS[t].single}</div>
           ))}
         </div>

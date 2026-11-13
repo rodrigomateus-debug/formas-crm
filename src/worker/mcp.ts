@@ -7,7 +7,7 @@ import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIV
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
-import { assertActividadVisible, assertVisible, esVentas, puedeVer, visibleSql } from './alcance';
+import { assertActividadVisible, assertVisible, esProduccion, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -408,7 +408,8 @@ const REGISTROS_DE: Record<string, (a: Record<string, any>) => unknown[]> = {
 };
 async function alcanceVentas(tool: string, a: Record<string, any>, ctx: Ctx, env: Env) {
   // El alta inteligente busca y completa registros existentes por mail, teléfono o dominio, sean de quien sean.
-  if (tool === 'upsert_bundle') throw new HttpError(403, 'El alta inteligente (upsert_bundle) no está en el perfil Ventas: buscá con search_records y creá con create_record.');
+  if (tool === 'upsert_bundle') throw new HttpError(403, 'El alta inteligente (upsert_bundle) no está en tu perfil: buscá con search_records y creá con create_record.');
+  if (esProduccion(ctx.user) && tool === 'create_record' && a.object_type === 'deal') throw new HttpError(403, 'Los negocios no están en el perfil Producción.');
   const meta = new Meta(env.DB);
   for (const id of REGISTROS_DE[tool]?.(a) ?? []) await assertVisible(env.DB, meta, ctx.user, await getRow(env.DB, Number(id)));
   if (tool === 'get_activity' || tool === 'update_activity') await assertActividadVisible(env.DB, ctx.user, Number(a.id));
@@ -476,7 +477,7 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
       if (!tool) return fail(-32602, `Herramienta desconocida: ${msg.params?.name}`);
       try {
         if (!tool.readOnly && ctx.user.role === 'viewer') throw new HttpError(403, 'El usuario del token es de solo lectura.');
-        if (esVentas(ctx.user)) await alcanceVentas(tool.name, msg.params?.arguments ?? {}, ctx, env);
+        if (restringido(ctx.user)) await alcanceVentas(tool.name, msg.params?.arguments ?? {}, ctx, env);
         if (!tool.readOnly && ctx.user.role !== 'admin') await soloLoSuyo(tool.name, msg.params?.arguments ?? {}, ctx, env);
         const result = await tool.run(msg.params?.arguments ?? {}, ctx, env, base);
         return ok({ content: [{ type: 'text', text: JSON.stringify(result, null, 1) }], structuredContent: Array.isArray(result) ? { results: result } : result });

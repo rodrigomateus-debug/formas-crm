@@ -1,5 +1,5 @@
 import { ownersOfUnitsSql, UNIDADES } from './records';
-import { actividadVisibleSql, esVentas, visibleSql } from './alcance';
+import { actividadVisibleSql, restringido, visibleSql } from './alcance';
 import { avisarAsignacion } from './avisos';
 import type { Ctx, User } from './env';
 import { HttpError, now } from './env';
@@ -221,7 +221,7 @@ export async function listTasks(db: D1Database, ctx: Ctx, q: TaskQuery) {
   const owner = q.owner ?? ctx.user.id;
   if (owner !== 'all') { where.push('a.owner_id = ?'); binds.push(owner); }
   // Perfil Ventas: sus tareas y las de los registros que ve (alcance.ts).
-  if (esVentas(ctx.user)) where.push(actividadVisibleSql('a', ctx.user));
+  if (restringido(ctx.user)) where.push(actividadVisibleSql('a', ctx.user));
   const unidades = (q.unidades ?? []).filter((k) => UNIDADES[k]);
   if (unidades.length) where.push(ownersOfUnitsSql(unidades, binds, 'a.owner_id'));
   if ((q.status ?? 'open') === 'open') where.push("a.status != 'COMPLETED'");

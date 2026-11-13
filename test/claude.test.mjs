@@ -76,7 +76,9 @@ test('conectar con Claude: OAuth como un conector de HubSpot o ClickUp', async (
   assert.equal(init.result.serverInfo.name, 'formas-crm');
 
   // 5. Desde Claude, una vendedora edita solo lo suyo.
-  const vera = (await call('POST', '/users', { email: `vera.claude.${RUN}@formas.ar`, name: `Vera Claude ${RUN}`, role: 'member', profile: 'produccion' })).data;
+  // Logística ve todo el CRM: así la prueba es de lo que se puede cambiar desde Claude, no de lo que ve cada perfil
+  // (Ventas y Producción ven solo lo suyo, alcance.ts y test/ventas.test.mjs).
+  const vera = (await call('POST', '/users', { email: `vera.claude.${RUN}@formas.ar`, name: `Vera Claude ${RUN}`, role: 'member', profile: 'logistica' })).data;
   const suyo = (await call('POST', '/records/company', { props: { name: `De Vera ${RUN}`, owner_id: vera.id } })).data;
   const ajeno = (await call('POST', '/records/company', { props: { name: `De Rodrigo ${RUN}`, owner_id: (await call('GET', '/me')).data.id } })).data;
   // Sin propietario (como un lead que entra por un formulario): al crear desde la pantalla queda de quien la crea, se lo saca.

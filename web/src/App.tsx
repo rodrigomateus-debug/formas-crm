@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
+import RecorridosPage from './pages/Recorridos';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
@@ -55,6 +56,8 @@ export default function App() {
         {/* Perfil Ventas: sin Producción ni Entregas. */}
         {!ventas && <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>}
         {!ventas && <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>}
+        {/* Recorridos: todos cargan lo que el chofer tiene que llevar o retirar (recorridos.ts). */}
+        <NavLink to="/recorridos" className="nav-link"><Icon name="route" />Recorridos</NavLink>
         {!ventas && <NavLink to="/cronograma" className="nav-link"><Icon name="calendar" />Cronograma</NavLink>}
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
@@ -81,6 +84,7 @@ export default function App() {
           {!ventas && <Route path="/entregas" element={<RemitosPage />} />}
           {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
+          <Route path="/recorridos" element={<RecorridosPage />} />
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />

@@ -30,7 +30,7 @@ export const TIPOS = {
 } as const;
 export type Tipo = keyof typeof TIPOS;
 const esTipo = (t: unknown): t is Tipo => typeof t === 'string' && t in TIPOS;
-const esDia = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
+export const esDia = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
 
 // A qué estado pasa el artículo en ClickUp cuando se marca hecho cada movimiento. Se puede cambiar en la configuración
 // del cronograma (settings `cronograma`).
@@ -86,12 +86,12 @@ export interface Movimiento {
 // direcciones tiene además las paradas «:2», «:3»… (rutaDelDia).
 export const claveParada = (m: Pick<Movimiento, 'tipo' | 'pdv_task' | 'company_id' | 'lugar'>) =>
   m.tipo === 'entrega' ? `p:${m.pdv_task}` : m.company_id ? `e:${m.company_id}` : `o:${norm(m.lugar ?? 'Sin proveedor')}`;
-const esDeLaParada = (clave: string, base: string) => clave === base || clave.startsWith(`${base}:`);
+export const esDeLaParada = (clave: string, base: string) => clave === base || clave.startsWith(`${base}:`);
 type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null; pactada: string | null };
 interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
 
-const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
-const diaSemana = (dia: string) => new Date(`${dia}T12:00:00Z`).getUTCDay();
+export const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+export const diaSemana = (dia: string) => new Date(`${dia}T12:00:00Z`).getUTCDay();
 export const hoyBsAs = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
 // El nombre del artículo sin la coletilla que le pone ClickUp («Necessaire - Proveedor»).
 const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stock)\s*$/i, '').trim();
@@ -146,7 +146,7 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
   return out;
 }
 
-async function movimientos(db: D1Database, desde: string, hasta: string) {
+export async function movimientos(db: D1Database, desde: string, hasta: string) {
   const filas = (await db.prepare(`${SELECT_MOV} AND (COALESCE(a.entrega_real, p.entrega_real) BETWEEN ?1 AND ?2 OR a.ingreso_proveedor BETWEEN ?1 AND ?2
       OR a.retiro_proveedor BETWEEN ?1 AND ?2 OR a.egreso_impresor BETWEEN ?1 AND ?2 OR a.retiro_impresor BETWEEN ?1 AND ?2)`).bind(desde, hasta).all<FilaMov>()).results;
   const [ops, hechos, feriados] = await Promise.all([
@@ -185,10 +185,12 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   const rd = esDia(q.rd) && q.rd < q.desde ? q.rd : q.desde;
   const rh = esDia(q.rh) && q.rh > q.hasta ? q.rh : q.hasta;
   if (Date.parse(rh) - Date.parse(rd) > 200 * 86_400_000) throw new HttpError(400, 'El rango es demasiado largo.');
-  const { movs, feriados } = await movimientos(db, rd, rh);
+  const [{ movs, feriados }, encs] = await Promise.all([movimientos(db, rd, rh), encargosEntre(db, rd, rh)]);
   const hoy = hoyBsAs();
   const dias: Record<string, { total: number; pendientes: number; atrasados: number }> = {};
-  for (const m of movs) {
+  // Los encargos (Recorridos) cuentan igual que un movimiento; uno que no se pudo hacer sigue pendiente hasta que Logística
+  // lo pase a otro día o lo cancele.
+  for (const m of [...movs, ...encs.map((e) => ({ fecha: e.fecha, hecho: e.estado === 'hecho' }))]) {
     const d = (dias[m.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 });
     d.total++;
     if (!m.hecho) { d.pendientes++; if (m.fecha < hoy) d.atrasados++; }
@@ -200,10 +202,11 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   ]);
   for (const n of notas.results) { const d = (dias[n.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 }); d.total++; if (!n.hecho) { d.pendientes++; if (n.fecha < hoy) d.atrasados++; } }
   const deLaSemana = movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta);
-  const [, , quienes] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, q.desde, q.hasta), choferesYExpresos(db)]);
+  const encargos = encs.filter((e) => e.fecha >= q.desde && e.fecha <= q.hasta);
+  const [, , quienes] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, encargos, q.desde, q.hasta), choferesYExpresos(db)]);
   return {
     hoy, desde: q.desde, hasta: q.hasta,
-    movimientos: deLaSemana,
+    movimientos: deLaSemana, encargos,
     notas: notas.results.filter((n) => n.fecha >= q.desde && n.fecha <= q.hasta),
     feriados: Object.fromEntries(feriados), dias,
     sin_fecha: sinFecha.results.map((f) => ({
@@ -218,7 +221,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
 // En la semana, quién hace cada movimiento: el chofer (o el expreso) del recorrido de ese día que tiene su parada. Lo que no
 // está en ningún recorrido va al primero, igual que en la ruta del día; un día sin recorridos guardados no tiene chofer
 // todavía. Las entregas que retira el cliente en Formas no son parada de nadie.
-async function ponerChoferes(db: D1Database, movs: Movimiento[], desde: string, hasta: string) {
+async function ponerChoferes(db: D1Database, movs: Movimiento[], encs: EncargoDia[], desde: string, hasta: string) {
   const pedidos = [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
   const [cfg, dirs, guardadas] = await Promise.all([
     cronogramaConfig(db),
@@ -238,11 +241,27 @@ async function ponerChoferes(db: D1Database, movs: Movimiento[], desde: string, 
     const rutas = porDia.get(m.fecha), base = claveParada(m);
     m.chofer = rutas?.length ? (rutas.find((r) => r.orden.some((c) => esDeLaParada(c, base))) ?? rutas[0]).chofer : null;
   }
+  // Un encargo va con el chofer de la parada en la que cae: la del mismo lugar si ese día ya se va ahí (como en la ruta
+  // del día, con lo que se sabe sin buscar afuera), o la suya.
+  const sitios = new Map<string, Sitio[]>();
+  for (const m of movs) {
+    if (m.tipo === 'ingreso' || m.retira_en) continue;
+    const dir = m.tipo === 'entrega' && m.record_id ? (dirs.get(m.record_id) ?? []).find((d) => !d.retira)?.direccion ?? null : null;
+    sitios.set(m.fecha, [...(sitios.get(m.fecha) ?? []), { clave: claveParada(m), nombre: (m.tipo === 'entrega' ? m.cliente : m.lugar) ?? '', company_id: m.tipo === 'entrega' ? null : m.company_id, direccion: dir }]);
+  }
+  for (const e of encs) {
+    const del = sitios.get(e.fecha) ?? [];
+    const base = anfitrion(e, del);
+    if (!del.some((x) => x.clave === base)) sitios.set(e.fecha, [...del, { clave: base, nombre: e.destino, company_id: e.company_id, lugar_id: e.lugar_id, direccion: e.direccion }]);
+    const rutas = porDia.get(e.fecha);
+    e.parada = base;
+    e.chofer = rutas?.length ? (rutas.find((r) => r.orden.some((c) => esDeLaParada(c, base))) ?? rutas[0]).chofer : null;
+  }
 }
 
 // Los del desplegable «Chofer»: los choferes de la lista y los que tienen link de la app (Entregas → Choferes), sin
 // repetir, y los expresos.
-async function choferesYExpresos(db: D1Database, lista_?: Transportista[]) {
+export async function choferesYExpresos(db: D1Database, lista_?: Transportista[]) {
   const ts = lista_ ?? await listarTransportistas(db);
   const conLink = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
   const choferes = [...new Map([...ts.filter((x) => x.tipo === 'chofer').map((x) => x.nombre), ...conLink].map((n) => [norm(n), n])).values()].sort((a, b) => a.localeCompare(b));
@@ -589,9 +608,10 @@ export async function soltarPunto(db: D1Database, ctx: Ctx, direccion: string) {
 // ---------- La ruta del día ----------
 
 export interface Parada {
-  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | 'expreso' | null;
+  clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | 'expreso' | 'encargo' | null;
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
   company_id: number | null; record_id: number | null; movimientos: Movimiento[];
+  encargos: EncargoDia[];   // lo que pidió alguien para ese día en ese lugar (Recorridos)
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: Visita | null;   // lo que marcó el chofer en la app
   expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
@@ -699,7 +719,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     for (const [i, dir] of [direccion, ...otras].entries()) {
       const clave = i ? `${base}:${i + 1}` : base;
       const par = paradas.get(clave) ?? { clave, nombre, direccion: dir, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
-        company_id: companyId, record_id: recordId, movimientos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null };
+        company_id: companyId, record_id: recordId, movimientos: [], encargos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null };
       par.movimientos.push(m);
       if (sugerencia && !par.sugerencia) par.sugerencia = sugerencia;
       if (!par.horario && horarioDe(horarioTexto)) { par.horario = horarioDe(horarioTexto); par.horario_texto = horarioTexto; }
@@ -720,6 +740,22 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     p.expreso = { nombre: e.expreso, guia: e.guia, cliente: p.nombre };
     p.nombre = e.expreso; p.direccion = t?.direccion || (deLibreta ? direccionLugar(deLibreta) : null); p.origen = p.direccion ? 'expreso' : null;
     p.sugerencia = null; p.lugar = deLibreta ? infoLugar(deLibreta) : null; p.horario = null; p.horario_texto = null; p.company_id = null;
+  }
+  // Los encargos del día (Recorridos): van en la parada del mismo lugar si ese día ya se va ahí (un retiro de ClickUp en el
+  // mismo impresor, la entrega a ese cliente, otro encargo); si no, son una parada propia. Los cancelados no.
+  const encs = await encargosEntre(db, fecha, fecha);
+  const lugaresEnc = await lugaresPorId(db, encs.map((e) => e.lugar_id));
+  for (const e of encs) {
+    const clave = anfitrion(e, lista_);
+    let p = lista_.find((x) => x.clave === clave);
+    if (!p) {
+      const l = e.lugar_id ? lugaresEnc.get(e.lugar_id) ?? null : null;
+      p = { clave, nombre: e.destino, direccion: e.direccion || (l?.direccion ? direccionLugar(l) : null), origen: 'encargo', lat: null, lng: null, punto_manual: false,
+        horario: null, horario_texto: null, company_id: e.company_id, record_id: null, movimientos: [], encargos: [], sugerencia: null, lugar: l ? infoLugar(l) : null };
+      lista_.push(p); paradas.set(clave, p);
+    }
+    p.encargos.push(e);
+    if (!p.horario && horarioDe(e.horario)) { p.horario = horarioDe(e.horario); p.horario_texto = e.horario; }
   }
   // Lo que dice la libreta del lugar al que se va (horario, contacto, observaciones), reconocido por calle y altura.
   const porDir = await lugaresPorDireccion(db, lista_.filter((p) => p.direccion && !p.lugar).map((p) => p.direccion!));
@@ -824,8 +860,8 @@ export async function asignarChofer(env: Env, ctx: Ctx, b: { fecha?: unknown; id
   const pedido = String(b.chofer ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
   // Con el nombre como está en la lista.
   const chofer = pedido ? [...r.choferes, ...r.expresos.map((x) => x.nombre)].find((n) => norm(n) === norm(pedido)) ?? pedido : null;
-  const paradas = r.paradas.filter((p) => p.movimientos.some((m) => ids.has(m.id)));
-  if (!paradas.length) throw new HttpError(400, 'Eso no es una parada de la ruta de ese día: lo retira el cliente en Formas o es un ingreso al depósito.');
+  const paradas = r.paradas.filter((p) => p.movimientos.some((m) => ids.has(m.id)) || p.encargos.some((e) => ids.has(`enc:${e.id}`)));
+  if (!paradas.length) throw new HttpError(400, 'Eso no es una parada de la ruta de ese día: lo retira el cliente en Formas, es un ingreso al depósito o el encargo ya no es de ese día.');
   const claves = new Set(paradas.map((p) => p.clave));
   const rutas: RutaGuardada[] = r.rutas.map((x) => ({ ...x, orden: x.orden.filter((c) => !claves.has(c)) }));
   let destino = rutas.find((x) => (chofer ? !!x.chofer && norm(x.chofer) === norm(chofer) : !x.chofer));
@@ -840,7 +876,7 @@ export async function asignarChofer(env: Env, ctx: Ctx, b: { fecha?: unknown; id
   } else destino.orden.push(...claves);
   const quedan = rutas.filter((x) => x === destino || x.chofer || x.orden.length);
   await escribirRutas(env.DB, ctx, fecha, quedan);
-  return { ok: true, chofer: destino.chofer, recorrido: quedan.indexOf(destino) + 1, paradas: paradas.length, movimientos: paradas.reduce((n, p) => n + p.movimientos.length, 0) };
+  return { ok: true, chofer: destino.chofer, recorrido: quedan.indexOf(destino) + 1, paradas: paradas.length, movimientos: paradas.reduce((n, p) => n + p.movimientos.length + p.encargos.length, 0) };
 }
 // Dónde entra una parada en un recorrido que alguien ordenó: en el lugar que menos lo alarga. Sin ubicar, al final.
 function dondeEntra(salida: Punto | null, fin: Destino, orden: string[], p: Parada, porClave: Map<string, Parada>, hora: number) {
@@ -878,6 +914,8 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
           movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.cantidad, hecho: m.hecho })),
+          encargos: p.encargos.map((e) => ({ id: e.id, llevar: e.llevar, retirar: e.retirar, desde: nombreBase(e.desde, r.bases), hacia: nombreBase(e.hacia, r.bases),
+            horario: e.horario, contacto: e.contacto, notas: e.notas, urgente: e.urgente, quien: e.quien, estado: e.estado })),
         })),
       };
     }),
@@ -913,6 +951,7 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
     .first<{ resultado: string; motivo: string | null; nota: string | null; marcados: string }>();
   if ((antes?.resultado ?? null) === resultado && (antes?.motivo ?? null) === motivo && (antes?.nota ?? null) === (resultado ? nota : null)) return { ok: true, entrega };
   let marcados = (lista(antes?.marcados) as Array<{ id: string; tipo: Tipo }>).filter((x) => x && esTipo(x.tipo));
+  const encPrevios = (lista(antes?.marcados) as Array<{ id: string; tipo: string; antes?: string }>).filter((x) => x && x.tipo === 'encargo');
   const porTipo = (xs: Array<{ id: string; tipo: Tipo }>) => { const m = new Map<Tipo, string[]>(); for (const x of xs) m.set(x.tipo, [...(m.get(x.tipo) ?? []), x.id]); return m; };
   const deATandas = async (ids: string[], tipo: Tipo, hecho: boolean) => {
     const hechos: string[] = [];
@@ -929,11 +968,115 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
     for (const [tipo, ids] of [...porTipo(marcados)].reverse()) await deATandas(ids, tipo, false);
     marcados = [];
   }
+  // Los encargos de la parada quedan como los dejó el chofer (hecho o no se pudo, y se le avisa a quien lo pidió); al
+  // deshacer o dejarla para después vuelven a como estaban.
+  const encMarcados = await encargosDelChofer(db, chofer, parada.encargos, encPrevios, resultado, resultado === 'no_se_pudo' ? `${MOTIVOS[motivo!]}${nota ? `: ${nota}` : ''}` : null);
   if (resultado) {
     await db.prepare('INSERT OR REPLACE INTO cronograma_visitas (fecha, clave, resultado, motivo, nota, chofer, token_id, marcados, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(fecha, clave, resultado, motivo, nota, chofer, ctx.tokenId ?? null, JSON.stringify(marcados), now()).run();
+      .bind(fecha, clave, resultado, motivo, nota, chofer, ctx.tokenId ?? null, JSON.stringify([...marcados, ...encMarcados]), now()).run();
   } else await db.prepare('DELETE FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave).run();
   return { ok: true, entrega };
+}
+
+// ---------- Encargos (Recorridos, recorridos.ts) en el cronograma ----------
+
+// Lo que alguien le pidió al recorrido de un día: a dónde, qué se deja y qué se retira. Acá solo lo que necesitan el
+// cronograma, la ruta del día y la app del chofer; cargarlos, editarlos y lo demás está en recorridos.ts.
+export interface ItemEnc { cant: number | null; que: string; pdv: string | null }
+export type EstadoEnc = 'pendiente' | 'hecho' | 'no_se_pudo' | 'cancelado';
+export interface EncargoDia {
+  id: number; fecha: string; user_id: number | null; quien: string | null; destino: string; direccion: string | null; lugar_id: number | null; company_id: number | null;
+  record_id: number | null; llevar: ItemEnc[]; retirar: ItemEnc[]; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
+  notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
+  origen: string; created_at: string;
+  chofer?: string | null;   // en la semana: el chofer del recorrido en el que cae su parada
+  parada?: string;          // en la semana: la parada en la que cae
+}
+export interface EncargoFila {
+  id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; destino: string; direccion: string | null; lugar_id: number | null;
+  company_id: number | null; record_id: number | null; llevar: string; retirar: string; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
+  notas: string | null; urgente: number; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null; origen: string; created_at: string;
+}
+export const SELECT_ENC = 'SELECT e.*, COALESCE(u.name, e.pedido_por) AS quien FROM encargos e LEFT JOIN users u ON u.id = e.user_id';
+const itemsDe = (s: string): ItemEnc[] => (lista(s) as ItemEnc[]).filter((x) => x && typeof x.que === 'string');
+export const aEncargo = (r: EncargoFila): EncargoDia => ({
+  id: r.id, fecha: r.fecha, user_id: r.user_id, quien: r.quien, destino: r.destino, direccion: r.direccion, lugar_id: r.lugar_id, company_id: r.company_id, record_id: r.record_id,
+  llevar: itemsDe(r.llevar), retirar: itemsDe(r.retirar), desde: r.desde, hacia: r.hacia, horario: r.horario, contacto: r.contacto, notas: r.notas, urgente: !!r.urgente,
+  estado: r.estado, motivo: r.motivo, remito: r.remito, hecho_chofer: r.hecho_chofer, hecho_por: r.hecho_por, origen: r.origen, created_at: r.created_at,
+});
+// Los de esos días, sin los cancelados ni el historial de la planilla.
+export async function encargosEntre(db: D1Database, desde: string, hasta: string) {
+  // El historial que se trajo de la planilla vieja (origen «planilla») no va: lo de esos días ya está en ClickUp.
+  const { results } = await db.prepare(`${SELECT_ENC} WHERE e.fecha BETWEEN ? AND ? AND e.estado <> 'cancelado' AND e.origen = 'hub' ORDER BY e.id`).bind(desde, hasta).all<EncargoFila>();
+  return results.map(aEncargo);
+}
+export async function lugaresPorId(db: D1Database, ids: Array<number | null>) {
+  const l = [...new Set(ids.filter((x): x is number => !!x))];
+  if (!l.length) return new Map<number, Lugar>();
+  const { results } = await db.prepare('SELECT * FROM lugares WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(l)).all<Lugar>();
+  return new Map(results.map((x) => [x.id, x]));
+}
+const nombreBase = (id: string | null, bases: Base[]) => (id ? bases.find((b) => b.id === id)?.nombre ?? null : null);
+
+// Un lugar al que se va, para saber si dos cosas van al mismo lado: la parada de un movimiento, un encargo, un destino.
+export interface Sitio { clave?: string; nombre: string; company_id?: number | null; lugar_id?: number | null; direccion?: string | null }
+// Son el mismo lugar si son el mismo destino de la libreta; si las dos tienen calle y altura, manda la dirección (dos
+// lugares de Nestlé son distintos, dos empresas en el mismo edificio son la misma parada); si no, la misma empresa o el
+// mismo nombre («IMPREFAS» de la libreta es el impresor IMPREFAS de ClickUp).
+export function mismoSitio(a: Sitio, b: Sitio) {
+  if (a.lugar_id && a.lugar_id === b.lugar_id) return true;
+  const ca = a.direccion ? claveCalle(a.direccion) : '', cb = b.direccion ? claveCalle(b.direccion) : '';
+  if (ca && cb) return ca === cb;
+  if (a.company_id && a.company_id === b.company_id) return true;
+  const kb = new Set(clavesDeNombre(b.nombre));
+  return clavesDeNombre(a.nombre).some((k) => kb.has(k));
+}
+// La parada propia de un encargo: la de su empresa (la misma que la de un retiro o un egreso en ese proveedor o impresor),
+// la de su lugar de la libreta o la de su dirección.
+export const claveEncargo = (e: Pick<EncargoDia, 'company_id' | 'lugar_id' | 'direccion' | 'destino'>) =>
+  e.company_id ? `e:${e.company_id}` : e.lugar_id ? `l:${e.lugar_id}` : `d:${(e.direccion ? claveCalle(e.direccion) : '') || claveProveedor(e.destino) || 'sin-destino'}`;
+// En qué parada cae un encargo: la del mismo lugar, si ese día ya se va ahí; si no, la suya.
+export function anfitrion(e: EncargoDia, sitios: Sitio[]) {
+  const propia = claveEncargo(e);
+  if (sitios.some((s) => s.clave === propia)) return propia;
+  const yo: Sitio = { nombre: e.destino, company_id: e.company_id, lugar_id: e.lugar_id, direccion: e.direccion };
+  return sitios.find((s) => s.clave && mismoSitio(yo, s))?.clave ?? propia;
+}
+
+// Un aviso de la campanita sobre un encargo, a quien lo pidió (o a quienes se diga). No sale por mail.
+export async function avisarEncargo(db: D1Database, para: Array<number | null | undefined>, encargoId: number, detalle: string, byUser: number | null) {
+  const a = [...new Set(para.filter((x): x is number => !!x && x !== byUser))];
+  if (!a.length) return;
+  const ts = now();
+  await db.batch(a.map((u) => db.prepare("INSERT INTO avisos (user_id, kind, encargo_id, detalle, by_user, sent_at, error) VALUES (?, 'encargo', ?, ?, ?, ?, 'solo en el Hub')")
+    .bind(u, encargoId, detalle.slice(0, 300), byUser, ts)));
+}
+
+// Lo que marca el chofer en una parada, en sus encargos: «hecho» o «no se pudo» (los pendientes, o los que antes no se
+// pudieron); al deshacerlo, o si la deja para después, vuelven a como estaban. Lo que marcó Logística no se toca.
+// Devuelve lo que quedó marcado por el chofer (para poder deshacerlo).
+async function encargosDelChofer(db: D1Database, chofer: string, encs: EncargoDia[], previos: Array<{ id: string; antes?: string }>, resultado: string | null, porQue: string | null) {
+  const nuevo: EstadoEnc | null = resultado === 'hecho' ? 'hecho' : resultado === 'no_se_pudo' ? 'no_se_pudo' : null;
+  const prev = new Map(previos.map((x) => [Number(String(x.id).replace(/^enc:/, '')), (x.antes ?? 'pendiente') as EstadoEnc]));
+  const ts = now(), stmts: D1PreparedStatement[] = [], out: Array<{ id: string; tipo: 'encargo'; antes: EstadoEnc }> = [];
+  const avisos: Array<[EncargoDia, string]> = [];
+  for (const e of encs) {
+    const antes = prev.get(e.id) ?? e.estado;
+    if (nuevo && (antes === 'pendiente' || antes === 'no_se_pudo')) {
+      if (e.estado !== nuevo || e.motivo !== porQue) {
+        stmts.push(db.prepare('UPDATE encargos SET estado = ?, motivo = ?, hecho_chofer = ?, hecho_por = NULL, hecho_at = ?, updated_at = ? WHERE id = ?').bind(nuevo, porQue, chofer, ts, ts, e.id));
+        avisos.push([e, nuevo === 'hecho' ? `${chofer} lo marcó hecho.` : `No se pudo (${chofer}): ${porQue ?? ''}`.trim()]);
+      }
+      e.estado = nuevo; e.motivo = porQue;
+      out.push({ id: `enc:${e.id}`, tipo: 'encargo', antes });
+    } else if (prev.has(e.id) && e.estado !== antes) {
+      stmts.push(db.prepare('UPDATE encargos SET estado = ?, motivo = NULL, hecho_chofer = NULL, hecho_at = NULL, updated_at = ? WHERE id = ?').bind(antes, ts, e.id));
+      e.estado = antes; e.motivo = null;
+    }
+  }
+  if (stmts.length) await db.batch(stmts);
+  for (const [e, detalle] of avisos) await avisarEncargo(db, [e.user_id], e.id, detalle, null);
+  return out;
 }
 
 // ---------- Choferes y expresos ----------
@@ -984,8 +1127,8 @@ export async function guardarExpreso(db: D1Database, ctx: Ctx, b: { clave?: unkn
 
 // ---------- La libreta de direcciones ----------
 
-interface Lugar { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
-const infoLugar = (l: Lugar): LugarInfo => ({ nombre: l.nombre, horario: l.horario, telefono: l.telefono, contacto: l.contacto, observaciones: l.observaciones, coordinacion: l.coordinacion });
+export interface Lugar { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
+export const infoLugar = (l: Lugar): LugarInfo => ({ nombre: l.nombre, horario: l.horario, telefono: l.telefono, contacto: l.contacto, observaciones: l.observaciones, coordinacion: l.coordinacion });
 
 // La dirección completa de un lugar: la calle, la localidad y, si es del conurbano, la provincia.
 export function direccionLugar(l: { direccion: string | null; localidad: string | null; zona: string | null }) {
@@ -1018,7 +1161,7 @@ export function clavesDeNombre(nombre: string, conPrimera = false) {
 }
 // De varios lugares con el mismo nombre, el que se usa solo: si hay uno, ese; si todos son la misma dirección, el primero;
 // si uno solo es el depósito, ese. Si no, ninguno (se elige a mano en la parada).
-function unicoLugar(ls: Lugar[]): Lugar | null {
+export function unicoLugar(ls: Lugar[]): Lugar | null {
   const con = ls.filter((l) => l.direccion && claveCalle(l.direccion));
   if (!con.length) return null;
   if (new Set(con.map((l) => claveCalle(l.direccion!))).size === 1) return con[0];
@@ -1028,7 +1171,7 @@ function unicoLugar(ls: Lugar[]): Lugar | null {
 // Los lugares de la libreta para cada nombre. `exactos`: se llaman igual (sirven para usar la dirección sola).
 // `parecidos`: además los que empiezan con la misma palabra («NESTLE ARGENTINA S.A.» → todos los «NESTLE…»): solo se
 // ofrecen para elegir, nunca se usan solos.
-async function lugaresPara(db: D1Database, nombres: string[]) {
+export async function lugaresPara(db: D1Database, nombres: string[]) {
   const out = new Map<string, { exactos: Lugar[]; parecidos: Lugar[] }>();
   const claves = new Map(nombres.map((n) => [n, { exactas: clavesDeNombre(n), todas: clavesDeNombre(n, true) }]));
   const todas = [...new Set([...claves.values()].flatMap((c) => c.todas))];
@@ -1039,11 +1182,11 @@ async function lugaresPara(db: D1Database, nombres: string[]) {
   for (const [n, k] of claves) out.set(n, { exactos: sinRepetir(results.filter((r) => k.exactas.includes(r.clave))), parecidos: sinRepetir(results.filter((r) => k.todas.includes(r.clave))) });
   return out;
 }
-async function lugaresPorDireccion(db: D1Database, direcciones: string[]) {
+export async function lugaresPorDireccion(db: D1Database, direcciones: string[]) {
   const claves = [...new Set(direcciones.map(claveCalle).filter(Boolean))];
   const out = new Map<string, Lugar>();
   if (!claves.length) return out;
-  const { results } = await db.prepare('SELECT * FROM lugares WHERE clave_dir IN (SELECT value FROM json_each(?)) ORDER BY (horario IS NOT NULL) + (observaciones IS NOT NULL) DESC')
+  const { results } = await db.prepare('SELECT * FROM lugares WHERE activo = 1 AND clave_dir IN (SELECT value FROM json_each(?)) ORDER BY (horario IS NOT NULL) + (observaciones IS NOT NULL) DESC')
     .bind(JSON.stringify(claves)).all<Lugar & { clave_dir: string }>();
   for (const l of results) if (!out.has(l.clave_dir)) out.set(l.clave_dir, l);
   return out;
@@ -1053,7 +1196,7 @@ async function lugaresPorDireccion(db: D1Database, direcciones: string[]) {
 export async function buscarLugares(db: D1Database, q: string, de = '') {
   const texto = norm(q).replace(/[%_]/g, ' ').trim();
   const sugeridos = de ? (await lugaresPara(db, [de])).get(de)?.parecidos ?? [] : [];
-  const encontrados = texto.length >= 2 ? (await db.prepare(`SELECT * FROM lugares WHERE direccion IS NOT NULL AND (lower(nombre) LIKE ?1 OR lower(direccion) LIKE ?1 OR lower(COALESCE(localidad, '')) LIKE ?1)
+  const encontrados = texto.length >= 2 ? (await db.prepare(`SELECT * FROM lugares WHERE activo = 1 AND direccion IS NOT NULL AND (lower(nombre) LIKE ?1 OR lower(direccion) LIKE ?1 OR lower(COALESCE(localidad, '')) LIKE ?1)
       ORDER BY (lower(nombre) LIKE ?2) DESC, nombre LIMIT 25`).bind(`%${texto}%`, `${texto}%`).all<Lugar>()).results : [];
   const vistos = new Set<number>();
   return { lugares: [...(texto ? [] : sugeridos), ...encontrados, ...(texto ? sugeridos : [])].filter((l) => l.direccion && !vistos.has(l.id) && (vistos.add(l.id), true)).slice(0, 25)
@@ -1085,13 +1228,19 @@ export async function lugaresConfig(db: D1Database): Promise<LugaresConfig> {
 // La planilla tiene que ser una hoja de Google publicada como CSV.
 const urlValida = (env: Env, url: string) => /^https:\/\/docs\.google\.com\/spreadsheets\/.+output=csv/.test(url) || (!!env.LUGARES_CSV_URL && url === env.LUGARES_CSV_URL);
 
-// Copia la planilla a la libreta (la reemplaza entera). `forzar`: ahora; si no, una vez por día, y solo cuando abre la
-// ruta alguien que edita. Si la planilla no se puede leer o viene vacía, queda la copia anterior.
+// Copia la planilla a la libreta. Desde Recorridos (pedido de Rodrigo del 13/11/2026) la libreta es del Hub: cada lugar
+// tiene su id para siempre (los encargos lo nombran), así que la copia ya no la borra entera. Suma los lugares nuevos y
+// actualiza los que ya estaban (los reconoce por nombre y dirección); lo que se creó en el Hub queda, lo que se corrigió en
+// el Hub la planilla ya no lo pisa, y lo que la planilla sacó queda inactivo. `forzar`: ahora; si no, una vez por día, y
+// solo cuando la usa alguien que edita (o cuando todavía no se copió nunca). Si la planilla no se puede leer o viene
+// vacía, queda la copia anterior.
+export const clavePlanilla = (nombre: string, direccion: string | null) => `${norm(nombre).replace(/\s+/g, ' ')}|${claveDireccion(direccion ?? '')}`;
 export async function actualizarLugares(env: Env, puede: boolean, forzar = false) {
   const db = env.DB;
   const cfg = await lugaresConfig(db);
   const url = env.LUGARES_CSV_URL || cfg.url;
-  if (!url || (!forzar && (!puede || Date.now() - cfg.at < 86_400_000))) return cfg;
+  const nunca = !cfg.filas && Date.now() - cfg.at > 3_600_000;
+  if (!url || (!forzar && !nunca && (!puede || Date.now() - cfg.at < 86_400_000))) return cfg;
   const guardar = (c: LugaresConfig) => db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('lugares', ?)").bind(JSON.stringify(c)).run().then(() => c);
   try {
     if (!urlValida(env, url)) throw new Error('La dirección tiene que ser la de una hoja de Google publicada como CSV.');
@@ -1104,29 +1253,63 @@ export async function actualizarLugares(env: Env, puede: boolean, forzar = false
       c1: col(/contacto 1|^contacto/), c2: col(/contacto 2/), obs: col(/observ/), coord: col(/coordinac/) };
     if (I.nombre < 0 || I.direccion < 0) throw new Error('La planilla no tiene las columnas PROVEEDOR y DIRECCION.');
     const t = (f: string[], i: number, max = 600) => (i < 0 ? null : String(f[i] ?? '').replace(/\s+/g, ' ').trim().slice(0, max) || null);
+    const vistos = new Set<string>();
     const lugares = filas.map((f) => ({ nombre: t(f, I.nombre, 160), direccion: t(f, I.direccion, 300), localidad: t(f, I.localidad, 80), zona: t(f, I.zona, 40), horario: t(f, I.horario, 160),
-      telefono: t(f, I.telefono, 60), contacto: [t(f, I.c1, 80), t(f, I.c2, 80)].filter(Boolean).join(' / ') || null, observaciones: t(f, I.obs), coordinacion: t(f, I.coord, 1200) })).filter((l) => l.nombre);
+      telefono: t(f, I.telefono, 60), contacto: [t(f, I.c1, 80), t(f, I.c2, 80)].filter(Boolean).join(' / ') || null, observaciones: t(f, I.obs), coordinacion: t(f, I.coord, 1200) }))
+      .filter((l): l is typeof l & { nombre: string } => !!l.nombre)
+      // Dos filas con el mismo nombre y la misma dirección son el mismo lugar: vale la primera.
+      .map((l) => ({ ...l, clave: clavePlanilla(l.nombre, l.direccion), clave_dir: l.direccion ? claveCalle(l.direccion) || null : null }))
+      .filter((l) => !vistos.has(l.clave) && (vistos.add(l.clave), true));
     if (lugares.length < 1) throw new Error('La planilla vino vacía.');
-    const stmts: D1PreparedStatement[] = [db.prepare('DELETE FROM lugares_claves'), db.prepare('DELETE FROM lugares')];
-    // De a varias filas por consulta (hasta 100 valores cada una): son miles de lugares.
-    const filasL = lugares.map((l, i) => [i + 1, l.nombre, l.direccion, l.localidad, l.zona, l.horario, l.telefono, l.contacto, l.observaciones, l.coordinacion, l.direccion ? claveCalle(l.direccion) || null : null]);
-    for (let i = 0; i < filasL.length; i += 9) {
-      const t9 = filasL.slice(i, i + 9);
-      stmts.push(db.prepare(`INSERT INTO lugares (id, nombre, direccion, localidad, zona, horario, telefono, contacto, observaciones, coordinacion, clave_dir) VALUES ${t9.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`).bind(...t9.flat()));
+    const copia = Date.now();
+    // De a muchas filas por consulta (un JSON con todas): son miles de lugares. Lo corregido en el Hub no se pisa.
+    const stmts: D1PreparedStatement[] = [];
+    for (let i = 0; i < lugares.length; i += 400) {
+      stmts.push(db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, zona, horario, telefono, contacto, observaciones, coordinacion, clave_dir, clave_planilla, origen, activo, visto, updated_at)
+        SELECT json_extract(value, '$.nombre'), json_extract(value, '$.direccion'), json_extract(value, '$.localidad'), json_extract(value, '$.zona'), json_extract(value, '$.horario'),
+          json_extract(value, '$.telefono'), json_extract(value, '$.contacto'), json_extract(value, '$.observaciones'), json_extract(value, '$.coordinacion'), json_extract(value, '$.clave_dir'),
+          json_extract(value, '$.clave'), 'planilla', 1, ?2, ?3
+        FROM json_each(?1) WHERE true
+        ON CONFLICT(clave_planilla) DO UPDATE SET visto = excluded.visto, activo = 1,
+          nombre = CASE WHEN lugares.editado = 1 THEN lugares.nombre ELSE excluded.nombre END,
+          direccion = CASE WHEN lugares.editado = 1 THEN lugares.direccion ELSE excluded.direccion END,
+          localidad = CASE WHEN lugares.editado = 1 THEN lugares.localidad ELSE excluded.localidad END,
+          zona = CASE WHEN lugares.editado = 1 THEN lugares.zona ELSE excluded.zona END,
+          horario = CASE WHEN lugares.editado = 1 THEN lugares.horario ELSE excluded.horario END,
+          telefono = CASE WHEN lugares.editado = 1 THEN lugares.telefono ELSE excluded.telefono END,
+          contacto = CASE WHEN lugares.editado = 1 THEN lugares.contacto ELSE excluded.contacto END,
+          observaciones = CASE WHEN lugares.editado = 1 THEN lugares.observaciones ELSE excluded.observaciones END,
+          coordinacion = CASE WHEN lugares.editado = 1 THEN lugares.coordinacion ELSE excluded.coordinacion END,
+          clave_dir = CASE WHEN lugares.editado = 1 THEN lugares.clave_dir ELSE excluded.clave_dir END`)
+        .bind(JSON.stringify(lugares.slice(i, i + 400)), copia, now()));
     }
-    const pares = lugares.flatMap((l, i) => [...new Set([...clavesDeNombre(l.nombre!), ...clavesDeNombre(l.nombre!, true).filter((x) => x.startsWith('~'))])].map((k) => [k, i + 1] as [string, number]));
-    for (let i = 0; i < pares.length; i += 45) {
-      const t45 = pares.slice(i, i + 45);
-      stmts.push(db.prepare(`INSERT OR IGNORE INTO lugares_claves (clave, lugar_id) VALUES ${t45.map(() => '(?, ?)').join(', ')}`).bind(...t45.flat()));
-    }
+    // Lo que la planilla ya no tiene (y nadie corrigió en el Hub) deja de ofrecerse.
+    stmts.push(db.prepare("UPDATE lugares SET activo = 0 WHERE origen = 'planilla' AND editado = 0 AND (visto IS NULL OR visto <> ?)").bind(copia));
     // Todo junto: si algo falla, queda la libreta como estaba.
     await db.batch(stmts);
+    await reindexarLugares(db);
     return await guardar({ url: cfg.url, at: Date.now(), filas: lugares.length, error: null });
   } catch (e) {
     console.error('cronograma: libreta', (e as Error).message);
     // Se anota el intento: no se reintenta en cada apertura de la ruta, sino en una hora.
     return await guardar({ ...cfg, at: forzar ? cfg.at : Date.now() - 82_800_000, error: (e as Error).message.slice(0, 200) });
   }
+}
+// Los nombres con los que se reconoce cada lugar activo (lugares_claves), de nuevo. Con `ids`, solo esos (un lugar que se
+// creó o se corrigió en el Hub).
+export async function reindexarLugares(db: D1Database, ids?: number[]) {
+  const ls = ids
+    ? (await db.prepare('SELECT id, nombre, activo FROM lugares WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<{ id: number; nombre: string; activo: number }>()).results
+    : (await db.prepare('SELECT id, nombre, activo FROM lugares WHERE activo = 1').all<{ id: number; nombre: string; activo: number }>()).results;
+  const pares = ls.filter((l) => l.activo).flatMap((l) => [...new Set([...clavesDeNombre(l.nombre), ...clavesDeNombre(l.nombre, true).filter((x) => x.startsWith('~'))])].map((k) => [k, l.id]));
+  const stmts: D1PreparedStatement[] = [ids
+    ? db.prepare('DELETE FROM lugares_claves WHERE lugar_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids))
+    : db.prepare('DELETE FROM lugares_claves')];
+  for (let i = 0; i < pares.length; i += 2000) {
+    stmts.push(db.prepare(`INSERT OR IGNORE INTO lugares_claves (clave, lugar_id) SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]') FROM json_each(?)`)
+      .bind(JSON.stringify(pares.slice(i, i + 2000))));
+  }
+  await db.batch(stmts);
 }
 export async function guardarLugaresConfig(env: Env, b: { url?: unknown }) {
   const url = String(b.url ?? '').trim();

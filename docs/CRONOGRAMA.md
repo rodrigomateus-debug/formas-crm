@@ -19,7 +19,9 @@ Nada se carga: los movimientos salen de las fechas de cada artículo en ClickUp,
 | Listos para entregar, sin fecha | Estado «listo para entregar» sin fecha de entrega | — |
 
 Lo único propio del CRM: las notas sueltas de un día, los feriados, lo que se marcó como hecho, los recorridos y lo que
-marca el chofer (migración `0045_cronograma.sql`).
+marca el chofer (migración `0045_cronograma.sql`). Además, los **encargos** que carga cualquiera en
+[Recorridos](RECORRIDOS.md) (llevar o retirar muestras, sobres, mercadería): van en su propio carril de la semana y en la
+parada del mismo lugar en la ruta del día.
 
 ## Semana
 
@@ -56,6 +58,9 @@ marca el chofer (migración `0045_cronograma.sql`).
 - **Avisos** en la tarjeta: cae en feriado o fin de semana, se retira y se entrega el mismo día, la entrega es anterior
   al último retiro, el retiro del impresor es anterior al egreso. «Evento» si el pedido es para un evento; «Atrasado» si
   ya pasó y no se hizo.
+- **Encargos** (pedido de Rodrigo del 13/11/2026): lo que alguien pidió en [Recorridos](RECORRIDOS.md), en un carril verde
+  de cada día. Se arrastran a otro día, se les elige el chofer (pasa toda la parada de ese lugar) y se marcan hechos como
+  las demás tarjetas; un clic abre el encargo. A quien lo pidió le llega un aviso si se lo cambian.
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque
@@ -140,11 +145,13 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 ### La libreta de direcciones
 
 Los lugares a los que se va siempre (proveedores, impresores, depósitos y oficinas de clientes: unos 2.500), con su
-dirección, horario, teléfono, contacto y observaciones. Es una copia de la planilla de Logística publicada como CSV
-(columnas PROVEEDOR, DIRECCION, H. ATENCION, TELEFONO, LOCALIDAD, ZONA, CONTACTO 1 y 2, OBSERVACIONES y los datos de
-coordinación). La planilla sigue siendo donde se cargan y corrigen los lugares.
+dirección, horario, teléfono, contacto y observaciones. Desde [Recorridos](RECORRIDOS.md#una-sola-base-de-destinos) es
+la **base de destinos del Hub**: cada lugar tiene su id, se agregan y se corrigen en Recorridos → Destinos, y la planilla de
+Logística publicada como CSV (columnas PROVEEDOR, DIRECCION, H. ATENCION, TELEFONO, LOCALIDAD, ZONA, CONTACTO 1 y 2,
+OBSERVACIONES y los datos de coordinación) se sigue copiando sin pisar lo que se corrigió en el Hub.
 
-- **Se copia sola una vez por día**, cuando alguien que edita abre la ruta, y con «Actualizar» al pie del mapa. Si la
+- **Se copia sola una vez por día**, cuando alguien que edita abre la ruta, y con «Actualizar» al pie del mapa. Suma los
+  lugares nuevos y actualiza los que estaban (por nombre y dirección); los que la planilla sacó dejan de ofrecerse. Si la
   planilla no se puede leer, queda la copia anterior. De qué planilla se copia lo cambia un administrador
   (`PUT /api/cronograma/lugares/planilla`).
 - **Una parada sin dirección** usa la de la libreta si hay un lugar que se llama igual («SOLSPORT»; «MAD / DIMILITO» es

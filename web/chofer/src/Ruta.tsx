@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { marcarParada, pedirRuta, SinSenal, type ParadaChofer, type RecorridoChofer } from './api';
+import { marcarParada, pedirRuta, SinSenal, type ItemChofer, type ParadaChofer, type RecorridoChofer } from './api';
 import { hhmm, simular } from '../../src/ruta';
 import { Icono } from './iconos';
 import { telefono } from './instalar';
@@ -14,6 +14,9 @@ import { telefono } from './instalar';
 const TIPO: Record<string, string> = { entrega: 'Entregar', retiro_proveedor: 'Retirar', retiro_impresor: 'Retirar', egreso: 'Dejar' };
 const MOTIVOS: Array<[string, string]> = [['nadie', 'No había nadie'], ['cerrado', 'Estaba cerrado'], ['direccion', 'No encontré la dirección'], ['rechazo', 'No lo quisieron recibir'], ['no_listo', 'No estaba listo'], ['otro', 'Otro motivo']];
 const num = new Intl.NumberFormat('es-AR');
+const item = (i: ItemChofer) => [i.cant != null ? num.format(i.cant) : '', i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ');
+// Hecha: la marcó él, o están hechos sus artículos y sus encargos.
+const hechaP = (p: ParadaChofer) => p.visita?.resultado === 'hecho' || (p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho'));
 const CLAVE = 'chofer-ruta';
 const hoy = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Argentina/Buenos_Aires' });
 function guardado(): RecorridoChofer[] {
@@ -62,7 +65,8 @@ function linkRecorrido(pendientes: ParadaChofer[], fin: string | null): { url: s
 // Un cambio en la parada que se ve ya, antes de que conteste el servidor.
 function optimista(p: ParadaChofer, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string): ParadaChofer {
   if (!resultado) return { ...p, visita: null };
-  return { ...p, visita: { resultado, motivo: motivo ?? null, nota: nota || null }, movimientos: resultado === 'hecho' ? p.movimientos.map((m) => ({ ...m, hecho: true })) : p.movimientos };
+  return { ...p, visita: { resultado, motivo: motivo ?? null, nota: nota || null }, movimientos: resultado === 'hecho' ? p.movimientos.map((m) => ({ ...m, hecho: true })) : p.movimientos,
+    encargos: resultado === 'hecho' ? (p.encargos ?? []).map((e) => ({ ...e, estado: 'hecho' as const })) : p.encargos };
 }
 
 // Las entregas del recorrido de hoy, para elegir de cuál es una foto (la guía de un expreso, un remito sin PDV).
@@ -115,7 +119,6 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
         const vuelve = r.fin === undefined || !!r.vuelve;
         const destino = vuelve ? base : r.fin ? (r.fin.lat != null && r.fin.lng != null ? { lat: r.fin.lat, lng: r.fin.lng } : null) : 'ultima' as const;
         const sim = simular(base, r.paradas, r.salida, null, destino);
-        const hechaP = (p: ParadaChofer) => p.visita?.resultado === 'hecho' || p.movimientos.every((m) => m.hecho);
         const hechas = r.paradas.filter(hechaP).length;
         const lugarFin = vuelve ? r.base : r.fin ?? null;
         const todo = linkRecorrido(r.paradas.filter((p) => !hechaP(p) && p.visita?.resultado !== 'no_se_pudo'), lugarFin ? destinoDe(lugarFin) : null);
@@ -206,7 +209,8 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
   const [motivo, setMotivo] = useState('');
   const [nota, setNota] = useState('');
   const esEntrega = p.movimientos.some((m) => m.tipo === 'entrega');
-  const soloRetiros = p.movimientos.every((m) => m.tipo.startsWith('retiro'));
+  const encs = p.encargos ?? [];
+  const soloRetiros = p.movimientos.every((m) => m.tipo.startsWith('retiro')) && encs.every((e) => !e.llevar.length && e.retirar.length > 0);
   function marcar(resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, m?: string, n?: string) {
     // Una entrega hecha: directo a la foto del remito firmado. La cámara se abre ya, en el mismo toque: si se espera a que
     // conteste el servidor, el iPhone no la deja abrir.
@@ -219,7 +223,16 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
       <ul>
         {p.movimientos.map((m) => <li key={m.id} className={m.hecho ? 'hecho' : ''}><strong>{TIPO[m.tipo] ?? m.tipo}</strong> PDV {m.npdv ?? '—'}{m.cliente ? ` ${m.cliente}` : ''}
           {m.articulo ? ` · ${m.cantidad != null ? `${num.format(m.cantidad)} ` : ''}${m.articulo}` : ''}</li>)}
+        {encs.flatMap((e) => [
+          ...e.llevar.map((i, k) => <li key={`${e.id}l${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Dejar</strong> {item(i)}{e.desde ? <em> (lo buscás en {e.desde})</em> : null}</li>),
+          ...e.retirar.map((i, k) => <li key={`${e.id}r${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Retirar</strong> {item(i)}{e.hacia ? <em> (va a {e.hacia})</em> : null}</li>),
+          ...(!e.llevar.length && !e.retirar.length && e.notas ? [<li key={`${e.id}n`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Hacer</strong> {e.notas}</li>] : []),
+        ])}
       </ul>
+      {encs.map((e) => (e.urgente || e.contacto || e.horario || (e.notas && (e.llevar.length || e.retirar.length))) && (
+        <p key={`x${e.id}`} className={e.urgente ? 'ruta-tarde' : ''}>{[e.urgente ? 'Urgente: tiene que ser hoy' : '', e.contacto ? `Preguntá por ${e.contacto}` : '', e.horario ? `Horario: ${e.horario}` : '',
+          e.llevar.length || e.retirar.length ? e.notas ?? '' : '', e.quien ? `(lo pidió ${e.quien.split(' ')[0]})` : ''].filter(Boolean).join(' · ')}</p>
+      ))}
       {p.horario ? <p className={tarde ? 'ruta-tarde' : ''}>Reciben de {hhmm(p.horario[0])} a {hhmm(p.horario[1])}{tarde ? ': vas justo' : ''}</p> : p.lugar?.horario ? <p>Horario: {p.lugar.horario}</p> : null}
       {(p.lugar?.contacto || p.lugar?.telefono) && <p>Preguntá por {[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</p>}
       {p.lugar?.observaciones && <p>{p.lugar.observaciones}</p>}

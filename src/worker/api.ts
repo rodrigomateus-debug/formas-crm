@@ -32,6 +32,8 @@ import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { assertActividadVisible, assertVisible, esProduccion, esVentas, idsVisibles, restringido, sinVentas } from './alcance';
+import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarDestinos, listarEncargos,
+  numerarRemito, recorridosConfig, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -1335,6 +1337,41 @@ api.patch('/produccion/:task', async (c) => {
   const b = await c.req.json<{ campo?: string; valor?: unknown }>();
   return c.json({ pdv: await editarProduccion(c.env, c.get('ctx'), c.req.param('task'), String(b.campo ?? ''), b.valor) });
 });
+// ---------- Recorridos (recorridos.ts): los encargos al recorrido y la base de destinos ----------
+// Para todos los perfiles (también Ventas): cada uno carga y ve lo suyo; Logística, todo.
+
+api.get('/recorridos/agenda', async (c) => c.json(await agenda(c.env, c.get('ctx').user, c.req.query())));
+api.get('/recorridos/sugerencias', async (c) => c.json(await sugerenciasRecorrido(c.env, c.get('ctx').user)));
+api.get('/recorridos/destinos', async (c) => c.json(await buscarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
+api.get('/recorridos/destino', async (c) => c.json(await diasDelDestino(c.env, c.get('ctx').user, c.req.query())));
+api.get('/recorridos/libreta', async (c) => c.json(await listarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
+api.post('/recorridos/libreta', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), null, await c.req.json())));
+api.patch('/recorridos/libreta/:id', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
+api.get('/recorridos/encargos', async (c) => {
+  const q = c.req.query();
+  return c.json(await listarEncargos(c.env.DB, c.get('ctx').user, { desde: q.desde, hasta: q.hasta, todos: q.todos === '1', estado: q.estado, usuario: Number(q.usuario) || undefined }));
+});
+api.post('/recorridos/encargos', async (c) => c.json(await crearEncargo(c.env, c.get('ctx'), await c.req.json())));
+// Uno solo: el propio o, fuera del perfil Ventas, cualquiera.
+const encargoVisible = async (c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) => {
+  const e = await encargoPorId(c.env.DB, id);
+  if (esVentas(c.get('ctx').user) && e.user_id !== c.get('ctx').user.id) throw new HttpError(403, 'Es un encargo de otra persona.');
+  return e;
+};
+api.get('/recorridos/encargos/:id', async (c) => c.json(await encargoVisible(c, Number(c.req.param('id')))));
+api.patch('/recorridos/encargos/:id', async (c) => c.json(await editarEncargo(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
+api.post('/recorridos/encargos/:id/remito', async (c) => {
+  await encargoVisible(c, Number(c.req.param('id')));
+  return c.json(await numerarRemito(c.env.DB, c.get('ctx'), Number(c.req.param('id'))));
+});
+api.get('/recorridos/encargos/:id/remito', async (c) => c.html(await remitoHtml(c.env.DB, c.get('ctx').user, Number(c.req.param('id')))));
+api.get('/recorridos/config', async (c) => {
+  const x = await recorridosConfig(c.env.DB);
+  return c.json(c.get('ctx').user.role === 'admin' ? x : { remito_pv: x.remito_pv, remito_ultimo: x.remito_ultimo });
+});
+api.put('/recorridos/config', async (c) => c.json(await guardarRecorridosConfig(c.env.DB, c.get('ctx'), await c.req.json())));
+api.post('/recorridos/historial', async (c) => c.json(await importarHistorial(c.env, c.get('ctx'), await c.req.json().catch(() => ({})))));
+
 // ---------- Cronograma (cronograma.ts): entregas, ingresos, retiros y egresos por día, y la ruta de cada día ----------
 
 api.get('/cronograma', async (c) => {

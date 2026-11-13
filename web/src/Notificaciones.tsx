@@ -12,6 +12,7 @@ export interface Notificacion {
   id: number; kind: 'mencion' | 'respuesta' | 'tarea' | 'registro' | 'entrega' | string; record_id: number | null; object_type: ObjectType | null;
   name: string | null; activity_id: number | null; subject: string | null; mensaje_id: number | null; texto: string | null; by_user: number | null;
   created_at: string; leido_at: string | null;
+  encargo_id?: number | null; encargo_destino?: string | null; encargo_fecha?: string | null;
 }
 interface Res { no_leidas: number; items: Notificacion[] }
 
@@ -47,6 +48,7 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
     case 'mencion': return { titulo: <><b>{quien}</b> te mencionó en {reg}</>, detalle: n.texto, icono: 'at', destino: `${aReg}?conversacion=1&mensaje=${n.mensaje_id ?? ''}` };
     case 'respuesta': return { titulo: <><b>{quien}</b> te respondió en {reg}</>, detalle: n.texto, icono: 'reply', destino: `${aReg}?conversacion=1&mensaje=${n.mensaje_id ?? ''}` };
     case 'tarea': return { titulo: <><b>{quien}</b> te asignó una tarea</>, detalle: n.subject, icono: 'task', destino: '/tasks' };
+    case 'encargo': return { titulo: <>Tu encargo a <b>{n.encargo_destino ?? 'un destino'}</b>{n.encargo_fecha ? ` (${Number(n.encargo_fecha.slice(8))}/${Number(n.encargo_fecha.slice(5, 7))})` : ''}</>, detalle: n.texto, icono: 'route', destino: `/recorridos?tab=encargos&encargo=${n.encargo_id ?? ''}` };
     case 'entrega': return { titulo: <>Faltan entregas en {reg}</>, detalle: 'Según los remitos, todavía falta entregar algo.', icono: 'truck', destino: aReg };
     default: return { titulo: <><b>{quien}</b> te asignó {reg}</>, detalle: null, icono: n.object_type ?? 'note', destino: aReg };
   }

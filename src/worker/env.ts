@@ -48,6 +48,8 @@ export interface Env {
   GEOCODER_URL?: string;
   // Solo para pruebas: la planilla de la libreta de direcciones (cronograma.ts), simulada.
   LUGARES_CSV_URL?: string;
+  // Solo para pruebas: la Sheets API de Google (el historial de la planilla de Recorridos, recorridos.ts), simulada.
+  SHEETS_API_URL?: string;
 }
 
 // Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; Comercial es el perfil

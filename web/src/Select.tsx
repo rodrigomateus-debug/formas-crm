@@ -4,6 +4,8 @@ import { Children, Fragment, isValidElement, useEffect, useId, useLayoutEffect, 
 // en todos los navegadores y en los tres temas, en lugar de la lista nativa del sistema operativo.
 // Se usa igual que un <select>: mismos <option> y <optgroup> adentro, y `onChange` recibe { target: { value } }.
 // Con más de 10 opciones aparece un buscador arriba de la lista (en el celular no toma el foco solo, para no tapar la lista con el teclado).
+// Con `placeholder`, un valor que no está entre las opciones muestra ese texto en lugar de la primera opción: sirve para
+// un desplegable que es una acción («Pasar a…») o que todavía no tiene nada elegido.
 
 type ChangeEvent = { target: { value: string } };
 interface Opt { value: string; label: ReactNode; text: string; disabled: boolean; group?: string }
@@ -65,14 +67,14 @@ export function useFloating(anchor: RefObject<HTMLElement | null>, pop: RefObjec
   return { style, place };
 }
 
-export function Select({ value, onChange, children, className = 'input', style, disabled, autoFocus, title, id, placeholder = '—', ...aria }: {
+export function Select({ value, onChange, children, className = 'input', style, disabled, autoFocus, title, id, placeholder, ...aria }: {
   value?: string | number | null; onChange?: (e: ChangeEvent) => void; children?: ReactNode; className?: string; style?: CSSProperties;
   disabled?: boolean; autoFocus?: boolean; title?: string; id?: string; placeholder?: string; 'aria-label'?: string;
 }) {
   const opts = useMemo(() => { const o: Opt[] = []; collect(children, o); return o; }, [children]);
   const v = value == null ? '' : String(value);
-  // Como el <select> nativo: si el valor no está entre las opciones, se ve la primera.
-  const cur = opts.find((o) => o.value === v) ?? opts[0];
+  // Como el <select> nativo: si el valor no está entre las opciones, se ve la primera (o el `placeholder`, si se pasó).
+  const cur = opts.find((o) => o.value === v) ?? (placeholder == null ? opts[0] : undefined);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const [active, setActive] = useState(-1);
@@ -177,11 +179,11 @@ export function Select({ value, onChange, children, className = 'input', style, 
   return (
     <>
       <button type="button" ref={btn} id={id} className={`${className} select-like${cur ? '' : ' placeholder'}${open ? ' open' : ''}`} style={style}
-        disabled={disabled} autoFocus={autoFocus} title={title ?? cur?.text} aria-label={aria['aria-label']}
+        disabled={disabled} autoFocus={autoFocus} title={title ?? cur?.text ?? placeholder} aria-label={aria['aria-label']}
         role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-controls={open ? listId : undefined}
         aria-activedescendant={open && !withSearch && active >= 0 ? `${listId}-${active}` : undefined}
         onClick={(e) => { e.preventDefault(); open ? close() : openList(); }} onKeyDown={onKey}>
-        <span className="select-value">{cur ? cur.label : placeholder}</span>
+        <span className="select-value">{cur ? cur.label : placeholder ?? '—'}</span>
       </button>
       {open && (
         <div ref={pop} className="select-pop" style={popStyle} onMouseDown={(e) => { if (e.target !== search.current) e.preventDefault(); }}>

@@ -224,6 +224,9 @@ textarea.input { height: auto; min-height: 90px; padding: 8px 10px; resize: vert
 .select-grp { padding: 10px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
 .select-grp:first-child { padding-top: 6px; }
 .select-empty { padding: 10px; color: var(--text-3); }
+/* Una opción que no elige un valor sino que agrega uno nuevo a la lista («Agregar chofer o expreso…»). */
+.select-nuevo { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 500; }
+.select-nuevo svg { flex: none; }
 @keyframes pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .search { position: relative; }
 .search input { padding-left: 32px; }
@@ -1485,7 +1488,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-carril h3 span { color: var(--text-3); font-weight: 500; }
 .cr-tarjeta { position: relative; background: var(--kb); border-radius: 7px; padding: 7px 9px; min-width: 0; transition: opacity var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
 .cr-tarjeta[draggable="true"] { cursor: grab; } .cr-tarjeta.arrastrando { opacity: .4; }
-.cr-tarjeta.abre { cursor: pointer; } .cr-tarjeta.abre:hover { filter: brightness(.975); }
+.cr-tarjeta.abre { cursor: pointer; } .cr-tarjeta.abre:hover:not(:has(.select-pop)) { filter: brightness(.975); }
 .cr-tarjeta.hecho { opacity: .55; }
 
 .cr-t-rol { display: flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--k); margin-bottom: 2px; }
@@ -1523,6 +1526,18 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-check:hover { color: var(--k); }
 .cr-check.on { background: var(--ok-fill); border-color: var(--ok-fill); color: var(--on-ok-fill); }
 .cr-check.solo { position: absolute; top: 6px; right: 6px; cursor: default; }
+/* El chofer de la tarjeta: el desplegable del Hub en chico, con el camión adelante. Sin chofer, punteado. */
+.cr-t-chofer { display: flex; margin-top: 6px; min-width: 0; }
+.input.select-like.cr-chofer { width: auto; max-width: 100%; height: 24px; padding: 0 24px 0 25px; font-size: 11.5px; font-weight: 600; border-color: transparent; border-radius: 6px; background: var(--ui-surface); color: var(--ui-ink); }
+.input.select-like.cr-chofer::before { content: ''; position: absolute; left: 7px; top: 50%; width: 13px; height: 13px; margin-top: -6.5px; background: var(--k, var(--ui-ink-2));
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.5h11v9h-11zM13.5 9.5h4l3 3v3h-7M6.5 18.5a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6zM17 18.5a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6z'/%3E%3C/svg%3E") center / 13px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.5h11v9h-11zM13.5 9.5h4l3 3v3h-7M6.5 18.5a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6zM17 18.5a1.8 1.8 0 1 0 0-3.6 1.8 1.8 0 0 0 0 3.6z'/%3E%3C/svg%3E") center / 13px no-repeat; }
+.input.select-like.cr-chofer::after, .input.select-like.cr-pasar::after { right: 6px; width: 14px; height: 14px; margin-top: -7px; -webkit-mask-size: 14px; mask-size: 14px; }
+.input.select-like.cr-chofer:hover:not(:disabled):not(:focus) { border-color: var(--ui-ink-3); }
+.input.select-like.cr-chofer.vacio { font-weight: 500; color: var(--text-3); background: transparent; border: 1px dashed color-mix(in srgb, var(--k, var(--ui-ink-3)) 45%, transparent); }
+.input.select-like.cr-chofer.vacio::before { background: var(--text-3); }
+.cr-t-chofer.solo { align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--ui-ink-2); }
+.cr-t-chofer.solo svg { flex: none; color: var(--k); }
 .cr-agregar { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; padding: 3px 6px; border-radius: var(--r-control); font: inherit; font-size: 11.5px; font-weight: 500; color: var(--text-3); cursor: pointer; }
 .cr-agregar:hover { background: var(--ui-surface-sunken); color: var(--ui-ink); }
 .cr-agregar.feriado { padding: 0; font-size: 11px; opacity: 0; } .cr-dia-cab:hover .cr-agregar.feriado, .cr-agregar.feriado:focus-visible { opacity: 1; }
@@ -1543,6 +1558,9 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-rec.on { border-color: var(--accent-ink); background: var(--accent-soft); }
 .cr-ruta-barra { margin-bottom: 0; }
 .cr-campo { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); white-space: nowrap; } .cr-campo .input { min-width: 0; }
+.cr-campo .input.select-like.cr-sel { width: auto; min-width: 168px; max-width: 260px; color: var(--ui-ink); font-size: 13px; }
+/* Un recorrido que nadie ordenó a mano: en lugar del botón, avisa que se ordena solo. */
+.cr-solo { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-positive-ink); }
 .cr-kpis { display: flex; flex-wrap: wrap; gap: 8px 30px; padding: 14px 18px; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); }
 .cr-kpis span { display: block; font-size: 11px; color: var(--text-3); }
 .cr-kpis b { font-size: 20px; font-weight: 600; letter-spacing: -.01em; } .cr-kpis small { font-size: 12px; font-weight: 500; color: var(--text-3); margin-left: 4px; }
@@ -1586,14 +1604,17 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-lugares button span { color: var(--text-3); font-size: 11.5px; overflow-wrap: anywhere; }
 .cr-panel { display: flex; flex-direction: column; gap: 8px; max-width: 520px; padding: 12px 14px; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); }
 .cr-panel label, .cr-editar .cr-panel label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--text-3); }
-.cr-editar .cr-panel { border: 0; padding: 0; max-width: none; }
+.cr-editar .cr-panel, .modal-body .cr-panel { border: 0; padding: 0; max-width: none; }
 .cr-p-expreso { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11.5px; color: var(--ui-ink-2); margin: 2px 0; }
 .cr-tag.exp { background: var(--ui-info-soft); color: var(--ui-info-ink); }
 .cr-visita { grid-column: 2 / 4; display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; padding: 7px 10px; border-radius: var(--r-control); font-size: 12px; background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 .cr-visita.salteada { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
 .cr-visita svg { flex: none; margin-top: 1px; }
 .cr-p-pie { grid-column: 2 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; }
-.cr-pasar { font: inherit; font-size: 11.5px; height: 26px; border-radius: var(--r-control); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-2); padding: 0 4px; }
+.input.select-like.cr-pasar { width: auto; height: 26px; padding: 0 24px 0 9px; font-size: 11.5px; border-color: var(--ui-line); }
+.input.select-like.cr-pasar.placeholder { color: var(--ui-ink-2); }
+/* Con la lista abierta, una parada hecha no queda transparente: si no, la lista quedaría debajo del mapa. */
+.cr-parada.hecha:has(.select-pop) { opacity: 1; }
 .cr-flechas { display: inline-flex; gap: 2px; }
 .cr-flechas button { width: 26px; height: 26px; border-radius: var(--r-control); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-2); padding: 0; cursor: pointer; font: inherit; }
 .cr-flechas button:disabled { opacity: .3; cursor: default; }

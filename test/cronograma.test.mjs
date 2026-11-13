@@ -322,6 +322,10 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
   assert.equal(esParada(r), false, 'no es una parada');
   assert.ok(deEste(r).length && deEste(r).every((m) => m.retira_en === 'Oficina Matienzo' && !m.parcial), JSON.stringify(r.retiran));
+  // En la semana la tarjeta lo dice, y no tiene chofer para elegir.
+  const ret = mov(await semana(), 'entrega', 'Mochila');
+  assert.deepEqual([ret.retira_en, ret.chofer ?? null], ['Oficina Matienzo', null]);
+  assert.equal((await api('PUT', '/cronograma/chofer', { fecha: ret.fecha, ids: [ret.id], chofer: `Juan ${RUN}` })).status, 400, 'no es una parada de nadie');
   // Parte retira y parte se envía: la parada del envío sigue, y el retiro va aparte.
   assert.equal((await api('PUT', dirsUrl, { direcciones: [{ retira: 'roca' }, { direccion: previas[0].direccion }] })).status, 200);
   r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
@@ -533,4 +537,62 @@ test('cronograma: la entrega pactada viene de Finnegans y avisa cuando la real q
   pactadaFinnegans = null;
   await api('GET', `/records/order/${pedido}/products?refresh=1`);
   assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.fecha_de_entrega, '2026-11-17');
+});
+
+test('cronograma: el chofer se elige desde la tarjeta de la semana', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  const DIA = '2026-11-17';
+  // El día arranca con un solo recorrido, sin chofer, que nadie ordenó a mano.
+  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: DIA, rutas: [{ chofer: null, base: 'roca', salida: 510, orden: [], a_mano: false }] })).status, 200);
+  let v = await semana();
+  const ret = mov(v, 'retiro_proveedor', 'Mochila'), egr = mov(v, 'egreso', 'Termo');
+  assert.deepEqual([ret.fecha, egr.fecha], [DIA, DIA]);
+  assert.deepEqual([ret.chofer, egr.chofer], [null, null], 'todavía sin chofer');
+  assert.equal(mov(v, 'ingreso', 'Termo').chofer, undefined, 'un ingreso no es una parada: no lleva chofer');
+  assert.ok(v.choferes.includes(`Carlos ${RUN}`) && v.choferes.includes(`Juan ${RUN}`), 'los choferes del desplegable');
+  assert.ok(v.expresos.includes(`Expreso ${RUN}`), 'y los expresos');
+
+  // Carlos hace el retiro en Zecat: se arma su recorrido, que sale de donde sale el primero.
+  let r = await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [ret.id], chofer: `carlos  ${RUN}` });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.chofer, `Carlos ${RUN}`, 'con el nombre como está en la lista');
+  v = await semana();
+  assert.deepEqual([mov(v, 'retiro_proveedor', 'Mochila').chofer, mov(v, 'egreso', 'Termo').chofer], [`Carlos ${RUN}`, null]);
+  let ruta = (await api('GET', `/cronograma/ruta?fecha=${DIA}`)).data;
+  const clave = (id) => ruta.paradas.find((p) => p.movimientos.some((m) => m.id === id)).clave;
+  const deCarlos = () => ruta.rutas.find((x) => x.chofer === `Carlos ${RUN}`);
+  assert.deepEqual([deCarlos().orden, deCarlos().a_mano, deCarlos().base, deCarlos().salida], [[clave(ret.id)], false, 'roca', 510]);
+  assert.ok(ruta.rutas.every((x) => x === deCarlos() || !x.orden.includes(clave(ret.id))), 'sale del otro recorrido');
+
+  // El egreso en el impresor también: entra a su recorrido, que se ordena solo por el más corto.
+  assert.equal((await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [egr.id], chofer: `Carlos ${RUN}` })).status, 200);
+  ruta = (await api('GET', `/cronograma/ruta?fecha=${DIA}`)).data;
+  assert.deepEqual([...deCarlos().orden].sort(), [clave(ret.id), clave(egr.id)].sort());
+  assert.ok(ruta.rutas.every((x) => x.chofer || x.orden.length), 'un recorrido sin chofer que quedó vacío se saca');
+  assert.equal((await semana()).movimientos.find((m) => m.id === egr.id).chofer, `Carlos ${RUN}`);
+
+  // Ordenado a mano en la Ruta del día: queda en ese orden y lo que entra va donde menos lo alarga.
+  const aMano = [clave(egr.id), clave(ret.id)];
+  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: DIA, rutas: ruta.rutas.map((x) => (x.chofer === `Carlos ${RUN}` ? { ...x, orden: aMano, a_mano: true } : x)) })).status, 200);
+  ruta = (await api('GET', `/cronograma/ruta?fecha=${DIA}`)).data;
+  assert.deepEqual([deCarlos().orden, deCarlos().a_mano], [aMano, true]);
+  // Sin chofer: el retiro pasa a un recorrido sin chofer.
+  r = await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [ret.id], chofer: '' });
+  assert.deepEqual([r.status, r.data.chofer], [200, null]);
+  ruta = (await api('GET', `/cronograma/ruta?fecha=${DIA}`)).data;
+  assert.deepEqual(deCarlos().orden, [clave(egr.id)]);
+  assert.ok(ruta.rutas.some((x) => !x.chofer && x.orden.includes(clave(ret.id))));
+  assert.equal(mov(await semana(), 'retiro_proveedor', 'Mochila').chofer, null);
+  // Vuelve con Carlos: su recorrido sigue ordenado a mano.
+  assert.equal((await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [ret.id], chofer: `Carlos ${RUN}` })).status, 200);
+  ruta = (await api('GET', `/cronograma/ruta?fecha=${DIA}`)).data;
+  assert.deepEqual([[...deCarlos().orden].sort(), deCarlos().a_mano], [[clave(ret.id), clave(egr.id)].sort(), true]);
+
+  // Lo que no es una parada, un día roto o quien no edita el cronograma: no.
+  assert.equal((await api('PUT', '/cronograma/chofer', { fecha: '2026-11-16', ids: [mov(v, 'ingreso', 'Termo').id], chofer: `Carlos ${RUN}` })).status, 400);
+  assert.equal((await api('PUT', '/cronograma/chofer', { fecha: 'mañana', ids: [ret.id], chofer: `Carlos ${RUN}` })).status, 400);
+  asUser = `vende.${RUN}@formas.ar`;
+  assert.equal((await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [ret.id], chofer: '' })).status, 403);
+  asUser = null;
 });

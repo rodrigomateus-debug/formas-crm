@@ -32,6 +32,14 @@ marca el chofer (migración `0045_cronograma.sql`).
   el momento. Si ClickUp no lo acepta, no cambia nada. En las entregas la fecha queda en cada artículo que se movió; la
   del PDV se mueve solo si se movieron todos sus artículos abiertos (pasar uno a otro día no arrastra a los demás). Lo que
   estaba marcado hecho y se pasa a otro día vuelve a pendiente.
+- **Chofer** (pedido de Rodrigo del 13/11/2026): abajo de cada tarjeta de entrega, retiro o egreso, el desplegable con
+  los choferes y los expresos (el mismo de la Ruta del día, con «+ Agregar chofer o expreso…»). Elegir uno pasa la parada
+  al recorrido de ese chofer ese día; si no tiene, se arma uno nuevo que sale del mismo lugar y a la misma hora que el
+  primero. Pasa **la parada entera**: en un impresor van todos sus retiros y egresos del día (el aviso lo dice), y un pedido
+  que va a varias direcciones pasa con todas. «Sin chofer» la pasa a un recorrido sin chofer; uno sin chofer que queda
+  vacío se saca. Se ve en la Ruta del día y en la app del chofer. Los ingresos no llevan chofer (no son un viaje) y lo que
+  retira el cliente en Formas dice «Retira en …». En las tarjetas hechas y para quien solo mira, el chofer aparece sin
+  desplegable. Un día sin recorridos guardados está todo «Sin chofer».
 - **Hecho**: el círculo. Queda quién y cuándo, y **el artículo cambia de estado en ClickUp**:
 
   | Se marca | El artículo pasa a |
@@ -62,8 +70,12 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 - **Varios recorridos por día, uno por chofer** (pestañas). Cada uno con su chofer (los que tienen link en Entregas →
   Choferes), de dónde sale (Depósito Gral. Roca 4250 u Oficina Matienzo 1308, Florida Oeste) y a qué hora. Las paradas
   se pasan de un recorrido a otro.
-- **Orden**: arrastrando, con las flechas o «Ordenar por el recorrido más corto» (tiene en cuenta el horario de
-  recepción de cada lugar). La primera vez que se abre un día arranca ordenado.
+- **Orden**: un recorrido que nadie ordenó a mano (el del día recién abierto, o los que se arman eligiendo el chofer desde
+  las tarjetas) **se ordena solo** por el recorrido más corto, también en la app del chofer, y se vuelve a ordenar cuando
+  se le suma una parada o se ubica una dirección (la barra dice «Se ordena solo por el recorrido más corto»). Arrastrar
+  una parada o moverla con las flechas lo deja ordenado a mano: desde ahí queda en el orden que se le dio, lo que se le
+  suma desde una tarjeta entra donde menos lo alarga, y aparece «Ordenar por el recorrido más corto» (tiene en cuenta el
+  horario de recepción de cada lugar).
 - **Hora de llegada a cada parada, por ahora sin el tránsito del momento**: el tiempo de cada tramo con la calle libre
   por un factor según la hora, como un día de tránsito moderado (`web/src/ruta.ts`: 1,6 de 7 a 10, 1,35 de 10 a 12,
   1,4 de 12 a 14, 1,3 de 14 a 16:30, 1,65 de 16:30 a 19:30). Más el tiempo en cada parada (8 minutos y 4 por movimiento).
@@ -76,8 +88,9 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 
 ### Choferes, expresos y de dónde sale
 
-- **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido tiene los choferes, los expresos (transportes
-  de terceros) y «+ Agregar chofer o expreso…». Del expreso se guarda además su dirección, que es a donde se le lleva la
+- **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido (y el de cada tarjeta de la semana) tiene
+  los choferes, los expresos (transportes de terceros) y «+ Agregar chofer o expreso…». Todos los desplegables del
+  cronograma (Chofer, Sale de, Pasar a…, Expreso) son el del Hub (`web/src/Select.tsx`), no la lista del navegador. Del expreso se guarda además su dirección, que es a donde se le lleva la
   mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Entregas → Choferes, con
   el mismo nombre): un chofer puede estar en la lista sin link.
 - **Una entrega por expreso.** En la parada de una entrega, «Mandar por expreso»: se elige el expreso y, cuando se
@@ -150,6 +163,8 @@ vuelve, como siempre.
 | Correcciones de la revisión: qué marcó el chofer en cada parada, a nombre de quién, feriados que faltaban | `migrations/0046_cronograma_chofer.sql` |
 | La libreta de direcciones: tablas `lugares` y `lugares_claves`, y de qué planilla se copia (settings `lugares`) | `migrations/0047_lugares.sql` |
 | Choferes y expresos (`transportistas`), entregas por expreso con su guía (`entrega_expresos`) y el otro lugar de salida de un recorrido | `migrations/0054_transportistas.sql` |
+| Recorridos que se ordenan solos o que alguien ordenó a mano (`cronograma_rutas.a_mano`) | `migrations/0057_recorridos_solos.sql` |
+| El chofer desde la tarjeta: `PUT /api/cronograma/chofer` (`{ fecha, ids, chofer }`, con los `id` de los movimientos de la tarjeta) | `asignarChofer` en `src/worker/cronograma.ts` |
 | Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0045_cronograma.sql` |
 | Movimientos, mover, marcar, notas, feriados, direcciones, ruta, chofer | `src/worker/cronograma.ts` |
 | API `/api/cronograma…` | `src/worker/api.ts` |

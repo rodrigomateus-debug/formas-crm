@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
+import { Select } from '../Select';
 import { claveOrden, duracion, hhmm, optimizar, simular, type Simulacion, type TramosReales } from '../ruta';
-import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, type Mov, type Tipo } from './Cronograma';
+import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -21,7 +22,9 @@ interface Parada {
 }
 const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontró la dirección', rechazo: 'No lo quisieron recibir', no_listo: 'No estaba listo', otro: 'No se pudo' };
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat?: number | null; lng?: number | null } | null }
+// `a_mano`: alguien movió sus paradas. Si no, se ordena solo por el recorrido más corto (igual que en el servidor y en la
+// app del chofer): así quedan los que se arman eligiendo el chofer desde las tarjetas de la semana.
+interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat?: number | null; lng?: number | null } | null; a_mano?: boolean }
 interface BaseGeo { id: string; nombre: string; direccion: string; lat: number | null; lng: number | null }
 // `retiran`: las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido); `parcial`: el resto del pedido se envía.
 interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
@@ -43,6 +46,13 @@ function acomodar(rutas: Recorrido[], paradas: Parada[]): Recorrido[] {
   const out = rutas.map((r) => ({ ...r, orden: r.orden.filter((c) => claves.has(c) && !vistas.has(c) && (vistas.add(c), true)) }));
   out[0] = { ...out[0], orden: [...out[0].orden, ...paradas.map((p) => p.clave).filter((c) => !vistas.has(c))] };
   return out;
+}
+const salidaDe = (r: Recorrido, bases: BaseGeo[]) => punto(r.base === 'otro' && r.base_otro ? { lat: r.base_otro.lat ?? null, lng: r.base_otro.lng ?? null } : bases.find((b) => b.id === r.base) ?? bases[0]);
+// Los recorridos que nadie ordenó a mano van siempre por el más corto (la misma cuenta que hace el servidor).
+function ordenarSolos(rutas: Recorrido[], paradas: Parada[], bases: BaseGeo[]): Recorrido[] {
+  const porClave = new Map(paradas.map((p) => [p.clave, p]));
+  return rutas.map((r) => (r.a_mano || r.orden.length < 2 ? r
+    : { ...r, orden: optimizar(salidaDe(r, bases), r.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p), r.salida).map((p) => p.clave) }));
 }
 
 export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, onAbrir, onCambio }: {
@@ -78,12 +88,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       setError('');
       setDatos(d);
       setRutas((antes) => {
-        const base = antes.length && d.fecha === (antes as Recorrido[] & { fecha?: string }).fecha ? antes : d.rutas;
-        let r = acomodar(base, d.paradas);
-        // Mientras nadie guardó ni tocó el orden, arranca con el recorrido más corto (y se vuelve a ordenar a medida que
-        // se van ubicando las direcciones).
-        if (!d.guardada && !tocado.current) { const b = punto(d.bases.find((x) => x.id === r[0].base)); r = [{ ...r[0], orden: optimizar(b, d.paradas, r[0].salida).map((p) => p.clave) }, ...r.slice(1)]; }
-        return Object.assign(r, { fecha: d.fecha });
+        // Con cambios hechos en la pantalla se quedan esos; si no, lo que dice el servidor. Los recorridos que nadie ordenó
+        // a mano se vuelven a ordenar a medida que se van ubicando las direcciones.
+        const base = antes.length && d.fecha === (antes as Recorrido[] & { fecha?: string }).fecha && tocado.current ? antes : d.rutas;
+        return Object.assign(ordenarSolos(acomodar(base, d.paradas), d.paradas, d.bases), { fecha: d.fecha });
       });
       // Faltan ubicar direcciones (se buscan de a pocas): vuelve a pedir hasta que estén.
       window.clearTimeout(sondeo.current);
@@ -104,7 +112,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
   const puede = !!datos?.puede_editar;
   const porClave = useMemo(() => new Map((datos?.paradas ?? []).map((p) => [p.clave, p])), [datos]);
-  const cambiar = (f: (r: Recorrido[]) => Recorrido[]) => { sucio.current = true; tocado.current = true; setRutas((r) => { const n = Object.assign(f(r), { fecha }); porGuardar.current = { fecha, rutas: n }; return n; }); };
+  const cambiar = (f: (r: Recorrido[]) => Recorrido[]) => {
+    sucio.current = true; tocado.current = true;
+    setRutas((r) => { const n = Object.assign(datos ? ordenarSolos(f(r), datos.paradas, datos.bases) : f(r), { fecha }); porGuardar.current = { fecha, rutas: n }; return n; });
+  };
   // Guarda el orden y los recorridos un rato después del último cambio.
   useEffect(() => {
     if (!sucio.current || !puede || !rutas.length || (rutas as Recorrido[] & { fecha?: string }).fecha !== fecha) return;
@@ -154,12 +165,13 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     setRutas([]);
     void cargar();
   }
+  // Mover una parada a mano deja el recorrido ordenado a mano: ya no se reordena solo.
   const mover = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => {
     if (i !== act.i) return r;
     const o = [...r.orden], de = o.indexOf(clave);
     if (de < 0 || a < 0 || a >= o.length) return r;
     o.splice(a, 0, o.splice(de, 1)[0]);
-    return { ...r, orden: o };
+    return { ...r, orden: o, a_mano: true };
   }));
   const pasar = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => ({ ...r, orden: i === a ? [...r.orden.filter((c) => c !== clave), clave] : r.orden.filter((c) => c !== clave) })));
   const ordenar = () => {
@@ -224,34 +236,30 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             <i />Recorrido {a.i + 1}<span className="muted">{a.r.chofer ?? 'Sin chofer'} · {a.paradas.length} parada{a.paradas.length === 1 ? '' : 's'}</span>
           </button>
         ))}
-        {puede && rutas.length < 8 && <button type="button" className="cr-agregar" onClick={() => { cambiar((rs) => [...rs, { n: rs.length + 1, chofer: null, base: rs[0].base, salida: rs[0].salida, orden: [] }]); setActiva(rutas.length); }}><Icon name="plus" size={12} />Otro recorrido</button>}
+        {puede && rutas.length < 8 && <button type="button" className="cr-agregar" onClick={() => { cambiar((rs) => [...rs, { n: rs.length + 1, chofer: null, base: rs[0].base, salida: rs[0].salida, orden: [], a_mano: false }]); setActiva(rutas.length); }}><Icon name="plus" size={12} />Otro recorrido</button>}
       </div>
 
       <div className="toolbar cr-ruta-barra">
         <label className="cr-campo">Chofer
-          <select className="input sm" value={act.r.chofer ?? ''} disabled={!puede}
+          <Select className="input sm cr-sel" value={act.r.chofer ?? ''} disabled={!puede} aria-label="Chofer"
             onChange={(e) => { if (e.target.value === '+') { setPanel('chofer'); return; } cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, chofer: e.target.value || null } : r))); }}>
-            <option value="">Sin asignar</option>
-            <optgroup label="Choferes">
-              {[...new Set([...datos.choferes, ...(act.r.chofer && !(datos.expresos ?? []).some((x) => x.nombre === act.r.chofer) ? [act.r.chofer] : [])])].map((c) => <option key={c} value={c}>{c}</option>)}
-            </optgroup>
-            {(datos.expresos ?? []).length > 0 && <optgroup label="Expresos">{datos.expresos!.map((x) => <option key={x.id} value={x.nombre}>{x.nombre}</option>)}</optgroup>}
-            <option value="+">+ Agregar chofer o expreso…</option>
-          </select>
+            {opcionesChofer({ choferes: datos.choferes, expresos: (datos.expresos ?? []).map((x) => x.nombre), actual: act.r.chofer, vacio: 'Sin asignar', agregar: 'Agregar chofer o expreso…' })}
+          </Select>
         </label>
         <label className="cr-campo">Sale de
-          <select className="input sm" value={act.r.base} disabled={!puede}
+          <Select className="input sm cr-sel" value={act.r.base} disabled={!puede} aria-label="Sale de"
             onChange={(e) => { if (e.target.value === 'otro') { setPanel('salida'); return; } setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, base: e.target.value, base_otro: null } : r))); }}>
             {datos.bases.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)}
             <option value="otro">{act.r.base === 'otro' && act.r.base_otro ? act.r.base_otro.nombre : 'Otro lugar…'}</option>
-          </select>
+          </Select>
         </label>
         {puede && act.r.base === 'otro' && <button type="button" className="cr-link" onClick={() => setPanel('salida')}>Cambiar lugar</button>}
         <label className="cr-campo">A las
           <input type="time" className="input sm" value={`${String(Math.floor(act.r.salida / 60)).padStart(2, '0')}:${String(act.r.salida % 60).padStart(2, '0')}`} disabled={!puede}
             onChange={(e) => { if (!e.target.value) return; const [h, m] = e.target.value.split(':').map(Number); if (Number.isFinite(h)) cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, salida: h * 60 + (m || 0) } : r))); }} />
         </label>
-        {puede && <button type="button" className="btn sm primary" disabled={act.paradas.length < 2} onClick={ordenar}><Icon name="route" size={14} />Ordenar por el recorrido más corto</button>}
+        {puede && (act.r.a_mano ? <button type="button" className="btn sm primary" disabled={act.paradas.length < 2} onClick={ordenar}><Icon name="route" size={14} />Ordenar por el recorrido más corto</button>
+          : act.paradas.length > 1 && <span className="cr-solo" title="Hasta que muevas una parada a mano: desde ahí queda en el orden que le des."><Icon name="route" size={14} />Se ordena solo por el recorrido más corto</span>)}
         <span className="grow" />
         {puede && rutas.length > 1 && <button type="button" className="btn sm ghost danger" onClick={() => { cambiar((rs) => { const fuera = rs[act.i].orden, q = rs.filter((_, i) => i !== act.i); q[0] = { ...q[0], orden: [...q[0].orden, ...fuera] }; return q; }); setActiva(0); }}>Quitar este recorrido</button>}
       </div>
@@ -280,7 +288,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             const entregas = [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
             return [
               <Tramo key={`t${p.clave}`} t={s.tramo} />,
-              <li key={p.clave} className={`cr-parada${todo ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${sobre === p.clave ? ' sobre' : ''}`} draggable={puede && editando !== p.clave && ubicando?.clave !== p.clave}
+              <li key={p.clave} className={`cr-parada${todo ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${sobre === p.clave ? ' sobre' : ''}`} draggable={puede && editando !== p.clave && expresando !== p.clave && ubicando?.clave !== p.clave}
                 style={{ '--c': act.color } as React.CSSProperties}
                 onMouseEnter={() => setCaliente(p.clave)} onMouseLeave={() => setCaliente((c) => (c === p.clave ? null : c))}
                 onDragStart={(e) => { arrastre.current = p.clave; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', p.clave); } catch { /* no hace falta */ } }}
@@ -333,10 +341,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   {p.lat != null && <a className="cr-link" href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Cómo llegar</a>}
                   <span className="grow" />
                   {puede && rutas.length > 1 && (
-                    <select className="cr-pasar" aria-label="Pasar a otro recorrido" value="" onChange={(e) => { if (e.target.value !== '') pasar(p.clave, Number(e.target.value)); }}>
-                      <option value="">Pasar a…</option>
-                      {armadas.filter((a) => a.i !== act.i).map((a) => <option key={a.i} value={a.i}>Recorrido {a.i + 1}{a.r.chofer ? ` (${a.r.chofer})` : ''}</option>)}
-                    </select>
+                    <Select className="input cr-pasar" aria-label="Pasar a otro recorrido" value="" placeholder="Pasar a…" onChange={(e) => { if (e.target.value !== '') pasar(p.clave, Number(e.target.value)); }}>
+                      {armadas.filter((a) => a.i !== act.i).map((a) => <option key={a.i} value={a.i}>Recorrido {a.i + 1} · {a.r.chofer ?? 'sin chofer'}</option>)}
+                    </Select>
                   )}
                   {puede && <span className="cr-flechas"><button type="button" aria-label="Subir" disabled={i === 0} onClick={() => mover(p.clave, i - 1)}>↑</button><button type="button" aria-label="Bajar" disabled={i === act.paradas.length - 1} onClick={() => mover(p.clave, i + 1)}>↓</button></span>}
                 </div>
@@ -392,51 +399,6 @@ function Tramo({ t }: { t: Simulacion['vuelta'] }) {
   return <li className={`cr-tramo ${t.nivel}`}>{t.sinUbicar ? <span>Tramo sin calcular: falta ubicar una dirección</span> : <span className="num">{duracion(t.min)} · {t.km.toFixed(1).replace('.', ',')} km{t.estimado ? ' aprox.' : ''} · tránsito <b>{t.nivel}</b></span>}</li>;
 }
 
-// Agregar un chofer o un expreso a la lista, desde el desplegable «Chofer». Del expreso se pide además la dirección, que
-// es a donde se le lleva la mercadería (se puede buscar en la libreta).
-function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloExpreso?: boolean; onListo: (nombre: string) => void; onCancelar: () => void }) {
-  const toast = useToast();
-  const [nombre, setNombre] = useState('');
-  const [tipo, setTipo] = useState<'chofer' | 'expreso'>(soloExpreso ? 'expreso' : 'chofer');
-  const [direccion, setDireccion] = useState('');
-  const [ocupado, setOcupado] = useState(false);
-  const lugares = useLugares(tipo === 'expreso' && !direccion ? nombre : '');
-  async function guardar(e: React.FormEvent) {
-    e.preventDefault(); e.stopPropagation();
-    if (nombre.trim().length < 2) return;
-    setOcupado(true);
-    try { const r = await http<{ nombre: string }>('POST', '/cronograma/transportistas', { nombre, tipo, direccion }); toast(`${r.nombre} quedó en la lista de ${tipo === 'expreso' ? 'expresos' : 'choferes'}.`); onListo(r.nombre); }
-    catch (err) { toast((err as Error).message, true); setOcupado(false); }
-  }
-  return (
-    <form className="cr-panel" onSubmit={guardar}>
-      {!soloExpreso && (
-        <div className="row" role="group" aria-label="Qué es">
-          <button type="button" className={`chip${tipo === 'chofer' ? ' on' : ''}`} aria-pressed={tipo === 'chofer'} onClick={() => setTipo('chofer')}>Chofer</button>
-          <button type="button" className={`chip${tipo === 'expreso' ? ' on' : ''}`} aria-pressed={tipo === 'expreso'} onClick={() => setTipo('expreso')}>Expreso</button>
-        </div>
-      )}
-      <label>{tipo === 'expreso' ? 'Nombre del expreso' : 'Nombre del chofer'}<input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={80} /></label>
-      {tipo === 'expreso' && <label>Dirección del expreso (a dónde se le lleva)<input className="input sm" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" maxLength={300} /></label>}
-      {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => setDireccion(l.direccion)}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
-      {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, además hay que crearle el link en Entregas → Choferes, con el mismo nombre.</span>}
-      <div className="row"><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
-    </form>
-  );
-}
-
-// Lo que encuentra la libreta de direcciones para un texto (nombre del lugar, calle o localidad).
-function useLugares(q: string) {
-  const [lugares, setLugares] = useState<Array<{ id: number; nombre: string; direccion: string; horario: string | null }>>([]);
-  useEffect(() => {
-    if (q.trim().length < 2) { setLugares([]); return; }
-    let vivo = true;
-    const t = window.setTimeout(() => { http<{ lugares: typeof lugares }>('GET', `/cronograma/lugares${qs({ q })}`).then((r) => { if (vivo) setLugares(r.lugares); }, () => undefined); }, 250);
-    return () => { vivo = false; window.clearTimeout(t); };
-  }, [q]);
-  return lugares;
-}
-
 // «Sale de → Otro lugar»: se busca en la libreta por nombre o por dirección, o se escribe la dirección a mano.
 function OtroLugar({ onElegir, onCancelar }: { onElegir: (l: { nombre: string; direccion: string }) => void; onCancelar: () => void }) {
   const [buscar, setBuscar] = useState('');
@@ -472,11 +434,10 @@ function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id:
   return (
     <form className="cr-editar" onSubmit={(e) => { e.preventDefault(); if (expreso) void guardar(expreso); }}>
       <label>Expreso
-        <select className="input sm" value={expreso} onChange={(e) => { if (e.target.value === '+') setNuevo(true); else setExpreso(e.target.value); }}>
-          <option value="">Elegí un expreso</option>
+        <Select className="input sm" value={expreso} placeholder="Elegí un expreso" aria-label="Expreso" onChange={(e) => { if (e.target.value === '+') setNuevo(true); else setExpreso(e.target.value); }}>
           {[...new Set([...lista.map((x) => x.nombre), ...(expreso ? [expreso] : [])])].map((n) => <option key={n} value={n}>{n}</option>)}
-          <option value="+">+ Agregar expreso…</option>
-        </select></label>
+          <option value="+"><span className="select-nuevo"><Icon name="plus" size={13} />Agregar expreso…</span></option>
+        </Select></label>
       <label>Número de guía (se puede cargar después)<input className="input sm" value={guia} onChange={(e) => setGuia(e.target.value)} maxLength={80} /></label>
       <div className="row" style={{ flexWrap: 'wrap' }}>
         <button type="submit" className="btn sm primary" disabled={!expreso}>Guardar</button>

@@ -30,6 +30,7 @@ interface ViewConfig {
   q?: string; groups: Filter[][]; columns: string[]; sort: string; dir: 'asc' | 'desc'; owner?: string; owners?: string[]; dates?: Record<string, string>; tags?: string[]; unidades?: string[];
   relacion?: string[];   // contactos y empresas: tipo de relación (sin elegir, solo clientes y prospectos; [] = todos)
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string; cardProps?: string[];
+  vacias?: boolean;   // tablero: colapsar las columnas vacías (se abren solas cuando reciben algo)
   widths?: Record<string, number>;   // ancho de cada columna (se arrastra el borde del encabezado)
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
@@ -281,7 +282,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const current: ViewConfig = {
     q, groups: cfg.groups, columns: cfg.columns, sort: cfg.sort, dir: cfg.dir, owners: cfg.owners ?? [], dates: cfg.dates ?? {}, tags: cfg.tags ?? [], unidades: cfg.unidades ?? [], mode,
     ...(cfg.relacion ? { relacion: cfg.relacion } : {}),
-    ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
+    ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(cfg.vacias ? { vacias: true } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
     ...(cfg.widths && Object.keys(cfg.widths).length ? { widths: cfg.widths } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
@@ -290,7 +291,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const norm = (c: ViewConfig, base: ViewConfig) => JSON.stringify([
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), [...(c.unidades ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '', c.widths ?? {},
-    [...relacionDe(type, c.relacion)].sort(),
+    [...relacionDe(type, c.relacion)].sort(), !!c.vacias,
   ]);
   const dirty = !!activeSaved && cfgDe === activeView && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
@@ -479,9 +480,9 @@ function IndexFor({ type }: { type: ObjectType }) {
           onSelectAll={() => setSelAll(true)} onClear={() => setSelected(new Set())}
           onDone={() => { setSelected(new Set()); list.reload(); setBoardKey((k) => k + 1); }} />
       )}
-      {mode === 'board' && type === 'deal' ? <Board pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
+      {mode === 'board' && type === 'deal' ? <Board vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
-        : mode === 'board' ? <PropBoard type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
+        : mode === 'board' ? <PropBoard vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
           cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
           tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>

@@ -400,6 +400,8 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
   white-space: nowrap; font-size: 12px; color: var(--ui-ink-3); }
 .col-group-head b { flex: none; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ui-ink-2); }
 .col-group-cols { display: flex; gap: 12px; flex: 1; min-height: 0; align-items: stretch; }
+/* El título del área no ensancha el grupo: con las columnas achicadas, el grupo mide lo que ellas (sin espacio vacío). */
+.col-group-head { width: 0; min-width: 100%; }
 .card { position: relative; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); padding: 10px 12px; cursor: grab; display: flex; flex-direction: column; gap: 4px;
   transition: border-color var(--dur) var(--ease); }
 .card:hover { border-color: var(--ui-line-strong); }

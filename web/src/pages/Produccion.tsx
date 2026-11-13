@@ -8,6 +8,7 @@ import { SelectorFecha } from '../Fecha';
 import { cumple, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol } from './ProduccionFiltros';
 import { NombreProveedor } from '../proveedores';
 import { RecordPreview } from './RecordPage';
+import { BotonVacias, useColapso } from './Board';
 
 // Un clic en un renglón o una tarjeta abre la vista previa del pedido, salvo que sea en algo que se usa ahí mismo (un
 // desplegable, una fecha, un link, los asignados…).
@@ -48,9 +49,10 @@ const CERRADOS = ['entregados', 'anulado'];
 // Lo que guarda una vista de Producción (pestañas, como en Pedidos): búsqueda, unidades, a quién está asignado, vendedor,
 // cliente, si se ven los entregados y lista o tablero.
 // También los filtros por columna (ProduccionFiltros.tsx: estado, cantidad, fechas, proveedor, impresor).
-interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?: string; cliente?: string; cerrados: boolean; modo: 'lista' | 'tablero'; columnas?: FiltrosCol }
+interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?: string; cliente?: string; cerrados: boolean; modo: 'lista' | 'tablero'; columnas?: FiltrosCol;
+  vacias?: boolean }   // tablero: colapsar las columnas vacías (Board.tsx, useColapso)
 const normCols = (f?: FiltrosCol) => JSON.stringify(Object.entries(limpiar(f ?? {})).map(([k, x]) => [k, Array.isArray(x) ? [...x].sort() : x]));
-const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista', normCols(c.columnas)]);
+const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista', normCols(c.columnas), !!c.vacias]);
 
 // Quién vende el PDV (pedido de Rodrigo del 12/11/2026, con su foto y como filtro): el propietario del pedido en el CRM
 // y, si el PDV no tiene pedido, el VENDEDOR de ClickUp.
@@ -65,7 +67,7 @@ function Vendedor({ p }: { p: { owner_id: number | null; vendedor: string | null
 
 // Preferencias de cada uno en este navegador (lista o tablero, colapsado). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
-function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean } {
+function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean; vacias?: boolean } {
   try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; }
 }
 function guardarPref(p: object) { try { localStorage.setItem(PREF, JSON.stringify({ ...leerPref(), ...p })); } catch { /* sin almacenamiento */ } }
@@ -93,6 +95,8 @@ export default function ProduccionPage() {
   const { pestanas, guardar: guardarOrden } = useOrdenPestanas('produccion', vistas.data);
   const [activa, setActiva] = useState(() => params.get('v') ?? pestanas[0]);
   const [modo, setModo] = useState<'lista' | 'tablero'>(pref.modo ?? 'lista');
+  // Tablero: colapsar las columnas vacías. En «Todos» y «Míos» queda en este navegador; en una vista, con la vista.
+  const [vacias, setVacias] = useState(!!pref.vacias);
   // Sin unidades elegidas: las que se trabajan desde el CRM (las manda el servidor; quedan en `base`).
   const [unidades, setUnidades] = useState<string[] | null>(null);
   const [base, setBase] = useState<string[] | null>(null);
@@ -196,6 +200,7 @@ export default function ProduccionPage() {
   const cambiarUnidades = (u: string[]) => setUnidades(u);
   const cambiarPersona = (p: string) => setPersona(p);
   const cambiarModo = (m: 'lista' | 'tablero') => { setModo(m); guardarPref({ modo: m }); };
+  const cambiarVacias = (x: boolean) => { setVacias(x); if (esFija(activa)) guardarPref({ vacias: x }); };
 
   // Abrir una pestaña: «Todos» y «Míos» limpias (las unidades de siempre, sin entregados); una vista, como está guardada.
   const vistaDe = (k: string) => vistas.data?.find((x) => String(x.id) === k);
@@ -209,7 +214,9 @@ export default function ProduccionPage() {
       setUnidades(c.unidades?.length ? c.unidades : base); setPersona(c.persona ?? ''); setVendedor(c.vendedor ?? ''); setCliente(c.cliente ?? '');
       setCerrados(!!c.cerrados); setBuscar(c.q ?? ''); setColumnas(c.columnas ?? {});
       if (c.modo) setModo(c.modo);
+      setVacias(!!c.vacias);
     }
+    if (esFija(k)) setVacias(!!leerPref().vacias);
     // Una vista recién guardada que todavía no llegó: queda como se ve (es lo que se guardó).
   };
   // Al llegar las vistas: se aplica la que se abrió (del link o la primera); si ya no existe, la primera pestaña.
@@ -220,8 +227,8 @@ export default function ProduccionPage() {
     if (!esFija(activa)) { if (vistaDe(activa)) elegir(activa); else elegir(pestanas[0]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vistas.data]);
-  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}) };
-  const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista' })
+  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}), ...(vacias ? { vacias: true } : {}) };
+  const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista', vacias: false })
     !== normConfig({ q: '', unidades: base, persona: activa === 'mine' ? 'yo' : '', cerrados: false, modo: 'lista' });
   const articulos = filtrados.reduce((n, p) => n + p.articulos.length, 0);
   const soloLectura = v && !v.puede_editar;
@@ -278,6 +285,7 @@ export default function ProduccionPage() {
           title="Suma los PDV entregados o anulados en los últimos 30 días">Ver entregados (30 días)</button>
         {v && <FiltrosActivos f={columnas} onChange={setColumnas} ctx={ctxFiltros} />}
         <div className="bar-end">
+          {modo === 'tablero' && <BotonVacias value={vacias} onChange={cambiarVacias} />}
           {modo === 'lista' && (
             <button type="button" className="btn ghost" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
               title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
@@ -298,7 +306,7 @@ export default function ProduccionPage() {
         ? <Lista pdvs={filtrados} v={v} editar={editar} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
             onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onTodos={(abrir) => cambiarColapsado(!abrir)} />
-        : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} />)}
+        : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} vacias={vacias} />)}
       {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
     </div>
   );
@@ -653,10 +661,12 @@ const SIN_ETAPA = '__sin_etapa';
 const SIEMPRE = ['esperando_boceto', '1237498994', '1237498996'];
 const MAX_ARTICULOS = 4;
 
-function Tablero({ pdvs, v, editar, onAbrir, sel }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null;
+function Tablero({ pdvs, v, editar, onAbrir, sel, vacias }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean;
 }) {
   const { meta } = useMeta();
+  // Columnas angostas: a mano (la flechita) o, con «Colapsar vacías», las que no tienen nada (se abren solas).
+  const colapso = useColapso('crm.board.collapsed.produccion', vacias);
   const etapas = propOf(meta, 'order', 'hs_pipeline_stage')?.options ?? [];
   const deEtapa = (e: string) => pdvs.filter((p) => (p.etapa ?? SIN_ETAPA) === e);
   const conocidas = new Set(etapas.map((o) => o.value));
@@ -671,10 +681,19 @@ function Tablero({ pdvs, v, editar, onAbrir, sel }: {
       {cols.map((c) => {
         const lista = deEtapa(c.value);
         const slug = etapaPedidoSlug(c.value);
+        if (colapso.cerrada(c.value, lista.length)) return (
+          <div key={c.value} className={`col collapsed${slug ? ` etapa-col e-${slug}` : ''}`} onClick={() => colapso.alternar(c.value, lista.length)}
+            title={`${c.label}: ${lista.length}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
+            <Icon name="chevron" size={14} />
+            <span className="n num">{lista.length}</span>
+            <span className="vlabel">{c.label}</span>
+          </div>
+        );
         return (
           <div key={c.value} className="col">
             <div className={`col-head etapa-col${slug ? ` e-${slug}` : ''}`}>
-              <div className="t">{slug ? <EtapaPedido value={c.value} label={c.label} /> : <span>{c.label}</span>}<span className="n">{lista.length}</span></div>
+              <div className="t">{slug ? <EtapaPedido value={c.value} label={c.label} /> : <span>{c.label}</span>}<span className="n">{lista.length}</span>
+                <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => colapso.alternar(c.value, lista.length)}><Icon name="chevron" size={14} /></button></div>
             </div>
             <div className="col-body">
               {lista.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}

@@ -574,6 +574,9 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
 
   const paradas = new Map<string, Parada>();
   const puntoGoogle = new Map<string, { lat: number; lng: number }>();
+  // Las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido): no son paradas del chofer, van aparte.
+  // `parcial`: el pedido además tiene direcciones a donde se envía (esas sí son paradas).
+  const retiran: Array<Movimiento & { retira_en: string; parcial: boolean }> = [];
   for (const m of viajes) {
     let direccion: string | null = null, origen: Parada['origen'] = null, nombre = m.lugar ?? 'Sin proveedor', companyId = m.company_id, recordId: number | null = null;
     let sugerencia: Parada['sugerencia'] = null;
@@ -584,7 +587,15 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
       nombre = m.cliente ?? `PDV ${m.npdv ?? ''}`; companyId = p?.company_id ?? null; recordId = m.record_id;
       const previas = (m.cliente ? historial.get(m.cliente) ?? [] : []).filter((h) => h.record_id !== m.record_id);
       const deFinnegans = p ? fin.direcciones.get(p.id) ?? null : null;
-      const enTarjeta = p ? cargadas.get(p.id) ?? [] : [];
+      const todas = p ? cargadas.get(p.id) ?? [] : [];
+      const retiros = todas.filter((d) => d.retira);
+      const enTarjeta = todas.filter((d) => !d.retira);
+      if (retiros.length) {
+        const donde = [...new Set(retiros.map((d) => cfg.bases.find((x) => x.id === d.retira)?.nombre ?? d.direccion))].join(' y ');
+        retiran.push({ ...m, retira_en: donde, parcial: enTarjeta.length > 0 });
+        // Solo lo retira el cliente: no hay viaje (ni hay que buscarle otra dirección).
+        if (!enTarjeta.length) continue;
+      }
       for (const d of enTarjeta) if (d.validada && d.lat != null && d.lng != null) puntoGoogle.set(claveDireccion(d.direccion), { lat: d.lat, lng: d.lng });
       if (enTarjeta.length) { direccion = enTarjeta[0].direccion; origen = 'pedido'; otras = enTarjeta.slice(1).map((d) => d.direccion); }
       else if (p?.manual) { direccion = p.manual; origen = 'pedido'; }
@@ -651,7 +662,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   rutas[0].orden.push(...lista_.map((p) => p.clave).filter((c) => !vistas.has(c)));
   const choferes = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
   return {
-    fecha, paradas: lista_, llegan, rutas, guardada: guardadas.length > 0, choferes,
+    fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes,
     bases: cfg.bases.map((x) => { const g = geo.get(claveDireccion(x.direccion)); return { ...x, lat: g?.lat ?? null, lng: g?.lng ?? null }; }),
     buscando: pendientes + fin.pendientes, puede_editar: puedeEditarCronograma(user),
   };

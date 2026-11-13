@@ -129,6 +129,22 @@ test('direcciones de entrega: una con todo el pedido, o varias repartiendo sin p
   await call('PATCH', `/records/order/${pedido.id}`, { props: { direccion_entrega: 'Otra cosa 123' } });
   assert.equal((await call('GET', `/records/order/${pedido.id}`)).data.record.props.direccion_entrega, 'Av. Mitre 500, Avellaneda');
 
+  // Retira en Formas: en una de las direcciones de Formas (las bases del cronograma), sin Google; la dirección la pone el
+  // servidor, no la pantalla.
+  d = (await call('PUT', url, { direcciones: [{ retira: 'roca', direccion: 'lo que diga la pantalla', detalle: 'Retira Juan el viernes' }] })).data;
+  assert.deepEqual(d.bases.map((b) => b.id), ['roca', 'matienzo'], 'las dos direcciones de Formas');
+  assert.deepEqual(d.direcciones.map((x) => [x.retira, x.retira_nombre, x.direccion, x.validada, x.detalle]),
+    [['roca', 'Depósito Gral. Roca', 'General Roca 4250, Florida Oeste, Vicente López, Buenos Aires', false, 'Retira Juan el viernes']]);
+  assert.equal((await call('GET', `/records/order/${pedido.id}`)).data.record.props.direccion_entrega, 'Retira en Formas: Depósito Gral. Roca');
+  assert.equal((await call('PUT', url, { direcciones: [{ retira: 'otra' }] })).status, 400, 'solo las direcciones de Formas');
+  // Repartido: parte la retira el cliente y parte se envía.
+  d = (await call('PUT', url, { direcciones: [{ retira: 'matienzo' }, { place_id: 'ChIJ_nicaragua_1651' }],
+    cantidades: [{ direccion: 0, clave: 'MOC2', cantidad: 40 }, { direccion: 1, clave: 'GOR1', cantidad: 100 }] })).data;
+  assert.deepEqual(d.direcciones.map((x) => x.retira), ['matienzo', null]);
+  assert.deepEqual(d.productos.map((p) => [p.clave, p.quedan]), [['GOR1', 0], ['MOC2', 0], ['GOR1#2', 10]]);
+  assert.match((await call('GET', `/records/order/${pedido.id}`)).data.record.props.direccion_entrega, /^2 direcciones: Retira en Formas: Oficina Matienzo · Nicaragua 1651/);
+  assert.equal((await call('PUT', url, { direcciones: [{ retira: 'roca' }, { retira: 'roca' }] })).status, 400, 'la misma dos veces, sin detalle que las distinga');
+
   // Una vendedora: en sus pedidos sí; en los de otra, no.
   const vera = (await call('POST', '/users', { email: `vera.dir.${RUN}@formas.ar`, name: `Vera Dir ${RUN}`, profile: 'comercial', role: 'member' })).data;
   const V = { 'x-dev-user': vera.email };

@@ -10,7 +10,10 @@ textos convertidos a trazos) en el formato que sea.
   principal, descargar, abrir en Drive, quitar (deja de ofrecerse; el archivo queda en Drive).
 - **Pedido → Productos** y **Negocio → Bocetos**: cada producto tiene su fichita de logo (`LogoProducto`). Un clic abre el
   cuadro para elegir entre los logos de la empresa o «Subir uno nuevo», que lo guarda en la empresa y lo deja elegido para
-  ese producto. Sin elegir, va el principal.
+  ese producto. Sin elegir, va el principal. Los logos son de la empresa del pedido o negocio: si no tiene, el cuadro pide
+  asociarle una, y al asociarla (o crearla) desde la vista previa o la ficha, los logos se vuelven a pedir enseguida
+  (`useLogos` con las empresas asociadas; aviso de Rodrigo del 13/11/2026: seguía diciendo «no tiene empresa» hasta cerrar
+  y abrir la vista previa).
 - **Visor del boceto**: el mismo selector, para el producto del boceto.
 - **Producción**: al lado del nombre del artículo, «Sin logo» (la empresa no tiene) o «Logo» en rojo (con textos sin curvas o
   no vectorial). No se muestra en los artículos ya listos, entregados o anulados.

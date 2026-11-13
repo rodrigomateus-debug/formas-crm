@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
-import { SortPick, useCollapsed, useFillHeight, type CardActions } from './Board';
+import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 import { ChatChip } from './Conversacion';
 
@@ -166,7 +166,8 @@ export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecy
 
 // Tablero de empresas, contactos o pedidos agrupado por una propiedad (etapa del ciclo de vida, etapa del pedido…).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate }: {
+export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias }: {
+  vacias?: boolean; onVacias?: (v: boolean) => void;
   type: ObjectType; prop?: string; onProp: (p: string) => void; cardProps?: string[]; onCardProps: (p: string[]) => void; q: string; groups?: Filter[][];
   sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
@@ -187,7 +188,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   acciones.current = { onOpen, onSelect, setDragId };
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
-  const [collapsed, toggleCol] = useCollapsed(`crm.board.collapsed.${type}.${prop}`);
+  const colapso = useColapso(`crm.board.collapsed.${type}.${prop}`, vacias);
   const [boardRef, boardStyle] = useFillHeight();
   const def = groupable.find((p) => p.name === prop);
   const total = cols.reduce((n, c) => n + c.total, 0);
@@ -238,8 +239,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   });
 
 
-  const columna = (c: Column) => (collapsed.has(c.value) ? (
-    <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`} {...drop(c)} onClick={() => toggleCol(c.value)}
+  const columna = (c: Column) => (colapso.cerrada(c.value, c.total) ? (
+    <div key={c.value || 'vacio'} className={`col collapsed${over === c.value ? ' over' : ''}${etapa(c.value) ? ` etapa-col e-${etapa(c.value)}` : ''}`} {...drop(c)} onClick={() => colapso.alternar(c.value, c.total)}
       title={`${c.label}: ${c.total}${conMonto ? ` · ${fmtMoneyExact(c.amount, 'ARS')} sin IVA` : ''}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.label}`}>
       <Icon name="chevron" size={14} />
       {etapa(c.value) && <EtapaIcono value={c.value} size={15} />}
@@ -255,7 +256,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           {def?.type === 'owner' && c.value && <UserAvatar id={c.value} size="xs" />}
           <span className="ellipsis">{c.label}</span><span className="n num">{c.total}</span>
           {onCreate && c.value !== '' && def?.type !== 'owner' && <button className="col-fold" title={`Crear en «${c.label}»`} aria-label={`Crear en ${c.label}`} onClick={() => onCreate({ [prop]: c.value })}><Icon name="plus" size={14} /></button>}
-          <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => toggleCol(c.value)}><Icon name="chevron" size={14} /></button>
+          <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => colapso.alternar(c.value, c.total)}><Icon name="chevron" size={14} /></button>
         </div>
       </div>
       <div className="col-body">
@@ -297,6 +298,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           </Select>
         </label>
         <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />
+        <BotonVacias value={vacias} onChange={onVacias} />
         <div className="row small bar-label" title="Datos que muestra cada tarjeta (se guarda en la vista)">
           <span>Tarjeta</span>
           <MultiPick small options={propsOf(meta, type).filter((p) => !['name', 'hs_order_name'].includes(p.name)).map((p) => ({ value: p.name, label: p.label }))}
@@ -314,7 +316,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           <section key={`${s.area ?? 'otras'}-${s.cols[0].value || 'vacio'}`} className={`col-group${s.area ? ` area-${s.area}` : ' sin-area'}`}
             aria-label={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>
             <div className="col-group-head" title={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>
-              {s.area && <><b>{AREAS_PEDIDO[s.area].label}</b><span className="ellipsis">{AREAS_PEDIDO[s.area].nota}</span></>}
+              {/* Solo el área: quién las mueve queda al pasar el mouse. */}
+              {s.area && <b>{AREAS_PEDIDO[s.area].label}</b>}
             </div>
             <div className="col-group-cols">{s.cols.map(columna)}</div>
           </section>

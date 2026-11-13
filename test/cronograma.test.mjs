@@ -311,6 +311,24 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.equal(nueva.lat, -34.679);
   assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.direccion_entrega, `Nicaragua ${PDV_V}, Sarandí, Avellaneda`);
 
+  // Retira en Formas (tarjeta «Entrega»): no es una parada del chofer; va aparte, en «Retiran en Formas».
+  const dirsUrl = `/records/order/${pedido}/direcciones`;
+  const previas = (await api('GET', dirsUrl)).data.direcciones;
+  const deEste = (x) => x.retiran.filter((m) => m.npdv === PDV);
+  const esParada = (x) => x.paradas.some((p) => p.movimientos.some((m) => m.tipo === 'entrega' && m.npdv === PDV));
+  assert.equal((await api('PUT', dirsUrl, { direcciones: [{ retira: 'matienzo', detalle: 'Retira Ana' }] })).status, 200);
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  assert.equal(esParada(r), false, 'no es una parada');
+  assert.ok(deEste(r).length && deEste(r).every((m) => m.retira_en === 'Oficina Matienzo' && !m.parcial), JSON.stringify(r.retiran));
+  // Parte retira y parte se envía: la parada del envío sigue, y el retiro va aparte.
+  assert.equal((await api('PUT', dirsUrl, { direcciones: [{ retira: 'roca' }, { direccion: previas[0].direccion }] })).status, 200);
+  r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
+  assert.equal(r.paradas.find((p) => p.movimientos.some((m) => m.tipo === 'entrega' && m.npdv === PDV))?.direccion, previas[0].direccion);
+  assert.ok(deEste(r).length && deEste(r).every((m) => m.retira_en === 'Depósito Gral. Roca' && m.parcial));
+  // Como estaba.
+  assert.equal((await api('PUT', dirsUrl, { direcciones: previas.map((x) => ({ direccion: x.direccion, detalle: x.detalle })) })).status, 200);
+  assert.ok(esParada((await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data));
+
   // El 18/11: el retiro del impresor, con su dirección y su horario; el ingreso no es una parada.
   r = (await api('GET', '/cronograma/ruta?fecha=2026-11-18')).data;
   const imp = r.paradas.find((p) => p.company_id === imprefas);

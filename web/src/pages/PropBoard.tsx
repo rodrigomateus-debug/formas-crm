@@ -33,7 +33,7 @@ function OrderLine({ r }: { r: CrmRecord }) {
     when = {
       text: `${fullDate(p.fecha_de_entrega)} · ${falta(n)}`,
       cls: n < 0 ? ' late' : n <= 1 ? ' soon' : '',
-      title: `Entrega prometida: ${fullDate(p.fecha_de_entrega)} (${faltaLargo(n)})`,
+      title: `Entrega pactada: ${fullDate(p.fecha_de_entrega)} (${faltaLargo(n)})`,
     };
   }
   const unidad = unidadesDe(meta, 'order', p)[0];

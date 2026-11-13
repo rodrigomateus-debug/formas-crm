@@ -998,7 +998,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     // Quién lo tiene en producción (asignados en ClickUp), como en la tarjeta del tablero y en la ficha.
     ...(data.data?.produccion ? [['Producción', <QuienProduce key="prod" {...data.data.produccion} />] as [string, ReactNode]] : []),
     ['Tipo', record.props.tipo_de_pedido || '—'],
-    ['Entrega', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
+    ['Entrega pactada', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
     ['PDV', safeUrl(record.props.url_pdv_finnegans) ? <a key="pdv" href={safeUrl(record.props.url_pdv_finnegans)} target="_blank" rel="noreferrer">{record.props.pdv_finnegans || 'Abrir en Finnegans'}</a> : record.props.pdv_finnegans || '—'],
     ['Comprador', [record.props.hs_billing_address_firstname, record.props.hs_billing_address_lastname].filter(Boolean).join(' ') || associations?.contact?.[0]?.name || '—'],
     // De Finnegans, sin IVA: lo facturado que falta cobrar más lo que falta facturar; si es total o parcial.

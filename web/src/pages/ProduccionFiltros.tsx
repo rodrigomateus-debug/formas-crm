@@ -21,7 +21,7 @@ export type ColFiltro = keyof FiltrosCol;
 type ColFecha = 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor';
 const FECHAS: ColFecha[] = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor'];
 export const NOMBRE_COL: Record<ColFiltro, string> = {
-  estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega',
+  estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega real',
   ingreso_proveedor: 'Ingreso prov.', retiro_proveedor: 'Retiro prov.', egreso_impresor: 'Egreso imp.', retiro_impresor: 'Retiro imp.',
 };
 const COLUMNAS: ColFiltro[] = ['estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor'];

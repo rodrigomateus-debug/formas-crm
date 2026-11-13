@@ -48,6 +48,31 @@ export interface PedidoVenta {
   Items?: Array<{ ProductoCodigo?: string; Cantidad?: number; Precio?: number; Descuento1?: number; Descuento2?: number; Descripcion?: string; IncluyeImpuesto?: boolean }>;
 }
 
+// La fecha de entrega pactada del pedido de venta (la que pone el comercial), como AAAA-MM-DD. El nombre exacto del campo
+// en Finnegans no está documentado: se toma el que habla de la fecha de entrega, en cualquiera de los formatos en que
+// puede venir (ISO, DD/MM/AAAA, DD-MM-AAAA, «/Date(…)/» o milisegundos). Sin ese campo, null.
+export function fechaEntregaDeFinnegans(p: unknown): string | null {
+  if (!p || typeof p !== 'object') return null;
+  const aDia = (v: unknown): string | null => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number' || /^\/Date\((-?\d+)/.test(String(v))) {
+      const ms = typeof v === 'number' ? v : Number(String(v).match(/-?\d+/)![0]);
+      return ms > 946684800000 ? new Date(ms - 3 * 3600_000).toISOString().slice(0, 10) : null;
+    }
+    const t = String(v).trim();
+    let m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    m = t.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
+  };
+  const valido = (d: string | null) => (d && d > '2015-01-01' && d < '2100-01-01' && !Number.isNaN(Date.parse(`${d}T12:00:00Z`)) ? d : null);
+  const entradas = Object.entries(p as Record<string, unknown>);
+  for (const re of [/^fecha(de)?entrega$/i, /fecha.*entrega|entrega.*fecha/i]) {
+    for (const [k, v] of entradas) { if (re.test(k) && !/real|remito|factura/i.test(k)) { const d = valido(aDia(v)); if (d) return d; } }
+  }
+  return null;
+}
+
 // El pedido de venta, con sus renglones.
 export async function finnegansPedidoVenta(env: Env, token: string, pedido: string, b?: Budget) {
   for (const id of pedidoIds(pedido)) {

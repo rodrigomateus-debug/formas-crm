@@ -1297,8 +1297,23 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-tarjeta.abre { cursor: pointer; } .cr-tarjeta.abre:hover { filter: brightness(.975); }
 .cr-tarjeta.hecho { opacity: .55; }
 
-.cr-t-quien { font-weight: 600; font-size: 12px; line-height: 1.3; overflow-wrap: anywhere; padding-right: 48px; }
-.cr-t-pdv { font-size: 11px; font-weight: 600; color: var(--k); overflow-wrap: anywhere; }
+.cr-t-rol { display: flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--k); margin-bottom: 2px; }
+.cr-t-quien { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; line-height: 1.3; padding-right: 48px; min-width: 0; }
+.cr-t-quien > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.cr-t-quien .avatar { flex: none; } .cr-t-quien .prov-logo { flex: none; margin-right: 0; }
+.cr-t-linea { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; margin-top: 3px; }
+.cr-t-para { font-size: 11px; color: var(--ui-ink-2); min-width: 0; overflow-wrap: anywhere; }
+/* Evento: píldora llena, para que se vea de lejos. */
+.cr-evento { display: inline-flex; align-items: center; gap: 4px; font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1; padding: 3px 8px; border-radius: var(--r-pill); background: var(--ui-warning); color: #fff; }
+[data-theme="dark"] .cr-evento { color: #2a1c00; }
+.cr-t-prods { margin-top: 6px; padding-top: 5px; border-top: 1px solid color-mix(in srgb, var(--k) 20%, transparent); display: flex; flex-direction: column; gap: 2px; }
+.cr-t-prods > div { display: grid; grid-template-columns: minmax(26px, auto) minmax(0, 1fr); gap: 7px; font-size: 11.5px; line-height: 1.35; color: var(--ui-ink-2); }
+.cr-t-prods b { font-weight: 600; color: var(--ui-ink); text-align: right; }
+.cr-t-prods span { overflow-wrap: anywhere; }
+.cr-t-prods .ok span { text-decoration: line-through; opacity: .7; }
+.cr-t-mas { align-self: flex-start; border: 0; background: none; padding: 1px 0; font: inherit; font-size: 11px; font-weight: 600; color: var(--k); cursor: pointer; }
+.cr-t-mas:hover { text-decoration: underline; }
+.cr-t-pdv { font-size: 10.5px; font-weight: 600; color: var(--k); background: var(--ui-surface); border-radius: 5px; padding: 0 6px; white-space: nowrap; }
 .cr-t-item { font-size: 11px; line-height: 1.35; color: var(--ui-ink-2); margin-top: 1px; overflow-wrap: anywhere; }
 .cr-t-item.ok { text-decoration: line-through; opacity: .7; }
 .cr-tarjeta.nota .cr-t-item { font-size: 12px; padding-right: 48px; color: var(--ui-ink); }

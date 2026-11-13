@@ -45,6 +45,20 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', '
 export const diaCorto = (dia: string) => `${DIAS[D(dia).getDay()].slice(0, 3).toLowerCase()} ${D(dia).getDate()}/${D(dia).getMonth() + 1}`;
 export const diaLargo = (dia: string) => `${DIAS[D(dia).getDay()]} ${D(dia).getDate()} de ${MESES[D(dia).getMonth()].toLowerCase()}`;
 const num = new Intl.NumberFormat('es-AR');
+// Los nombres vienen de ClickUp y Finnegans todo en mayúsculas («SAMSUNG ELECTRONICS ARGENTINA S.A.»): se muestran como
+// se escriben («Samsung Electronics Argentina S.A.»). Lo que ya trae minúsculas se deja como está.
+const SIGLA = /^(s\.?a\.?(s|u)?|s\.?r\.?l\.?|s\.?a\.?i\.?c\.?(i|f)?\.?|s\.?h\.?|cdo|ypf|tgn|tgs|kcc|bs|as|pdv|ii|iii|[a-z])$/i;
+const MENOR = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e', 'para', 'con', 'en', 'el', 'a']);
+export function lindo(s: string | null | undefined): string {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || /[a-záéíóúñ]/.test(t)) return t;
+  return t.split(' ').map((w, i) => {
+    const m = w.toLowerCase();
+    if (SIGLA.test(m.replace(/[(),]/g, ''))) return w;
+    if (i > 0 && MENOR.has(m)) return m;
+    return m.replace(/(^|[(/\-.'"«])([a-záéíóúñ])/g, (_, a: string, b: string) => a + b.toUpperCase());
+  }).join(' ');
+}
 export const cantidad = (m: { cantidad: number | null; articulo: string }) => [m.cantidad != null ? num.format(m.cantidad) : '', m.articulo].filter(Boolean).join(' ');
 
 // Una tarjeta: los artículos de un PDV que tienen el mismo movimiento, el mismo día, en el mismo lugar.
@@ -57,9 +71,9 @@ function tarjetas(movs: Mov[]): Tarjeta[] {
     if (!t) {
       const pdv = `PDV ${x.npdv ?? '—'}`;
       t = x.tipo === 'entrega'
-        ? { key, tipo: x.tipo, fecha: x.fecha, titulo: x.cliente ?? pdv, sub: pdv, movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id }
-        : { key, tipo: x.tipo, fecha: x.fecha, titulo: x.lugar ?? (x.tipo === 'egreso' || x.tipo === 'retiro_impresor' ? 'Sin impresor' : 'Sin proveedor'),
-          sub: [pdv, x.cliente].filter(Boolean).join(' · '), movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id };
+        ? { key, tipo: x.tipo, fecha: x.fecha, titulo: lindo(x.cliente) || pdv, sub: pdv, movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id }
+        : { key, tipo: x.tipo, fecha: x.fecha, titulo: lindo(x.lugar) || (x.tipo === 'egreso' || x.tipo === 'retiro_impresor' ? 'Sin impresor' : 'Sin proveedor'),
+          sub: [pdv, lindo(x.cliente)].filter(Boolean).join(' · '), movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id };
       m.set(key, t);
     }
     t.movs.push(x);
@@ -182,7 +196,7 @@ export default function CronogramaPage() {
                       <header className="cr-dia-cab">
                         <div className="cr-dia-tit"><b>{DIAS[D(d).getDay()]}</b><span className="num">{D(d).getDate()}/{D(d).getMonth() + 1}</span>{d === v.hoy && <span className="cr-hoy">Hoy</span>}</div>
                         <div className="cr-dia-sub">
-                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{delDia.length ? (pend ? `${pend} pendiente${pend === 1 ? '' : 's'} de ${delDia.length}` : `${delDia.length} hechos`) : 'Sin movimientos'}</span>
+                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{delDia.length ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${delDia.length}` : `${delDia.length} hechos`) : 'Sin movimientos'}</span>
                           {delDia.some((m) => m.tipo !== 'ingreso') && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
                         </div>
                         <Feriado dia={d} nombre={v.feriados[d]} puede={puede} onCambio={cargar} />
@@ -311,10 +325,9 @@ function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: 
       <div className="cr-t-pdv num">{t.sub}{t.tipo === 'retiro_impresor' ? ' · impresor' : t.tipo === 'retiro_proveedor' ? ' · proveedor' : ''}</div>
       {ver.map((m) => <div key={m.id} className={`cr-t-item${m.hecho && !t.hecho ? ' ok' : ''}`}>{cantidad(m)}</div>)}
       {mas > 0 && <div className="cr-t-item muted">+ {mas} más</div>}
-      {(t.evento || atrasado || t.avisos.length > 0) && (
+      {(t.evento || (!t.hecho && t.avisos.length > 0)) && (
         <div className="cr-t-tags">
           {t.evento && <span className="cr-tag ev">Evento</span>}
-          {atrasado && <span className="cr-tag late">Atrasado</span>}
           {!t.hecho && t.avisos.map((a) => <span key={a} className="cr-tag riesgo"><Icon name="alert" size={11} />{a}</span>)}
         </div>
       )}
@@ -396,7 +409,7 @@ function SinFecha({ items, puede, onArrastrar, onMover, onAbrir }: {
             onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', pdv); } catch { /* no hace falta */ } onArrastrar({ ids, tipo: 'entrega', de: null, pdv }); }}
             onDragEnd={() => onArrastrar(null)}
             onClick={(e) => { if (g[0].record_id && !(e.target as HTMLElement).closest('button, .popover, [role="dialog"]')) onAbrir(g[0].record_id); }}>
-            <div className="cr-t-quien">{g[0].cliente ?? pdv}</div>
+            <div className="cr-t-quien">{lindo(g[0].cliente) || pdv}</div>
             <div className="cr-t-pdv num">{pdv}</div>
             {g.filter((x) => x.articulo).slice(0, 3).map((x) => <div key={x.task_id} className="cr-t-item">{cantidad(x)}</div>)}
             {g.length > 3 && <div className="cr-t-item muted">+ {g.length - 3} más</div>}

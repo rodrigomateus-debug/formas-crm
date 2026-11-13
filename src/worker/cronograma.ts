@@ -494,6 +494,15 @@ export async function fijarPunto(db: D1Database, ctx: Ctx, b: { direccion?: unkn
   return { ok: true };
 }
 
+// Sacar la corrección a mano de un punto: la dirección se vuelve a buscar en el mapa la próxima vez que se abra la ruta.
+export async function soltarPunto(db: D1Database, ctx: Ctx, direccion: string) {
+  exigir(ctx);
+  const clave = claveDireccion(String(direccion ?? ''));
+  if (!clave) throw new HttpError(400, 'Falta la dirección.');
+  await db.prepare('DELETE FROM geocodigos WHERE clave = ?').bind(clave).run();
+  return { ok: true };
+}
+
 // ---------- La ruta del día ----------
 
 export interface Parada {

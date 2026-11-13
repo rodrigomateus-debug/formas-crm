@@ -6,7 +6,7 @@ import {
 import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
-import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
+import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
@@ -53,8 +53,8 @@ export default function RecordPage() {
           {type === 'company' && <LogosCard companyId={record.id} />}
           {!ventas && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
           {type === 'deal' && <FacturarCard record={record} />}
-          {type === 'deal' && <BocetosNegocioCard dealId={record.id} />}
-          {type === 'order' && <ProductsCard recordId={record.id} max={5} />}
+          {type === 'deal' && <BocetosNegocioCard dealId={record.id} empresas={claveEmpresas(associations)} />}
+          {type === 'order' && <ProductsCard recordId={record.id} max={5} empresas={claveEmpresas(associations)} />}
           {type === 'order' && <RemitosCard record={record} onChange={refresh} />}
           {type === 'order' && <FilesCard recordId={record.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
@@ -606,7 +606,7 @@ interface OrderProducts { pedido: string | null; configured: boolean; clickup?: 
 // En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
 // El total es siempre el de todos. `onCambio`: se subió, aprobó, cambió o quitó un boceto (en la vista previa, el tablero
 // se vuelve a pedir para que el «3/5» de la tarjeta se actualice enseguida; aviso de Rodrigo del 13/11/2026).
-function ProductsCard({ recordId, max, onCambio }: { recordId: number; max: number; onCambio?: () => void }) {
+function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: number; max: number; onCambio?: () => void; empresas?: string }) {
   const res = useAsync(() => http<OrderProducts>('GET', `/records/order/${recordId}/products`), [recordId]);
   const [all, setAll] = useState(false);
   const d = res.data;
@@ -614,7 +614,7 @@ function ProductsCard({ recordId, max, onCambio }: { recordId: number; max: numb
   const shown = all ? items : items.slice(0, max);
   // Bocetos de cada producto (PDF o foto en Drive); se suben con el botón o soltándolos encima del recuadro.
   const toast = useToast();
-  const bo = useBocetos('order', recordId);
+  const bo = useBocetos('order', recordId, empresas);
   const [ver, setVer] = useState<Boceto | null>(null);
   const [subidos, setSubidos] = useState<Boceto[] | undefined>();
   const abrir = (b: Boceto | null, recien?: Boceto[]) => { setSubidos(recien); setVer(b); };
@@ -623,7 +623,7 @@ function ProductsCard({ recordId, max, onCambio }: { recordId: number; max: numb
   // Al terminar de subir, se abre el primero en el visor para ver que quedó bien.
   const sub = useSubirBocetos('order', recordId, productos, (s) => { cambio(); abrir(s[0], s); });
   // El logo original de cada producto (logos.ts): el elegido o el principal de la empresa.
-  const lg = useLogos('order', recordId);
+  const lg = useLogos('order', recordId, empresas);
   const bocetos = bo.data?.bocetos ?? [];
   const deProducto = (k: string) => bocetos.filter((b) => b.producto === k);
   const sinProducto = bocetos.filter((b) => !productos.some((p) => p.key === b.producto));
@@ -1019,7 +1019,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {type === 'company' && <LogosCard companyId={record.id} />}
         {!esVentas(meta.me) && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
-        {type === 'order' && <ProductsCard recordId={id} max={3} onCambio={onChange} />}
+        {type === 'order' && <ProductsCard recordId={id} max={3} onCambio={onChange} empresas={claveEmpresas(associations)} />}
         {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}
         {type === 'order' && <RemitosCard record={record} onChange={changed} />}
         {type === 'order' && <FilesCard recordId={id} />}

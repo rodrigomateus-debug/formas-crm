@@ -171,10 +171,28 @@ test('negocio y pedido: el N° de PDV los asocia, y los pedidos entran desde Fin
   assert.equal(o6.props.tipo_de_pedido, 'EVENTO');
   assert.equal(o6.props.fecha_de_entrega, '2026-12-01');
   assert.equal((await asociados('order', o6.id)).company[0]?.id, empresa.id);
-  // Un pedido de FP DEMO, una anulación, otro tipo de documento o algo que no es un aviso: solo quedan registrados.
+  // Un pedido de FP DEMO (la empresa de pruebas) también entra, aparte: con su unidad y «DEMO» en el nombre y en el pedido.
   await aviso(`DEMO ${RUN}`);
-  assert.equal((await pedidoPorNombre(N + 6)).length, 0, 'FP DEMO no entra');
+  const [demo] = await pedidoPorNombre(N + 6);
+  assert.ok(demo, 'el pedido de FP DEMO se dio de alta');
+  assert.deepEqual([demo.props.unidad_de_negocio, demo.props.pedido_finnegans], ['FP DEMO', `DEMO PEDVTASTP - ${N + 6}`]);
+  assert.match(demo.name, /· DEMO/);
+  await aviso(`DEMO ${RUN}`);
+  assert.equal((await pedidoPorNombre(N + 6)).length, 1, 'sin duplicarse');
+  // Un pedido de verdad con el mismo número que uno de FP DEMO es otro pedido.
+  await totales({ totales: {}, pedidos: { [`PEDVTASTP - ${N + 6}`]: { cliente: `VINCULO ${RUN} S.A.`, cuit: CUIT, fecha: hoy } } });
+  assert.deepEqual((await pedidoPorNombre(N + 6)).map((o) => o.props.unidad_de_negocio).sort(), ['FORMAS SHOP', 'FP DEMO']);
+  // Anulado en Finnegans: el pedido pasa a «Anulado» (por el aviso, o por el informe de cada hora).
+  const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
   assert.equal((await aviso(`AVISO ${RUN}`, 'nullify')).status, 200);
+  assert.equal((await api('GET', `/records/order/${o6.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'anulado por el aviso');
+  assert.notEqual((await api('GET', `/records/order/${demo.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'el de FP DEMO con otro número, no');
+  const an = await totales({ totales: {}, pedidos: {}, anulados: [`PEDVTASTP - ${N + 4}`, `DEMO PEDVTASTP - ${N + 6}`, `PEDVTASTP - 99999999`] });
+  assert.equal(an.data.nuevos.anulados, 2);
+  assert.equal((await api('GET', `/records/order/${o4.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'anulado por el informe');
+  assert.equal((await api('GET', `/records/order/${demo.id}`)).data.record.props.hs_pipeline_stage, ANULADO);
+  assert.equal((await totales({ totales: {}, pedidos: {}, anulados: [`PEDVTASTP - ${N + 4}`] })).data.nuevos.anulados, 0, 'ya estaba anulado');
+  // Otro tipo de documento o algo que no es un aviso: solo quedan registrados.
   assert.equal((await aviso(`AVISO ${RUN}`, 'create', 'FP_PDVMELI')).status, 200);
   assert.equal((await api('POST', camino, 'hola')).status, 200);
   assert.equal((await api('GET', camino)).status, 200, 'también por GET, como prueba Finnegans la dirección');

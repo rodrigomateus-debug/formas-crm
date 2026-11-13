@@ -26,7 +26,9 @@ async function unidadDelNegocio(db: D1Database, pipelineId: string | null) {
   const p = await db.prepare('SELECT team_id FROM pipelines WHERE id = ?').bind(pipelineId).first<{ team_id: number | null }>();
   return Object.values(UNIDADES).find((u) => u.team === p?.team_id)?.pedido ?? null;
 }
-const mismaUnidad = (unidades: string[] | null, unidad: unknown) => !unidades || !unidad || unidades.includes(String(unidad).toUpperCase());
+// Un pedido de FP DEMO (pruebas, pedidosfin.ts) se puede asociar con un negocio de cualquier unidad.
+const esDemo = (unidad: unknown) => String(unidad ?? '').toUpperCase() === 'FP DEMO';
+const mismaUnidad = (unidades: string[] | null, unidad: unknown) => !unidades || !unidad || esDemo(unidad) || unidades.includes(String(unidad).toUpperCase());
 
 interface Pedido { id: number; name: string; unidad: string | null; negocio: number | null }
 async function pedidosConNumero(db: D1Database, n: number) {
@@ -55,7 +57,8 @@ export async function vincularNegocio(db: D1Database, ctx: Ctx, dealId: number, 
     const u = await unidadDelNegocio(db, o.pipeline_id);
     if (!unidades || !u || u.some((x) => unidades.includes(x))) throw new HttpError(409, `El PDV ${n} ya está cargado en el negocio «${o.name}». Un pedido va en un solo negocio.`);
   }
-  const candidatos = (await pedidosConNumero(db, n)).filter((p) => mismaUnidad(unidades, p.unidad));
+  // Primero los de verdad; los de FP DEMO, después.
+  const candidatos = (await pedidosConNumero(db, n)).filter((p) => mismaUnidad(unidades, p.unidad)).sort((x, y) => Number(esDemo(x.unidad)) - Number(esDemo(y.unidad)));
   const pedido = candidatos.find((p) => p.negocio === dealId) ?? candidatos.find((p) => p.negocio == null) ?? candidatos[0];
   if (!pedido) return { estado: 'esperando' };
   if (pedido.negocio === dealId) return { estado: 'ya_estaba', pedido };

@@ -1,4 +1,4 @@
-import { aplicarPedidos, avisoDeFinnegans, type PedidoFin } from './pedidosfin';
+import { aplicarAnulados, aplicarPedidos, avisoDeFinnegans, type PedidoFin } from './pedidosfin';
 import { Hono } from 'hono';
 import { marcarParada, rutaDelChofer } from './cronograma';
 import type { Ctx, Env } from './env';
@@ -291,10 +291,12 @@ hooks.all('/finnegans/:key', async (c) => {
 // Total sin IVA de cada pedido (scripts/pedidos-totales.mjs): {totales: {"PEDVTASTP - 31277": 123456.78, …}}.
 hooks.post('/pedidos/totales', async (c) => {
   await adminToken(c.env, c.req.raw);
-  const body = await c.req.json<Parameters<typeof aplicarTotales>[1] & { pedidos?: Record<string, PedidoFin> }>();
+  const body = await c.req.json<Parameters<typeof aplicarTotales>[1] & { pedidos?: Record<string, PedidoFin>; anulados?: string[] }>();
   // Primero los pedidos nuevos de Finnegans (pedidosfin.ts): así reciben su total y su vendedora en la misma pasada.
   const pedidos = body.pedidos && typeof body.pedidos === 'object' ? await aplicarPedidos(c.env, body.pedidos) : undefined;
-  return c.json({ ...(await aplicarTotales(c.env, body)), ...(pedidos ? { nuevos: pedidos } : {}) });
+  // Y los que se anularon en Finnegans pasan a «Anulado».
+  const anulados = Array.isArray(body.anulados) ? await aplicarAnulados(c.env, body.anulados.map(String)) : undefined;
+  return c.json({ ...(await aplicarTotales(c.env, body)), ...(pedidos ? { nuevos: { ...pedidos, ...(anulados ?? {}) } } : {}) });
 });
 hooks.get('/pedidos/totales', async (c) => {
   await adminToken(c.env, c.req.raw);

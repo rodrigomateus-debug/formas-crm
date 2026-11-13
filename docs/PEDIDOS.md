@@ -285,10 +285,16 @@ Finnegans.
   que llama al CRM cuando se crea o se anula uno; avisa también cuando el pedido se carga por API, como hace el cotizador
   (probado el 13/11/2026). `POST /api/integrations/finnegans/webhook` (administrador) da la dirección, con su llave:
   `/hooks/finnegans/<llave>`. El aviso trae el tipo de documento, la identificación externa del pedido y el evento; con
-  eso el CRM lee el pedido de Finnegans (tres consultas) y, si es de Formas Publicitarias y no lo tiene, lo da de alta
-  en el momento. Las anulaciones y los pedidos de FP DEMO solo quedan en el registro de entradas, que guarda cada aviso
-  sin los tokens que manda Finnegans. Se prende y se apaga en Finnegans (`PATCH custom/BProc/FORMAS_HUB_PEDIDOS/config`
+  eso el CRM lee el pedido de Finnegans (tres consultas) y, si es de Formas Publicitarias o de FP DEMO y no lo tiene, lo da de alta
+  en el momento. Si el pedido se anula, pasa a «Anulado». El registro de entradas guarda cada aviso sin los tokens que
+  manda Finnegans. Se prende y se apaga en Finnegans (`PATCH custom/BProc/FORMAS_HUB_PEDIDOS/config`
   con `{"activo": true}`).
+- **Anulados.** Un pedido anulado en Finnegans pasa a «Anulado» en el CRM: por el aviso, o por el informe de cada hora
+  (los pedidos con todos sus renglones anulados). ClickUp lo anula por su lado, con su propia integración con Finnegans.
+- **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
+  los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
+  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni
+  los filtros por unidad de los pedidos de verdad; sí se pueden asociar a un negocio por su número.
 
 ### El N° de PDV en el negocio
 

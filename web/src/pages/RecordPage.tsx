@@ -6,7 +6,7 @@ import {
 import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
-import { BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
+import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
@@ -599,8 +599,9 @@ interface OrderProducts { pedido: string | null; configured: boolean; clickup?: 
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
 // los artículos del PDV de ClickUp (producto, cantidad, código y estado de producción, sin precio).
 // En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
-// El total es siempre el de todos.
-function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
+// El total es siempre el de todos. `onCambio`: se subió, aprobó, cambió o quitó un boceto (en la vista previa, el tablero
+// se vuelve a pedir para que el «3/5» de la tarjeta se actualice enseguida; aviso de Rodrigo del 13/11/2026).
+function ProductsCard({ recordId, max, onCambio }: { recordId: number; max: number; onCambio?: () => void }) {
   const res = useAsync(() => http<OrderProducts>('GET', `/records/order/${recordId}/products`), [recordId]);
   const [all, setAll] = useState(false);
   const d = res.data;
@@ -610,8 +611,12 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   const toast = useToast();
   const bo = useBocetos('order', recordId);
   const [ver, setVer] = useState<Boceto | null>(null);
+  const [subidos, setSubidos] = useState<Boceto[] | undefined>();
+  const abrir = (b: Boceto | null, recien?: Boceto[]) => { setSubidos(recien); setVer(b); };
+  const cambio = () => { bo.reload(); onCambio?.(); };
   const productos: ProductoRef[] = items.map((it) => ({ key: it.code || it.name, nombre: it.name }));
-  const sub = useSubirBocetos('order', recordId, productos, () => bo.reload());
+  // Al terminar de subir, se abre el primero en el visor para ver que quedó bien.
+  const sub = useSubirBocetos('order', recordId, productos, (s) => { cambio(); abrir(s[0], s); });
   // El logo original de cada producto (logos.ts): el elegido o el principal de la empresa.
   const lg = useLogos('order', recordId);
   const bocetos = bo.data?.bocetos ?? [];
@@ -620,9 +625,10 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   const puedeSubir = !!bo.data?.configurado;
   const usar = async (b: Boceto, key: string) => {
     const p = productos.find((x) => x.key === key);
-    try { await http('POST', `/bocetos/${b.id}/usar`, { order_id: recordId, producto: p?.key ?? null, producto_nombre: p?.nombre ?? b.producto_nombre }); toast('Boceto agregado al pedido'); bo.reload(); }
+    try { await http('POST', `/bocetos/${b.id}/usar`, { order_id: recordId, producto: p?.key ?? null, producto_nombre: p?.nombre ?? b.producto_nombre }); toast('Boceto agregado al pedido'); cambio(); }
     catch (e) { toast((e as Error).message, true); }
   };
+  const pg = sub.progreso;
   const qty = (n: number | null) => (n == null ? '' : n.toLocaleString('es-AR', { maximumFractionDigits: 2 }));
   const deClickup = d?.source === 'clickup';
   const empty = res.loading ? 'Buscando los productos…'
@@ -634,8 +640,9 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
   return (
     <SoltarBocetos className="panel assoc-card soltar" onArchivos={(f) => (puedeSubir ? sub.elegir(f) : toast('Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).', true))}>
       <div className="panel-head"><h3>Productos <span className="muted small">({items.length})</span></h3>
-        {puedeSubir && items.length > 0 && <BotonArchivos onArchivos={sub.elegir} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
+        {puedeSubir && items.length > 0 && <BotonArchivos onArchivos={sub.elegir} disabled={sub.subiendo} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
       </div>
+      {pg && !sub.cuadro && <div className="panel-body" style={{ paddingTop: 0 }}><AvisoSubida p={pg} /></div>}
       {/* Quién lo tiene en producción (asignado en ClickUp), con su foto: a quién preguntarle cómo viene. */}
       {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
       {shown.map((it, i) => (
@@ -656,10 +663,12 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
             )}
             {it.description && <div className="small muted clamp-2" title={it.description}>{it.description}</div>}
             <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-              <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={setVer} />
+              <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={(b) => abrir(b)} />
               <LogoProducto type="order" recordId={recordId} producto={it.code || it.name} productoNombre={it.name} res={lg.data} onCambio={() => lg.reload()} />
-              {puedeSubir && <BotonArchivos className="btn ghost sm boceto-mas" multiple={false} title={`Subir un boceto de ${it.name}`}
-                onArchivos={(f) => sub.elegir(f, { key: it.code || it.name, nombre: it.name })}>+ Boceto</BotonArchivos>}
+              {pg && pg.fase !== 'leyendo' && pg.producto === (it.code || it.name)
+                ? <span className="boceto-subiendo" aria-hidden><span className="spinner" />{pg.fase === 'subiendo' ? `Subiendo… ${Math.round(pg.pct * 100)} %` : 'Guardando en Drive…'}</span>
+                : puedeSubir && <BotonArchivos className="btn ghost sm boceto-mas" multiple={false} disabled={sub.subiendo} title={`Subir un boceto de ${it.name}`}
+                  onArchivos={(f) => sub.elegir(f, { key: it.code || it.name, nombre: it.name })}>+ Boceto</BotonArchivos>}
             </div>
           </div>
           {it.subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>}
@@ -688,7 +697,7 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
       {sinProducto.length > 0 && (
         <div className="assoc-item" style={{ flexDirection: 'column', gap: 4 }}>
           <div className="small muted">Bocetos sin producto (abrilos para elegir a cuál van)</div>
-          <BocetoChips lista={sinProducto} onAbrir={setVer} />
+          <BocetoChips lista={sinProducto} onAbrir={(b) => abrir(b)} />
         </div>
       )}
       {(bo.data?.de_negocios.length ?? 0) > 0 && (
@@ -696,7 +705,7 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
           <div className="small muted">Bocetos de negocios de esta empresa (hechos antes del pedido)</div>
           {bo.data!.de_negocios.map((b) => (
             <div key={b.id} className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-              <BocetoChips lista={[b]} onAbrir={setVer} />
+              <BocetoChips lista={[b]} onAbrir={(x) => abrir(x)} />
               <span className="small ellipsis grow" title={`Negocio: ${b.negocio}`}>{b.producto_nombre || b.nombre} · {b.negocio}</span>
               <Select className="input sm" style={{ width: 170 }} value="" aria-label="Usar en el producto" onChange={(e) => e.target.value && usar(b, e.target.value)}>
                 <option value="">Usar para…</option>
@@ -708,8 +717,8 @@ function ProductsCard({ recordId, max }: { recordId: number; max: number }) {
       )}
       {bo.data && !puedeSubir && items.length > 0 && <div className="panel-body small muted">Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).</div>}
       {sub.cuadro}
-      {ver && <BocetoVisor b={ver} esPedido productos={productos} onClose={() => setVer(null)} onCambio={() => bo.reload()}
-        logos={{ type: 'order', recordId, res: lg.data, onCambio: () => lg.reload() }} />}
+      {ver && <BocetoVisor key={ver.id} b={ver} esPedido productos={productos} subidos={subidos} onIr={(b) => setVer(bocetos.find((y) => y.id === b.id) ?? b)}
+        onClose={() => abrir(null)} onCambio={cambio} logos={{ type: 'order', recordId, res: lg.data, onCambio: () => lg.reload() }} />}
     </SoltarBocetos>
   );
 }
@@ -1005,7 +1014,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {type === 'company' && <LogosCard companyId={record.id} />}
         {!esVentas(meta.me) && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
-        {type === 'order' && <ProductsCard recordId={id} max={3} />}
+        {type === 'order' && <ProductsCard recordId={id} max={3} onCambio={onChange} />}
         {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}
         {type === 'order' && <RemitosCard record={record} onChange={changed} />}
         {type === 'order' && <FilesCard recordId={id} />}

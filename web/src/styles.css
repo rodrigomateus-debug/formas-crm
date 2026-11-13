@@ -821,7 +821,10 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .logo-op-btn:disabled { cursor: default; }
 .logo-op-nombre { font-weight: 600; font-size: 13px; }
 .logo-op-nombre svg { margin-left: 4px; color: var(--ui-warning); vertical-align: -1px; }
-.logo-op-ver { position: absolute; top: 4px; right: 4px; background: var(--ui-surface); }
+/* Ver grande y descargar, arriba a la derecha de cada logo del cuadro; al lado de la fichita del producto, descargar. */
+.logo-op-acciones { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; }
+.logo-op-acciones .btn { background: var(--ui-surface); }
+.btn.logo-bajar { color: var(--accent-ink); }
 .logo-op-nuevo { align-items: center; justify-content: center; gap: 4px; min-height: 160px; padding: 12px; border-style: dashed; color: var(--accent-ink); font: inherit;
   font-weight: 600; cursor: pointer; }
 .logo-vista { background: repeating-conic-gradient(var(--ui-surface-sunken) 0 25%, var(--ui-surface) 0 50%) 0 0 / 16px 16px; }

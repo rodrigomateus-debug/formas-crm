@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
+import { Avatar } from '../components';
+import { LogoProveedor, marcaProveedor } from '../proveedores';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. Cada día con
 // sus entregas, ingresos, retiros y egresos, armados solos con las fechas de cada artículo en ClickUp. Arrastrar una
@@ -16,7 +18,7 @@ export type Tipo = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'reti
 export interface Mov {
   id: string; tipo: Tipo; fecha: string; task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null;
   record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
-  hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null;
+  hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null; dominio?: string | null;
 }
 interface Nota { id: number; fecha: string; texto: string; hecho: number }
 interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -45,10 +47,24 @@ const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', '
 export const diaCorto = (dia: string) => `${DIAS[D(dia).getDay()].slice(0, 3).toLowerCase()} ${D(dia).getDate()}/${D(dia).getMonth() + 1}`;
 export const diaLargo = (dia: string) => `${DIAS[D(dia).getDay()]} ${D(dia).getDate()} de ${MESES[D(dia).getMonth()].toLowerCase()}`;
 const num = new Intl.NumberFormat('es-AR');
+// Los nombres vienen de ClickUp y Finnegans todo en mayúsculas («SAMSUNG ELECTRONICS ARGENTINA S.A.»): se muestran como
+// se escriben («Samsung Electronics Argentina S.A.»). Lo que ya trae minúsculas se deja como está.
+const SIGLA = /^(s\.?a\.?(s|u)?|s\.?r\.?l\.?|s\.?a\.?i\.?c\.?(i|f)?\.?|s\.?h\.?|cdo|ypf|tgn|tgs|kcc|bs|as|pdv|ii|iii|[a-z])$/i;
+const MENOR = new Set(['de', 'del', 'la', 'las', 'los', 'y', 'e', 'para', 'con', 'en', 'el', 'a']);
+export function lindo(s: string | null | undefined): string {
+  const t = String(s ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || /[a-záéíóúñ]/.test(t)) return t;
+  return t.split(' ').map((w, i) => {
+    const m = w.toLowerCase();
+    if (SIGLA.test(m.replace(/[(),]/g, ''))) return w;
+    if (i > 0 && MENOR.has(m)) return m;
+    return m.replace(/(^|[(/\-.'"«])([a-záéíóúñ])/g, (_, a: string, b: string) => a + b.toUpperCase());
+  }).join(' ');
+}
 export const cantidad = (m: { cantidad: number | null; articulo: string }) => [m.cantidad != null ? num.format(m.cantidad) : '', m.articulo].filter(Boolean).join(' ');
 
 // Una tarjeta: los artículos de un PDV que tienen el mismo movimiento, el mismo día, en el mismo lugar.
-interface Tarjeta { key: string; tipo: Tipo; fecha: string; titulo: string; sub: string; movs: Mov[]; hecho: boolean; evento: boolean; avisos: string[]; record_id: number | null }
+interface Tarjeta { key: string; tipo: Tipo; fecha: string; titulo: string; pdv: string; para: string; movs: Mov[]; hecho: boolean; evento: boolean; avisos: string[]; record_id: number | null; dominio: string | null; crudo: string }
 function tarjetas(movs: Mov[]): Tarjeta[] {
   const m = new Map<string, Tarjeta>();
   for (const x of movs) {
@@ -56,10 +72,11 @@ function tarjetas(movs: Mov[]): Tarjeta[] {
     let t = m.get(key);
     if (!t) {
       const pdv = `PDV ${x.npdv ?? '—'}`;
-      t = x.tipo === 'entrega'
-        ? { key, tipo: x.tipo, fecha: x.fecha, titulo: x.cliente ?? pdv, sub: pdv, movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id }
-        : { key, tipo: x.tipo, fecha: x.fecha, titulo: x.lugar ?? (x.tipo === 'egreso' || x.tipo === 'retiro_impresor' ? 'Sin impresor' : 'Sin proveedor'),
-          sub: [pdv, x.cliente].filter(Boolean).join(' · '), movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id };
+      // En las entregas la tarjeta es del cliente; en lo demás, del proveedor o impresor, y dice para qué PDV y cliente es.
+      const entrega = x.tipo === 'entrega';
+      const crudo = (entrega ? x.cliente : x.lugar) ?? '';
+      t = { key, tipo: x.tipo, fecha: x.fecha, pdv, para: entrega ? '' : lindo(x.cliente), movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id, dominio: x.dominio ?? null, crudo,
+        titulo: lindo(crudo) || (entrega ? pdv : x.tipo === 'egreso' || x.tipo === 'retiro_impresor' ? 'Sin impresor' : 'Sin proveedor') };
       m.set(key, t);
     }
     t.movs.push(x);
@@ -67,7 +84,8 @@ function tarjetas(movs: Mov[]): Tarjeta[] {
     t.evento = t.evento || x.evento;
     for (const a of x.avisos) if (!t.avisos.includes(a)) t.avisos.push(a);
   }
-  return [...m.values()].sort((a, b) => Number(a.hecho) - Number(b.hecho) || a.titulo.localeCompare(b.titulo));
+  // Primero lo pendiente y, adentro, los eventos; lo hecho al final.
+  return [...m.values()].sort((a, b) => Number(a.hecho) - Number(b.hecho) || Number(b.evento) - Number(a.evento) || a.titulo.localeCompare(b.titulo));
 }
 const coincide = (m: { npdv: string | null; cliente: string | null; articulo: string; lugar?: string | null }, q: string) =>
   !q || [m.npdv, m.cliente, m.articulo, m.lugar].some((x) => (x ?? '').toLowerCase().includes(q));
@@ -182,7 +200,7 @@ export default function CronogramaPage() {
                       <header className="cr-dia-cab">
                         <div className="cr-dia-tit"><b>{DIAS[D(d).getDay()]}</b><span className="num">{D(d).getDate()}/{D(d).getMonth() + 1}</span>{d === v.hoy && <span className="cr-hoy">Hoy</span>}</div>
                         <div className="cr-dia-sub">
-                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{delDia.length ? (pend ? `${pend} pendiente${pend === 1 ? '' : 's'} de ${delDia.length}` : `${delDia.length} hechos`) : 'Sin movimientos'}</span>
+                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{delDia.length ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${delDia.length}` : `${delDia.length} hechos`) : 'Sin movimientos'}</span>
                           {delDia.some((m) => m.tipo !== 'ingreso') && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
                         </div>
                         <Feriado dia={d} nombre={v.feriados[d]} puede={puede} onCambio={cargar} />
@@ -235,21 +253,30 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
   const semanas = useMemo(() => Array.from({ length: 13 }, (_, i) => sumar(centro, (i - 6) * 7)), [centro]);
   const max = Math.max(1, ...semanas.flatMap((s) => [0, 1, 2, 3, 4].map((i) => dias[sumar(s, i)]?.total ?? 0)));
   const estaSemana = lunesDe(hoy);
+  // Cómo se acomoda la barra. Por defecto arranca en la semana anterior a la actual: se ven la anterior, la actual y las
+  // que vienen; las más viejas quedan a la izquierda, a un arrastre o una flecha. Si la semana elegida no entra en esa
+  // vista (una muy vieja o muy lejana), se centra en ella. Con las flechas se centra en el mes al que se fue.
+  const centroAntes = useRef(centro);
   useEffect(() => {
     const c = caja.current;
-    const el = c?.querySelector<HTMLElement>('[aria-current="true"]') ?? c?.querySelector<HTMLElement>(`[data-s="${centro}"]`);
-    if (!el || !c) return;
+    if (!c) return;
     const base = c.getBoundingClientRect().left - c.scrollLeft;
     const izq = (x: HTMLElement) => x.getBoundingClientRect().left - base;
-    let left = izq(el) - c.clientWidth / 2 + el.clientWidth / 2;
-    // La semana actual queda a la vista junto con la elegida, si entran las dos.
-    const hoyEl = c.querySelector<HTMLElement>('.cr-sem.actual');
-    if (hoyEl && hoyEl !== el && Math.abs(izq(hoyEl) - izq(el)) + el.clientWidth + 40 < c.clientWidth) {
-      left = Math.min(left, izq(hoyEl) - 32);
-      left = Math.max(left, izq(hoyEl) + hoyEl.clientWidth + 32 - c.clientWidth);
-    }
-    c.scrollTo({ left, behavior: 'smooth' });
-  }, [semana, centro]);
+    const centrar = (x: HTMLElement) => izq(x) - c.clientWidth / 2 + x.clientWidth / 2;
+    const porFlecha = centroAntes.current !== centro;
+    centroAntes.current = centro;
+    const elegida = c.querySelector<HTMLElement>('[aria-current="true"]');
+    const delCentro = c.querySelector<HTMLElement>(`[data-s="${centro}"]`);
+    const anterior = c.querySelector<HTMLElement>(`[data-s="${sumar(estaSemana, -7)}"]`);
+    let left: number | null = null;
+    if (porFlecha && delCentro && centro !== semana) left = centrar(delCentro);
+    else if (anterior) {
+      left = izq(anterior) - 30;
+      // La elegida tiene que verse entera en esa vista; si no, se centra en ella.
+      if (elegida && (izq(elegida) < left || izq(elegida) + elegida.clientWidth > left + c.clientWidth - 30)) left = centrar(elegida);
+    } else if (elegida ?? delCentro) left = centrar((elegida ?? delCentro)!);
+    if (left != null) c.scrollTo({ left, behavior: 'smooth' });
+  }, [semana, centro, estaSemana]);
   const meses: Array<{ mes: string; semanas: string[] }> = [];
   for (const s of semanas) {
     const jueves = D(sumar(s, 3)), mes = `${MESES[jueves.getMonth()]}${jueves.getFullYear() !== D(hoy).getFullYear() ? ` ${jueves.getFullYear()}` : ''}`;
@@ -297,25 +324,46 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
 
 // ---------- Las tarjetas ----------
 
+// Con quién es cada movimiento: el cliente, un proveedor o un impresor.
+const ROL: Record<Tipo, { nombre: string; icono: string }> = {
+  entrega: { nombre: 'Cliente', icono: 'company' }, ingreso: { nombre: 'Proveedor', icono: 'bag' }, retiro_proveedor: { nombre: 'Proveedor', icono: 'bag' },
+  egreso: { nombre: 'Impresor', icono: 'printer' }, retiro_impresor: { nombre: 'Impresor', icono: 'printer' },
+};
+const TOPE = 3;
+
 function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: {
   t: Tarjeta; hoy: string; puede: boolean; onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
 }) {
   const atrasado = !t.hecho && t.fecha < hoy;
-  const ver = t.movs.filter((m) => m.articulo).slice(0, 4), mas = t.movs.filter((m) => m.articulo).length - ver.length;
+  // Hasta tres productos a la vista; el resto se abre con «+ N productos más», así un pedido largo no estira la columna.
+  const [todo, setTodo] = useState(false);
+  const prods = t.movs.filter((m) => m.articulo);
+  const ver = todo ? prods : prods.slice(0, TOPE);
+  const marca = t.tipo === 'entrega' ? null : marcaProveedor(t.crudo);
   return (
     <article className={`cr-tarjeta${t.hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}${onAbrir ? ' abre' : ''}`} draggable={puede}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.key); } catch { /* no hace falta */ } onArrastrar(true); e.currentTarget.classList.add('arrastrando'); }}
       onDragEnd={(e) => { e.currentTarget.classList.remove('arrastrando'); onArrastrar(false); }}
       onClick={(e) => { if (onAbrir && !(e.target as HTMLElement).closest('button, a, .popover, [role="dialog"]')) onAbrir(); }}>
-      <div className="cr-t-quien">{t.titulo}</div>
-      <div className="cr-t-pdv num">{t.sub}{t.tipo === 'retiro_impresor' ? ' · impresor' : t.tipo === 'retiro_proveedor' ? ' · proveedor' : ''}</div>
-      {ver.map((m) => <div key={m.id} className={`cr-t-item${m.hecho && !t.hecho ? ' ok' : ''}`}>{cantidad(m)}</div>)}
-      {mas > 0 && <div className="cr-t-item muted">+ {mas} más</div>}
-      {(t.evento || atrasado || t.avisos.length > 0) && (
+      <div className="cr-t-rol"><Icon name={ROL[t.tipo].icono} size={11} />{ROL[t.tipo].nombre}</div>
+      <div className="cr-t-quien">
+        {marca ? <LogoProveedor marca={marca} /> : t.dominio ? <Avatar name={t.titulo} type="company" domain={t.dominio} size="xs" /> : null}
+        <span>{t.titulo}</span>
+      </div>
+      <div className="cr-t-linea">
+        <span className="cr-t-pdv num">{t.pdv}</span>
+        {t.para && <span className="cr-t-para">{t.para}</span>}
+        {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
+      </div>
+      {prods.length > 0 && (
+        <div className="cr-t-prods">
+          {ver.map((m) => <div key={m.id} className={m.hecho && !t.hecho ? 'ok' : ''}><b className="num">{m.cantidad != null ? num.format(m.cantidad) : ''}</b><span>{m.articulo}</span></div>)}
+          {prods.length > TOPE && <button type="button" className="cr-t-mas" aria-expanded={todo} onClick={() => setTodo(!todo)}>{todo ? 'Ver menos' : `+ ${prods.length - TOPE} producto${prods.length - TOPE === 1 ? '' : 's'} más`}</button>}
+        </div>
+      )}
+      {!t.hecho && t.avisos.length > 0 && (
         <div className="cr-t-tags">
-          {t.evento && <span className="cr-tag ev">Evento</span>}
-          {atrasado && <span className="cr-tag late">Atrasado</span>}
-          {!t.hecho && t.avisos.map((a) => <span key={a} className="cr-tag riesgo"><Icon name="alert" size={11} />{a}</span>)}
+          {t.avisos.map((a) => <span key={a} className="cr-tag riesgo"><Icon name="alert" size={11} />{a}</span>)}
         </div>
       )}
       {puede && (
@@ -396,8 +444,8 @@ function SinFecha({ items, puede, onArrastrar, onMover, onAbrir }: {
             onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', pdv); } catch { /* no hace falta */ } onArrastrar({ ids, tipo: 'entrega', de: null, pdv }); }}
             onDragEnd={() => onArrastrar(null)}
             onClick={(e) => { if (g[0].record_id && !(e.target as HTMLElement).closest('button, .popover, [role="dialog"]')) onAbrir(g[0].record_id); }}>
-            <div className="cr-t-quien">{g[0].cliente ?? pdv}</div>
-            <div className="cr-t-pdv num">{pdv}</div>
+            <div className="cr-t-quien">{lindo(g[0].cliente) || pdv}</div>
+            <div className="cr-t-linea"><span className="cr-t-pdv num">{pdv}</span></div>
             {g.filter((x) => x.articulo).slice(0, 3).map((x) => <div key={x.task_id} className="cr-t-item">{cantidad(x)}</div>)}
             {g.length > 3 && <div className="cr-t-item muted">+ {g.length - 3} más</div>}
             {puede && <div className="cr-t-acc"><SelectorFecha valor={null} onElegir={(f) => f && onMover(ids, f, pdv)} label="Ponerle fecha de entrega" className="cr-mini" title="Ponerle fecha de entrega"><Icon name="calendar" size={13} /></SelectorFecha></div>}

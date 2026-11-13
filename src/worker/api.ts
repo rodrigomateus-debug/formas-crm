@@ -17,7 +17,9 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
-import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, seguir, seVe, subirAdjunto } from './conversacion';
+import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
+import { marcarNotificaciones, notificaciones } from './notificaciones';
+import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
@@ -455,7 +457,24 @@ api.patch('/mensajes/:id', async (c) => {
   canWrite(c.get('ctx'));
   return c.json(await editarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ body?: string }>()).body));
 });
+// Poner o sacar una reacción con emoji (tocar el mismo otra vez la saca).
+api.post('/mensajes/:id/reacciones', async (c) => {
+  canWrite(c.get('ctx'));
+  const m = await c.env.DB.prepare('SELECT record_id FROM mensajes WHERE id = ?').bind(Number(c.req.param('id'))).first<{ record_id: number }>();
+  if (!m) throw new HttpError(404, 'No existe el mensaje.');
+  await registroVisible(c, m.record_id);
+  return c.json(await reaccionar(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ emoji?: string }>()).emoji));
+});
 api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+// «Marcar como no leída» desde la bandeja.
+api.post('/records/:type/:id/conversacion/no-leido', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  return c.json(await marcarNoLeido(c.env.DB, c.get('ctx'), rec.id));
+});
+// La campanita (notificaciones.ts): lo último que le pasó a cada uno; marcarlas leídas o no leídas.
+api.get('/notificaciones', async (c) => c.json(await notificaciones(c.env.DB, c.get('ctx'), { limite: num(c.req.query('limite')), noLeidas: c.req.query('no_leidas') === '1' })));
+api.post('/notificaciones/leidas', async (c) => c.json(await marcarNotificaciones(c.env.DB, c.get('ctx'), (await c.req.json<{ ids?: unknown }>().catch(() => ({} as { ids?: unknown }))).ids, true)));
+api.post('/notificaciones/no-leidas', async (c) => c.json(await marcarNotificaciones(c.env.DB, c.get('ctx'), (await c.req.json<{ ids?: unknown }>()).ids ?? [], false)));
 // Las conversaciones que sigue el usuario (la bandeja) o, con no_leidas=1, solo las que tienen algo sin leer (el globito).
 api.get('/conversaciones', async (c) => c.json(await bandeja(c.env.DB, c.get('ctx'), { noLeidas: c.req.query('no_leidas') === '1', limite: num(c.req.query('limite')) })));
 
@@ -1149,6 +1168,81 @@ api.get('/bocetos/:id/archivo', async (c) => {
   return new Response(res.body, { headers: { 'content-type': b.mime ?? res.headers.get('content-type') ?? 'application/octet-stream',
     'content-disposition': `${disp}; filename*=UTF-8''${encodeURIComponent(b.nombre)}`, 'cache-control': 'private, max-age=3600' } });
 });
+// ---------- Logos del cliente (logos.ts, drive.ts) ----------
+
+// Los logos de la empresa (en un pedido o negocio, los de su empresa, con el elegido en cada producto).
+api.get('/records/:type/:id/logos', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const db = c.env.DB;
+  const company = await empresaDe(db, rec);
+  const cfg = await driveConfig(c.env);
+  const emp = company ? await db.prepare('SELECT name FROM records WHERE id = ?').bind(company).first<{ name: string }>() : null;
+  return c.json({
+    company_id: company, empresa: emp?.name ?? null,
+    logos: company ? await logosDe(db, company) : [],
+    elegidos: rec.object_type === 'company' ? [] : await elegidosDe(db, rec.id),
+    configurado: !!(cfg.carpeta && cfg.usuario && c.env.GOOGLE_SA_JSON),
+  });
+});
+// Subir uno a la empresa (formulario con «archivo», «etiqueta», «curvas» —lo que vio pdf.js— y, desde un producto,
+// «producto»: queda elegido para ese producto).
+api.post('/records/:type/:id/logos', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const company = await empresaDe(c.env.DB, rec);
+  if (!company) throw new HttpError(400, 'Este registro no tiene empresa: asociale una para guardar el logo.');
+  const form = await c.req.formData();
+  const archivo = form.get('archivo');
+  if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del logo.');
+  const s = (k: string) => (typeof form.get(k) === 'string' ? (form.get(k) as string) : null);
+  const logo = await subirLogo(c.env, ctx, company, archivo, { etiqueta: s('etiqueta'), curvas: s('curvas') });
+  const producto = s('producto')?.trim();
+  if (producto && rec.object_type !== 'company') {
+    await elegirLogo(c.env.DB, ctx, rec, producto, logo.id);
+    if (rec.object_type === 'order') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  }
+  return c.json(logo, 201);
+});
+// Elegir el logo de un producto ({ producto, logo_id }; logo_id null: el principal).
+api.put('/records/:type/:id/logos/producto', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const body = await c.req.json<{ producto?: string; logo_id?: number | null }>();
+  const logo = await elegirLogo(c.env.DB, ctx, rec, String(body.producto ?? ''), body.logo_id == null ? null : Number(body.logo_id));
+  if (rec.object_type === 'order') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
+  return c.json({ logo });
+});
+api.patch('/logos/:id', async (c) => {
+  canWrite(c.get('ctx'));
+  const l = await logoPorId(c.env.DB, Number(c.req.param('id')));
+  await registroVisible(c, l.company_id);
+  return c.json(await actualizarLogo(c.env.DB, l.id, await c.req.json()));
+});
+api.delete('/logos/:id', async (c) => {
+  canWrite(c.get('ctx'));
+  const l = await logoPorId(c.env.DB, Number(c.req.param('id')));
+  await registroVisible(c, l.company_id);
+  await quitarLogo(c.env.DB, l.id);
+  return c.json({ ok: true });
+});
+// El archivo, desde Drive. Lo que el CRM sabe mostrar va «inline» (el SVG, encerrado: sin scripts ni nada de afuera);
+// lo demás (AI, CDR, EPS…), siempre como descarga.
+api.get('/logos/:id/archivo', async (c) => {
+  const l = await logoPorId(c.env.DB, Number(c.req.param('id')));
+  await registroVisible(c, l.company_id);
+  const res = await bajarArchivo(c.env, l.drive_id);
+  const inline = !!l.vista && !c.req.query('descargar');
+  const headers: Record<string, string> = {
+    'content-type': inline ? (l.vista === 'pdf' ? 'application/pdf' : l.mime ?? 'application/octet-stream') : 'application/octet-stream',
+    'content-disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(l.nombre)}`,
+    'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff',
+  };
+  if (l.vista === 'svg') headers['content-security-policy'] = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'";
+  return new Response(res.body, { headers });
+});
+
 // Dónde se guardan (Configuración → Integraciones): la carpeta o unidad compartida de Drive y con qué usuario se entra.
 api.get('/integrations/bocetos', async (c) => {
   requireRole(c.get('ctx'), 'admin');

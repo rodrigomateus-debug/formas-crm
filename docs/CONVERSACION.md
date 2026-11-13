@@ -24,6 +24,10 @@ que queda registrado, con @menciones y la actividad del pedido entremezclada.
   grande; varias, en grilla); los demás, como tarjetas (el PDF con la miniatura de su primera página). Imágenes y PDF se
   abren a pantalla completa (el PDF con pdf.js, igual en todos los navegadores), con flechas, «Descargar» y «Abrir»; lo
   demás se descarga.
+- Reaccionar con emojis (👍 ❤️ 😂 🎉 🙏 👀 ✅ 🔥): la carita al pasar el mouse por el mensaje, o el «+» al lado de las que ya
+  hay. Abajo del mensaje se ve cada emoji con cuántos (en color si está el tuyo) y, al pasar el mouse, quiénes; tocar uno
+  pone o saca el tuyo. Tabla `mensaje_reacciones` (migración 0049); `mensajes.reaccion_at` hace que lleguen con las
+  novedades a los demás.
 - «Todo» muestra los mensajes con la actividad; «Mensajes», solo el chat.
 - La campanita: seguir o dejar de seguir la conversación.
 - «Visto por» abajo del último mensaje y la raya de «Nuevos» desde donde había leído.
@@ -65,3 +69,26 @@ del registro (`activities`).
 
 - Llevar los comentarios a ClickUp y traer los de ClickUp, mientras Corporate siga trabajando allá.
 - Que Claude (MCP) pueda leer y escribir en la conversación.
+
+## Bandeja, notificaciones y tareas (13/11/2026)
+
+- **Bandeja** (`/conversaciones`): arranca en **Sin leer**; **Todas** es el historial. Agrupada por día (Hoy, Ayer, Esta
+  semana, Este mes, Antes), con quién escribió lo último y su foto, la mención a vos resaltada y una barra a la izquierda en
+  lo sin leer (amarilla si te mencionaron). Con algo sin leer se muestra el último mensaje de otra persona, no el tuyo.
+  Al pasar el mouse (en el celular, siempre): **Tarea** y **Leída / No leída**. «No leída» deja pendiente el último mensaje
+  de otra persona (`POST /records/:type/:id/conversacion/no-leido`).
+- **Crear tarea con un mensaje** (`web/src/TareaDesdeMensaje.tsx`): desde la bandeja o desde las acciones de cada mensaje.
+  El título sale del mensaje (sin las menciones del principio), vence mañana (atajos Hoy, Mañana, En 2 días, El lunes u otro
+  día), es para vos (o para quien escribió, con un botón) y en el detalle queda el mensaje citado. Va asociada al pedido o
+  negocio, así que aparece también en su conversación; guarda `meta.mensaje_id`.
+- **Campanita** (arriba a la derecha, `web/src/Notificaciones.tsx`, `src/worker/notificaciones.ts`): los avisos de cada uno
+  (tabla `avisos`, la misma de los mails) con leído / no leído (`avisos.leido_at`, migración 0051): te mencionaron, te
+  respondieron (`kind 'respuesta'`, solo en el CRM, no por mail), te asignaron una tarea o un registro, faltan entregas.
+  Un clic lleva al mensaje (`?conversacion=1&mensaje=…`: la ficha abre la conversación y lo resalta), a Tareas o al pedido,
+  y la marca leída. Leer la conversación marca leídas sus menciones y respuestas. «Marcar todas como leídas», y el puntito
+  de cada una para marcarla leída o no leída. Se actualiza cada 45 segundos. No se muestran las de registros que ya no ves,
+  de mensajes borrados ni de tareas borradas. Lo de antes de 3 días arranca leído.
+- Las menciones avisan siempre (también si el mensaje entró por la API con el token de alguien), y las respuestas avisan a
+  quien escribió el mensaje respondido (si no lo mencionan en la respuesta).
+
+Pruebas: `test/notificaciones.test.mjs`.

@@ -46,7 +46,7 @@ export function armarMail(from: string, to: string, subject: string, text: strin
   const boundary = `fcrm${Date.now().toString(36)}`;
   const enc = (s: string) => `=?UTF-8?B?${mimeB64(s).replace(/\r\n/g, '')}?=`;
   return [
-    `From: ${enc('Formas CRM')} <${from}>`, `To: <${to}>`, `Subject: ${enc(subject)}`, 'MIME-Version: 1.0',
+    `From: ${enc('Formas Hub')} <${from}>`, `To: <${to}>`, `Subject: ${enc(subject)}`, 'MIME-Version: 1.0',
     `Content-Type: multipart/alternative; boundary="${boundary}"`, '',
     `--${boundary}`, 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', mimeB64(text),
     `--${boundary}`, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', mimeB64(html),
@@ -74,12 +74,12 @@ const fecha = (iso: string | null) => (iso ? new Date(Date.parse(iso) + ART).toI
 interface Linea { titulo: string; detalle: string; url: string }
 function cuerpo(env: Env, intro: string, grupos: Array<[string, Linea[]]>) {
   const text = [intro, '', ...grupos.flatMap(([h, ls]) => [h, ...ls.map((l) => `• ${l.titulo}${l.detalle ? ` · ${l.detalle}` : ''}\n  ${l.url}`), '']),
-    `Abrí el CRM: ${APP_URL(env)}/tasks`].join('\n');
+    `Abrí Formas Hub: ${APP_URL(env)}/tasks`].join('\n');
   const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2933;max-width:560px">
 <p>${esc(intro)}</p>${grupos.map(([h, ls]) => `<p style="margin:16px 0 6px;font-weight:bold">${esc(h)}</p><ul style="padding-left:18px;margin:0">${ls.map((l) =>
     `<li style="margin:4px 0"><a href="${esc(l.url)}" style="color:#0b6bcb">${esc(l.titulo)}</a>${l.detalle ? ` <span style="color:#6b7280">· ${esc(l.detalle)}</span>` : ''}</li>`).join('')}</ul>`).join('')}
-<p style="margin-top:20px"><a href="${APP_URL(env)}/tasks" style="color:#0b6bcb">Abrir mis tareas en el CRM</a></p>
-<p style="color:#9ca3af;font-size:12px">Aviso automático de Formas CRM.</p></div>`;
+<p style="margin-top:20px"><a href="${APP_URL(env)}/tasks" style="color:#0b6bcb">Abrir mis tareas en Formas Hub</a></p>
+<p style="color:#9ca3af;font-size:12px">Aviso automático de Formas Hub.</p></div>`;
   return { text, html };
 }
 
@@ -121,9 +121,9 @@ async function resumenes(env: Env, cfg: AvisosConfig, b: Budget, now: Date, forc
         const partes = [deHoy.length && `${deHoy.length} para hoy`, totalVencidas && `${totalVencidas} vencida${totalVencidas > 1 ? 's' : ''}`].filter(Boolean).join(' y ');
         const masVencidas = totalVencidas > vencidas.length
           ? [{ titulo: `y ${totalVencidas - vencidas.length} vencidas más`, detalle: '', url: `${APP_URL(env)}/tasks` }] : [];
-        const { text, html } = cuerpo(env, `Hola ${u.name.split(' ')[0]}, estas son tus tareas de hoy en el CRM.`,
+        const { text, html } = cuerpo(env, `Hola ${u.name.split(' ')[0]}, estas son tus tareas de hoy en Formas Hub.`,
           [['Para hoy', deHoy.map(linea)], ['Vencidas', [...vencidas.map(linea), ...masVencidas]]].filter(([, ls]) => ls.length) as Array<[string, Linea[]]>);
-        await enviar(env, cfg, u.email, `Tus tareas en el CRM: ${partes}`, text, html, b);
+        await enviar(env, cfg, u.email, `Tus tareas en Formas Hub: ${partes}`, text, html, b);
         n++;
       }
       listos.push(u.id);
@@ -179,12 +179,12 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     const entregas = rows.filter((r) => r.kind === 'entrega');
     const menciones = rows.filter((r) => r.kind === 'mencion');
     const subject = menciones.length === rows.length
-      ? (rows.length === 1 ? `${quien[0] ?? 'Alguien'} te mencionó en «${rows[0].rec_name ?? 'una conversación'}»` : `Te mencionaron ${rows.length} veces en el CRM`)
+      ? (rows.length === 1 ? `${quien[0] ?? 'Alguien'} te mencionó en «${rows[0].rec_name ?? 'una conversación'}»` : `Te mencionaron ${rows.length} veces en Formas Hub`)
       : entregas.length === rows.length
       ? (rows.length === 1 ? `Faltan entregas: ${rows[0].rec_name ?? 'un pedido'}` : `${rows.length} pedidos con faltantes de entrega`)
       : rows.length === 1
       ? `${quien[0] ?? 'Alguien'} te asignó ${rows[0].kind === 'tarea' ? 'una tarea' : `«${rows[0].rec_name ?? 'un registro'}»`}`
-      : `Te asignaron ${rows.length} cosas en el CRM`;
+      : `Te asignaron ${rows.length} cosas en Formas Hub`;
     const grupos: Array<[string, Linea[]]> = [
       ['Te mencionaron', lineas.filter((_, i) => rows[i].kind === 'mencion')],
       ['Pedidos con faltantes de entrega (según los remitos)', lineas.filter((_, i) => rows[i].kind === 'entrega')],
@@ -192,7 +192,7 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     ].filter(([, ls]) => ls.length) as Array<[string, Linea[]]>;
     const { text, html } = cuerpo(env, menciones.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, te mencionaron en la conversación de:`
       : entregas.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, a estos pedidos les falta entregar algo según sus remitos:`
-      : `Hola ${u.user_name.split(' ')[0]}, te asignaron esto en el CRM:`, grupos);
+      : `Hola ${u.user_name.split(' ')[0]}, te asignaron esto en Formas Hub:`, grupos);
     try {
       await enviar(env, cfg, u.email, subject, text, html, b);
       await marcar(ids, null);

@@ -14,6 +14,7 @@ import CronogramaPage from './pages/Cronograma';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
+import { Campanita } from './Notificaciones';
 
 export default function App() {
   const { meta } = useMeta();
@@ -41,7 +42,7 @@ export default function App() {
   return (
     <div className="shell">
       <nav className={`sidebar${menu ? ' open' : ''}`} aria-label="Menú principal">
-        <div className="brand"><img src="/formas-logo-white.png" alt="Formas" /><span>CRM</span></div>
+        <div className="brand"><img src="/formas-logo-white.png" alt="Formas" /><span>Hub</span></div>
         <NavLink to="/" end className="nav-link"><Icon name="home" />Inicio</NavLink>
         <NavLink to="/tasks" className="nav-link"><Icon name="task" />Tareas{tasks ? <span className="count">{tasks}</span> : null}</NavLink>
         <NavLink to="/conversaciones" className="nav-link"><Icon name="chat" />Conversaciones
@@ -69,6 +70,8 @@ export default function App() {
           <button className="btn ghost icon menu-btn" onClick={() => setMenu(!menu)} aria-label="Abrir menú"><Icon name="menu" size={20} /></button>
           <GlobalSearch />
           <span className="grow" />
+          {/* Notificaciones (Notificaciones.tsx): menciones, respuestas, asignaciones y faltantes de entrega. */}
+          <Campanita />
           <CreateMenu />
         </header>
         <Routes>

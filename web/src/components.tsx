@@ -127,11 +127,16 @@ function scrollBehind(e: React.WheelEvent<HTMLDivElement>) {
   }
 }
 
+// Con un cuadro (Modal) encima, Escape cierra el cuadro y no la vista previa de atrás (el visor de bocetos, que se abre
+// solo al subir uno, cerraba todo). Los dos escuchan en `window` y el orden depende de cuál se registró último: si el
+// lateral va primero, ve que hay un cuadro abierto; si va después, el cuadro ya marcó la tecla (`defaultPrevented`).
+let modalesAbiertos = 0;
+
 // `aside`: un panel pegado a la izquierda del lateral (la conversación del pedido en la vista previa). `actions`: botones
 // en la cabecera, antes de la cruz.
 export function Drawer({ title, onClose, children, footer, clear, aside, actions }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; clear?: boolean; aside?: ReactNode; actions?: ReactNode }) {
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && !e.defaultPrevented && !modalesAbiertos && onClose();
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
@@ -151,8 +156,9 @@ export function Drawer({ title, onClose, children, footer, clear, aside, actions
 }
 
 export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
+  useEffect(() => { modalesAbiertos++; return () => { modalesAbiertos--; }; }, []);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);

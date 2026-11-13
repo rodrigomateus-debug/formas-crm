@@ -113,7 +113,7 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ingresar · Formas CRM</title>
+<title>Ingresar · Formas Hub</title>
 <meta name="color-scheme" content="light dark" />
 <meta name="robots" content="noindex" />
 <link rel="icon" href="/formas-favicon.svg" type="image/svg+xml" />
@@ -198,7 +198,7 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
 <main class="login">
   <section class="hero" aria-hidden="true">
     <img class="foto" src="/login/hero.webp" alt="" />
-    <div class="hero-top"><img src="/formas-logo-white.png" alt="" /><span>CRM</span></div>
+    <div class="hero-top"><img src="/formas-logo-white.png" alt="" /><span>Hub</span></div>
     <div class="hero-bottom">
       <h2>Clientes, pedidos y producción, <b>en un solo lugar.</b></h2>
       <p>Todo lo que pasa con cada cliente de Formas, desde el primer contacto hasta la entrega.</p>
@@ -207,11 +207,11 @@ function pagina({ volver, aviso, esError, habilitado }: { volver: string; aviso:
   <section class="panel">
     <div class="card">
       <div class="logo" role="img" aria-label="Formas · Your brand loved"></div>
-      <h1>Ingresá al CRM</h1>
+      <h1>Ingresá a Formas Hub</h1>
       <p class="sub">Con tu cuenta de Google de Formas.</p>
       ${aviso ? `<div class="aviso${esError ? ' error' : ''}" role="${esError ? 'alert' : 'status'}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span>${esc(aviso)}</span></div>` : ''}
       <a class="google" href="${esc(href)}"${habilitado ? '' : ' aria-disabled="true" tabindex="-1"'}>${G}<span>Ingresar con Google</span></a>
-      <p class="nota">Solo pueden entrar las cuentas de Formas que tienen usuario en el CRM.</p>
+      <p class="nota">Solo pueden entrar las cuentas de Formas que tienen usuario en Formas Hub.</p>
       <div class="pie"><i></i>Formas Publicitarias</div>
     </div>
   </section>

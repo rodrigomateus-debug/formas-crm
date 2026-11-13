@@ -71,11 +71,11 @@ function ConectarClaude({ onClose, onCambio }: { onClose: () => void; onCambio: 
       <ol className="cc-pasos">
         <li><b>Abrí Claude</b> → Configuración → Conectores.
           <div><a className="btn sm primary" href={CLAUDE_CONECTORES} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Abrir Claude</a></div></li>
-        <li><b>Buscá «Formas CRM» y tocá Conectar.</b> Si no aparece, tocá «Agregar conector personalizado», ponele de nombre <b>Formas CRM</b> y esta dirección:
+        <li><b>Buscá «Formas Hub» y tocá Conectar.</b> Si no aparece, tocá «Agregar conector personalizado», ponele de nombre <b>Formas Hub</b> y esta dirección:
           <div className="cc-url"><code>{url}</code><button type="button" className="btn sm" onClick={copiar}>Copiar</button></div></li>
         <li><b>Claude te trae al CRM: tocá «Permitir».</b> Listo, ya podés usarlo en Claude, Claude Desktop o Cowork.</li>
       </ol>
-      {admin && <p className="small muted" style={{ margin: 0 }}>Como administrador, podés agregar «Formas CRM» una sola vez para toda la organización en Claude (Configuración de la organización → Conectores, con la misma dirección): así cada uno solo toca «Conectar».</p>}
+      {admin && <p className="small muted" style={{ margin: 0 }}>Como administrador, podés agregar «Formas Hub» una sola vez para toda la organización en Claude (Configuración de la organización → Conectores, con la misma dirección): así cada uno solo toca «Conectar».</p>}
     </Modal>
   );
 }

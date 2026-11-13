@@ -144,6 +144,17 @@ test('conversación del pedido: mensajes, menciones, no leídos y actividad', as
   await call('DELETE', `/mensajes/${conImg.data.id}`);
   assert.equal((await fetch(`${CRM}/api/mensaje-adjuntos/${img.data.id}`)).status, 404);
 
+  // Reacciones con emojis: tocar pone o saca; los demás las ven con las novedades; solo emojis.
+  const reac = (id, emoji, H = {}) => call('POST', `/mensajes/${id}/reacciones`, { emoji }, H);
+  assert.deepEqual((await reac(m2.data.id, '👍')).data.reacciones, [{ emoji: '👍', users: [yo.id] }]);
+  assert.deepEqual((await reac(m2.data.id, '👍', C)).data.reacciones, [{ emoji: '👍', users: [yo.id, ceci.id] }]);
+  await reac(m2.data.id, '🎉', C);
+  const conReac = (await call('GET', `${url}?desde=${encodeURIComponent(new Date(Date.now() - 60_000).toISOString())}`)).data.items.find((i) => i.key === `m${m2.data.id}`);
+  assert.deepEqual(conReac.reacciones, [{ emoji: '👍', users: [yo.id, ceci.id] }, { emoji: '🎉', users: [ceci.id] }], 'viene con las novedades');
+  assert.deepEqual((await reac(m2.data.id, '👍')).data.reacciones, [{ emoji: '👍', users: [ceci.id] }, { emoji: '🎉', users: [ceci.id] }], 'tocar de nuevo la saca');
+  assert.equal((await reac(m2.data.id, 'hola')).status, 400);
+  assert.equal((await reac(m1b.id, '👍')).status, 404, 'no a un mensaje borrado');
+
   // La tarjeta del tablero cuenta los mensajes (sin los borrados).
   const lista = (await call('GET', `/board-prop/order?prop=hs_pipeline_stage&q=${encodeURIComponent(RUN)}`)).data;
   const tarjeta = lista.columns?.flatMap((c) => c.records).find((r) => r.id === pedido.id);

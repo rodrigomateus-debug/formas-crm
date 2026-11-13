@@ -74,6 +74,8 @@ const PDVS = () => [pdvTask(`cr${RUN}`, PDV, '2026-11-19'), pdvTask(`cv${RUN}`, 
 const ESTADOS = ['ingreso de pedido', 'pdv', 'pedido al proveedor', 'en control de depósito', 'en el impresor', 'en revision', 'listo para entergar', 'anulado', 'entregados'];
 // Los colores de la lista real: los estados quedan guardados un día y los usan las otras pruebas.
 const COLOR = { 'ingreso de pedido': 'var(--cu-status-red)', pdv: '#a18072', 'en revision': '#0f9d9f', 'en el impresor': '#ffc53d', 'listo para entergar': '#008844', anulado: '#8d8d8d', entregados: '#008844' };
+// La entrega pactada que dice Finnegans para el pedido (la prueba del final la cambia).
+let pactadaFinnegans = null;
 let consultasClaude = 0, consultasGeo = 0;
 
 let server;
@@ -137,7 +139,7 @@ before(async () => {
       if (p === '/clickup/list/901326159292') return send({ statuses: ESTADOS.map((status) => ({ status, color: COLOR[status] ?? '#1090e0', type: status === 'entregados' ? 'closed' : 'custom' })) });
       if (p === '/clickup/list/901326159292/task') return send({ tasks: PDVS().flatMap((t) => [t, ...t.subtasks]), last_page: true });
       if (p === '/fin/oauth/token') { res.setHeader('content-type', 'application/json'); return res.end('"token-de-prueba"'); }
-      if (p.startsWith('/fin/pedidoVenta/')) return send({ Cliente: `C-${RUN}`, Items: [], DireccionEntrega: p.includes(PDV_V) ? `Nicaragua ${PDV_V}, Sarandí` : `Av. Libertador ${PDV} Piso 4, Vicente López` });
+      if (p.startsWith('/fin/pedidoVenta/')) return send({ Cliente: `C-${RUN}`, Items: [], ...(pactadaFinnegans && !p.includes(PDV_V) ? { FechaEntrega: pactadaFinnegans } : {}), DireccionEntrega: p.includes(PDV_V) ? `Nicaragua ${PDV_V}, Sarandí` : `Av. Libertador ${PDV} Piso 4, Vicente López` });
       if (p.startsWith('/fin/cliente/')) return send({ RazonSocial: CLIENTE });
       const t = PDVS().find((x) => x.id === tarea);
       if (t) return send(t);
@@ -507,4 +509,28 @@ test('cronograma: choferes y expresos, una entrega por expreso con su guía y un
   await api('PUT', '/cronograma/ruta', { fecha: '2026-11-20', rutas: [{ chofer: null, base: 'roca', salida: 540, orden: [] }] });
   r = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data;
   assert.deepEqual([r.rutas[0].base, r.rutas[0].base_otro ?? null], ['roca', null]);
+});
+
+test('cronograma: la entrega pactada viene de Finnegans y avisa cuando la real quedó para después', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  let v = await semana();
+  const pedido = mov(v, 'entrega', 'Termo').record_id;
+  // El PDV se creó con entrega para el 25/11: la real del termo (18/11) es anterior, sin aviso.
+  assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.fecha_de_entrega, '2026-11-25');
+  assert.ok(!mov(v, 'entrega', 'Termo').avisos.some((a) => a.startsWith('Pactada')));
+  // En Finnegans el comercial la cambió al 17/11 (viene como DD/MM/AAAA): al releer el pedido queda en el CRM.
+  pactadaFinnegans = '17/11/2026';
+  assert.equal((await api('GET', `/records/order/${pedido}/products?refresh=1`)).status, 200);
+  assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.fecha_de_entrega, '2026-11-17');
+  // La real del termo (18/11) ahora es posterior a la pactada: el cronograma lo avisa.
+  v = await semana();
+  assert.ok(mov(v, 'entrega', 'Termo').avisos.includes('Pactada para el 17/11'));
+  // Producción ve las dos: la pactada del PDV y la real de cada artículo.
+  const prod = (await api('GET', '/produccion?unidades=CORPORATE&cerrados=1')).data.pdvs.find((x) => x.npdv === PDV);
+  assert.equal(prod.entrega_prometida, '2026-11-17');
+  // Si Finnegans no manda la fecha, la del CRM queda como estaba.
+  pactadaFinnegans = null;
+  await api('GET', `/records/order/${pedido}/products?refresh=1`);
+  assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.fecha_de_entrega, '2026-11-17');
 });

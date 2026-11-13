@@ -291,7 +291,7 @@ export function readPdv(t: CuTask, servicios: Set<string> = new Set()) {
   };
 }
 
-async function systemCtx(env: Env): Promise<Ctx> {
+export async function systemCtx(env: Env): Promise<Ctx> {
   const u = await env.DB.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<User>();
   return { user: u!, source: 'clickup', sourceDetail: 'Lista PEC' };
 }

@@ -280,10 +280,15 @@ Finnegans.
 - **Control de repetidos:** `GET /api/integrations/pedidos` trae en `finnegans.duplicados` los pedidos con el mismo
   pedido de Finnegans o el mismo número en la misma unidad (no debería haber; si aparece alguno, se combinan). El script
   informa cuántos hay en cada corrida.
-- **Aviso de Finnegans (webhook), en prueba.** Finnegans puede llamar a una dirección cuando se crea, cambia o anula un
-  documento (un «proceso» de tipo Transacción en modo Webhook). `POST /api/integrations/finnegans/webhook`
-  (administrador) da la dirección, con su llave: `/hooks/finnegans/<llave>`. Todo lo que llega queda en el registro de
-  entradas; si nombra un pedido de venta que el CRM no tiene, se lee de Finnegans (tres consultas) y se da de alta.
+- **Aviso de Finnegans (webhook).** En Finnegans hay un proceso de tipo Transacción en modo Webhook,
+  `FORMAS_HUB_PEDIDOS`, para los pedidos de venta de Shop, Corporate y No Estrés (`PEDVTASTP`, `PEDVTAFP`, `PEDVTANE`),
+  que llama al CRM cuando se crea o se anula uno; avisa también cuando el pedido se carga por API, como hace el cotizador
+  (probado el 13/11/2026). `POST /api/integrations/finnegans/webhook` (administrador) da la dirección, con su llave:
+  `/hooks/finnegans/<llave>`. El aviso trae el tipo de documento, la identificación externa del pedido y el evento; con
+  eso el CRM lee el pedido de Finnegans (tres consultas) y, si es de Formas Publicitarias y no lo tiene, lo da de alta
+  en el momento. Las anulaciones y los pedidos de FP DEMO solo quedan en el registro de entradas, que guarda cada aviso
+  sin los tokens que manda Finnegans. Se prende y se apaga en Finnegans (`PATCH custom/BProc/FORMAS_HUB_PEDIDOS/config`
+  con `{"activo": true}`).
 
 ### El N° de PDV en el negocio
 

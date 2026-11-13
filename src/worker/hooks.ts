@@ -278,10 +278,12 @@ hooks.all('/finnegans/:key', async (c) => {
   const key = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'finnegans_webhook_key'").first<{ value: string }>())?.value;
   if (!key || c.req.param('key') !== key) throw new HttpError(404, 'No existe.');
   const cuerpo = (await c.req.text()).slice(0, 20_000);
-  const texto = `${c.req.method} ${new URL(c.req.url).search}\n${cuerpo}`;
+  // Finnegans manda un token suyo en la dirección (?access_token=…) y otro en el cuerpo: son credenciales, no se guardan.
+  const sinTokens = (t: string) => t.replace(/(access_token=)[^&\s"]+/gi, '$1…').replace(/("(?:token|access_token)"\s*:\s*")[^"]*"/gi, '$1…"');
+  const texto = sinTokens(`${c.req.method} ${new URL(c.req.url).search}\n${cuerpo}`);
   let result: unknown;
   let ok = 1;
-  try { result = await avisoDeFinnegans(c.env, texto); } catch (e) { ok = 0; result = { error: (e as Error).message }; }
+  try { result = await avisoDeFinnegans(c.env, cuerpo); } catch (e) { ok = 0; result = { error: (e as Error).message }; }
   await c.env.DB.prepare('INSERT INTO inbound_log (source, payload, result, ok) VALUES (?, ?, ?, ?)').bind('finnegans', texto, JSON.stringify(result), ok).run();
   return c.json({ ok: true });
 });

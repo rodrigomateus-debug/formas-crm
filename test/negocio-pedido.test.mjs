@@ -33,7 +33,9 @@ before(async () => {
     pedidas.push(p + (url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen') ? `?${url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen')}` : ''));
     if (p === '/fin/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals') return send(fin.facturas[url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen')] ?? []);
     if (p.startsWith('/fin/facturaVenta/')) return send({ NumeroComprobante: 'A-00006-00099001', Fecha: '2026-11-12', CAE: '86400000000009', CAEFechaVto: '2026-11-22' });
-    if (p === `/fin/pedidoVenta/PEDVTASTP - ${String(N + 5).padStart(8, '0')}`) return send({ Cliente: 'C-AVISO', MonedaCodigo: 'PES', Fecha: '2026-11-13', VendedorCodigo: 'nadie@formas.ar', USR_FechaEntrega: '2026-12-01', USR_EsEvento: true, Items: [] });
+    // El pedido que nombra el aviso (por su identificación externa, como la manda el cotizador) y uno de FP DEMO.
+    if (p === `/fin/pedidoVenta/AVISO ${RUN}`) return send({ Cliente: 'C-AVISO', EmpresaCodigo: 'EMPRE01', NumeroInterno: N + 5, MonedaCodigo: 'PES', Fecha: '2026-11-13', VendedorCodigo: 'nadie@formas.ar', USR_FechaEntrega: '2026-12-01', USR_EsEvento: true, Items: [] });
+    if (p === `/fin/pedidoVenta/DEMO ${RUN}`) return send({ Cliente: 'C-AVISO', EmpresaCodigo: '7', NumeroInterno: N + 6, Fecha: '2026-11-13', Items: [] });
     if (p === '/fin/cliente/C-AVISO') return send({ IdentificacionTributariaNumero: CUIT, RazonSocial: `VINCULO ${RUN} SA` });
     send({ error: 'no simulado' }, 404);
   });
@@ -159,15 +161,27 @@ test('negocio y pedido: el N° de PDV los asocia, y los pedidos entran desde Fin
   assert.equal((await api('POST', '/integrations/finnegans/webhook', {})).data.url, hook, 'siempre la misma');
   assert.equal((await api('POST', '/hooks/finnegans/llave-equivocada', { x: 1 })).status, 404);
   const camino = new URL(hook).pathname;
-  assert.equal((await api('POST', camino, { evento: 'onCreate', identificacionExterna: `PEDVTASTP - ${String(N + 5).padStart(8, '0')}` })).status, 200);
+  // Como lo manda Finnegans: el tipo de documento, la identificación externa y el evento; con un token suyo en la dirección.
+  const aviso = (code, event = 'create', type = 'PEDVTASTP') => api('POST', `${camino}?access_token=secreto-${RUN}&async=1`,
+    { eventID: 1, webhook: 'FORMAS_HUB_PEDIDOS', webhookType: 'Documento', token: `secreto-${RUN}`, object: { type, category: 'PDV', code, event }, params: {}, sucursal: '7' });
+  assert.equal((await aviso(`AVISO ${RUN}`)).status, 200);
   const [o6] = await pedidoPorNombre(N + 5);
   assert.ok(o6, 'el pedido del aviso se dio de alta');
+  assert.equal(o6.props.pedido_finnegans, `PEDVTASTP - ${N + 5}`, 'con el número que le dio Finnegans');
   assert.equal(o6.props.tipo_de_pedido, 'EVENTO');
   assert.equal(o6.props.fecha_de_entrega, '2026-12-01');
   assert.equal((await asociados('order', o6.id)).company[0]?.id, empresa.id);
-  // Un aviso que no nombra un pedido solo queda registrado.
+  // Un pedido de FP DEMO, una anulación, otro tipo de documento o algo que no es un aviso: solo quedan registrados.
+  await aviso(`DEMO ${RUN}`);
+  assert.equal((await pedidoPorNombre(N + 6)).length, 0, 'FP DEMO no entra');
+  assert.equal((await aviso(`AVISO ${RUN}`, 'nullify')).status, 200);
+  assert.equal((await aviso(`AVISO ${RUN}`, 'create', 'FP_PDVMELI')).status, 200);
   assert.equal((await api('POST', camino, 'hola')).status, 200);
   assert.equal((await api('GET', camino)).status, 200, 'también por GET, como prueba Finnegans la dirección');
+  // El registro guarda lo que llegó, sin los tokens de Finnegans.
+  const registro = (await api('GET', '/inbound')).data.filter((x) => x.source === 'finnegans');
+  assert.ok(registro.some((x) => x.payload.includes(`AVISO ${RUN}`)), 'queda registrado');
+  assert.ok(!registro.some((x) => x.payload.includes(`secreto-${RUN}`)), 'sin los tokens');
 });
 
 test('razón social: manda la empresa del negocio; si no, la del CUIT; si nadie la tiene, se sugiere', async () => {

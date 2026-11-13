@@ -5,7 +5,7 @@ import { STAGE, usuarioPorNombre } from './clickup';
 import { resolverEmpresa, soloNumeros } from './razones';
 import { clavePedido } from './totales';
 import { numeroPdv, vincularPedido, vincularPendientes } from './vinculos';
-import { finnegansPedidoVenta, finnegansToken } from './finnegans';
+import { finnegansToken, type PedidoVenta } from './finnegans';
 import { Budget } from './budget';
 
 // Pedidos desde Finnegans (pedido de Rodrigo del 13/11/2026). El pedido se carga desde el cotizador, queda en Finnegans y
@@ -130,28 +130,37 @@ export async function pedidosDuplicados(db: D1Database) {
 }
 
 // ---------- Aviso de Finnegans (webhook) ----------
-// Finnegans puede llamar a una URL cuando se crea, cambia o anula un documento (un «proceso» de tipo Transacción en modo
-// Webhook). Con eso el pedido entra al CRM en el momento, sin esperar el informe de cada hora. Todavía en prueba: todo lo
-// que llega queda en el registro de entradas (Configuración → Registro) para ver qué manda. Si el aviso nombra un pedido
-// de venta («PEDVTASTP - 00031277»), se lee ese pedido de Finnegans (tres consultas) y se da de alta si no está.
-export async function avisoDeFinnegans(env: Env, texto: string) {
-  const claves = [...new Set([...texto.matchAll(/PEDVTA[A-Z]*\s*-\s*\d+/g)].map((m) => clavePedido(m[0])).filter((c): c is string => !!c && !!UNIDAD[c.split(' - ')[0]]))].slice(0, 5);
-  if (!claves.length) return { pedidos: [] as string[], nuevos: null };
-  const db = env.DB;
-  const ya = new Set((await db.prepare("SELECT json_extract(props, '$.pedido_finnegans') AS p FROM records WHERE object_type = 'order' AND archived = 0 AND json_extract(props, '$.pedido_finnegans') IS NOT NULL")
-    .all<{ p: string }>()).results.map((r) => clavePedido(r.p)));
-  const faltan = claves.filter((c) => !ya.has(c));
-  if (!faltan.length) return { pedidos: claves, nuevos: null };
+// Finnegans llama a una dirección cuando se crea, cambia o anula un documento (un «proceso» de tipo Transacción en modo
+// Webhook; el de Formas es FORMAS_HUB_PEDIDOS, para los pedidos de venta de Shop, Corporate y No Estrés). Con eso el
+// pedido entra al CRM en el momento, sin esperar el informe de cada hora. Avisa también cuando el pedido se carga por
+// API, como hace el cotizador (probado el 13/11/2026). Lo que manda:
+//   POST …?access_token=<token de Finnegans>&async=1
+//   {"eventID": 318950, "webhook": "FORMAS_HUB_PEDIDOS", "webhookType": "Documento", "user": "…", "timeStamp": "…",
+//    "object": {"type": "PEDVTASTP", "category": "PDV", "code": "<IdentificacionExterna>", "event": "create"}, "sucursal": "7"}
+// `object.code` es la identificación externa del pedido: con ella se lee el pedido de Finnegans (tres consultas: token,
+// pedido y cliente) y, si es de Formas Publicitarias (no de FP DEMO) y el CRM no lo tiene, se da de alta. Los demás
+// eventos (anulación, cambios) por ahora solo quedan en el registro de entradas.
+const FIN_API = (env: Env) => env.FINNEGANS_API_URL ?? 'https://api.finneg.com/api';
+interface AvisoFin { object?: { type?: string; category?: string; code?: string; event?: string } }
+export async function avisoDeFinnegans(env: Env, cuerpo: string) {
+  let aviso: AvisoFin = {};
+  try { aviso = JSON.parse(cuerpo) as AvisoFin; } catch { /* no es JSON: solo queda registrado */ }
+  const o = aviso.object ?? {};
+  const tipo = String(o.type ?? '').toUpperCase();
+  const ie = String(o.code ?? '').trim();
+  if (!UNIDAD[tipo] || !ie) return { evento: o.event ?? null, pedido: null, hecho: 'no es un pedido de venta del CRM' };
+  if (o.event !== 'create') return { evento: o.event ?? null, pedido: ie, hecho: 'solo registrado' };
   const b = Budget.of(env);
   const token = await finnegansToken(env, b);
-  if (!token) return { pedidos: claves, nuevos: null };
-  const pedidos: Record<string, PedidoFin> = {};
-  for (const c of faltan) {
-    const p = await finnegansPedidoVenta(env, token, c, b);
-    if (!p?.Cliente) continue;
-    const cli = await fetch(`${env.FINNEGANS_API_URL ?? 'https://api.finneg.com/api'}/cliente/${encodeURIComponent(p.Cliente)}?ACCESS_TOKEN=${encodeURIComponent(token)}`)
-      .then((r) => (r.ok ? r.json() as Promise<{ IdentificacionTributariaNumero?: string; RazonSocial?: string }> : null)).catch(() => null);
-    pedidos[c] = { cliente: cli?.RazonSocial ?? '', cuit: cli?.IdentificacionTributariaNumero ?? '', vendedor: p.VendedorCodigo ?? '', fecha: p.Fecha, entrega: p.USR_FechaEntrega, evento: !!p.USR_EsEvento };
-  }
-  return { pedidos: claves, nuevos: Object.keys(pedidos).length ? await aplicarPedidos(env, pedidos) : null };
+  if (!token) return { evento: o.event, pedido: ie, hecho: 'falta conectar Finnegans' };
+  const leer = async <T>(path: string) => { b.take(); const r = await fetch(`${FIN_API(env)}/${path}?ACCESS_TOKEN=${encodeURIComponent(token)}`); return r.ok ? (await r.json()) as T : null; };
+  const p = await leer<PedidoVenta & { EmpresaCodigo?: string; NumeroInterno?: number }>(`pedidoVenta/${encodeURIComponent(ie)}`);
+  if (!p?.Cliente || !p.NumeroInterno) return { evento: o.event, pedido: ie, hecho: 'Finnegans no devolvió el pedido' };
+  // FP DEMO y Soutex usan los mismos tipos de documento: solo los de Formas Publicitarias.
+  if (p.EmpresaCodigo !== 'EMPRE01') return { evento: o.event, pedido: ie, hecho: `de otra empresa (${p.EmpresaCodigo ?? 'sin empresa'}): no se carga` };
+  const cli = await leer<{ IdentificacionTributariaNumero?: string; RazonSocial?: string }>(`cliente/${encodeURIComponent(p.Cliente)}`);
+  const clave = `${tipo} - ${p.NumeroInterno}`;
+  const nuevos = await aplicarPedidos(env, { [clave]: { cliente: cli?.RazonSocial ?? '', cuit: cli?.IdentificacionTributariaNumero ?? '', vendedor: p.VendedorCodigo ?? '',
+    fecha: p.Fecha, entrega: p.USR_FechaEntrega, evento: !!p.USR_EsEvento } });
+  return { evento: o.event, pedido: clave, hecho: nuevos.creados ? 'dado de alta' : nuevos.completados ? 'completado' : 'ya estaba', nuevos };
 }

@@ -103,4 +103,4 @@ Pruebas: `test/notificaciones.test.mjs`.
   resumen («5 actualizaciones · Etapa: En producción · 1 boceto subido · 1 aprobado»), quiénes y el horario; un clic las
   despliega. «Mensajes» sigue mostrando solo el chat.
 - **Logos**: subir un logo desde un producto del pedido o negocio (o elegir otro) aparece en su conversación con la
-  miniatura y si está en curvas; la miniatura abre el archivo. `logos.record_id` (migración 0052) guarda desde dónde se subió.
+  miniatura y si está en curvas; la miniatura abre el archivo. `logos.record_id` (migración 0053) guarda desde dónde se subió.

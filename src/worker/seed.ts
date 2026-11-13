@@ -290,7 +290,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['saldo_pendiente_de_pago_mxn', 'Saldo pendiente de pago (ARS)', 'currency', 'Pedido'],
     ['progreso_pdv', 'Progreso PDV', 'number', 'Pedido'],
     ['items_entregados', 'Ítems entregados', 'string', 'Pedido'],
-    ['unidad_de_negocio', 'Unidad de negocio', 'enum', 'Pedido', ['FORMAS SHOP', 'CORPORATE', 'NO ESTRÉS']],
+    ['unidad_de_negocio', 'Unidad de negocio', 'enum', 'Pedido', ['FORMAS SHOP', 'CORPORATE', 'NO ESTRÉS', 'FP DEMO']],
     ['cliente_clickup', 'Cliente (ClickUp)', 'string', 'Pedido', [], RO],
     ['pedido_finnegans', 'Pedido en Finnegans', 'string', 'Pedido', [], RO],
     ['url_clickup', 'PDV en ClickUp', 'url', 'Pedido', [], RO],

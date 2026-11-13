@@ -280,10 +280,21 @@ Finnegans.
 - **Control de repetidos:** `GET /api/integrations/pedidos` trae en `finnegans.duplicados` los pedidos con el mismo
   pedido de Finnegans o el mismo número en la misma unidad (no debería haber; si aparece alguno, se combinan). El script
   informa cuántos hay en cada corrida.
-- **Aviso de Finnegans (webhook), en prueba.** Finnegans puede llamar a una dirección cuando se crea, cambia o anula un
-  documento (un «proceso» de tipo Transacción en modo Webhook). `POST /api/integrations/finnegans/webhook`
-  (administrador) da la dirección, con su llave: `/hooks/finnegans/<llave>`. Todo lo que llega queda en el registro de
-  entradas; si nombra un pedido de venta que el CRM no tiene, se lee de Finnegans (tres consultas) y se da de alta.
+- **Aviso de Finnegans (webhook).** En Finnegans hay un proceso de tipo Transacción en modo Webhook,
+  `FORMAS_HUB_PEDIDOS`, para los pedidos de venta de Shop, Corporate y No Estrés (`PEDVTASTP`, `PEDVTAFP`, `PEDVTANE`),
+  que llama al CRM cuando se crea o se anula uno; avisa también cuando el pedido se carga por API, como hace el cotizador
+  (probado el 13/11/2026). `POST /api/integrations/finnegans/webhook` (administrador) da la dirección, con su llave:
+  `/hooks/finnegans/<llave>`. El aviso trae el tipo de documento, la identificación externa del pedido y el evento; con
+  eso el CRM lee el pedido de Finnegans (tres consultas) y, si es de Formas Publicitarias o de FP DEMO y no lo tiene, lo da de alta
+  en el momento. Si el pedido se anula, pasa a «Anulado». El registro de entradas guarda cada aviso sin los tokens que
+  manda Finnegans. Se prende y se apaga en Finnegans (`PATCH custom/BProc/FORMAS_HUB_PEDIDOS/config`
+  con `{"activo": true}`).
+- **Anulados.** Un pedido anulado en Finnegans pasa a «Anulado» en el CRM: por el aviso, o por el informe de cada hora
+  (los pedidos con todos sus renglones anulados). ClickUp lo anula por su lado, con su propia integración con Finnegans.
+- **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
+  los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
+  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni
+  los filtros por unidad de los pedidos de verdad; sí se pueden asociar a un negocio por su número.
 
 ### El N° de PDV en el negocio
 

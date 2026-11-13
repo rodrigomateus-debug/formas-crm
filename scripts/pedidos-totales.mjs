@@ -62,7 +62,8 @@ export const consultas = { n: 0 };
 // (src/worker/pedidosfin.ts): del primer renglón de cada pedido, el cliente, su CUIT, el vendedor, la fecha, la entrega y
 // si es evento. Sin los anulados, Mercado Libre, MarketShell ni los objetivos de venta. `desde`: AAAA-MM-DD.
 const aIso = (s) => { const m = String(s ?? '').match(/^(\d{2})[-/](\d{2})[-/](\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : String(s ?? '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null; };
-export function pedidosNuevos(filas, desde) {
+// `prefijo`: «DEMO » para los de FP DEMO (la empresa de pruebas), que van aparte.
+export function pedidosNuevos(filas, desde, prefijo = '') {
   const out = {};
   const anulados = new Set();
   for (const r of filas) {
@@ -75,7 +76,18 @@ export function pedidosNuevos(filas, desde) {
       entrega: aIso(r.USRFECHAENTREGA), evento: r.USRESEVENTO === true || /^(s[ií]|true|1)$/i.test(String(r.USRESEVENTO ?? '')) };
   }
   for (const k of anulados) delete out[k];
-  return out;
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [prefijo + k, v]));
+}
+// Los pedidos anulados en Finnegans (todos sus renglones anulados): en el CRM pasan a «Anulado».
+export function pedidosAnulados(filas, prefijo = '') {
+  const vivos = new Set();
+  const anulados = new Set();
+  for (const r of filas) {
+    const k = clavePedido(r.DOCNROINT);
+    if (!k || !/^PEDVTA(STP|FP|NE) - /.test(k)) continue;
+    (/anulad/i.test(r.ESTADO ?? '') ? anulados : vivos).add(k);
+  }
+  return [...anulados].filter((k) => !vivos.has(k)).map((k) => prefijo + k);
 }
 
 async function getJson(url, init, intentos = 4) {
@@ -374,11 +386,14 @@ async function main() {
   const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');
   if (!base || !process.env.CRM_TOKEN) throw new Error('Faltan CRM_URL y CRM_TOKEN.');
   const res = await fetch(`${base}/hooks/pedidos/totales`, { method: 'POST', redirect: 'manual',
-    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas), pedidos: pedidosNuevos(filas[0], masDias(hoy, -15)) }) });
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas),
+      // Formas Publicitarias y FP DEMO (EMPRESAS[1], la de pruebas, que entra aparte).
+      pedidos: { ...pedidosNuevos(filas[0], masDias(hoy, -15)), ...pedidosNuevos(filas[1] ?? [], masDias(hoy, -15), 'DEMO ') },
+      anulados: [...pedidosAnulados(filas[0]), ...pedidosAnulados(filas[1] ?? [], 'DEMO ')] }) });
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
   console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans).`);
-  if (r.nuevos) console.log(`Pedidos nuevos de Finnegans: ${r.nuevos.recibidos} recientes, ${r.nuevos.creados} dados de alta, ${r.nuevos.completados} completados, ${r.nuevos.con_negocio} asociados a su negocio; ${r.nuevos.duplicados} números de PDV repetidos.`);
+  if (r.nuevos) console.log(`Pedidos nuevos de Finnegans: ${r.nuevos.recibidos} recientes, ${r.nuevos.creados} dados de alta, ${r.nuevos.completados} completados, ${r.nuevos.con_negocio} asociados a su negocio, ${r.nuevos.anulados ?? 0} pasados a anulado; ${r.nuevos.duplicados} números de PDV repetidos.`);
   // Si un informe falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
   const filasSaldo = await saldos(tok, hoy);
   const resumen = resumenPedidos(filas);

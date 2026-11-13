@@ -9,7 +9,7 @@ import { encolarLogo, logoDelProducto } from './logos';
 import { tareaPostEntrega } from './postentrega';
 import { montosDesdePedidos } from './montos';
 import { recalcularEntrega } from './remitos';
-import { enlazarPedido, guardarTareas, leerEstados, podarArticulos, vincularOpciones } from './produccion';
+import { completarProveedores, enlazarPedido, guardarTareas, leerEstados, podarArticulos, vincularOpciones } from './produccion';
 import { articulosServicio, relecturasPedidas } from './servicios';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
@@ -608,6 +608,8 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
     }
     await leerEstados(env, b).catch((e) => { if (e instanceof OutOfBudget) throw e; console.error('estados', (e as Error).message); });
     await vincularOpciones(db, ctx).catch((e) => console.error('proveedores', (e as Error).message));
+    // El PROVEEDOR que falta, por el SKU del artículo (pocos por corrida; deja lugar para revisar PDV).
+    await completarProveedores(env, b, { reserva: POR_PDV * 2 }).catch((e) => { if (e instanceof OutOfBudget) throw e; console.error('proveedores por SKU', (e as Error).message); });
     // 2. Los PDV anotados.
     // El CUIT del pedido (dos consultas a Finnegans) solo sirve si hay empresas con CUIT en el CRM; si no, se busca por nombre.
     const conCuit = await db.prepare("SELECT 1 FROM records WHERE object_type = 'company' AND archived = 0 AND COALESCE(json_extract(props, '$.cuit'), '') != '' LIMIT 1").first();

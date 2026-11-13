@@ -3,7 +3,7 @@ import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { Budget } from './budget';
 import { createRecord, updateRecord } from './records';
-import { API, cu, generalStage, LIST, norm, STAGE, upsertPdv, usuarioPorNombre, type CuTask } from './clickup';
+import { API, cu, generalStage, leerArticulo, LIST, norm, STAGE, upsertPdv, usuarioPorNombre, type CuTask } from './clickup';
 import { fotosDeArticulos } from './productos';
 import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
 
@@ -19,6 +19,7 @@ import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
 // - El estado del PDV sale de la combinación de sus artículos (generalStage, la misma regla que el estado del pedido).
 // - Los desplegables PROVEEDOR e IMPRESOR de ClickUp quedan atados a empresas del CRM con tipo de relación «Proveedor»,
 //   con las opciones repetidas («FYR SA» y «FYRSA») en la misma empresa.
+// - El proveedor que falta sale del SKU del artículo (completarProveedores): ZEC Zecat, IMP Promoproductos…
 
 // Los campos de la lista PEC que se ven y se editan (id del campo personalizado en ClickUp).
 export const CAMPOS = {
@@ -72,7 +73,7 @@ interface Fila {
   unidad: string | null; cliente: string | null; vendedor: string | null; cantidad: number | null; cantidad_controlada: number | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: string; etiquetas: string;
-  orden: number; url: string | null; actualizado: number;
+  orden: number; url: string | null; actualizado: number; codigo: string | null;
 }
 
 // Una fecha de ClickUp (ms) → AAAA-MM-DD en Buenos Aires.
@@ -132,13 +133,16 @@ function filaDe(t: CuTask, pdvTask: string): Fila & { campos: boolean } {
     asignados: JSON.stringify((t.assignees ?? []).map((a) => a.id).filter((x) => x != null)),
     etiquetas: JSON.stringify((t.tags ?? []).map((x) => x.name).filter(Boolean)),
     orden: Number(t.orderindex ?? 0) || 0, url: t.url ?? null, actualizado: Number(t.date_updated ?? 0) || 0,
+    // El SKU: la línea «Código:» de la descripción del artículo (si la tarea no trajo la descripción, queda el que estaba).
+    codigo: es_pdv || !(t.text_content || t.description) ? null : leerArticulo(t).code?.trim() || null,
   };
 }
 
 const COLS = ['task_id', 'pdv_task', 'es_pdv', 'nombre', 'npdv', 'estado', 'unidad', 'cliente', 'vendedor', 'cantidad', 'cantidad_controlada', 'proveedor',
-  'impresor', 'entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado'] as const;
-// Sin los campos personalizados se actualiza solo lo que trae siempre la tarea.
-const SIEMPRE = ['nombre', 'estado', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado'];
+  'impresor', 'entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado',
+  'codigo'] as const;
+// Sin los campos personalizados se actualiza solo lo que trae siempre la tarea (y el código, si vino la descripción).
+const SIEMPRE = ['nombre', 'estado', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado', 'codigo'];
 
 // Guarda las tareas que trajo ClickUp: los PDV (tareas de la lista con «PDV» en el nombre) y sus artículos (subtareas).
 // Lo más viejo no pisa lo más nuevo. También guarda la gente asignada y las opciones de PROVEEDOR e IMPRESOR.
@@ -154,7 +158,8 @@ export async function guardarTareas(db: D1Database, tasks: CuTask[]) {
     .bind(JSON.stringify(filas.map((f) => f.task_id))).all<{ task_id: string; estado: string; actualizado: number; record_id: number | null }>()).results.map((r) => [r.task_id, r]));
   const stmts: D1PreparedStatement[] = [];
   for (const f of filas) {
-    const set = (f.campos ? COLS.filter((c) => c !== 'task_id' && c !== 'pdv_task' && c !== 'es_pdv') : SIEMPRE).map((c) => `${c} = excluded.${c}`);
+    const set = (f.campos ? COLS.filter((c) => c !== 'task_id' && c !== 'pdv_task' && c !== 'es_pdv') : SIEMPRE)
+      .map((c) => (c === 'codigo' ? 'codigo = COALESCE(excluded.codigo, produccion.codigo)' : `${c} = excluded.${c}`));
     stmts.push(db.prepare(`INSERT INTO produccion (${COLS.join(', ')}, record_id, leido_at) VALUES (${COLS.map(() => '?').join(', ')},
         (SELECT record_id FROM produccion WHERE task_id = ?), ?)
       ON CONFLICT(task_id) DO UPDATE SET ${set.join(', ')}, pdv_task = excluded.pdv_task, leido_at = excluded.leido_at
@@ -308,6 +313,86 @@ export async function opcionesAEmpresa(db: D1Database, de: number[], a: number) 
   await db.prepare('UPDATE produccion_opciones SET company_id = ? WHERE company_id IN (SELECT value FROM json_each(?))').bind(a, JSON.stringify(de)).run();
 }
 
+// ---------- El proveedor por el SKU ----------
+
+// Pedido de Rodrigo del 13/11/2026: si un artículo no tiene PROVEEDOR en ClickUp y su SKU empieza con el prefijo de un
+// importador, se le pone ese. `claves`: cómo puede llamarse en el desplegable de ClickUp o su empresa en el CRM, como las
+// compara claveProveedor (los mismos nombres que web/src/proveedores.tsx).
+export const PROVEEDOR_POR_SKU: Record<string, { nombre: string; claves: string[] }> = {
+  ZEC: { nombre: 'Zecat', claves: ['zecat', 'articulospromocionales'] },
+  IMP: { nombre: 'Promoproductos', claves: ['promoproductos', 'improm'] },
+  CDO: { nombre: 'Stocksur', claves: ['stocksur', 'cdo', 'cdostocksur', 'stocksurcdo'] },
+  ZOM: { nombre: 'Irion', claves: ['irion', 'zom', 'irionzom'] },
+  NFM: { nombre: 'Nuevas Formas', claves: ['nuevasformas', 'eneformas'] },
+  XTR: { nombre: 'X-Trade', claves: ['xtrade', 'xtradeonline'] },
+  MYA: { nombre: 'Maya', claves: ['maya'] },
+};
+export const prefijoSku = (sku: string | null | undefined) => {
+  const s = String(sku ?? '').trim().toUpperCase();
+  return Object.keys(PROVEEDOR_POR_SKU).find((p) => s.startsWith(p)) ?? null;
+};
+// La opción del desplegable PROVEEDOR de cada prefijo: la primera con ese nombre o, si no, la primera atada a esa empresa.
+// Igual o, si la clave es larga, que empiece así («STOCKSUR SOCIEDAD ANONIMA», «XTRADEONLINE»).
+async function opcionesPorPrefijo(db: D1Database) {
+  const ops = (await db.prepare(`SELECT o.option_id, o.nombre, r.name AS empresa FROM produccion_opciones o
+      LEFT JOIN records r ON r.id = o.company_id AND r.archived = 0 WHERE o.campo = 'proveedor' ORDER BY o.orden`)
+    .all<{ option_id: string; nombre: string; empresa: string | null }>()).results;
+  const out = new Map<string, string>();
+  for (const [pre, m] of Object.entries(PROVEEDOR_POR_SKU)) {
+    const es = (n: string | null) => {
+      const k = n ? claveProveedor(n) : '';
+      return !!k && m.claves.some((c) => k === c || (c.length >= 5 && k.startsWith(c)));
+    };
+    const o = ops.find((x) => es(x.nombre)) ?? ops.find((x) => es(x.empresa));
+    if (o) out.set(pre, o.option_id);
+  }
+  return out;
+}
+
+// En cada sincronización de ClickUp, de a pocos (cada uno es una escritura en ClickUp): los artículos abiertos de las
+// unidades que se trabajan desde el CRM, sin proveedor y que el CRM todavía no completó. El SKU es el de la subtarea
+// («Código:») o, si no lo tiene, el del renglón del pedido atado a ese artículo. Se escribe en ClickUp, así se ve igual
+// en los dos lados; lo que eligió una persona no se toca, y si después lo cambian o lo vacían, el CRM no lo vuelve a
+// poner. Si el desplegable no tiene opción para ese importador, no se hace nada. `reserva`: consultas que deja libres.
+export async function completarProveedores(env: Env, b: Budget, opts: { max?: number; reserva?: number } = {}) {
+  const db = env.DB;
+  const max = opts.max ?? 5, reserva = opts.reserva ?? 0;
+  if (!env.CLICKUP_TOKEN || b.left() <= reserva) return { completados: 0 };
+  const { unidades } = await produccionConfig(db);
+  const candidatos = (await db.prepare(`SELECT task_id, sku FROM (
+      SELECT a.task_id, a.actualizado, COALESCE(a.codigo,
+          (SELECT TRIM(li.code) FROM line_items li WHERE li.clickup_task = a.task_id AND TRIM(COALESCE(li.code, '')) != '' LIMIT 1)) AS sku
+        FROM produccion a LEFT JOIN produccion p ON p.task_id = a.pdv_task
+        WHERE a.es_pdv = 0 AND a.proveedor IS NULL AND a.proveedor_auto IS NULL AND a.estado NOT IN (SELECT value FROM json_each(?1))
+          AND COALESCE(p.unidad, a.unidad, '') IN (SELECT value FROM json_each(?2)))
+      WHERE UPPER(SUBSTR(sku, 1, 3)) IN (SELECT value FROM json_each(?3)) ORDER BY actualizado DESC LIMIT 100`)
+    .bind(JSON.stringify(CERRADOS), JSON.stringify(unidades), JSON.stringify(Object.keys(PROVEEDOR_POR_SKU)))
+    .all<{ task_id: string; sku: string }>()).results;
+  if (!candidatos.length) return { completados: 0 };
+  const porPrefijo = await opcionesPorPrefijo(db);
+  let completados = 0, intentos = 0;
+  for (const c of candidatos) {
+    const op = porPrefijo.get(prefijoSku(c.sku) ?? '');
+    if (!op) continue;
+    if (intentos >= max || b.left() <= reserva) break;
+    intentos++;
+    b.take();
+    try {
+      await escribir(env, 'POST', `/task/${encodeURIComponent(c.task_id)}/field/${CAMPOS.proveedor.id}`, { value: op });
+    } catch (e) {
+      const msg = (e as Error).message;
+      console.error('proveedor por SKU', c.task_id, msg);
+      // Si ClickUp no lo acepta (la tarea ya no está, la opción tampoco), no se insiste; si fue un corte o el límite de
+      // ClickUp, se reintenta en la próxima.
+      if (/HTTP 4\d\d/.test(msg) && !/HTTP 429/.test(msg)) await db.prepare("UPDATE produccion SET proveedor_auto = 'error' WHERE task_id = ?").bind(c.task_id).run();
+      continue;
+    }
+    await db.prepare('UPDATE produccion SET proveedor = COALESCE(proveedor, ?1), proveedor_auto = ?1 WHERE task_id = ?2').bind(op, c.task_id).run();
+    completados++;
+  }
+  return { completados };
+}
+
 // ---------- Configuración: qué unidades se trabajan desde el CRM ----------
 
 export interface ProduccionConfig { unidades: string[] }
@@ -356,13 +441,14 @@ export async function leerEstados(env: Env, b: Budget) {
 
 // ---------- La vista de Producción ----------
 
-export type FilaDb = Fila & { record_id: number | null };
+export type FilaDb = Fila & { record_id: number | null; proveedor_auto?: string | null };
 export interface ArticuloVista {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
   foto?: string | null;   // la foto del producto, la misma que en el pedido (fotosDeArticulos en productos.ts)
   logo?: string | null;   // cómo está el logo del producto: ok, textos, no_vectorial, sin_verificar o falta (logos.ts)
+  proveedor_sku: string | null;   // el SKU, si el proveedor lo puso el CRM por el SKU y sigue ese (completarProveedores)
 }
 export interface PdvVista extends ArticuloVista {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
@@ -375,7 +461,7 @@ const articulo = (f: FilaDb): ArticuloVista => ({
   task_id: f.task_id, nombre: f.nombre, estado: f.estado, cantidad: f.cantidad, cantidad_controlada: f.cantidad_controlada, cliente: f.cliente,
   proveedor: f.proveedor, impresor: f.impresor, entrega_real: f.entrega_real, ingreso_proveedor: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
   egreso_impresor: f.egreso_impresor, retiro_impresor: f.retiro_impresor, vence: f.vence, asignados: lista(f.asignados).map(Number), etiquetas: lista(f.etiquetas).map(String),
-  url: f.url,
+  url: f.url, proveedor_sku: f.proveedor && f.proveedor === f.proveedor_auto ? f.codigo : null,
 });
 
 // El estado del PDV: el de la combinación de sus artículos (como el estado del pedido). Si la producción todavía no

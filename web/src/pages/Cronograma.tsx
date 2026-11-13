@@ -5,6 +5,7 @@ import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, Modal } from '../components';
 import { Select } from '../Select';
+import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. Cada día con
@@ -381,7 +382,12 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
       <div className="cr-t-linea">
         <span className="cr-t-pdv num">{t.pdv}</span>
         {t.para && <span className="cr-t-para">{t.para}</span>}
-        {t.movs[0]?.expreso && <span className="cr-tag exp" title="No va directo al cliente: se lleva al expreso">Expreso {lindo(t.movs[0].expreso.nombre)}{t.movs[0].expreso.guia ? ` · guía ${t.movs[0].expreso.guia}` : ''}</span>}
+        {t.movs[0]?.expreso && (() => {
+          // Con la guía de un expreso que tiene seguimiento (Vía Cargo), la etiqueta abre el seguimiento del envío.
+          const e = t.movs[0].expreso!, url = seguimientoExpreso(e.nombre, e.guia), texto = `Expreso ${lindo(e.nombre)}${e.guia ? ` · guía ${e.guia}` : ''}`;
+          return url ? <a className="cr-tag exp" href={url} target="_blank" rel="noreferrer" title="Ver el seguimiento del envío">{texto} ↗</a>
+            : <span className="cr-tag exp" title="No va directo al cliente: se lleva al expreso">{texto}</span>;
+        })()}
         {t.retira_en && <span className="cr-tag" title="Lo retira el cliente: no es parada de ningún recorrido">Retira en {t.retira_en}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>

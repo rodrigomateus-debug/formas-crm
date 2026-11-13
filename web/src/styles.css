@@ -225,6 +225,9 @@ textarea.input { height: auto; min-height: 90px; padding: 8px 10px; resize: vert
 .select-grp:first-child { padding-top: 6px; }
 .select-empty { padding: 10px; color: var(--text-3); }
 /* Una opción que no elige un valor sino que agrega uno nuevo a la lista («Agregar chofer o expreso…»). */
+/* La guía del expreso leída en la foto del remito (Entregas y la tarjeta «Entrega» del pedido). */
+.guia-expreso { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.guia-expreso b { font-size: 13px; letter-spacing: .02em; }
 /* El código de un chofer para entrar a su app (Entregas → Choferes), grande para dictarlo. */
 .codigo-chofer { font-size: 30px; font-weight: 700; letter-spacing: .12em; color: var(--ui-ink); }
 .select-nuevo { display: inline-flex; align-items: center; gap: 6px; color: var(--accent-ink); font-weight: 500; }
@@ -1609,6 +1612,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-editar .cr-panel, .modal-body .cr-panel { border: 0; padding: 0; max-width: none; }
 .cr-p-expreso { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11.5px; color: var(--ui-ink-2); margin: 2px 0; }
 .cr-tag.exp { background: var(--ui-info-soft); color: var(--ui-info-ink); }
+a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: underline; }
 .cr-visita { grid-column: 2 / 4; display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; padding: 7px 10px; border-radius: var(--r-control); font-size: 12px; background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 .cr-visita.salteada { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
 .cr-visita svg { flex: none; margin-top: 1px; }

@@ -3,6 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
 import { Select } from '../Select';
+import { seguimientoExpreso } from '../expresos';
 import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 
@@ -320,7 +321,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                 <div className="cr-n num">{todo ? <Icon name="check" size={13} /> : i + 1}</div>
                 <div className="cr-p-quien">
                   <div className="cr-p-nombre">{lindo(p.nombre)}</div>
-                  {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia ? <> · guía <b className="num">{p.expreso.guia}</b></> : ' · sin guía todavía'}</div>}
+                  {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia
+                    ? <> · guía {seguimientoExpreso(p.expreso.nombre, p.expreso.guia) ? <a className="cr-link num" href={seguimientoExpreso(p.expreso.nombre, p.expreso.guia)!} target="_blank" rel="noreferrer" title="Ver el seguimiento del envío">{p.expreso.guia} ↗</a> : <b className="num">{p.expreso.guia}</b>}</>
+                    : ' · sin guía todavía'}</div>}
                   <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ?? 'Sin dirección cargada'}</div>
                 </div>
                 <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></div>

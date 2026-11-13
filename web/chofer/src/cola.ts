@@ -8,6 +8,8 @@ export type FotoEnCola = {
   lat?: number;
   lng?: number;
   reemplaza?: string;
+  /** La parada del recorrido desde la que se sacó (la cámara se abrió desde «Entregué» o «Dejé en el expreso»). */
+  parada?: string;
   /** Ya se probó achicarla más después de un «muy pesada». */
   achicada?: boolean;
   /** Las fotos que se mandaron juntas comparten este identificador (solo para mostrar el avance «2 de 3»). */
@@ -21,6 +23,7 @@ export type FotoDeTanda = {
   tomada_el: string;
   origen: 'camara' | 'guardada';
   reemplaza?: string;
+  parada?: string;
   /** Para mostrarlas en el orden en que se sumaron. */
   orden: number;
 };

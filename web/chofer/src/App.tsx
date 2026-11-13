@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import { RutaHoy } from './Ruta';
+import { RutaHoy, entregasDeHoy } from './Ruta';
 import {
   LinkInvalido, Rechazo, corregirPdv, entrarConCodigo, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
@@ -53,7 +53,7 @@ type Lectura = { tono: Tono; icono: string; titulo: string };
 /** Qué significa cada respuesta del servidor para el chofer. */
 function lectura(r: RemitoChofer): Lectura {
   if (r.repetir) return { tono: 'mal', icono: 'repetir', titulo: 'Sacala de nuevo' };
-  if (faltaPdv(r)) return { tono: 'aviso', icono: 'aviso', titulo: 'Falta el número de PDV' };
+  if (faltaPdv(r)) return { tono: 'aviso', icono: 'aviso', titulo: r.guia ? '¿De qué entrega es la guía?' : 'Falta el número de PDV' };
   switch (r.estado) {
     case 'ok': return { tono: 'bien', icono: 'bien', titulo: 'Listo' };
     case 'revisar': return { tono: 'aviso', icono: 'aviso', titulo: 'Llegó. Lo revisa Logística' };
@@ -136,6 +136,7 @@ export default function App() {
   const enCamino = useRef(0);       // fotos que se están achicando (cuentan para el tope)
   const tandaLevantada = useRef(false);
   const reemplaza = useRef<string | undefined>(undefined);
+  const paradaFoto = useRef<string | undefined>(undefined);   // la parada desde la que se abrió la cámara
   const punto = useRef<Promise<Punto | null> | null>(null);
   const arriba = useRef<HTMLHeadingElement>(null);
 
@@ -231,8 +232,9 @@ export default function App() {
     if (enPrevia()) history.back();
   }
 
-  function abrirCamara(reemplazaA?: string) {
+  function abrirCamara(reemplazaA?: string, parada?: string) {
     reemplaza.current = reemplazaA;
+    paradaFoto.current = parada;
     entrada.current?.click();
   }
   function abrirGuardadas(reemplazaA?: string) {
@@ -244,8 +246,9 @@ export default function App() {
   async function alElegir(lista: FileList | null, origen: Origen) {
     const archivos = Array.from(lista ?? []);
     if (!archivos.length) return;
-    const reemplazaA = reemplaza.current;
+    const reemplazaA = reemplaza.current, paradaA = paradaFoto.current;
     reemplaza.current = undefined;
+    paradaFoto.current = undefined;
     const lugar = Math.max(0, TOPE_TANDA - tandaAhora.current.length - enCamino.current);
     const entran = archivos.slice(0, lugar);
     setAvisoTanda(entran.length < archivos.length
@@ -264,6 +267,7 @@ export default function App() {
         const foto: FotoDeTanda = {
           clave: claveNueva(), blob, tomada_el: new Date(tomada).toISOString(), origen,
           reemplaza: i === 0 ? reemplazaA : undefined, // «Sacala de nuevo» reemplaza a una sola foto
+          parada: paradaA,
           orden: Date.now() + i / 1000,
         };
         setTanda((antes) => [...antes, { ...foto, url: URL.createObjectURL(blob) }]);
@@ -326,7 +330,7 @@ export default function App() {
     const lote = fotos.length > 1 ? claveNueva() : undefined;
     for (const f of fotos) {
       const conLugar = f.origen === 'camara' ? lugar : null;
-      await envios.agregar({ clave: f.clave, blob: f.blob, tomada_el: f.tomada_el, lat: conLugar?.lat, lng: conLugar?.lng, reemplaza: f.reemplaza, lote });
+      await envios.agregar({ clave: f.clave, blob: f.blob, tomada_el: f.tomada_el, lat: conLugar?.lat, lng: conLugar?.lng, reemplaza: f.reemplaza, parada: f.parada, lote });
       sacarDeTanda(f.clave).catch(() => {}); // ya quedó en la cola de envíos
       URL.revokeObjectURL(f.url);
     }
@@ -484,7 +488,7 @@ export default function App() {
 
         {!hayFoco && <Consejos />}
 
-        {!hayFoco && <RutaHoy enLinea={enLinea} alEntregar={() => abrirCamara()} />}
+        {!hayFoco && <RutaHoy enLinea={enLinea} alEntregar={(parada) => abrirCamara(undefined, parada)} />}
 
         <section className="hoy" aria-labelledby="titulo-hoy">
           <h2 id="titulo-hoy">Hoy {filas.length > 0 && <span className="cuenta">{filas.length}</span>}</h2>
@@ -668,12 +672,14 @@ function CampoPdv({ remito, modo, enfocar, alListo, alCancelar }: {
   const [soloNumeros, setSoloNumeros] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
   const id = `pdv-${remito.id}`;
+  // Las entregas del recorrido de hoy: tocar una es más fácil que escribir el número (pedido de Rodrigo del 13/11/2026).
+  const paradas = useMemo(() => entregasDeHoy(), []);
 
   useEffect(() => {
-    if (!enfocar) return;
+    if (!enfocar || paradas.length) return;
     campo.current?.focus();
     campo.current?.select();
-  }, [enfocar]);
+  }, [enfocar, paradas.length]);
 
   function alEscribir(texto: string) {
     const limpio = texto.replace(/\D/g, '').slice(0, 10);
@@ -687,13 +693,17 @@ function CampoPdv({ remito, modo, enfocar, alListo, alCancelar }: {
     e.preventDefault();
     if (mandando) return;
     if (!valor) { setError('Escribí el número de PDV.'); campo.current?.focus(); return; }
+    await decir(valor);
+  }
+  // Manda el PDV escrito o la parada elegida.
+  async function decir(pdv: string, parada?: string) {
     setMandando(true);
     setError('');
     try {
-      const r = await corregirPdv(remito.id, valor);
+      const r = await corregirPdv(remito.id, pdv, parada);
       alListo(r);
       // Si el servidor lo vuelve a pedir (no hay pedido con ese número), el número queda a la vista para corregirlo.
-      if (r.pide_pdv) { campo.current?.focus(); campo.current?.select(); }
+      if (r.pide_pdv && !parada) { campo.current?.focus(); campo.current?.select(); }
     } catch (err) {
       if (err instanceof LinkInvalido) envios.marcarLinkInvalido();
       else if (err instanceof Rechazo) {
@@ -708,8 +718,18 @@ function CampoPdv({ remito, modo, enfocar, alListo, alCancelar }: {
 
   return (
     <form className={`campo-pdv ${modo}`} onSubmit={mandar} noValidate>
+      {paradas.length > 0 && (
+        <div className="elegir-parada" role="group" aria-label="De qué entrega es">
+          <p className="etiqueta">{remito.guia ? 'Tocá la parada:' : '¿De qué entrega es? Tocá la parada:'}</p>
+          {paradas.map((p) => (
+            <button key={p.clave} type="button" className="boton chico" disabled={mandando} onClick={() => void decir('', p.clave)}>
+              <strong>{p.nombre}</strong>{p.pdv && <span>PDV {p.pdv}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <label htmlFor={id}>
-        {modo === 'alternativa' ? 'O escribí el número de PDV' : modo === 'corregir' ? 'Número de PDV correcto' : 'Número de PDV'}
+        {paradas.length || modo === 'alternativa' ? 'O escribí el número de PDV' : modo === 'corregir' ? 'Número de PDV correcto' : 'Número de PDV'}
       </label>
       <input
         ref={campo} id={id} type="text" inputMode="numeric" pattern="[0-9]*" autoComplete="off" enterKeyHint="send"

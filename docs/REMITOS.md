@@ -114,6 +114,17 @@ sus renglones vuelven al principal; otra foto del mismo número que dice el PDV 
   «chofer» que solo sirve para la app de remitos y del recorrido: no abre el resto del CRM ni las otras entradas; el
   código es otra forma de ese mismo link.
 
+### La guía del expreso
+
+Si en la foto está la guía de un expreso (Vía Cargo, Andreani, OCA…), la lectura saca también la empresa, el número de
+guía, el remito del expreso, el destinatario y la localidad (`guia_expreso`). Con guía no se le pide otra foto al chofer
+aunque tape parte del remito o el remito no esté firmado. La foto llega con la parada desde la que se sacó (columna
+`parada`, migración `0063_remito_parada.sql`); si no, y no se sabe de qué entrega es, la app le pregunta al chofer con sus
+entregas de hoy para tocar (`POST /hooks/chofer/api/remitos/:id/pdv` con `{ "parada": "p:…" }` o `{ "pdv": "…" }`). La
+guía se carga en la entrega por expreso (ver
+[CRONOGRAMA.md](CRONOGRAMA.md#choferes-expresos-y-de-dónde-sale)); queda un control «Guía del expreso» en el remito
+que dice dónde quedó o por qué no, y el remito la muestra con «Copiar» y, si el expreso tiene, «Ver el seguimiento».
+
 ## La app del chofer (`web/chofer/`)
 
 Una página que se agrega a la pantalla de inicio del celular (PWA), servida por el Worker en `/hooks/chofer/` (esa ruta

@@ -18,6 +18,9 @@ import { asignarChofer, guardarExpreso, guardarTransportista, quitarTransportist
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
+import { numeroPdv, vincularNegocio } from './vinculos';
+import { pedidosDuplicados } from './pedidosfin';
+import { asignarRazon, razonesAEmpresa, razonSocialDe, resolverEmpresa } from './razones';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
 import { marcarNotificaciones, notificaciones } from './notificaciones';
 import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
@@ -242,6 +245,8 @@ api.post('/records/:type', async (c) => {
   // Un negocio creado con pedidos (o un pedido creado en un negocio) toma el monto de sus pedidos (montos.ts).
   const pedidos = type === 'deal' ? otros.some((o) => o.object_type === 'order') : type === 'order' && otros.some((o) => o.object_type === 'deal');
   if (pedidos) await montosDesdePedidos(c.env.DB, [row.id], ctx);
+  // Un negocio creado ya con su N° de PDV: se asocia con su pedido (vinculos.ts). Si el número es de otro negocio, queda sin asociar.
+  if (type === 'deal' && body.props?.pdv_finnegans) await vincularNegocio(c.env.DB, ctx, row.id).catch(() => undefined);
   return c.json(rowToRecord(await getRow(c.env.DB, row.id)), 201);
 });
 
@@ -282,7 +287,17 @@ api.patch('/records/:type/:id', async (c) => {
   if (type === 'deal' && body.props && 'amount' in body.props && !('monto_a_mano' in body.props) && await tienePedidos(c.env.DB, Number(c.req.param('id')))) {
     body.props.monto_a_mano = true;
   }
+  // El N° de PDV de un negocio (vinculos.ts): se guarda solo el número; si ese PDV ya es de otro negocio, rebota antes de
+  // cambiar nada.
+  const conPdv = type === 'deal' && body.props && 'pdv_finnegans' in body.props;
+  if (conPdv) {
+    const n = numeroPdv(body.props.pdv_finnegans);
+    body.props.pdv_finnegans = n ? String(n) : null;
+    await vincularNegocio(c.env.DB, ctx, Number(c.req.param('id')), { valor: n, soloRevisar: true });
+  }
   let row = await updateRecord(c.env.DB, ctx, type, Number(c.req.param('id')), body.props ?? {});
+  // Con el número, el pedido queda asociado al negocio (si ya está en el CRM; si no, cuando llegue) y el monto pasa a ser el suyo.
+  if (conPdv && (await vincularNegocio(c.env.DB, ctx, row.id)).estado === 'asociado') row = await getRow(c.env.DB, row.id, type);
   // El total o el estado (anulado) de un pedido cambian el monto de su negocio (montos.ts); desmarcar «Monto a mano»
   // vuelve el negocio al total de sus pedidos.
   if (type === 'order' && ('hs_total_price' in (body.props ?? {}) || 'hs_pipeline_stage' in (body.props ?? {}))) await montosDesdePedidos(c.env.DB, [row.id], ctx);
@@ -384,6 +399,7 @@ api.post('/records/:type/:id/merge', async (c) => {
   const row = await mergeRecords(c.env.DB, ctx, type, Number(c.req.param('id')), Number(other_id));
   // Dos empresas proveedoras combinadas: las opciones de ClickUp de la que se va pasan a la que queda (produccion.ts).
   if (type === 'company') await opcionesAEmpresa(c.env.DB, [Number(other_id)], row.id);
+  if (type === 'company') await razonesAEmpresa(c.env.DB, [Number(other_id)], row.id);
   return c.json(rowToRecord(row));
 });
 
@@ -513,6 +529,12 @@ api.post('/associations', async (c) => {
   await associate(c.env.DB, ctx, Number(b.from_id), Number(b.to_id), { label: b.label, primary: b.primary });
   // Un pedido que se suma a un negocio le pone su total al monto (montos.ts).
   await montosDesdePedidos(c.env.DB, [Number(b.from_id), Number(b.to_id)], ctx);
+  // Un pedido con su negocio, o un negocio con su empresa: la empresa del negocio queda en sus pedidos y la razón social
+  // de cada pedido pasa a ser una de las de esa empresa (razones.ts).
+  const { results: pedidos } = await c.env.DB.prepare(`SELECT id FROM records WHERE object_type = 'order' AND archived = 0 AND (id IN (?1, ?2)
+    OR id IN (SELECT a.to_id FROM associations a JOIN records d ON d.id = a.from_id AND d.object_type = 'deal' WHERE a.from_id IN (?1, ?2) AND a.to_type = 'order')) LIMIT 20`)
+    .bind(Number(b.from_id), Number(b.to_id)).all<{ id: number }>();
+  for (const o of pedidos) await resolverEmpresa(c.env.DB, ctx, o.id).catch(() => undefined);
   return c.json({ ok: true });
 });
 
@@ -956,6 +978,20 @@ api.get('/records/order/:id/products', async (c) => {
   return c.json(await orderProducts(c.env, rec.id, JSON.parse(rec.props), { refresh: c.req.query('refresh') === '1' }));
 });
 
+// La razón social con que se factura un pedido (razones.ts): la del pedido o la del pedido de un negocio, y las de una empresa.
+api.get('/records/:type/:id/razon-social', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  return c.json(await razonSocialDe(c.env.DB, rec.object_type, rec.id));
+});
+// Resolver la razón social de un pedido sin empresa: {accion: 'crear' | 'asignar' | 'crear_con_nombre', company_id?, name?}.
+api.post('/records/order/:id/razon-social', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  if (rec.object_type !== 'order') throw new HttpError(404, 'No es un pedido.');
+  return c.json(await asignarRazon(c.env.DB, ctx, rec.id, await c.req.json()));
+});
+
 // Un administrador cambia el tipo de un renglón del pedido: producto o servicio (servicios.ts). El estado del pedido se
 // vuelve a calcular en la próxima sincronización con ClickUp.
 api.put('/records/order/:id/products/tipo', async (c) => {
@@ -1355,10 +1391,25 @@ api.get('/integrations/pedidos', async (c) => {
   const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
   return c.json({
     clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
-    finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
+    finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0,
+      // Los pedidos que se dieron de alta desde el informe de Finnegans (pedidosfin.ts) y los repetidos, para control.
+      pedidos: JSON.parse((await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'pedidos_finnegans'").first<{ value: string }>())?.value ?? 'null'),
+      duplicados: await pedidosDuplicados(c.env.DB) },
     remitos: { configured: !!c.env.ANTHROPIC_API_KEY, ...(await c.env.DB.prepare(`SELECT SUM(estado = 'sin_leer') AS sin_leer, SUM(estado = 'revisar') AS revisar,
       SUM(estado = 'ok') AS leidos, MAX(leido_at) AS at FROM remitos`).first<{ sin_leer: number | null; revisar: number | null; leidos: number | null; at: string | null }>()) },
   });
+});
+// La dirección a la que Finnegans avisa cuando se crea un pedido de venta (hooks.ts, /hooks/finnegans/<llave>). Solo
+// administradores; pedirla otra vez da la misma, salvo con {nueva: true}.
+api.post('/integrations/finnegans/webhook', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const b = await c.req.json<{ nueva?: boolean }>().catch(() => ({} as { nueva?: boolean }));
+  let key = (await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'finnegans_webhook_key'").first<{ value: string }>())?.value;
+  if (!key || b.nueva) {
+    key = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+    await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('finnegans_webhook_key', ?)").bind(key).run();
+  }
+  return c.json({ url: `${new URL(c.req.url).origin}/hooks/finnegans/${key}` });
 });
 // Leer una tanda de remitos sin leer ahora (lo mismo que hace el cron cada 10 minutos).
 api.post('/integrations/remitos/leer', async (c) => {
@@ -1372,7 +1423,9 @@ api.post('/integrations/clickup/sync', async (c) => {
 });
 api.post('/integrations/finnegans/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  return c.json(await syncFacturas(c.env));
+  // El botón recorre también los pedidos abiertos; {barrido: false} lee solo los que tienen una factura nueva avisada.
+  const b = await c.req.json<{ barrido?: boolean }>().catch(() => ({} as { barrido?: boolean }));
+  return c.json(await syncFacturas(c.env, { barrido: b.barrido !== false }));
 });
 
 // ---------- Administración ----------

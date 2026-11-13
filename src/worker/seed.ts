@@ -455,7 +455,9 @@ export async function seedConfig(db: D1Database) {
       const f = stageFlags(label, probability);
       // Perder un negocio de venta pide el motivo; mandar la cotización, el valor del negocio (migración 0024).
       const stageConfig = sales && f.is_closed && !f.is_won ? { required_props: ['motivo_de_cierre_perdido'] }
-        : /^env[ií]o de cotizaci[oó]n$/i.test(label) ? { required_props: ['amount'] } : {};
+        : /^env[ií]o de cotizaci[oó]n$/i.test(label) ? { required_props: ['amount'] }
+        // «Pasos operativos» y, en Corporate, «Cierre Ganado» preguntan el N° de PDV, sin obligar (migración 0060).
+        : /^pasos operativos$/i.test(label) || id === '989921336' ? { ask_props: ['pdv_finnegans'] } : {};
       stmts.push(db.prepare('INSERT OR IGNORE INTO stages (id, pipeline_id, label, display_order, probability, is_closed, is_won, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .bind(id, p.id, label, j, probability, f.is_closed, f.is_won, JSON.stringify(stageConfig)));
     });

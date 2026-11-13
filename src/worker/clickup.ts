@@ -11,6 +11,7 @@ import { montosDesdePedidos } from './montos';
 import { recalcularEntrega } from './remitos';
 import { completarProveedores, enlazarPedido, guardarTareas, leerEstados, podarArticulos, vincularOpciones } from './produccion';
 import { articulosServicio, relecturasPedidas } from './servicios';
+import { vincularPedido } from './vinculos';
 
 // Pedidos desde ClickUp (pedido de Rodrigo del 30/10/2026). La lista PEC («Producciones en curso → Produccion Merch»)
 // tiene una tarea por PDV y una subtarea por artículo, cada una con su estado. Cada 10 minutos se leen las tareas que
@@ -103,7 +104,7 @@ function fields(t: CuTask) {
 
 export const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 // Nombre de empresa para comparar: sin la forma societaria del final ("Memes Games SRL" = "MEMES GAMES S.R.L.").
-const companyKey = (s: string) => norm(s).replace(/[.,]/g, '').replace(/(\s(s ?r ?l|s ?a ?s|s ?a ?u|s ?a ?i ?c|s ?a ?c ?i ?f|s ?a|s ?h))+$/, '').trim();
+export const companyKey = (s: string) => norm(s).replace(/[.,]/g, '').replace(/(\s(s ?r ?l|s ?a ?s|s ?a ?u|s ?a ?i ?c|s ?a ?c ?i ?f|s ?a|s ?h))+$/, '').trim();
 
 // El pedido de Finnegans del PDV: la línea «Pedido: PEDVTASTP - 31277» (al principio de la línea; no «Fecha pedido: …»).
 // Los PDV más viejos no la tienen y traen «Tipo de Documento: PEDVTAFP»: el pedido es ese tipo con el número del PDV.
@@ -407,6 +408,8 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     entregadoAhora = pdv.stage === STAGE.entregado;
     const company = await companyFor(env, pdv, fin, b);
     if (company) await associate(db, ctx, id, company, { primary: true }).catch(() => undefined);
+    // Con su negocio: el que tiene este N° de PDV o el único de su empresa que espera pedido (vinculos.ts).
+    await vincularPedido(db, ctx, id).catch((e) => console.error('negocio del pedido', pdv.npdv, (e as Error).message));
     result = 'creado';
   } else {
     id = existing.id;

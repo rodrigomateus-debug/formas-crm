@@ -8,7 +8,8 @@ export interface Property {
   object_type: ObjectType; name: string; label: string; type: string; options: Option[]; group_name: string; description: string;
   display_order: number; system: number; read_only: number; in_create_form: number; required: number;
 }
-export interface StageConfig { required_props?: string[]; task?: { subject: string; due_days?: number; task_type?: string } | null }
+// ask_props: lo que la etapa pide al entrar sin ser obligatorio (el N° de PDV al pasar a «Pasos operativos»).
+export interface StageConfig { required_props?: string[]; ask_props?: string[]; task?: { subject: string; due_days?: number; task_type?: string } | null }
 export interface PipelineConfig {
   rules?: { no_skip?: boolean; no_backward?: boolean; require_company?: boolean; create_stages?: string[] };
   visible_teams?: number[];
@@ -183,8 +184,14 @@ export function canSeePipeline(u: User, p: Pipeline) {
 // Lo que falta completar para pasar un negocio a una etapa.
 // Un dato obligatorio falta si está vacío; el valor del negocio, también si es $0 (la misma regla que el servidor).
 export const faltaDato = (k: string, v: unknown) => v == null || v === '' || (k === 'amount' && !(Number(v) > 0));
-export function missingFor(stage: Stage, props: Record<string, unknown>) {
-  return (stage.config?.required_props ?? []).filter((k) => faltaDato(k, props[k]));
+// Solo lo obligatorio que falta (al crear un negocio o al cambiar la etapa de muchos a la vez, lo opcional no se pide).
+export const faltanObligatorias = (stage: Stage, props: Record<string, unknown>) => (stage.config?.required_props ?? []).filter((k) => faltaDato(k, props[k]));
+// Lo que hay que pedir para entrar a la etapa: lo obligatorio que falta y lo opcional que falta y todavía no se preguntó.
+// `preguntado`: lo que ya contestó la ventana (si dejó vacío un opcional, viene igual con su clave y no se vuelve a pedir).
+export function missingFor(stage: Stage, props: Record<string, unknown>, preguntado: Record<string, unknown> = {}) {
+  const obligatorias = (stage.config?.required_props ?? []).filter((k) => faltaDato(k, props[k]));
+  const opcionales = (stage.config?.ask_props ?? []).filter((k) => !obligatorias.includes(k) && faltaDato(k, props[k]) && !(k in preguntado));
+  return [...obligatorias, ...opcionales];
 }
 export const userOf = (meta: Meta, id: unknown) => (id == null || id === '' ? undefined : meta.users.find((u) => u.id === Number(id)));
 export const userName = (meta: Meta, id: unknown) => userOf(meta, id)?.name ?? (id ? `Usuario ${id}` : 'Sin asignar');

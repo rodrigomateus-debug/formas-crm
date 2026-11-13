@@ -14,6 +14,10 @@ textos convertidos a trazos) en el formato que sea.
   asociarle una, y al asociarla (o crearla) desde la vista previa o la ficha, los logos se vuelven a pedir enseguida
   (`useLogos` con las empresas asociadas; aviso de Rodrigo del 13/11/2026: seguía diciendo «no tiene empresa» hasta cerrar
   y abrir la vista previa).
+- **Descargar** (pedido de Rodrigo del 13/11/2026): al lado de la fichita del logo de cada producto (en el pedido, el
+  negocio y el visor del boceto), un botón baja el archivo original de un clic, con su nombre (`BajarLogo`); en el cuadro
+  para elegir, cada versión tiene «ver grande» y «descargar». Antes había que abrir el cuadro, el ojito y recién ahí
+  «Descargar». Desde la empresa, en el visor del logo, como siempre.
 - **Visor del boceto**: el mismo selector, para el producto del boceto.
 - **Producción**: al lado del nombre del artículo, «Sin logo» (la empresa no tiene) o «Logo» en rojo (con textos sin curvas o
   no vectorial). No se muestra en los artículos ya listos, entregados o anulados.

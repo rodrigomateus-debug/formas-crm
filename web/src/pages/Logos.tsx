@@ -207,7 +207,19 @@ export function LogosCard({ companyId }: { companyId: number }) {
 
 // ---------- En el producto (y su boceto) ----------
 
-// La fichita del logo de un producto: cuál va y cómo está; un clic abre el cuadro para elegir otro o subir uno nuevo.
+// Bajar el archivo original del logo (AI, CDR, PDF…) de un clic (pedido de Rodrigo del 13/11/2026: desde el pedido había
+// que abrir el cuadro, el ojito y recién ahí «Descargar»).
+export function BajarLogo({ logo, className = 'btn ghost xs icon logo-bajar' }: { logo: Logo; className?: string }) {
+  return (
+    <a className={className} href={urlLogo(logo, true)} download={logo.nombre} title={`Descargar ${nombreLogo(logo)} (${logo.formato.toUpperCase()})`}
+      aria-label={`Descargar el logo ${nombreLogo(logo)}`} onClick={(e) => e.stopPropagation()}>
+      <Icon name="download" size={13} />
+    </a>
+  );
+}
+
+// La fichita del logo de un producto: cuál va y cómo está; un clic abre el cuadro para elegir otro o subir uno nuevo. Al
+// lado, para bajarlo.
 export function LogoProducto({ type, recordId, producto, productoNombre, res, onCambio }: {
   type: ObjectType; recordId: number; producto: string; productoNombre: string; res: LogosRes | null | undefined; onCambio: () => void;
 }) {
@@ -223,6 +235,7 @@ export function LogoProducto({ type, recordId, producto, productoNombre, res, on
         {logo ? <span className="ellipsis" style={{ maxWidth: 120 }}>{nombreLogo(logo)}</span> : 'Falta logo'}
         {logo && (estado === 'ok' ? <Icon name="check" size={12} /> : <span className={`logo-punto ${CURVAS[logo.curvas].cls}`} aria-label={CURVAS[logo.curvas].label} />)}
       </button>
+      {logo && <BajarLogo logo={logo} />}
       {abierto && createPortal(<ElegirLogo type={type} recordId={recordId} producto={producto} productoNombre={productoNombre} res={res}
         onClose={() => setAbierto(false)} onCambio={onCambio} />, document.body)}
     </>
@@ -273,7 +286,10 @@ function ElegirLogo({ type, recordId, producto, productoNombre, res, onClose, on
                   <span className="logo-op-nombre ellipsis">{nombreLogo(l)}{l.principal ? <Icon name="star" size={12} /> : null}</span>
                   <span className="row" style={{ gap: 4, justifyContent: 'center' }}><span className="small muted">{l.formato.toUpperCase()}</span><EstadoCurvas curvas={l.curvas} corto /></span>
                 </button>
-                <button type="button" className="btn ghost xs logo-op-ver" onClick={() => setVer(l)} title="Ver grande" aria-label={`Ver ${nombreLogo(l)}`}><Icon name="eye" size={14} /></button>
+                <span className="logo-op-acciones">
+                  <button type="button" className="btn ghost xs icon" onClick={() => setVer(l)} title="Ver grande" aria-label={`Ver ${nombreLogo(l)}`}><Icon name="eye" size={14} /></button>
+                  <BajarLogo logo={l} className="btn ghost xs icon" />
+                </span>
               </div>
             );
           })}

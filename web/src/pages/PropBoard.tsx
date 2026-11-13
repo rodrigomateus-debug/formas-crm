@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, cobroPedido, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
 import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
@@ -47,9 +47,10 @@ function OrderLine({ r }: { r: CrmRecord }) {
   );
 }
 
-// Saldo pendiente del pedido (Finnegans, con IVA: lo facturado que falta cobrar más lo que falta facturar), bien a la vista:
-// en rojo y en negrita si queda algo por cobrar; en verde, con un tilde, si está todo pago. Sin dato de Finnegans (o anulado),
-// no se muestra: no saber no es lo mismo que estar pago.
+// Saldo pendiente del pedido (Finnegans, sin IVA: lo facturado que falta cobrar más lo que falta facturar), bien a la vista:
+// en rojo «· total» si no pagó nada; en ámbar «· parcial» si ya pagó algo (el anticipo), con cuánto al pasar el mouse
+// (aviso de Rodrigo del 13/11/2026); en verde, con un tilde, si está todo pago. Sin dato de Finnegans (o anulado), no se
+// muestra: no saber no es lo mismo que estar pago.
 function Saldo({ r }: { r: CrmRecord }) {
   const p = r.props;
   const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -57,8 +58,16 @@ function Saldo({ r }: { r: CrmRecord }) {
   if (saldo == null || p.hs_pipeline_stage === ANULADO) return null;
   if (saldo <= 0) return <div className="saldo pago" title="Sin saldo pendiente en Finnegans: está todo pago."><Icon name="check" size={13} />Pagado</div>;
   const pf = num(p.importe_por_facturar);
-  const detalle = pf ? (pf >= saldo - 1 ? ' (todavía sin facturar)' : ` (${fmtMoney(pf)} todavía sin facturar)`) : '';
-  return <div className="saldo debe" title={`Saldo pendiente en Finnegans: ${fmtMoneyExact(saldo, 'ARS')} con IVA${detalle}.`}>Saldo pendiente <span className="num">{fmtMoney(saldo)}</span></div>;
+  const detalle = pf ? (pf >= saldo - 1 ? ' Todavía sin facturar.' : ` ${fmtMoney(pf)} todavía sin facturar.`) : '';
+  const c = cobroPedido(p);
+  const title = c?.parcial ? `Ya pagó ${fmtMoneyExact(c.pagado, 'ARS')} (${c.pct} %) de ${fmtMoneyExact(c.total, 'ARS')}; falta ${fmtMoneyExact(saldo, 'ARS')}. Sin IVA, de Finnegans.${detalle}`
+    : c ? `No pagó nada todavía: falta todo el pedido, ${fmtMoneyExact(saldo, 'ARS')}. Sin IVA, de Finnegans.${detalle}`
+    : `Saldo pendiente en Finnegans: ${fmtMoneyExact(saldo, 'ARS')} sin IVA.${detalle}`;
+  return (
+    <div className={`saldo debe${c?.parcial ? ' parcial' : ''}`} title={title}>
+      Saldo pendiente <span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
+    </div>
+  );
 }
 
 // Miniaturas de los productos del pedido (solo si alguno tiene foto): hasta 3, una al lado de la otra, y «+X» si tiene más

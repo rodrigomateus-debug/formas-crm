@@ -207,6 +207,18 @@ export const fmtMoney = (v: unknown, currency?: string) => {
   return `${n < 0 ? '-' : ''}${currency === 'USD' ? 'US$' : '$'}\u00a0${(m >= 100 ? millones0 : millones1).format(m)}\u00a0M`;
 };
 export const fmtNumber = (v: unknown) => (v == null || v === '' ? '' : number.format(Number(v)));
+
+// ¿El saldo pendiente del pedido es total o parcial? (pedido de Rodrigo del 13/11/2026: si ya pagó algo, el anticipo, o
+// no). El total del pedido y el saldo son los dos sin IVA, de Finnegans (totales.ts): lo pagado es la diferencia. Menos
+// del 1 % del total cuenta como nada (redondeos, percepciones). Sin saldo, ya todo pago o sin total para comparar: null.
+export function cobroPedido(p: Record<string, unknown>) {
+  const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+  const saldo = num(p.saldo_pendiente_de_pago_mxn), total = num(p.hs_total_price);
+  if (saldo == null || saldo <= 0 || total == null || total <= 0) return null;
+  const pagado = total - saldo;
+  if (pagado <= total * 0.01) return { parcial: false, pagado: 0, total, pct: 0 };
+  return { parcial: true, pagado, total, pct: Math.min(99, Math.max(1, Math.round((pagado / total) * 100))) };
+}
 export function fmtDate(v: unknown, withTime = false) {
   if (!v) return '';
   const s = String(v);

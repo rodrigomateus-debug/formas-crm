@@ -132,6 +132,14 @@ Mercado Libre no cuentan. Cada hora se recalculan los pedidos de los últimos 12
 cobranzas sin aplicar (un pago que todavía no se imputó a ninguna factura) son del cliente, no de un pedido. Si un
 informe falla, no se manda nada. Es solo lectura: en Finnegans no se escribe.
 
+**Total o parcial** (pedido de Rodrigo del 13/11/2026: que el saldo aclare si ya pagó algo, el anticipo). Lo pagado es el
+total del pedido menos el saldo, los dos sin IVA de Finnegans (`cobroPedido` en `web/src/lib.tsx`). En la tarjeta del
+tablero: «Saldo pendiente $ 3,5 M · total» en rojo si no pagó nada, «· parcial» en ámbar si ya pagó algo (al pasar el
+mouse, cuánto y qué porcentaje), «Pagado» en verde si no queda nada. En la vista previa: «$ 1,8 M · parcial: ya pagó
+$ 1,7 M (49 %)». Una diferencia de menos del 1 % del total cuenta como que no pagó nada (redondeos, percepciones). Sin
+total del pedido no se puede saber y se muestra solo el saldo. Un pago que todavía no se imputó a ninguna factura
+(cobranza sin aplicar) no baja el saldo del pedido, así que hasta que se aplica el pedido sigue diciendo «total».
+
 ## Miniaturas de los productos en la tarjeta
 
 Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, la tarjeta muestra hasta 3 fotos de los productos del pedido,

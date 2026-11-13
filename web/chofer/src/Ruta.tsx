@@ -35,12 +35,15 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
     <>
       {conParadas.map((r) => {
         const base = r.base.lat != null && r.base.lng != null ? { lat: r.base.lat, lng: r.base.lng } : null;
-        const sim = simular(base, r.paradas, r.salida);
+        // Dónde termina: donde sale, otro lugar o la última parada.
+        const vuelve = r.fin === undefined || !!r.vuelve;
+        const destino = vuelve ? base : r.fin ? (r.fin.lat != null && r.fin.lng != null ? { lat: r.fin.lat, lng: r.fin.lng } : null) : 'ultima' as const;
+        const sim = simular(base, r.paradas, r.salida, null, destino);
         const hechas = r.paradas.filter((p) => p.visita?.resultado === 'hecho' || p.movimientos.every((m) => m.hecho)).length;
         return (
           <section key={r.n} className="ruta" aria-labelledby={`titulo-ruta-${r.n}`}>
             <h2 id={`titulo-ruta-${r.n}`}>Tu recorrido de hoy <span className="cuenta">{hechas}/{r.paradas.length}</span></h2>
-            <p className="ruta-sale">Salís de {r.base.nombre} a las {hhmm(r.salida)} · volvés cerca de las {hhmm(sim.fin)}</p>
+            <p className="ruta-sale">Salís de {r.base.nombre} a las {hhmm(r.salida)} · {vuelve ? 'volvés' : r.fin ? `terminás en ${r.fin.nombre}` : 'terminás en la última parada'} cerca de las {hhmm(sim.fin)}</p>
             <ol className="lista ruta-lista">
               {r.paradas.map((p, i) => {
                 const s = sim.paradas[i], hecha = p.visita?.resultado === 'hecho' || p.movimientos.every((m) => m.hecho);

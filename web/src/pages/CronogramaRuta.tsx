@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
 import { Select } from '../Select';
-import { claveOrden, duracion, hhmm, optimizar, simular, type Simulacion, type TramosReales } from '../ruta';
+import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
@@ -24,7 +24,10 @@ const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Est
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 // `a_mano`: alguien movió sus paradas. Si no, se ordena solo por el recorrido más corto (igual que en el servidor y en la
 // app del chofer): así quedan los que se arman eligiendo el chofer desde las tarjetas de la semana.
-interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat?: number | null; lng?: number | null } | null; a_mano?: boolean }
+// `fin`: dónde termina (pedido de Rodrigo del 13/11/2026): 'igual' (vuelve a donde sale), el id de un depósito, 'ultima'
+// (en la última parada, sin volver) u 'otro' (`fin_otro`).
+type LugarElegido = { nombre: string; direccion: string; lat?: number | null; lng?: number | null };
+interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: LugarElegido | null; a_mano?: boolean; fin?: string; fin_otro?: LugarElegido | null }
 interface BaseGeo { id: string; nombre: string; direccion: string; lat: number | null; lng: number | null }
 // `retiran`: las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido); `parcial`: el resto del pedido se envía.
 interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
@@ -47,12 +50,21 @@ function acomodar(rutas: Recorrido[], paradas: Parada[]): Recorrido[] {
   out[0] = { ...out[0], orden: [...out[0].orden, ...paradas.map((p) => p.clave).filter((c) => !vistas.has(c))] };
   return out;
 }
-const salidaDe = (r: Recorrido, bases: BaseGeo[]) => punto(r.base === 'otro' && r.base_otro ? { lat: r.base_otro.lat ?? null, lng: r.base_otro.lng ?? null } : bases.find((b) => b.id === r.base) ?? bases[0]);
+const geoDe = (id: string, l: LugarElegido): BaseGeo => ({ id, nombre: l.nombre, direccion: l.direccion, lat: l.lat ?? null, lng: l.lng ?? null });
+// De dónde sale: un depósito de Formas o, con «Otro lugar», el que se eligió.
+const salidaDe = (r: Recorrido, i: number, bases: BaseGeo[]): BaseGeo | null => (r.base === 'otro' && r.base_otro ? geoDe(`otro-${i}`, r.base_otro) : bases.find((b) => b.id === r.base) ?? bases[0] ?? null);
+// Dónde termina: donde sale, un depósito, otro lugar o, si termina en la última parada, ninguno (null).
+const finDe = (r: Recorrido, i: number, bases: BaseGeo[], salida: BaseGeo | null): BaseGeo | null =>
+  r.fin === 'ultima' ? null : r.fin === 'otro' && r.fin_otro ? geoDe(`fin-${i}`, r.fin_otro) : bases.find((b) => b.id === r.fin) ?? salida;
+const destinoDe = (fin: BaseGeo | null): Destino => (fin ? punto(fin) : 'ultima');
 // Los recorridos que nadie ordenó a mano van siempre por el más corto (la misma cuenta que hace el servidor).
 function ordenarSolos(rutas: Recorrido[], paradas: Parada[], bases: BaseGeo[]): Recorrido[] {
   const porClave = new Map(paradas.map((p) => [p.clave, p]));
-  return rutas.map((r) => (r.a_mano || r.orden.length < 2 ? r
-    : { ...r, orden: optimizar(salidaDe(r, bases), r.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p), r.salida).map((p) => p.clave) }));
+  return rutas.map((r, i) => {
+    if (r.a_mano || r.orden.length < 2) return r;
+    const sale = salidaDe(r, i, bases);
+    return { ...r, orden: optimizar(punto(sale), r.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p), r.salida, destinoDe(finDe(r, i, bases, sale))).map((p) => p.clave) };
+  });
 }
 
 export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, onAbrir, onCambio }: {
@@ -70,7 +82,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [ubicando, setUbicando] = useState<{ clave: string; lat?: number; lng?: number } | null>(null);
   // Paneles de la barra del recorrido (agregar un chofer o un expreso, elegir otro lugar de salida) y la parada a la que
   // se le está cargando el expreso.
-  const [panel, setPanel] = useState<'chofer' | 'salida' | null>(null);
+  const [panel, setPanel] = useState<'chofer' | 'salida' | 'fin' | null>(null);
   const [expresando, setExpresando] = useState<string | null>(null);
   const arrastre = useRef<string | null>(null);
   const [sobre, setSobre] = useState<string | null>(null);
@@ -124,13 +136,12 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   }, [rutas, puede, fecha, toast]);
 
   const armadas = useMemo(() => rutas.map((r, i) => {
-    // Sale de un depósito de Formas o, con «Otro lugar», del que se eligió.
-    const base: BaseGeo | null = r.base === 'otro' && r.base_otro ? { id: `otro-${i}`, nombre: r.base_otro.nombre, direccion: r.base_otro.direccion, lat: r.base_otro.lat ?? null, lng: r.base_otro.lng ?? null }
-      : datos?.bases.find((b) => b.id === r.base) ?? datos?.bases[0] ?? null;
+    const base = salidaDe(r, i, datos?.bases ?? []), fin = finDe(r, i, datos?.bases ?? [], base), destino = destinoDe(fin);
     const paradas = r.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p);
-    const clave = claveOrden(punto(base), paradas);
+    const clave = claveOrden(punto(base), paradas, destino);
     const real = reales[clave];
-    return { r, i, base, paradas, clave, real, sim: simular(punto(base), paradas, r.salida, real), color: COLORES[i % COLORES.length] };
+    // `vuelve`: termina donde sale.
+    return { r, i, base, fin, vuelve: !!fin && fin.id === base?.id, paradas, clave, real, sim: simular(punto(base), paradas, r.salida, real, destino), color: COLORES[i % COLORES.length] };
   }), [rutas, datos, porClave, reales]);
 
   // El recorrido por calles (distancia y tiempo de cada tramo, y el dibujo). Si el servicio no contesta, queda la
@@ -141,13 +152,13 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     const ctl = new AbortController();
     const t = window.setTimeout(async () => {
       for (const a of faltan) {
-        const pts = [a.base!, ...a.paradas, a.base!].map((p) => `${p.lng},${p.lat}`).join(';');
+        const pts = [a.base!, ...a.paradas, ...(a.fin ? [a.fin] : [])].map((p) => `${p.lng},${p.lat}`).join(';');
         try {
           const res = await fetch(`${ROUTER}${pts}?overview=full&geometries=geojson`, { signal: ctl.signal });
           if (!res.ok) continue;
           const j = (await res.json()) as { routes?: Array<{ legs: Array<{ distance: number; duration: number }>; geometry: { coordinates: Array<[number, number]> } }> };
           const ruta = j.routes?.[0];
-          if (!ruta || ruta.legs.length !== a.paradas.length + 1) continue;
+          if (!ruta || ruta.legs.length !== a.paradas.length + (a.fin ? 1 : 0)) continue;
           setReales((r) => ({ ...r, [a.clave]: { clave: a.clave, tramos: ruta.legs.map((l) => ({ km: l.distance / 1000, min: l.duration / 60 })), linea: ruta.geometry.coordinates.map(([x, y]) => [y, x]) } }));
         } catch { /* sin servicio de rutas: sigue la estimación */ }
       }
@@ -176,10 +187,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const pasar = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => ({ ...r, orden: i === a ? [...r.orden.filter((c) => c !== clave), clave] : r.orden.filter((c) => c !== clave) })));
   const ordenar = () => {
     // Los dos órdenes se comparan con la misma cuenta (línea recta), y el de ahora solo se cambia si el nuevo es mejor.
-    const b = punto(act.base);
-    const antes = simular(b, act.paradas, act.r.salida).costo;
-    const nuevo = optimizar(b, act.paradas, act.r.salida);
-    const despues = simular(b, nuevo, act.r.salida).costo;
+    const b = punto(act.base), d = destinoDe(act.fin);
+    const antes = simular(b, act.paradas, act.r.salida, null, d).costo;
+    const nuevo = optimizar(b, act.paradas, act.r.salida, d);
+    const despues = simular(b, nuevo, act.r.salida, null, d).costo;
     if (antes - despues <= 1) { toast('Ya era el recorrido más corto.'); return; }
     cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, orden: nuevo.map((p) => p.clave) } : r)));
     toast(`Recorrido reordenado: unos ${duracion(antes - despues)} menos.`);
@@ -254,6 +265,16 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
           </Select>
         </label>
         {puede && act.r.base === 'otro' && <button type="button" className="cr-link" onClick={() => setPanel('salida')}>Cambiar lugar</button>}
+        <label className="cr-campo">Termina en
+          <Select className="input sm cr-sel" value={act.r.fin ?? 'igual'} disabled={!puede} aria-label="Termina en"
+            onChange={(e) => { const v = e.target.value; if (v === 'otro') { setPanel('fin'); return; } setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, fin: v, fin_otro: null } : r))); }}>
+            <option value="igual">Donde sale</option>
+            {datos.bases.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)}
+            <option value="ultima">La última parada</option>
+            <option value="otro">{act.r.fin === 'otro' && act.r.fin_otro ? act.r.fin_otro.nombre : 'Otro lugar…'}</option>
+          </Select>
+        </label>
+        {puede && act.r.fin === 'otro' && <button type="button" className="cr-link" onClick={() => setPanel('fin')}>Cambiar lugar</button>}
         <label className="cr-campo">A las
           <input type="time" className="input sm" value={`${String(Math.floor(act.r.salida / 60)).padStart(2, '0')}:${String(act.r.salida % 60).padStart(2, '0')}`} disabled={!puede}
             onChange={(e) => { if (!e.target.value) return; const [h, m] = e.target.value.split(':').map(Number); if (Number.isFinite(h)) cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, salida: h * 60 + (m || 0) } : r))); }} />
@@ -266,12 +287,13 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
       {panel === 'chofer' && puede && <NuevoTransportista onCancelar={() => setPanel(null)} onListo={(nombre) => { setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, chofer: nombre } : r))); void cargar(); }} />}
       {panel === 'salida' && puede && <OtroLugar onCancelar={() => setPanel(null)} onElegir={(l) => { setPanel(null); void guardarYa(rutas.map((r, i) => (i === act.i ? { ...r, base: 'otro', base_otro: l } : r))); }} />}
+      {panel === 'fin' && puede && <OtroLugar titulo="Dónde termina este recorrido" onCancelar={() => setPanel(null)} onElegir={(l) => { setPanel(null); void guardarYa(rutas.map((r, i) => (i === act.i ? { ...r, fin: 'otro', fin_otro: l } : r))); }} />}
 
       <div className="cr-kpis">
         <div><span>Paradas</span><b className="num">{act.paradas.length}<small>{movs.length} movimientos</small></b></div>
         <div><span>Recorrido</span><b className="num">{act.sim.km.toFixed(0)}<small>km{act.real ? '' : ' aprox.'}</small></b></div>
         <div><span>En la calle</span><b className="num">{duracion(act.sim.fin - act.r.salida)}</b></div>
-        <div><span>Vuelve</span><b className="num">{hhmm(act.sim.fin)}</b></div>
+        <div><span>{act.vuelve ? 'Vuelve' : 'Termina'}</span><b className="num">{hhmm(act.sim.fin)}</b></div>
         <div><span>Hecho</span><b className="num">{hechos}<small>de {movs.length}</small></b></div>
         <div><span>Fuera de horario</span><b className={`num ${tarde ? 'danger-text' : ''}`}>{tarde || '—'}</b></div>
         {act.sim.sinUbicar > 0 && <div><span>Sin ubicar</span><b className="num warn-text">{act.sim.sinUbicar}</b></div>}
@@ -362,13 +384,18 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
               </li>,
             ];
           })}
-          {act.paradas.length > 0 && <Tramo t={act.sim.vuelta} />}
-          {act.paradas.length > 0 && <li className="cr-parada base"><div className="cr-n base"><Icon name="home" size={13} /></div><div><div className="cr-p-nombre">Vuelta a {act.base?.nombre}</div></div><div className="cr-eta"><b className="num">{hhmm(act.sim.fin)}</b><span>llega</span></div></li>}
+          {act.paradas.length > 0 && act.fin && <Tramo t={act.sim.vuelta} />}
+          {act.paradas.length > 0 && (
+            <li className="cr-parada base"><div className="cr-n base"><Icon name={act.vuelve ? 'home' : 'pin'} size={13} /></div>
+              <div><div className="cr-p-nombre">{!act.fin ? 'Termina en la última parada' : act.vuelve ? `Vuelta a ${act.base?.nombre}` : `Termina en ${act.fin.nombre}`}</div>
+                {act.fin && !act.vuelve && <div className="cr-p-sub">{act.fin.direccion}</div>}</div>
+              <div className="cr-eta"><b className="num">{hhmm(act.sim.fin)}</b><span>{act.fin ? 'llega' : 'termina'}</span></div></li>
+          )}
         </ol>
 
         <div className="cr-ruta-lado">
           <div className="cr-mapa-caja">
-            <Mapa armadas={armadas} activa={act.i} bases={[...datos.bases, ...armadas.filter((a) => a.base && a.base.id.startsWith('otro-')).map((a) => a.base!)]} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
+            <Mapa armadas={armadas} activa={act.i} bases={[...datos.bases, ...armadas.filter((a) => a.base && a.base.id.startsWith('otro-')).map((a) => a.base!), ...armadas.filter((a) => a.fin?.id.startsWith('fin-')).map((a) => a.fin!)]} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
             <div className="cr-mapa-pie small">
               <span>{act.real ? 'Recorrido por calles.' : 'Recorrido en línea recta (estimado).'} Tiempos con tránsito moderado según la hora, sin el tránsito del momento.</span>
               {puede && <span>Si un punto quedó mal, usá «Corregir ubicación» en su parada.</span>}
@@ -399,14 +426,14 @@ function Tramo({ t }: { t: Simulacion['vuelta'] }) {
   return <li className={`cr-tramo ${t.nivel}`}>{t.sinUbicar ? <span>Tramo sin calcular: falta ubicar una dirección</span> : <span className="num">{duracion(t.min)} · {t.km.toFixed(1).replace('.', ',')} km{t.estimado ? ' aprox.' : ''} · tránsito <b>{t.nivel}</b></span>}</li>;
 }
 
-// «Sale de → Otro lugar»: se busca en la libreta por nombre o por dirección, o se escribe la dirección a mano.
-function OtroLugar({ onElegir, onCancelar }: { onElegir: (l: { nombre: string; direccion: string }) => void; onCancelar: () => void }) {
+// «Sale de → Otro lugar» (o «Termina en»): se busca en la libreta por nombre o por dirección, o se escribe la dirección a mano.
+function OtroLugar({ titulo = 'De dónde sale este recorrido', onElegir, onCancelar }: { titulo?: string; onElegir: (l: { nombre: string; direccion: string }) => void; onCancelar: () => void }) {
   const [buscar, setBuscar] = useState('');
   const lugares = useLugares(buscar);
   const texto = buscar.trim();
   return (
     <div className="cr-panel">
-      <label>De dónde sale este recorrido<input className="input sm" autoFocus value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar o dirección" /></label>
+      <label>{titulo}<input className="input sm" autoFocus value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar o dirección" /></label>
       {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => onElegir({ nombre: l.nombre, direccion: l.direccion })}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
       <div className="row">
         {/\d/.test(texto) && texto.length > 5 && <button type="button" className="btn sm" onClick={() => onElegir({ nombre: texto, direccion: texto })}>Usar «{texto}» como dirección</button>}
@@ -514,7 +541,7 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
 
 // ---------- El mapa ----------
 
-type Armada = { r: Recorrido; i: number; base: BaseGeo | null; paradas: Parada[]; real?: Real; sim: Simulacion; color: string };
+type Armada = { r: Recorrido; i: number; base: BaseGeo | null; fin: BaseGeo | null; paradas: Parada[]; real?: Real; sim: Simulacion; color: string };
 function Mapa({ armadas, activa, bases, caliente, puede, onPin, ubicando, onUbicar }: {
   armadas: Armada[]; activa: number; bases: BaseGeo[]; caliente: string | null; puede: boolean; onPin: (clave: string, ruta: number) => void; ubicando: { clave: string; lat?: number; lng?: number } | null; onUbicar: (lat: number, lng: number) => void;
 }) {
@@ -542,18 +569,20 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, ubicando, onUbic
     g.clearLayers();
     pines.current.clear();
     const todos: Array<[number, number]> = [];
-    const usadas = new Set(armadas.filter((a) => a.paradas.length).map((a) => a.base?.id));
+    const usadas = new Set(armadas.filter((a) => a.paradas.length).flatMap((a) => [a.base?.id, a.fin?.id]));
     for (const b of bases) {
       if (b.lat == null || b.lng == null || (!usadas.has(b.id) && usadas.size)) continue;
       todos.push([b.lat, b.lng]);
-      L.marker([b.lat, b.lng], { icon: L.divIcon({ className: 'cr-pin-wrap', html: '<span class="cr-pin base">⌂</span>', iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 500, keyboard: false })
+      // Donde sale (o vuelve), la casita; donde termina, si es otro lugar, la bandera.
+      L.marker([b.lat, b.lng], { icon: L.divIcon({ className: 'cr-pin-wrap', html: `<span class="cr-pin base">${b.id.startsWith('fin-') ? '⚑' : '⌂'}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }), zIndexOffset: 500, keyboard: false })
         .bindTooltip(esc(b.nombre), { direction: 'top', offset: [0, -14] }).addTo(g);
     }
     // Primero los recorridos que no se están mirando, apagados; el activo arriba.
     for (const a of [...armadas].sort((x, y) => Number(x.i === activa) - Number(y.i === activa))) {
       const act = a.i === activa, b = a.base && a.base.lat != null ? [a.base.lat, a.base.lng] as [number, number] : null;
+      const f = a.fin && a.fin.lat != null ? [a.fin.lat, a.fin.lng] as [number, number] : null;
       const puntos = a.paradas.filter((p) => p.lat != null).map((p) => [p.lat!, p.lng!] as [number, number]);
-      const linea = a.real?.linea ?? (puntos.length && b ? [b, ...puntos, b] : puntos);
+      const linea = a.real?.linea ?? (puntos.length && b ? [b, ...puntos, ...(f ? [f] : [])] : puntos);
       if (linea.length > 1) {
         if (act) L.polyline(linea, { color: '#ffffff', weight: 8, opacity: 0.9, interactive: false }).addTo(g);
         L.polyline(linea, { color: a.color, weight: act ? 4.5 : 3, opacity: act ? 0.95 : 0.4, dashArray: a.real ? undefined : '2 9', lineCap: 'round', interactive: false }).addTo(g);

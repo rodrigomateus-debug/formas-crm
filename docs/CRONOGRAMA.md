@@ -97,6 +97,12 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   despacha, se carga el **número de guía** para seguir el envío. La parada pasa a ser el expreso (con su dirección) y dice
   para qué cliente es; en la semana la tarjeta lleva «Expreso … · guía …». Es del PDV: vale para todas sus entregas. «Va
   directo al cliente» lo deshace. El chofer ve «Dejé en el expreso: foto de la guía».
+- **Termina en** (pedido de Rodrigo del 13/11/2026): un recorrido no siempre vuelve a donde salió. Al lado de «Sale de»:
+  **Donde sale** (como hasta ahora), uno de los depósitos de Formas, **La última parada** (no vuelve a ningún lado) u
+  **Otro lugar**, que se busca en la libreta o se escribe la dirección, como en «Sale de». El último tramo, la hora a la
+  que termina («Termina» en vez de «Vuelve» cuando no es el mismo lugar), los kilómetros, el orden más corto y el mapa
+  (con una bandera donde termina) lo tienen en cuenta. El chofer lo ve en su app: «terminás en … cerca de las …».
+  Columnas `fin`, `fin_nombre` y `fin_direccion` de `cronograma_rutas` (migración `0060_recorrido_termina.sql`).
 - **Sale de → Otro lugar.** Además de los dos depósitos de Formas, un recorrido puede salir de otro lugar: se busca en la
   libreta por nombre o por dirección, o se escribe la dirección. Queda con su punto en el mapa.
 

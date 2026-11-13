@@ -231,7 +231,10 @@ export type ParadaChofer = {
   lugar?: { horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null } | null;
   movimientos: Array<{ id: string; tipo: string; npdv: string | null; cliente: string | null; articulo: string; cantidad: number | null; hecho: boolean }>;
 };
-export type RecorridoChofer = { n: number; salida: number; base: { nombre: string; direccion: string; lat: number | null; lng: number | null }; paradas: ParadaChofer[] };
+type LugarChofer = { nombre: string; direccion: string; lat: number | null; lng: number | null };
+/** `fin`: dónde termina (null: en la última parada); `vuelve`: es el mismo lugar de donde sale. Sin `fin` (servidor de
+    antes), vuelve. */
+export type RecorridoChofer = { n: number; salida: number; base: LugarChofer; fin?: LugarChofer | null; vuelve?: boolean; paradas: ParadaChofer[] };
 
 /** El recorrido que Logística le armó a este chofer para hoy (vacío si todavía no le asignaron ninguno). */
 export async function pedirRuta(): Promise<RecorridoChofer[]> {

@@ -82,7 +82,7 @@ async function registro(db: D1Database, recordId: number) {
 
 // La conversación entera (los últimos `limite` de cada cosa) o, con `desde`, lo que cambió después.
 export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, opts: { desde?: string | null; limite?: number } = {}) {
-  await registro(db, recordId);
+  const rec = await registro(db, recordId);
   const ahora = now();
   const desde = opts.desde && !Number.isNaN(Date.parse(opts.desde)) ? new Date(opts.desde).toISOString() : '';
   const lim = Math.min(Math.max(opts.limite ?? 300, 1), 500);
@@ -136,7 +136,7 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
   const yo = participantes.find((p) => p.user_id === ctx.user.id);
   // Los estados de producción con su color de ClickUp, para pintar los cambios de los artículos (solo al abrirla).
   const estados = desde ? undefined : (await estadosPec(db)).map((e) => ({ status: e.status, color: e.color }));
-  return { ahora, items, participantes, siguiendo: !!yo?.siguiendo, leido_hasta: yo?.leido_hasta ?? 0, ...(estados ? { estados } : {}) };
+  return { ahora, nombre: rec.name, items, participantes, siguiendo: !!yo?.siguiendo, leido_hasta: yo?.leido_hasta ?? 0, ...(estados ? { estados } : {}) };
 }
 
 // Quiénes tienen asignado el pedido en producción y son usuarios del CRM (Ceci, Sole…).
@@ -172,10 +172,12 @@ export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input
   // Con imágenes, el texto puede ir vacío.
   const body = sueltos.length && !String(input.body ?? '').trim() ? '' : limpiar(input.body);
   let respondeA: number | null = null;
+  let autorRespondido: number | null = null;
   if (input.responde_a) {
-    const r = await db.prepare('SELECT id FROM mensajes WHERE id = ? AND record_id = ?').bind(Number(input.responde_a), recordId).first<{ id: number }>();
+    const r = await db.prepare('SELECT id, user_id FROM mensajes WHERE id = ? AND record_id = ?').bind(Number(input.responde_a), recordId).first<{ id: number; user_id: number | null }>();
     if (!r) throw new HttpError(400, 'El mensaje al que respondés no es de esta conversación.');
     respondeA = r.id;
+    autorRespondido = r.user_id;
   }
   const menciones = await validarMenciones(db, mencionesDe(body));
   const ts = now();
@@ -195,8 +197,13 @@ export async function escribir(db: D1Database, ctx: Ctx, recordId: number, input
     ...[[rec.owner_id, 'propietario'] as const, ...prod.map((u) => [u, 'produccion'] as const)].filter(([u]) => u && u !== ctx.user.id)
       .map(([u, motivo]) => db.prepare('INSERT OR IGNORE INTO conversacion_participantes (record_id, user_id, leido_hasta, motivo) VALUES (?, ?, ?, ?)').bind(recordId, u, id - 1, motivo)),
     // Aviso por mail a los mencionados (sale con los demás avisos, si lo tienen prendido).
-    ...(['crm', 'mcp'].includes(ctx.source) ? menciones.filter((u) => u !== ctx.user.id).map((u) =>
-      db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, mensaje_id) VALUES (?, 'mencion', ?, ?, ?)").bind(u, recordId, ctx.user.id, id)) : []),
+    // (Los mensajes los escribe siempre una persona, desde la pantalla, Claude o la API con su token.)
+    ...menciones.filter((u) => u !== ctx.user.id).map((u) =>
+      db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, mensaje_id) VALUES (?, 'mencion', ?, ?, ?)").bind(u, recordId, ctx.user.id, id)),
+    // A quien le responden (si no lo mencionan en la respuesta): a la campanita, no al mail.
+    ...(autorRespondido && autorRespondido !== ctx.user.id && !menciones.includes(autorRespondido)
+      ? [db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, mensaje_id, sent_at, error) VALUES (?, 'respuesta', ?, ?, ?, ?, 'solo en el CRM')")
+        .bind(autorRespondido, recordId, ctx.user.id, id, ts)] : []),
     // Las imágenes quedan del mensaje.
     ...(sueltos.length ? [db.prepare('UPDATE mensaje_adjuntos SET mensaje_id = ? WHERE id IN (SELECT value FROM json_each(?))').bind(id, JSON.stringify(sueltos))] : []),
     // La conversación cuenta como actividad del registro.
@@ -265,9 +272,25 @@ export async function borrarMensaje(db: D1Database, ctx: Ctx, id: number) {
 }
 
 export async function marcarLeido(db: D1Database, ctx: Ctx, recordId: number, hasta: number) {
-  await db.prepare('UPDATE conversacion_participantes SET leido_hasta = MAX(leido_hasta, ?) WHERE record_id = ? AND user_id = ?')
-    .bind(Math.max(0, Math.floor(Number(hasta) || 0)), recordId, ctx.user.id).run();
+  const h = Math.max(0, Math.floor(Number(hasta) || 0));
+  await db.batch([
+    db.prepare('UPDATE conversacion_participantes SET leido_hasta = MAX(leido_hasta, ?) WHERE record_id = ? AND user_id = ?').bind(h, recordId, ctx.user.id),
+    // Lo que se leyó en la conversación ya no queda pendiente en la campanita.
+    db.prepare(`UPDATE avisos SET leido_at = ? WHERE user_id = ? AND record_id = ? AND kind IN ('mencion', 'respuesta') AND leido_at IS NULL AND mensaje_id <= ?`)
+      .bind(now(), ctx.user.id, recordId, h),
+  ]);
   return { ok: true };
+}
+
+// «Marcar como no leída» (la bandeja): vuelve a quedar pendiente desde el último mensaje de otra persona.
+export async function marcarNoLeido(db: D1Database, ctx: Ctx, recordId: number) {
+  await registro(db, recordId);
+  const ultimo = await db.prepare('SELECT MAX(id) AS id FROM mensajes WHERE record_id = ? AND borrado_at IS NULL AND COALESCE(user_id, 0) != ?')
+    .bind(recordId, ctx.user.id).first<{ id: number | null }>();
+  if (!ultimo?.id) throw new HttpError(400, 'No hay mensajes de otras personas para dejar sin leer.');
+  await db.prepare(`INSERT INTO conversacion_participantes (record_id, user_id, leido_hasta, siguiendo, motivo) VALUES (?, ?, ?, 1, 'manual')
+    ON CONFLICT(record_id, user_id) DO UPDATE SET leido_hasta = excluded.leido_hasta, siguiendo = 1`).bind(recordId, ctx.user.id, ultimo.id - 1).run();
+  return { ok: true, leido_hasta: ultimo.id - 1 };
 }
 
 export async function seguir(db: D1Database, ctx: Ctx, recordId: number, si: boolean) {
@@ -285,15 +308,18 @@ export async function bandeja(db: D1Database, ctx: Ctx, opts: { noLeidas?: boole
   const { results } = await db.prepare(`SELECT * FROM (SELECT p.record_id, r.object_type, r.name, p.leido_hasta,
       (SELECT COUNT(*) FROM mensajes m WHERE m.record_id = p.record_id AND m.id > p.leido_hasta AND m.borrado_at IS NULL AND COALESCE(m.user_id, 0) != p.user_id) AS no_leidos,
       (SELECT COUNT(*) FROM mensajes m, json_each(m.menciones) j WHERE m.record_id = p.record_id AND m.id > p.leido_hasta AND m.borrado_at IS NULL AND j.value = p.user_id) AS menciones,
-      (SELECT MAX(m.id) FROM mensajes m WHERE m.record_id = p.record_id AND m.borrado_at IS NULL) AS ultimo_id
+      (SELECT MAX(m.id) FROM mensajes m WHERE m.record_id = p.record_id AND m.borrado_at IS NULL) AS ultimo_id,
+      (SELECT MAX(m.id) FROM mensajes m WHERE m.record_id = p.record_id AND m.borrado_at IS NULL AND COALESCE(m.user_id, 0) != p.user_id) AS ajeno_id
     FROM conversacion_participantes p JOIN records r ON r.id = p.record_id AND r.archived = 0
     WHERE p.user_id = ? AND p.siguiendo = 1 AND ${visibleSql('r', ctx.user)}) WHERE ultimo_id IS NOT NULL ${opts.noLeidas ? 'AND no_leidos > 0' : ''}
     ORDER BY ultimo_id DESC LIMIT ?`).bind(ctx.user.id, lim)
-    .all<{ record_id: number; object_type: string; name: string; leido_hasta: number; no_leidos: number; menciones: number; ultimo_id: number }>();
+    .all<{ record_id: number; object_type: string; name: string; leido_hasta: number; no_leidos: number; menciones: number; ultimo_id: number; ajeno_id: number | null }>();
+  // Lo que se muestra: el último mensaje; con algo sin leer, el último de otra persona (lo que falta leer, no lo mío).
+  const mostrar = (r: (typeof results)[number]) => (r.no_leidos > 0 && r.ajeno_id ? r.ajeno_id : r.ultimo_id);
   const ultimos = results.length ? new Map((await db.prepare('SELECT id, user_id, body, created_at FROM mensajes WHERE id IN (SELECT value FROM json_each(?))')
-    .bind(JSON.stringify(results.map((r) => r.ultimo_id))).all<{ id: number; user_id: number | null; body: string; created_at: string }>()).results.map((m) => [m.id, m])) : new Map();
-  const conversaciones = results.map((r) => {
-    const u = ultimos.get(r.ultimo_id);
+    .bind(JSON.stringify(results.map(mostrar))).all<{ id: number; user_id: number | null; body: string; created_at: string }>()).results.map((m) => [m.id, m])) : new Map();
+  const conversaciones = results.map(({ ajeno_id: _a, ...r }) => {
+    const u = ultimos.get(mostrar({ ...r, ajeno_id: _a }));
     return { ...r, ultimo: u ? { ...u, body: textoPlano(u.body).slice(0, 240) || '📎 Adjunto' } : null };
   });
   return {

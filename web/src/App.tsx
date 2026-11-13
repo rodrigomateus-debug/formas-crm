@@ -14,6 +14,7 @@ import CronogramaPage from './pages/Cronograma';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
+import { Campanita } from './Notificaciones';
 
 export default function App() {
   const { meta } = useMeta();
@@ -69,6 +70,8 @@ export default function App() {
           <button className="btn ghost icon menu-btn" onClick={() => setMenu(!menu)} aria-label="Abrir menú"><Icon name="menu" size={20} /></button>
           <GlobalSearch />
           <span className="grow" />
+          {/* Notificaciones (Notificaciones.tsx): menciones, respuestas, asignaciones y faltantes de entrega. */}
+          <Campanita />
           <CreateMenu />
         </header>
         <Routes>

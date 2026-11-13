@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
-import { Avatar } from '../components';
+import { Avatar, Modal } from '../components';
+import { Select } from '../Select';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. Cada día con
@@ -20,13 +21,15 @@ export interface Mov {
   record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
   hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null; dominio?: string | null;
   expreso?: { nombre: string; guia: string | null } | null;
+  chofer?: string | null;     // quién hace la parada ese día (el chofer o el expreso de su recorrido); no viene en los ingresos
+  retira_en?: string | null;  // lo retira el cliente en Formas: no es parada de nadie
 }
 interface Nota { id: number; fecha: string; texto: string; hecho: number }
 interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
 interface DiaResumen { total: number; pendientes: number; atrasados: number }
 interface Vista {
   hoy: string; desde: string; hasta: string; movimientos: Mov[]; notas: Nota[]; feriados: Record<string, string>; dias: Record<string, DiaResumen>;
-  sin_fecha: SinFecha[]; puede_editar: boolean;
+  sin_fecha: SinFecha[]; puede_editar: boolean; choferes?: string[]; expresos?: string[];
 }
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
@@ -65,7 +68,9 @@ export function lindo(s: string | null | undefined): string {
 export const cantidad = (m: { cantidad: number | null; articulo: string }) => [m.cantidad != null ? num.format(m.cantidad) : '', m.articulo].filter(Boolean).join(' ');
 
 // Una tarjeta: los artículos de un PDV que tienen el mismo movimiento, el mismo día, en el mismo lugar.
-interface Tarjeta { key: string; tipo: Tipo; fecha: string; titulo: string; pdv: string; para: string; movs: Mov[]; hecho: boolean; evento: boolean; avisos: string[]; record_id: number | null; dominio: string | null; crudo: string }
+// `parada`: va en la ruta del día (no es un ingreso ni lo retira el cliente), así que se le elige el chofer.
+interface Tarjeta { key: string; tipo: Tipo; fecha: string; titulo: string; pdv: string; para: string; movs: Mov[]; hecho: boolean; evento: boolean; avisos: string[]; record_id: number | null; dominio: string | null; crudo: string;
+  parada: boolean; chofer: string | null; retira_en: string | null }
 function tarjetas(movs: Mov[]): Tarjeta[] {
   const m = new Map<string, Tarjeta>();
   for (const x of movs) {
@@ -77,6 +82,7 @@ function tarjetas(movs: Mov[]): Tarjeta[] {
       const entrega = x.tipo === 'entrega';
       const crudo = (entrega ? x.cliente : x.lugar) ?? '';
       t = { key, tipo: x.tipo, fecha: x.fecha, pdv, para: entrega ? '' : lindo(x.cliente), movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id, dominio: x.dominio ?? null, crudo,
+        parada: x.tipo !== 'ingreso' && !x.retira_en, chofer: x.chofer ?? null, retira_en: x.retira_en ?? null,
         titulo: lindo(crudo) || (entrega ? pdv : x.tipo === 'egreso' || x.tipo === 'retiro_impresor' ? 'Sin impresor' : 'Sin proveedor') };
       m.set(key, t);
     }
@@ -103,6 +109,7 @@ export default function CronogramaPage() {
   const [unidad, setUnidad] = useState('');
   const [pendientes, setPendientes] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
+  const [nuevoPara, setNuevoPara] = useState<Tarjeta | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
   const arrastre = useRef<{ ids: string[]; tipo: Tipo; de: string | null; pdv: string } | null>(null);
   const pedido = useRef(0);
@@ -145,6 +152,19 @@ export default function CronogramaPage() {
       const r = { cambiados: 0, estado: null as string | null };
       for (let i = 0; i < ids.length; i += 25) { const x = await http<{ cambiados: number; estado: string | null }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + 25), tipo: t.tipo, hecho }); r.cambiados += x.cambiados; r.estado = x.estado; }
       toast(!hecho ? 'Quedó como pendiente.' : r.cambiados && r.estado ? `Hecho. ${r.cambiados === 1 ? 'El artículo pasó' : `${r.cambiados} artículos pasaron`} a «${r.estado}» en ClickUp.` : 'Marcado como hecho.');
+    } catch (e) { toast((e as Error).message, true); }
+    void cargar();
+  }
+  // El chofer de una tarjeta: su parada pasa al recorrido de ese chofer ese día (toda la parada: en un impresor van todos
+  // sus retiros y egresos del día). Se ve en la Ruta del día y en la app del chofer.
+  async function asignar(t: Tarjeta, chofer: string) {
+    if (chofer === '+') { setNuevoPara(t); return; }
+    const ids = t.movs.map((m) => m.id);
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.id) ? { ...m, chofer: chofer || null } : m)) });
+    try {
+      const r = await http<{ chofer: string | null; recorrido: number; movimientos: number }>('PUT', '/cronograma/chofer', { fecha: t.fecha, ids, chofer });
+      const otros = r.movimientos - ids.length;
+      toast(`${t.titulo}: ${r.chofer ? `va con ${r.chofer}` : 'quedó sin chofer'} el ${diaCorto(t.fecha)} (recorrido ${r.recorrido}).${otros > 0 ? ` Va toda la parada: ${otros === 1 ? 'pasó también otro movimiento' : `pasaron también otros ${otros} movimientos`} de ese lugar.` : ''}`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
   }
@@ -213,7 +233,8 @@ export default function CronogramaPage() {
                           return (
                             <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
                               <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
-                              {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
+                              {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []} onChofer={(c) => asignar(t, c)}
+                                onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
                                 onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
                                 onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                             </div>
@@ -238,6 +259,11 @@ export default function CronogramaPage() {
         </Suspense>
       )}
       {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
+      {nuevoPara && (
+        <Modal title="Agregar chofer o expreso" onClose={() => setNuevoPara(null)}>
+          <NuevoTransportista onCancelar={() => setNuevoPara(null)} onListo={(nombre) => { const t = nuevoPara; setNuevoPara(null); void asignar(t, nombre); }} />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -332,8 +358,9 @@ const ROL: Record<Tipo, { nombre: string; icono: string }> = {
 };
 const TOPE = 3;
 
-function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: {
-  t: Tarjeta; hoy: string; puede: boolean; onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
+function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onAbrir, onMover, onArrastrar }: {
+  t: Tarjeta; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
+  onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
 }) {
   const atrasado = !t.hecho && t.fecha < hoy;
   // Hasta tres productos a la vista; el resto se abre con «+ N productos más», así un pedido largo no estira la columna.
@@ -345,7 +372,7 @@ function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: 
     <article className={`cr-tarjeta${t.hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}${onAbrir ? ' abre' : ''}`} draggable={puede}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.key); } catch { /* no hace falta */ } onArrastrar(true); e.currentTarget.classList.add('arrastrando'); }}
       onDragEnd={(e) => { e.currentTarget.classList.remove('arrastrando'); onArrastrar(false); }}
-      onClick={(e) => { if (onAbrir && !(e.target as HTMLElement).closest('button, a, .popover, [role="dialog"]')) onAbrir(); }}>
+      onClick={(e) => { if (onAbrir && !(e.target as HTMLElement).closest('button, a, .popover, .select-pop, [role="dialog"]')) onAbrir(); }}>
       <div className="cr-t-rol"><Icon name={ROL[t.tipo].icono} size={11} />{ROL[t.tipo].nombre}</div>
       <div className="cr-t-quien">
         {marca ? <LogoProveedor marca={marca} /> : t.dominio ? <Avatar name={t.titulo} type="company" domain={t.dominio} size="xs" /> : null}
@@ -355,6 +382,7 @@ function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: 
         <span className="cr-t-pdv num">{t.pdv}</span>
         {t.para && <span className="cr-t-para">{t.para}</span>}
         {t.movs[0]?.expreso && <span className="cr-tag exp" title="No va directo al cliente: se lleva al expreso">Expreso {lindo(t.movs[0].expreso.nombre)}{t.movs[0].expreso.guia ? ` · guía ${t.movs[0].expreso.guia}` : ''}</span>}
+        {t.retira_en && <span className="cr-tag" title="Lo retira el cliente: no es parada de ningún recorrido">Retira en {t.retira_en}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
       {prods.length > 0 && (
@@ -368,6 +396,14 @@ function TarjetaMov({ t, hoy, puede, onMarcar, onAbrir, onMover, onArrastrar }: 
           {t.avisos.map((a) => <span key={a} className="cr-tag riesgo"><Icon name="alert" size={11} />{a}</span>)}
         </div>
       )}
+      {t.parada && (puede && !t.hecho ? (
+        <div className="cr-t-chofer">
+          <Select className={`input cr-chofer${t.chofer ? '' : ' vacio'}`} value={t.chofer ?? ''} aria-label="Chofer" title={t.chofer ? `Chofer: ${t.chofer}` : 'Elegir el chofer'}
+            onChange={(e) => onChofer(e.target.value)}>
+            {opcionesChofer({ choferes, expresos, actual: t.chofer, vacio: 'Sin chofer', agregar: 'Agregar chofer o expreso…' })}
+          </Select>
+        </div>
+      ) : t.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{t.chofer}</div>)}
       {puede && (
         <div className="cr-t-acc">
           <SelectorFecha valor={t.fecha} onElegir={(f) => f && onMover(f)} label="Pasar a otro día" className="cr-mini" title="Pasar a otro día"><Icon name="calendar" size={13} /></SelectorFecha>
@@ -456,4 +492,66 @@ function SinFecha({ items, puede, onArrastrar, onMover, onAbrir }: {
       })}
     </section>
   );
+}
+
+// ---------- Choferes y expresos (también los usa la Ruta del día) ----------
+
+// Las opciones del desplegable «Chofer» (el Select del Hub): sin chofer, los choferes, los expresos y, con `agregar`, la
+// opción para sumar uno a la lista (valor «+»). `actual` aparece aunque ya no esté en la lista. Es una función y no un
+// componente porque el Select lee sus <option> directamente.
+export function opcionesChofer({ choferes, expresos, actual, vacio, agregar }: { choferes: string[]; expresos: string[]; actual?: string | null; vacio: string; agregar?: string }) {
+  const cs = [...new Set([...choferes, ...(actual && !expresos.includes(actual) ? [actual] : [])])];
+  return (
+    <>
+      <option value="">{vacio}</option>
+      {cs.length > 0 && <optgroup label="Choferes">{cs.map((c) => <option key={c} value={c}>{c}</option>)}</optgroup>}
+      {expresos.length > 0 && <optgroup label="Expresos">{expresos.map((x) => <option key={x} value={x}>{x}</option>)}</optgroup>}
+      {agregar && <option value="+"><span className="select-nuevo"><Icon name="plus" size={13} />{agregar}</span></option>}
+    </>
+  );
+}
+
+// Agregar un chofer o un expreso a la lista, desde el desplegable «Chofer» (de la Ruta del día o de una tarjeta). Del
+// expreso se pide además la dirección, que es a donde se le lleva la mercadería (se puede buscar en la libreta).
+export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloExpreso?: boolean; onListo: (nombre: string) => void; onCancelar: () => void }) {
+  const toast = useToast();
+  const [nombre, setNombre] = useState('');
+  const [tipo, setTipo] = useState<'chofer' | 'expreso'>(soloExpreso ? 'expreso' : 'chofer');
+  const [direccion, setDireccion] = useState('');
+  const [ocupado, setOcupado] = useState(false);
+  const lugares = useLugares(tipo === 'expreso' && !direccion ? nombre : '');
+  async function guardar(e: React.FormEvent) {
+    e.preventDefault(); e.stopPropagation();
+    if (nombre.trim().length < 2) return;
+    setOcupado(true);
+    try { const r = await http<{ nombre: string }>('POST', '/cronograma/transportistas', { nombre, tipo, direccion }); toast(`${r.nombre} quedó en la lista de ${tipo === 'expreso' ? 'expresos' : 'choferes'}.`); onListo(r.nombre); }
+    catch (err) { toast((err as Error).message, true); setOcupado(false); }
+  }
+  return (
+    <form className="cr-panel" onSubmit={guardar}>
+      {!soloExpreso && (
+        <div className="row" role="group" aria-label="Qué es">
+          <button type="button" className={`chip${tipo === 'chofer' ? ' on' : ''}`} aria-pressed={tipo === 'chofer'} onClick={() => setTipo('chofer')}>Chofer</button>
+          <button type="button" className={`chip${tipo === 'expreso' ? ' on' : ''}`} aria-pressed={tipo === 'expreso'} onClick={() => setTipo('expreso')}>Expreso</button>
+        </div>
+      )}
+      <label>{tipo === 'expreso' ? 'Nombre del expreso' : 'Nombre del chofer'}<input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={80} /></label>
+      {tipo === 'expreso' && <label>Dirección del expreso (a dónde se le lleva)<input className="input sm" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" maxLength={300} /></label>}
+      {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => setDireccion(l.direccion)}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
+      {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, además hay que crearle el link en Entregas → Choferes, con el mismo nombre.</span>}
+      <div className="row"><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
+    </form>
+  );
+}
+
+// Lo que encuentra la libreta de direcciones para un texto (nombre del lugar, calle o localidad).
+export function useLugares(q: string) {
+  const [lugares, setLugares] = useState<Array<{ id: number; nombre: string; direccion: string; horario: string | null }>>([]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setLugares([]); return; }
+    let vivo = true;
+    const t = window.setTimeout(() => { http<{ lugares: typeof lugares }>('GET', `/cronograma/lugares${qs({ q })}`).then((r) => { if (vivo) setLugares(r.lugares); }, () => undefined); }, 250);
+    return () => { vivo = false; window.clearTimeout(t); };
+  }, [q]);
+  return lugares;
 }

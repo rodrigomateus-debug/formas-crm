@@ -8,6 +8,7 @@ import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
 import { MODELO } from './remitos';
+import { optimizar, simular, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
 // repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
@@ -77,7 +78,15 @@ export interface Movimiento {
   hecho: boolean; hecho_por: number | null; evento: boolean; avisos: string[]; url: string | null;
   expreso?: { nombre: string; guia: string | null } | null;   // la entrega va por un expreso (entrega_expresos)
   dominio?: string | null;   // el dominio de la empresa de la tarjeta (el cliente en las entregas; si no, el proveedor o impresor), para su logo
+  chofer?: string | null;    // en la semana: el chofer (o expreso) del recorrido del día en el que está su parada
+  retira_en?: string | null; // en la semana: lo retira el cliente en Formas (tarjeta «Entrega»), así que no es parada de nadie
 }
+// La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
+// esa empresa (tres retiros en el mismo impresor son una parada). No depende de la dirección. Un pedido que va a varias
+// direcciones tiene además las paradas «:2», «:3»… (rutaDelDia).
+export const claveParada = (m: Pick<Movimiento, 'tipo' | 'pdv_task' | 'company_id' | 'lugar'>) =>
+  m.tipo === 'entrega' ? `p:${m.pdv_task}` : m.company_id ? `e:${m.company_id}` : `o:${norm(m.lugar ?? 'Sin proveedor')}`;
+const esDeLaParada = (clave: string, base: string) => clave === base || clave.startsWith(`${base}:`);
 type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null };
 interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
 
@@ -188,7 +197,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   ]);
   for (const n of notas.results) { const d = (dias[n.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 }); d.total++; if (!n.hecho) { d.pendientes++; if (n.fecha < hoy) d.atrasados++; } }
   const deLaSemana = movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta);
-  await ponerDominios(db, deLaSemana);
+  const [, , quienes] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, q.desde, q.hasta), choferesYExpresos(db)]);
   return {
     hoy, desde: q.desde, hasta: q.hasta,
     movimientos: deLaSemana,
@@ -198,8 +207,43 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
       task_id: f.task_id, pdv_task: f.pdv_task, npdv: f.pdv_npdv ?? f.npdv, cliente: f.cliente ?? f.pdv_cliente, unidad: f.pdv_unidad ?? f.unidad,
       record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
     })),
+    choferes: quienes.choferes, expresos: quienes.expresos.map((x) => x.nombre),
     puede_editar: puedeEditarCronograma(user),
   };
+}
+
+// En la semana, quién hace cada movimiento: el chofer (o el expreso) del recorrido de ese día que tiene su parada. Lo que no
+// está en ningún recorrido va al primero, igual que en la ruta del día; un día sin recorridos guardados no tiene chofer
+// todavía. Las entregas que retira el cliente en Formas no son parada de nadie.
+async function ponerChoferes(db: D1Database, movs: Movimiento[], desde: string, hasta: string) {
+  const pedidos = [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
+  const [cfg, dirs, guardadas] = await Promise.all([
+    cronogramaConfig(db),
+    direccionesDePedidos(db, pedidos),
+    db.prepare('SELECT fecha, chofer, orden FROM cronograma_rutas WHERE fecha BETWEEN ? AND ? ORDER BY fecha, n').bind(desde, hasta)
+      .all<{ fecha: string; chofer: string | null; orden: string }>(),
+  ]);
+  const porDia = new Map<string, Array<{ chofer: string | null; orden: string[] }>>();
+  for (const r of guardadas.results) porDia.set(r.fecha, [...(porDia.get(r.fecha) ?? []), { chofer: r.chofer, orden: lista(r.orden).map(String) }]);
+  for (const m of movs) {
+    if (m.tipo === 'ingreso') continue;
+    const todas = m.tipo === 'entrega' && m.record_id ? dirs.get(m.record_id) ?? [] : [];
+    if (todas.length && todas.every((d) => d.retira)) {
+      m.retira_en = [...new Set(todas.map((d) => cfg.bases.find((x) => x.id === d.retira)?.nombre ?? d.direccion))].join(' y ');
+      continue;
+    }
+    const rutas = porDia.get(m.fecha), base = claveParada(m);
+    m.chofer = rutas?.length ? (rutas.find((r) => r.orden.some((c) => esDeLaParada(c, base))) ?? rutas[0]).chofer : null;
+  }
+}
+
+// Los del desplegable «Chofer»: los choferes de la lista y los que tienen link de la app (Entregas → Choferes), sin
+// repetir, y los expresos.
+async function choferesYExpresos(db: D1Database, lista_?: Transportista[]) {
+  const ts = lista_ ?? await listarTransportistas(db);
+  const conLink = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
+  const choferes = [...new Map([...ts.filter((x) => x.tipo === 'chofer').map((x) => x.nombre), ...conLink].map((n) => [norm(n), n])).values()].sort((a, b) => a.localeCompare(b));
+  return { choferes, con_link: conLink, expresos: ts.filter((x) => x.tipo === 'expreso').map((x) => ({ id: x.id, nombre: x.nombre, direccion: x.direccion })) };
 }
 
 // ---------- Mover y marcar: se escribe en ClickUp ----------
@@ -540,7 +584,12 @@ export interface Parada {
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
-interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat: number | null; lng: number | null } | null }
+// `a_mano`: alguien ordenó sus paradas en la Ruta del día. Si no, se ordena solo por el recorrido más corto.
+interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: { nombre: string; direccion: string; lat: number | null; lng: number | null } | null; a_mano?: boolean }
+const puntoDe = (p: { lat: number | null; lng: number | null } | null | undefined): Punto | null => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
+// De dónde sale un recorrido, en el mapa: un depósito de Formas o el otro lugar que se eligió.
+const salidaDe = (r: RutaGuardada, bases: Array<{ id: string; lat: number | null; lng: number | null }>) =>
+  puntoDe(r.base === 'otro' && r.base_otro ? r.base_otro : bases.find((b) => b.id === r.base) ?? bases[0]);
 
 export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { buscar?: boolean } = {}) {
   const buscar = !!opts.buscar;
@@ -622,7 +671,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     // La clave no depende de la dirección: corregirla no saca la parada del recorrido guardado ni pierde lo que marcó el
     // chofer. Una entrega es la de su PDV; un retiro o un egreso, el de esa empresa. Un pedido que va a varias direcciones
     // (tarjeta «Entrega») tiene una parada por dirección: la primera con la clave del PDV y las otras con su número (:2, :3…).
-    const base = m.tipo === 'entrega' ? `p:${m.pdv_task}` : companyId ? `e:${companyId}` : `o:${norm(nombre)}`;
+    const base = claveParada(m);
     const horarioTexto = companyId ? empresas.get(companyId)?.horario ?? null : null;
     for (const [i, dir] of [direccion, ...otras].entries()) {
       const clave = i ? `${base}:${i + 1}` : base;
@@ -656,8 +705,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     if (p.lugar && !p.horario && horarioDe(p.lugar.horario)) { p.horario = horarioDe(p.lugar.horario); p.horario_texto = p.lugar.horario; }
     if (p.lugar && !buscar) p.lugar.coordinacion = null;
   }
-  const guardadas = (await db.prepare('SELECT n, chofer, base, base_nombre, base_direccion, salida, orden FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
-    .all<{ n: number; chofer: string | null; base: string | null; base_nombre: string | null; base_direccion: string | null; salida: number; orden: string }>()).results;
+  const guardadas = (await db.prepare('SELECT n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
+    .all<{ n: number; chofer: string | null; base: string | null; base_nombre: string | null; base_direccion: string | null; salida: number; orden: string; a_mano: number }>()).results;
   const { geo, pendientes } = await ubicar(env, [...cfg.bases.map((x) => x.direccion), ...guardadas.filter((r) => r.base === 'otro' && r.base_direccion).map((r) => r.base_direccion!),
     ...lista_.map((p) => p.direccion).filter((d): d is string => !!d)], buscar);
   for (const p of lista_) {
@@ -676,42 +725,97 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     ? guardadas.map((r) => {
       const otro = r.base === 'otro' && r.base_direccion ? r.base_direccion : null;
       const g = otro ? geo.get(claveDireccion(otro)) : null;
-      return { n: r.n, chofer: r.chofer, salida: r.salida, orden: lista(r.orden).map(String),
+      return { n: r.n, chofer: r.chofer, salida: r.salida, orden: lista(r.orden).map(String), a_mano: !!r.a_mano,
         base: otro ? 'otro' : cfg.bases.some((x) => x.id === r.base) ? r.base! : cfg.bases[0].id,
         base_otro: otro ? { nombre: r.base_nombre || otro, direccion: otro, lat: g?.lat ?? null, lng: g?.lng ?? null } : null };
     })
-    : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [] }];
+    : [{ n: 1, chofer: null, base: cfg.bases[0].id, salida: 510, orden: [], a_mano: false }];
   // Las paradas que no están en ningún recorrido (un movimiento que se pasó a este día después de armarlo) van al primero,
   // también para el chofer; las que ya no existen se sacan.
   const existen = new Set(lista_.map((p) => p.clave)), vistas = new Set<string>();
   for (const r of rutas) r.orden = r.orden.filter((c) => existen.has(c) && !vistas.has(c) && (vistas.add(c), true));
   rutas[0].orden.push(...lista_.map((p) => p.clave).filter((c) => !vistas.has(c)));
-  // Los choferes: los de la lista y los que tienen link de la app (Entregas → Choferes), sin repetir.
-  const conLink = (await db.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY name").all<{ name: string }>()).results.map((c) => c.name);
-  const choferes = [...new Map([...transportistas.filter((x) => x.tipo === 'chofer').map((x) => x.nombre), ...conLink].map((n) => [norm(n), n])).values()].sort((a, b) => a.localeCompare(b));
+  const bases = cfg.bases.map((x) => { const g = geo.get(claveDireccion(x.direccion)); return { ...x, lat: g?.lat ?? null, lng: g?.lng ?? null }; });
+  // Los recorridos que nadie ordenó a mano (los armaron las tarjetas de la semana, o todavía nadie los tocó) van por el
+  // más corto, también en la app del chofer; se vuelven a ordenar a medida que se ubican las direcciones.
+  const porClave = new Map(lista_.map((p) => [p.clave, p]));
+  for (const r of rutas) {
+    if (r.a_mano || r.orden.length < 2) continue;
+    r.orden = optimizar(salidaDe(r, bases), r.orden.map((c) => porClave.get(c)!), r.salida).map((p) => p.clave);
+  }
+  const { choferes, con_link, expresos } = await choferesYExpresos(db, transportistas);
   return {
-    fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes, con_link: conLink,
-    expresos: transportistas.filter((x) => x.tipo === 'expreso').map((x) => ({ id: x.id, nombre: x.nombre, direccion: x.direccion })),
-    bases: cfg.bases.map((x) => { const g = geo.get(claveDireccion(x.direccion)); return { ...x, lat: g?.lat ?? null, lng: g?.lng ?? null }; }),
+    fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes, con_link, expresos, bases,
     buscando: pendientes + fin.pendientes, puede_editar: puedeEditarCronograma(user),
   };
 }
 
+// Desde la Ruta del día. Cada recorrido dice si alguien ordenó sus paradas a mano (`a_mano`); si no lo dice (la pantalla de
+// antes), cuenta como ordenado a mano, como hasta ahora.
 export async function guardarRutas(db: D1Database, ctx: Ctx, b: { fecha?: unknown; rutas?: unknown }) {
   exigir(ctx);
   if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
   const rutas = (Array.isArray(b.rutas) ? b.rutas : []).slice(0, 8) as Array<Partial<RutaGuardada>>;
   if (!rutas.length) throw new HttpError(400, 'Falta el recorrido.');
+  await escribirRutas(db, ctx, b.fecha, rutas);
+  return { ok: true };
+}
+async function escribirRutas(db: D1Database, ctx: Ctx, fecha: string, rutas: Array<Partial<RutaGuardada>>) {
   const ts = now();
   await db.batch([
-    db.prepare('DELETE FROM cronograma_rutas WHERE fecha = ?').bind(b.fecha),
-    ...rutas.map((r, i) => db.prepare('INSERT INTO cronograma_rutas (fecha, n, chofer, base, base_nombre, base_direccion, salida, orden, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .bind(b.fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base).slice(0, 40) : null,
+    db.prepare('DELETE FROM cronograma_rutas WHERE fecha = ?').bind(fecha),
+    ...rutas.map((r, i) => db.prepare('INSERT INTO cronograma_rutas (fecha, n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(fecha, i + 1, r.chofer ? String(r.chofer).slice(0, 80) : null, r.base ? String(r.base).slice(0, 40) : null,
         r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.nombre ?? '').trim().slice(0, 120) || null : null,
         r.base === 'otro' && r.base_otro?.direccion ? String(r.base_otro.direccion).trim().slice(0, 300) : null,
-        Math.min(1439, Math.max(0, Math.round(Number(r.salida) || 510))), JSON.stringify((Array.isArray(r.orden) ? r.orden : []).map(String)), ctx.user.id, ts)),
+        Math.min(1439, Math.max(0, Math.round(Number(r.salida) || 510))), JSON.stringify((Array.isArray(r.orden) ? r.orden : []).map(String)),
+        r.a_mano === false ? 0 : 1, ctx.user.id, ts)),
   ]);
-  return { ok: true };
+}
+
+// El chofer de una tarjeta de la semana (pedido de Rodrigo del 13/11/2026): su parada pasa al recorrido de ese día que
+// tiene ese chofer o expreso; si no hay, se arma uno nuevo que sale del mismo lugar y a la misma hora que el primero. Pasa
+// la parada entera: tres retiros en el mismo impresor son una sola, y un pedido que va a varias direcciones pasa con
+// todas. En un recorrido ordenado a mano entra donde menos lo alarga; en uno que se ordena solo, lo ordena rutaDelDia.
+// Sin chofer va a un recorrido sin chofer. Un recorrido sin chofer que queda vacío se saca.
+export async function asignarChofer(env: Env, ctx: Ctx, b: { fecha?: unknown; ids?: unknown; chofer?: unknown }) {
+  exigir(ctx);
+  if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
+  const fecha = b.fecha;
+  const ids = new Set((Array.isArray(b.ids) ? b.ids : []).map(String).filter(Boolean));
+  if (!ids.size) throw new HttpError(400, 'Falta qué movimiento.');
+  const r = await rutaDelDia(env, ctx.user, fecha);
+  const pedido = String(b.chofer ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  // Con el nombre como está en la lista.
+  const chofer = pedido ? [...r.choferes, ...r.expresos.map((x) => x.nombre)].find((n) => norm(n) === norm(pedido)) ?? pedido : null;
+  const paradas = r.paradas.filter((p) => p.movimientos.some((m) => ids.has(m.id)));
+  if (!paradas.length) throw new HttpError(400, 'Eso no es una parada de la ruta de ese día: lo retira el cliente en Formas o es un ingreso al depósito.');
+  const claves = new Set(paradas.map((p) => p.clave));
+  const rutas: RutaGuardada[] = r.rutas.map((x) => ({ ...x, orden: x.orden.filter((c) => !claves.has(c)) }));
+  let destino = rutas.find((x) => (chofer ? !!x.chofer && norm(x.chofer) === norm(chofer) : !x.chofer));
+  if (!destino) {
+    if (rutas.length >= 8) throw new HttpError(400, 'Ese día ya tiene 8 recorridos: pasá la parada desde la Ruta del día.');
+    destino = { n: rutas.length + 1, chofer, base: rutas[0].base, base_otro: rutas[0].base_otro ?? null, salida: rutas[0].salida, orden: [], a_mano: false };
+    rutas.push(destino);
+  }
+  if (destino.a_mano) {
+    const porClave = new Map(r.paradas.map((p) => [p.clave, p]));
+    for (const p of paradas) destino.orden = dondeEntra(salidaDe(destino, r.bases), destino.orden, p, porClave, destino.salida);
+  } else destino.orden.push(...claves);
+  const quedan = rutas.filter((x) => x === destino || x.chofer || x.orden.length);
+  await escribirRutas(env.DB, ctx, fecha, quedan);
+  return { ok: true, chofer: destino.chofer, recorrido: quedan.indexOf(destino) + 1, paradas: paradas.length, movimientos: paradas.reduce((n, p) => n + p.movimientos.length, 0) };
+}
+// Dónde entra una parada en un recorrido que alguien ordenó: en el lugar que menos lo alarga. Sin ubicar, al final.
+function dondeEntra(salida: Punto | null, orden: string[], p: Parada, porClave: Map<string, Parada>, hora: number) {
+  const actual = orden.map((c) => porClave.get(c)).filter((x): x is Parada => !!x);
+  if (!salida || p.lat == null || p.lng == null || actual.length !== orden.length) return [...orden, p.clave];
+  let mejor = orden.length, costo = Infinity;
+  for (let i = 0; i <= actual.length; i++) {
+    const c = simular(salida, [...actual.slice(0, i), p, ...actual.slice(i)], hora).costo;
+    if (c < costo - 0.01) { costo = c; mejor = i; }
+  }
+  return [...orden.slice(0, mejor), p.clave, ...orden.slice(mejor)];
 }
 
 // El recorrido de un chofer para la app de los remitos (/hooks/chofer): las paradas en el orden que armó Logística, con

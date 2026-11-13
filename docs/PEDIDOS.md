@@ -195,6 +195,13 @@ Cada boceto es de un producto del pedido. En una primera etapa producción sigue
 - **En el pedido**, en «Productos»: cada producto muestra su estado en ClickUp (cada artículo tiene el suyo; el del PDV junta
   los de todos) y sus bocetos. «+ Boceto» sube uno para ese producto; «+ Bocetos» o soltar archivos encima del recuadro sube
   varios: el CRM lee cada PDF (el boceto de producción dice «PRODUCTO» y el nombre) y propone a qué producto va.
+- **Mientras sube** (aviso de Rodrigo del 13/11/2026: parecía que no hacía nada hasta el «subido»): arriba del recuadro y en
+  el renglón del producto se ve qué está haciendo, con una barrita: «Leyendo…» (el PDF, para proponer el producto),
+  «Subiendo… 45 %» y «Guardando en Drive…» (lo que más tarda); con varios, «1 de 3». **Al terminar se abre solo el visor**
+  con el boceto recién subido para revisar que esté bien y aprobarlo; si fueron varios, se pasa de uno a otro con ‹ ›.
+  Escape cierra el visor y deja abierta la vista previa del pedido.
+- **El «3/5» de la tarjeta del tablero** se actualiza en cuanto se sube, aprueba, cambia o quita un boceto desde la vista
+  previa (antes quedaba el número viejo hasta recargar la página).
 - **Referencia o técnico**: una foto o un boceto rápido para avanzar, o el técnico final con medidas. Cada producto puede
   tener varias versiones (v1, v2…); se marca cuál está **aprobado**.
 - **Al aprobar uno en un pedido**, el CRM lo adjunta en ClickUp a la subtarea del artículo de ese producto (por código del

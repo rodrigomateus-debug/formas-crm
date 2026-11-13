@@ -161,25 +161,6 @@ export async function authenticate(env: Env, req: Request, pathToken?: string, o
   throw new HttpError(401, 'Tu sesión terminó: volvé a ingresar con Google.', { login: '/login' });
 }
 
-// La app del chofer (/hooks/chofer), sin link: quién es por su sesión del Hub (pedido de Rodrigo del 13/11/2026). Los
-// choferes de Formas entran con su usuario como al resto del Hub: el login con Google (cookie `crm_sesion`) o Cloudflare
-// Access (su cabecera o, en /hooks, que Access deja pasar, su cookie `CF_Authorization`). En desarrollo, solo con la
-// cabecera x-dev-user (sin ella la app pide el link, como en producción). Sin sesión: null.
-export async function usuarioParaChofer(env: Env, req: Request): Promise<User | null> {
-  const jwt = req.headers.get('cf-access-jwt-assertion') ?? leerCookie(req, 'CF_Authorization');
-  if (jwt && env.ACCESS_AUD && env.ACCESS_TEAM_DOMAIN) {
-    const email = await verifyAccessJwt(env, jwt).catch(() => null);
-    if (email) return userByEmail(env, email);
-  }
-  const sesion = env.SESSION_SECRET ? await leerFirmado<{ email: string; exp: number }>(env.SESSION_SECRET, leerCookie(req, COOKIE_SESION)) : null;
-  if (sesion) {
-    if (!mismoOrigen(req)) throw new HttpError(403, 'Pedido desde otra página: se rechaza.');
-    return userByEmail(env, sesion.email);
-  }
-  const dev = env.DEV_USER_EMAIL ? req.headers.get('x-dev-user') : null;
-  return dev ? userByEmail(env, dev) : null;
-}
-
 // Superadmin: un administrador con la marca (Configuración → Usuarios) o el administrador principal (ADMIN_EMAIL).
 export function esSuperadmin(env: Env, u: User) {
   return u.role === 'admin' && (!!u.superadmin || (!!env.ADMIN_EMAIL && u.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()));

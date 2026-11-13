@@ -93,16 +93,6 @@ test('login con Google: la página, la sesión y los rechazos', async () => {
   // No se vuelve a otro sitio.
   for (const v of ['%2F%2Fevil.example', 'https%3A%2F%2Fevil.example', '%2Fauth%2Fsalir']) assert.equal((await ingresar(email, {}, v)).headers.get('location'), '/', v);
 
-  // La app del chofer, sin link: con la sesión del Hub entra como esa persona (un chofer de Formas); sin sesión, no.
-  const yo = await fetch(`${CRM}/hooks/chofer/api/yo`, { headers: { cookie: sesion } });
-  assert.equal(yo.status, 200);
-  assert.deepEqual(await yo.json(), { nombre: `Login ${RUN}`, usuario: true });
-  assert.equal((await fetch(`${CRM}/hooks/chofer/api/yo`)).status, 401);
-  assert.equal((await fetch(`${CRM}/hooks/chofer/api/yo`, { headers: { cookie: `crm_sesion=${otra}.${firma}` } })).status, 401, 'adulterada, tampoco');
-  // «Entrar con mi usuario de Formas» después del login vuelve a la app.
-  const alChofer = await ingresar(email, {}, '%2Fchofer%2Fentrar');
-  assert.equal(alChofer.headers.get('location'), '/chofer/entrar');
-
   // Salir borra la sesión.
   const salir = await sinSeguir('/auth/salir', sesion);
   assert.equal(salir.headers.get('location'), '/login?salio=1');

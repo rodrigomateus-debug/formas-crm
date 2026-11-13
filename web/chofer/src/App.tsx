@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { RutaHoy } from './Ruta';
 import {
-  ENTRAR_CON_USUARIO, LinkInvalido, Rechazo, corregirPdv, entrarConUsuario, hayAcceso, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto,
-  usarToken, type RemitoChofer,
+  LinkInvalido, Rechazo, corregirPdv, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
 import { envios, type Envio } from './envios';
 import { guardarEnTanda, leerTanda, sacarDeTanda, vaciarTanda, type FotoDeTanda } from './cola';
@@ -115,9 +114,7 @@ const TOPE_TANDA = 10;
 export default function App() {
   const estado = useSyncExternalStore(envios.suscribir, envios.leer);
   const enLinea = useEnLinea();
-  // Entró con su link o con su usuario de Formas. Sin link, primero se fija si tiene la sesión del Hub (`probando`).
   const [hayToken, setHayToken] = useState(() => !!token());
-  const [probando, setProbando] = useState(() => !token());
   const [nombre, setNombre] = useState<string | null>(() => nombreGuardado());
   const [remitos, setRemitos] = useState<RemitoChofer[]>(remitosGuardados);
   const [listaAlDia, setListaAlDia] = useState(false);
@@ -142,13 +139,8 @@ export default function App() {
   const punto = useRef<Promise<Punto | null> | null>(null);
   const arriba = useRef<HTMLHeadingElement>(null);
 
-  useEffect(() => {
-    if (token()) return;
-    void entrarConUsuario().then((ok) => { if (ok) setHayToken(true); }).finally(() => setProbando(false));
-  }, []);
-
   const refrescar = useCallback(async () => {
-    if (!hayAcceso()) return;
+    if (!token()) return;
     try {
       const lista = await pedirRemitos();
       setRemitos(lista);
@@ -418,11 +410,9 @@ export default function App() {
   const esperando = estado.envios.filter((e) => e.fase === 'espera');
   const esperandoFuera = esperando.filter((e) => e.clave !== estado.foco).length;
 
-  if (probando) return <main className="link-roto" aria-busy="true"><p className="nota">Abriendo…</p></main>;
   if (!hayToken || estado.linkInvalido) {
     return (
       <LinkRoto
-        sinLink={!token()}
         guardadas={esperando.length}
         alPegar={(t) => { usarToken(t); setHayToken(true); envios.linkNuevo(); void refrescar(); pedirYo().then(setNombre).catch(() => {}); }}
       />
@@ -998,9 +988,7 @@ function TarjetaLote({ envios: lote, enLinea, alReintentar }: { envios: Envio[];
   );
 }
 
-// Sin link (o con uno que ya no anda). El chofer de Formas entra con su usuario del Hub; el de afuera, con el link que le
-// pasa Logística.
-function LinkRoto({ sinLink, guardadas, alPegar }: { sinLink: boolean; guardadas: number; alPegar: (token: string) => void }) {
+function LinkRoto({ guardadas, alPegar }: { guardadas: number; alPegar: (token: string) => void }) {
   const [texto, setTexto] = useState('');
   const [error, setError] = useState(false);
   function entrar(e: FormEvent) {
@@ -1011,20 +999,15 @@ function LinkRoto({ sinLink, guardadas, alPegar }: { sinLink: boolean; guardadas
   return (
     <main className="link-roto">
       <img src={`${import.meta.env.BASE_URL}icono.svg`} alt="" width="56" height="56" />
-      <h1>{sinLink ? 'Entrá a tu recorrido' : 'Este link no funciona'}</h1>
+      <h1>Este link no funciona</h1>
+      <p className="grande">Pedile tu link a Logística.</p>
       {guardadas > 0 && (
         <p className="nota">
-          {guardadas === 1 ? 'La foto que quedó guardada no se pierde: se manda' : `Las ${guardadas} fotos que quedaron guardadas no se pierden: se mandan`} cuando vuelvas a entrar.
+          {guardadas === 1 ? 'La foto que quedó guardada no se pierde: se manda' : `Las ${guardadas} fotos que quedaron guardadas no se pierden: se mandan`} cuando entres con tu link.
         </p>
       )}
-      <div className="entrar-usuario">
-        <p className="grande">¿Sos de Formas?</p>
-        <a className="boton principal" href={ENTRAR_CON_USUARIO}>Entrar con mi usuario de Formas</a>
-        <p className="nota">Con el mismo mail con el que entrás al Hub. Ves lo que tenés asignado hoy, sin link.</p>
-      </div>
       <form onSubmit={entrar} noValidate>
-        <p className="grande">¿Sos chofer de afuera?</p>
-        <label htmlFor="link">Pegá acá el link que te pasó Logística</label>
+        <label htmlFor="link">¿Ya te lo pasaron? Pegalo acá</label>
         <input
           id="link" type="text" inputMode="url" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
           value={texto} onChange={(e) => { setTexto(e.target.value); setError(false); }}

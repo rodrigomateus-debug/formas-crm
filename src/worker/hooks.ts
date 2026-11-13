@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { choferDeUsuario, marcarParada, rutaDelChofer } from './cronograma';
+import { marcarParada, rutaDelChofer } from './cronograma';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
-import { authenticate, usuarioParaChofer } from './auth';
+import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { emailDomain, normDomain, normLinkedin, normPhone, splitName } from './records';
 import { clickupStatus, limpiarRemitos, remitosPendientes, syncClickup } from './clickup';
@@ -314,23 +314,17 @@ hooks.post('/remitos/leer', async (c) => {
 });
 
 // ---------- App del chofer (web/chofer, remitos.ts) ----------
-// Va por /hooks porque esta ruta no pasa por el login de Cloudflare Access. Un chofer de afuera entra con su link
-// personal (/hooks/chofer/#t=fcrm_…, un token tipo «chofer» que solo sirve para esto); uno de Formas, con su usuario del
-// Hub, sin link (choferDeUsuario). `credencial`: si entra con su usuario y todavía no la tiene, se le arma (para mandar
-// remitos). La app se compila aparte a dist/chofer.
-const conLink = (req: Request) => !!req.headers.get('authorization')?.startsWith('Bearer ') || new URL(req.url).searchParams.has('token');
-async function chofer(env: Env, req: Request, credencial = false) {
-  if (conLink(req)) return authenticate(env, req, undefined, { chofer: true });
-  const user = await usuarioParaChofer(env, req);
-  if (!user) throw new HttpError(401, 'Falta el link del chofer.');
-  return choferDeUsuario(env, user, credencial);
+// Va por /hooks porque esta ruta no pasa por el login de Cloudflare Access: cada chofer entra con su link personal
+// (/hooks/chofer/#t=fcrm_…, un token tipo «chofer» que solo sirve para esto). La app se compila aparte a dist/chofer.
+async function chofer(env: Env, req: Request) {
+  return authenticate(env, req, undefined, { chofer: true });
 }
 async function pedidoNombre(db: D1Database, id: number | null) {
   return id ? (await db.prepare('SELECT name FROM records WHERE id = ?').bind(id).first<{ name: string }>())?.name ?? null : null;
 }
 hooks.get('/chofer/api/yo', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
-  return c.json({ nombre: ctx.sourceDetail ?? 'Chofer', usuario: !conLink(c.req.raw) });
+  return c.json({ nombre: ctx.sourceDetail ?? 'Chofer' });
 });
 // El recorrido del día de este chofer (cronograma.ts): el que Logística armó con su nombre.
 hooks.get('/chofer/api/ruta', async (c) => {
@@ -346,14 +340,14 @@ hooks.get('/chofer/api/remitos', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
   const { results } = await c.env.DB.prepare(`SELECT r.*, o.name AS pedido_nombre FROM (SELECT id, record_id, clave, created_at, estado, repetir, motivo,
       numero, pdv, cliente, lectura, pide_pdv, pdv_chofer, controles FROM remitos WHERE token_id = ? ORDER BY created_at DESC LIMIT 30) r LEFT JOIN records o ON o.id = r.record_id`)
-    .bind(ctx.tokenId ?? -1).all<RemitoRow & { pedido_nombre: string | null }>();
+    .bind(ctx.tokenId).all<RemitoRow & { pedido_nombre: string | null }>();
   const items = await itemsDe(c.env.DB, results.map((r) => r.id));
   return c.json({ remitos: results.map((r) => paraChofer(r, items.get(r.id) ?? [], r.pedido_nombre)) });
 });
 // Una foto: se guarda enseguida (la misma clave o la misma foto no duplican) y se lee en el momento, así el chofer sabe
 // si tiene que sacar otra mientras está con el cliente.
 hooks.post('/chofer/api/remitos', async (c) => {
-  const ctx = await chofer(c.env, c.req.raw, true);
+  const ctx = await chofer(c.env, c.req.raw);
   const form = await c.req.formData();
   const archivo = form.get('archivo');
   if (!(archivo instanceof File)) throw new HttpError(400, 'Falta la foto del remito.');
@@ -390,7 +384,7 @@ hooks.get('/chofer/manifest.webmanifest', async (c) => {
 });
 // El chofer escribe el PDV de uno de sus remitos ({"pdv": "30706"}): no se leía, no coincidía o se leyó mal.
 hooks.post('/chofer/api/remitos/:id/pdv', async (c) => {
-  const ctx = await chofer(c.env, c.req.raw, true);
+  const ctx = await chofer(c.env, c.req.raw);
   const { pdv } = await c.req.json<{ pdv?: unknown }>().catch(() => ({ pdv: null }));
   const id = Number(c.req.param('id'));
   const r = await corregirPdv(c.env, ctx, id, pdv);

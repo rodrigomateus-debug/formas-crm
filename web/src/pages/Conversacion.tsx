@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue,
 import { Avatar, EstadoClickup, UserAvatar } from '../components';
 import { RecordPreview } from './RecordPage';
 import { VistaPdf } from './Bocetos';
+import { CrearTareaDesdeMensaje } from '../TareaDesdeMensaje';
 
 // Conversación de un pedido o negocio (src/worker/conversacion.ts): un chat grupal entre el vendedor, producción y
 // logística, con @menciones, y entremezclada la actividad del pedido (cambios de estado, de cada artículo, bocetos,
@@ -24,7 +25,7 @@ type Evento =
   | { key: string; kind: 'actividad'; at: string; activity_id: number; tipo: string; subject: string; body: string; direction: string | null; status: string | null; due_at: string | null; user_id: number | null };
 type Item = Mensaje | Evento;
 interface Participante { user_id: number; leido_hasta: number; siguiendo: boolean; motivo: string | null }
-interface Respuesta { ahora: string; items: Item[]; participantes: Participante[]; siguiendo: boolean; leido_hasta: number; estados?: Array<{ status: string; color: string }> }
+interface Respuesta { ahora: string; nombre?: string; items: Item[]; participantes: Participante[]; siguiendo: boolean; leido_hasta: number; estados?: Array<{ status: string; color: string }> }
 
 // ---------- Mensajes sin leer (el globito del menú y de las tarjetas) ----------
 
@@ -529,9 +530,9 @@ function ElegirEmoji({ onElegir, chico }: { onElegir: (emoji: string) => void; c
   );
 }
 
-function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen }: {
+function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen, onTarea }: {
   m: Mensaje; cont: boolean; citado?: Mensaje; meId: number; esAdmin: boolean; puedeReaccionar: boolean; vistoPor?: User[];
-  onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void; onAbrirImagen: (id: number) => void;
+  onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void; onAbrirImagen: (id: number) => void; onTarea?: () => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -584,6 +585,7 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPo
           {cont && <time className="msg-hora" dateTime={m.created_at}>{hora}</time>}
           {puedeReaccionar && <ElegirEmoji onElegir={reaccionar} />}
           <button className="btn ghost sm icon" title="Responder" aria-label="Responder" onClick={onResponder}><Icon name="reply" size={14} /></button>
+          {onTarea && puedeReaccionar && <button className="btn ghost sm icon" title="Crear una tarea con este mensaje" aria-label="Crear tarea" onClick={onTarea}><Icon name="task" size={14} /></button>}
           {mio && <button className="btn ghost sm icon" title="Editar" aria-label="Editar" onClick={() => setEditando(true)}><Icon name="edit" size={14} /></button>}
           {(mio || esAdmin) && <button className="btn ghost sm icon" title="Borrar" aria-label="Borrar" onClick={async () => {
             if (!confirm('¿Borrar este mensaje? Va a quedar «Mensaje borrado».')) return;
@@ -608,7 +610,7 @@ const DIA = (iso: string) => {
 };
 const leerFiltro = () => { try { return localStorage.getItem('crm:conv-filtro') === 'mensajes' ? 'mensajes' : 'todo'; } catch { return 'todo'; } };
 
-export function ConversacionPanel({ type, recordId, onClose, className = '' }: { type: ObjectType; recordId: number; onClose?: () => void; className?: string }) {
+export function ConversacionPanel({ type, recordId, onClose, className = '', mensaje }: { type: ObjectType; recordId: number; onClose?: () => void; className?: string; mensaje?: number }) {
   const { meta } = useMeta();
   const toast = useToast();
   const me = meta.me;
@@ -626,6 +628,8 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
   const pegado = useRef(true);
   const marcado = useRef(0);
   const [visor, setVisor] = useState<number | null>(null);
+  const [nombre, setNombre] = useState('');
+  const [tarea, setTarea] = useState<Mensaje | null>(null);
   // Soltar imágenes en cualquier parte del panel: van al cuadro de escribir.
   const soltar = useRef<((files: File[]) => void) | null>(null);
   const registrarSoltar = useCallback((f: ((files: File[]) => void) | null) => { soltar.current = f; }, []);
@@ -645,6 +649,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
     const desde = inicial || !cursor.current ? undefined : new Date(Date.parse(cursor.current) - 20 * 60_000).toISOString();
     const r = await http<Respuesta>('GET', `/records/${type}/${recordId}/conversacion${qs({ desde })}`);
     cursor.current = r.ahora;
+    if (r.nombre) setNombre(r.nombre);
     if (inicial) {
       setItems(new Map(r.items.map((it) => [it.key, it])));
       setLeidoAlAbrir(r.leido_hasta);
@@ -700,6 +705,14 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
     el.classList.add('destello');
     setTimeout(() => el.classList.remove('destello'), 1600);
   };
+  // Desde una notificación: al mensaje (una vez cargada; queda resaltado un momento).
+  const fuiA = useRef<number | null>(null);
+  useEffect(() => {
+    if (!cargado || !mensaje || fuiA.current === mensaje || !porId.has(mensaje)) return;
+    fuiA.current = mensaje;
+    pegado.current = false;
+    setTimeout(() => irA(mensaje), 80);
+  }, [cargado, mensaje, porId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enviar = async (body: string, adjuntos: number[]) => {
     try {
@@ -794,7 +807,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
               <MensajeVista m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'} puedeReaccionar={puedeEscribir && !meta.real_user}
                 vistoPor={ultimo && it.id === ultimo.id ? vistoUltimo : undefined}
                 onResponder={() => setRespondiendo(it)} onIrA={irA} onAbrirImagen={setVisor}
-                onEditado={(m) => mezclar([m])} />
+                onEditado={(m) => mezclar([m])} onTarea={() => setTarea(it)} />
             </Fragment>
           );
         })}
@@ -805,54 +818,121 @@ export function ConversacionPanel({ type, recordId, onClose, className = '' }: {
           respondiendo={respondiendo ? <>Respondiendo a <b>{userOf(meta, respondiendo.user_id)?.name ?? 'Alguien'}</b>: {textoPlano(respondiendo.body) || '📎 Adjunto'}</> : undefined}
           onCancelarRespuesta={() => setRespondiendo(null)} />
         : <div className="muted small conv-solo-mira">Tu usuario es de «Solo mira»: podés leer la conversación pero no escribir.</div>}
+      {tarea && <CrearTareaDesdeMensaje m={{ id: tarea.id, user_id: tarea.user_id, texto: textoPlano(tarea.body), recordId, type, recordName: nombre || OBJECTS[type].single }}
+        onClose={() => setTarea(null)} onCreada={() => traer(false).catch(() => undefined)} />}
     </section>
   );
 }
 
 // ---------- Bandeja: las conversaciones que sigo ----------
 
+// Por defecto, lo que falta leer; «Todas» es el historial. Agrupadas por día, con quién escribió lo último (y su foto), la
+// mención a mí resaltada y, al pasar el mouse, crear una tarea con ese mensaje o marcarla leída / no leída.
+const GRUPO = (iso: string) => {
+  const d = new Date(iso); d.setHours(0, 0, 0, 0);
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const dif = Math.round((hoy.getTime() - d.getTime()) / 86_400_000);
+  return dif <= 0 ? 'Hoy' : dif === 1 ? 'Ayer' : dif < 7 ? 'Esta semana' : dif < 31 ? 'Este mes' : 'Antes';
+};
+function Resaltado({ texto, nombre }: { texto: string; nombre: string }) {
+  const marca = `@${nombre}`;
+  const partes = texto.split(marca);
+  return <>{partes.map((p, i) => <Fragment key={i}>{i > 0 && <span className="mencion yo">{marca}</span>}{p}</Fragment>)}</>;
+}
+const leerPestana = (): 'sin_leer' | 'todas' => { try { return localStorage.getItem('crm:bandeja') === 'todas' ? 'todas' : 'sin_leer'; } catch { return 'sin_leer'; } };
+
 export default function ConversacionesPage() {
   const { meta } = useMeta();
+  const toast = useToast();
   const sinLeer = useNoLeidas();
-  const [solo, setSolo] = useState(false);
+  const [pestana, setPestanaState] = useState(leerPestana);
+  const setPestana = (p: 'sin_leer' | 'todas') => { setPestanaState(p); try { localStorage.setItem('crm:bandeja', p); } catch { /* sin memoria */ } };
   const [tick, setTick] = useState(0);
   const [lista, setLista] = useState<NoLeidas | null>(null);
   const [abierta, setAbierta] = useState<{ type: ObjectType; id: number } | null>(null);
+  const [tarea, setTarea] = useState<ConvResumen | null>(null);
+  const solo = pestana === 'sin_leer';
   useEffect(() => {
     http<NoLeidas>('GET', `/conversaciones${qs({ no_leidas: solo ? 1 : undefined, limite: 100 })}`).then(setLista).catch(() => undefined);
   }, [solo, tick, sinLeer.no_leidos]);
   const convs = lista?.conversaciones ?? [];
+  const puede = meta.me.role !== 'viewer' && !meta.real_user;
+  const actualizar = () => { setTick((t) => t + 1); refrescarNoLeidas(); };
+  const marcar = async (c: ConvResumen, leida: boolean) => {
+    try {
+      if (leida) await http('POST', `/records/${c.object_type}/${c.record_id}/conversacion/leido`, { hasta: c.ultimo_id });
+      else await http('POST', `/records/${c.object_type}/${c.record_id}/conversacion/no-leido`);
+      toast(leida ? 'Marcada como leída' : 'Marcada como no leída: vuelve a quedar pendiente');
+      actualizar();
+    } catch (e) { toast((e as Error).message, true); }
+  };
+  const grupos: Array<[string, ConvResumen[]]> = [];
+  for (const c of convs) {
+    const g = c.ultimo ? GRUPO(c.ultimo.created_at) : 'Antes';
+    const ult = grupos[grupos.length - 1];
+    if (ult && ult[0] === g) ult[1].push(c); else grupos.push([g, [c]]);
+  }
   return (
     <div className="content">
       <div className="page-head">
         <h1>Conversaciones</h1>
         <span className="grow" />
         <div className="seg" role="group" aria-label="Cuáles">
-          <button className={!solo ? 'on' : ''} onClick={() => setSolo(false)}>Todas las que sigo</button>
-          <button className={solo ? 'on' : ''} onClick={() => setSolo(true)}>Sin leer{sinLeer.no_leidos ? ` (${sinLeer.no_leidos})` : ''}</button>
+          <button className={solo ? 'on' : ''} onClick={() => setPestana('sin_leer')}>Sin leer{sinLeer.no_leidos ? <span className={`seg-n${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</button>
+          <button className={!solo ? 'on' : ''} onClick={() => setPestana('todas')}>Todas</button>
         </div>
       </div>
-      <p className="muted small" style={{ marginTop: 0 }}>Las conversaciones de los pedidos y negocios donde escribiste, te mencionaron, sos el propietario o lo tenés en producción.</p>
+      <p className="muted small" style={{ marginTop: 0 }}>{solo
+        ? 'Lo que todavía no leíste en los pedidos y negocios que seguís. Al abrir una conversación queda leída; si querés retomarla después, marcala como no leída.'
+        : 'El historial de las conversaciones que seguís: donde escribiste, te mencionaron, sos el propietario o lo tenés en producción.'}</p>
       {!lista && <div className="muted">Cargando…</div>}
-      {lista && !convs.length && <div className="empty panel">{solo ? 'No tenés nada sin leer.' : 'Todavía no seguís ninguna conversación. Abrí un pedido y escribí en «Conversación».'}</div>}
-      <div className="panel conv-bandeja">
-        {convs.map((c) => (
-          <button key={c.record_id} type="button" className={`conv-fila${c.no_leidos ? ' sin-leer' : ''}`} onClick={() => setAbierta({ type: c.object_type, id: c.record_id })}>
-            <Avatar name={c.name} type={c.object_type} />
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div className="row" style={{ gap: 6 }}>
-                <b className="ellipsis">{c.name}</b>
-                <span className="small muted">{OBJECTS[c.object_type].single}</span>
-                <span className="grow" />
-                {c.ultimo && <span className="small muted" title={fmtDate(c.ultimo.created_at, true)}>{fmtRelative(c.ultimo.created_at, true)}</span>}
-              </div>
-              {c.ultimo && <div className="small ellipsis conv-ultimo"><b>{userOf(meta, c.ultimo.user_id)?.name.split(' ')[0] ?? 'Alguien'}:</b> {c.ultimo.body}</div>}
-            </div>
-            {c.no_leidos > 0 && <span className={`count${c.menciones ? ' mencion' : ''}`} title={c.menciones ? 'Te mencionaron' : 'Sin leer'}>{c.menciones ? '@ ' : ''}{c.no_leidos}</span>}
-          </button>
-        ))}
-      </div>
-      {abierta && <RecordPreview type={abierta.type} id={abierta.id} onClose={() => { setAbierta(null); setTick((t) => t + 1); }} />}
+      {lista && !convs.length && (solo
+        ? <div className="panel bandeja-vacia"><span className="bandeja-ok"><Icon name="check" size={22} /></span><b>Estás al día</b>
+            <span className="muted small">No tenés mensajes sin leer.</span><button className="btn sm" onClick={() => setPestana('todas')}>Ver todas las conversaciones</button></div>
+        : <div className="empty panel">Todavía no seguís ninguna conversación. Abrí un pedido y escribí en «Conversación».</div>)}
+      {grupos.map(([g, cs]) => (
+        <section key={g} className="bandeja-grupo">
+          <div className="bandeja-dia">{g}</div>
+          <div className="panel conv-bandeja">
+            {cs.map((c) => {
+              const autor = c.ultimo ? userOf(meta, c.ultimo.user_id) : null;
+              const mio = c.ultimo?.user_id === meta.me.id;
+              return (
+                <div key={c.record_id} className={`conv-fila${c.no_leidos ? ' sin-leer' : ''}${c.menciones ? ' con-mencion' : ''}`} role="button" tabIndex={0}
+                  onClick={() => setAbierta({ type: c.object_type, id: c.record_id })} onKeyDown={(e) => { if (e.key === 'Enter') setAbierta({ type: c.object_type, id: c.record_id }); }}>
+                  <span className="conv-av"><Avatar name={c.name} type={c.object_type} />{c.no_leidos > 0 && <span className="conv-punto" aria-hidden />}</span>
+                  <div className="grow" style={{ minWidth: 0 }}>
+                    <div className="conv-fila-t">
+                      <span className="ellipsis conv-nombre">{c.name}</span>
+                      <span className={`tag conv-tipo ${c.object_type}`}>{OBJECTS[c.object_type].single}</span>
+                      {c.menciones > 0 && <span className="tag mencion-tag" title="Te mencionaron"><Icon name="at" size={11} />Te mencionaron</span>}
+                    </div>
+                    {c.ultimo && (
+                      <div className="conv-ultimo">
+                        {c.ultimo.user_id ? <UserAvatar id={c.ultimo.user_id} size="xs" /> : null}
+                        <span className="ellipsis"><b>{mio ? 'Vos' : autor?.name.split(' ')[0] ?? 'Alguien'}:</b> <Resaltado texto={c.ultimo.body} nombre={meta.me.name} /></span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="conv-lado">
+                    {c.ultimo && <span className="small muted" title={fmtDate(c.ultimo.created_at, true)}>{fmtRelative(c.ultimo.created_at, true)}</span>}
+                    {c.no_leidos > 0 && <span className={`count${c.menciones ? ' mencion' : ''}`} title={`${c.no_leidos} sin leer`}>{c.no_leidos}</span>}
+                  </div>
+                  <div className="conv-acciones" onClick={(e) => e.stopPropagation()}>
+                    {puede && c.ultimo && <button className="btn ghost sm" title="Crear una tarea con este mensaje" onClick={() => setTarea(c)}><Icon name="task" size={14} />Tarea</button>}
+                    {c.no_leidos > 0
+                      ? <button className="btn ghost sm" title="Marcar como leída" onClick={() => marcar(c, true)}><Icon name="check" size={14} />Leída</button>
+                      : <button className="btn ghost sm" title="Marcar como no leída: vuelve a quedar pendiente" onClick={() => marcar(c, false)}><Icon name="eye" size={14} />No leída</button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+      {tarea?.ultimo && <CrearTareaDesdeMensaje m={{ id: tarea.ultimo.id, user_id: tarea.ultimo.user_id, texto: tarea.ultimo.body, recordId: tarea.record_id, type: tarea.object_type, recordName: tarea.name }}
+        onClose={() => setTarea(null)} />}
+      {abierta && <RecordPreview type={abierta.type} id={abierta.id} onClose={() => { setAbierta(null); actualizar(); }} />}
     </div>
   );
 }

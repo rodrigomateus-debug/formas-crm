@@ -17,7 +17,8 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
-import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
+import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
+import { marcarNotificaciones, notificaciones } from './notificaciones';
 import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
@@ -465,6 +466,15 @@ api.post('/mensajes/:id/reacciones', async (c) => {
   return c.json(await reaccionar(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ emoji?: string }>()).emoji));
 });
 api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+// «Marcar como no leída» desde la bandeja.
+api.post('/records/:type/:id/conversacion/no-leido', async (c) => {
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  return c.json(await marcarNoLeido(c.env.DB, c.get('ctx'), rec.id));
+});
+// La campanita (notificaciones.ts): lo último que le pasó a cada uno; marcarlas leídas o no leídas.
+api.get('/notificaciones', async (c) => c.json(await notificaciones(c.env.DB, c.get('ctx'), { limite: num(c.req.query('limite')), noLeidas: c.req.query('no_leidas') === '1' })));
+api.post('/notificaciones/leidas', async (c) => c.json(await marcarNotificaciones(c.env.DB, c.get('ctx'), (await c.req.json<{ ids?: unknown }>().catch(() => ({} as { ids?: unknown }))).ids, true)));
+api.post('/notificaciones/no-leidas', async (c) => c.json(await marcarNotificaciones(c.env.DB, c.get('ctx'), (await c.req.json<{ ids?: unknown }>()).ids ?? [], false)));
 // Las conversaciones que sigue el usuario (la bandeja) o, con no_leidas=1, solo las que tienen algo sin leer (el globito).
 api.get('/conversaciones', async (c) => c.json(await bandeja(c.env.DB, c.get('ctx'), { noLeidas: c.req.query('no_leidas') === '1', limite: num(c.req.query('limite')) })));
 

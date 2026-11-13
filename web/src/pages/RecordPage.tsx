@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
@@ -76,6 +76,11 @@ function CentroConConversacion({ type, record, children }: { type: ObjectType; r
     return type === 'order' ? 'conversacion' : 'actividad';
   });
   const setTab = (t: 'conversacion' | 'actividad') => { setTabState(t); try { localStorage.setItem(clave, t); } catch { /* sin memoria */ } };
+  // Desde una notificación o un mail (?conversacion=1&mensaje=…): la conversación, en ese mensaje (también si ya estaba en la ficha).
+  const loc = useLocation();
+  const params = new URLSearchParams(loc.search);
+  const mensaje = Number(params.get('mensaje')) || undefined;
+  useEffect(() => { if (params.has('conversacion')) setTabState('conversacion'); }, [loc.search]); // eslint-disable-line react-hooks/exhaustive-deps
   const sinLeer = useNoLeidosDe(record.id);
   return (
     <>
@@ -84,7 +89,7 @@ function CentroConConversacion({ type, record, children }: { type: ObjectType; r
           {sinLeer ? <span className={`count nuevo${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</button>
         <button className={`tab ${tab === 'actividad' ? 'on' : ''}`} onClick={() => setTab('actividad')}><Icon name="history" size={14} />Actividad</button>
       </div>
-      {tab === 'conversacion' ? <ConversacionPanel type={type} recordId={record.id} className="en-ficha" /> : children}
+      {tab === 'conversacion' ? <ConversacionPanel type={type} recordId={record.id} className="en-ficha" mensaje={mensaje} /> : children}
     </>
   );
 }

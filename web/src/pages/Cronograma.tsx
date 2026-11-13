@@ -253,21 +253,30 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
   const semanas = useMemo(() => Array.from({ length: 13 }, (_, i) => sumar(centro, (i - 6) * 7)), [centro]);
   const max = Math.max(1, ...semanas.flatMap((s) => [0, 1, 2, 3, 4].map((i) => dias[sumar(s, i)]?.total ?? 0)));
   const estaSemana = lunesDe(hoy);
+  // Cómo se acomoda la barra. Por defecto arranca en la semana anterior a la actual: se ven la anterior, la actual y las
+  // que vienen; las más viejas quedan a la izquierda, a un arrastre o una flecha. Si la semana elegida no entra en esa
+  // vista (una muy vieja o muy lejana), se centra en ella. Con las flechas se centra en el mes al que se fue.
+  const centroAntes = useRef(centro);
   useEffect(() => {
     const c = caja.current;
-    const el = c?.querySelector<HTMLElement>('[aria-current="true"]') ?? c?.querySelector<HTMLElement>(`[data-s="${centro}"]`);
-    if (!el || !c) return;
+    if (!c) return;
     const base = c.getBoundingClientRect().left - c.scrollLeft;
     const izq = (x: HTMLElement) => x.getBoundingClientRect().left - base;
-    let left = izq(el) - c.clientWidth / 2 + el.clientWidth / 2;
-    // La semana actual queda a la vista junto con la elegida, si entran las dos.
-    const hoyEl = c.querySelector<HTMLElement>('.cr-sem.actual');
-    if (hoyEl && hoyEl !== el && Math.abs(izq(hoyEl) - izq(el)) + el.clientWidth + 40 < c.clientWidth) {
-      left = Math.min(left, izq(hoyEl) - 32);
-      left = Math.max(left, izq(hoyEl) + hoyEl.clientWidth + 32 - c.clientWidth);
-    }
-    c.scrollTo({ left, behavior: 'smooth' });
-  }, [semana, centro]);
+    const centrar = (x: HTMLElement) => izq(x) - c.clientWidth / 2 + x.clientWidth / 2;
+    const porFlecha = centroAntes.current !== centro;
+    centroAntes.current = centro;
+    const elegida = c.querySelector<HTMLElement>('[aria-current="true"]');
+    const delCentro = c.querySelector<HTMLElement>(`[data-s="${centro}"]`);
+    const anterior = c.querySelector<HTMLElement>(`[data-s="${sumar(estaSemana, -7)}"]`);
+    let left: number | null = null;
+    if (porFlecha && delCentro && centro !== semana) left = centrar(delCentro);
+    else if (anterior) {
+      left = izq(anterior) - 30;
+      // La elegida tiene que verse entera en esa vista; si no, se centra en ella.
+      if (elegida && (izq(elegida) < left || izq(elegida) + elegida.clientWidth > left + c.clientWidth - 30)) left = centrar(elegida);
+    } else if (elegida ?? delCentro) left = centrar((elegida ?? delCentro)!);
+    if (left != null) c.scrollTo({ left, behavior: 'smooth' });
+  }, [semana, centro, estaSemana]);
   const meses: Array<{ mes: string; semanas: string[] }> = [];
   for (const s of semanas) {
     const jueves = D(sumar(s, 3)), mes = `${MESES[jueves.getMonth()]}${jueves.getFullYear() !== D(hoy).getFullYear() ? ` ${jueves.getFullYear()}` : ''}`;

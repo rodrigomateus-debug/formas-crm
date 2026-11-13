@@ -17,6 +17,8 @@ export type RemitoChofer = {
   pide_pdv?: boolean;
   /** El PDV que escribió el chofer, si escribió. */
   pdv_chofer?: string | null;
+  /** La guía de un expreso que se leyó en la foto. */
+  guia?: { empresa: string | null; numero: string } | null;
 };
 
 const API = '/hooks/chofer/api';
@@ -139,8 +141,9 @@ export async function pedirRemitos(): Promise<RemitoChofer[]> {
   return Array.isArray(remitos) ? remitos : [];
 }
 
-/** El chofer escribe o corrige el número de PDV de un remito. No va a la cola: si no hay señal, se prueba de nuevo. */
-export async function corregirPdv(id: number, pdv: string): Promise<RemitoChofer> {
+/** El chofer dice de qué entrega es una foto: escribe el PDV o elige la parada de su recorrido. No va a la cola: si no hay
+    señal, se prueba de nuevo. */
+export async function corregirPdv(id: number, pdv: string, parada?: string): Promise<RemitoChofer> {
   if (!tokenEnMemoria) throw new LinkInvalido();
   const corte = new AbortController();
   const reloj = setTimeout(() => corte.abort(), 30_000);
@@ -149,7 +152,7 @@ export async function corregirPdv(id: number, pdv: string): Promise<RemitoChofer
     r = await fetch(`${API}/remitos/${id}/pdv`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdv }),
+      body: JSON.stringify(parada ? { parada } : { pdv }),
       signal: corte.signal,
     });
   } catch {
@@ -181,6 +184,8 @@ export type FotoParaMandar = {
   lng?: number;
   /** Clave de la foto anterior que esta viene a reemplazar (cuando el servidor pidió repetirla). */
   reemplaza?: string;
+  /** La parada del recorrido desde la que se sacó: así se sabe de qué entrega es (la guía de un expreso, un remito sin PDV). */
+  parada?: string;
 };
 
 /** Manda una foto. Con XMLHttpRequest para poder contar de verdad cuánto subió: `alSubir(0..1)` y después `alLeer()`
@@ -194,6 +199,7 @@ export function mandarRemito(f: FotoParaMandar, alSubir: (parte: number) => void
     datos.append('tomada_el', f.tomada_el);
     if (f.lat != null && f.lng != null) { datos.append('lat', String(f.lat)); datos.append('lng', String(f.lng)); }
     if (f.reemplaza) datos.append('reemplaza', f.reemplaza);
+    if (f.parada) datos.append('parada', f.parada);
 
     const x = new XMLHttpRequest();
     x.open('POST', API + '/remitos');

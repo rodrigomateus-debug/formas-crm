@@ -65,7 +65,16 @@ function optimista(p: ParadaChofer, resultado: 'hecho' | 'no_se_pudo' | 'saltead
   return { ...p, visita: { resultado, motivo: motivo ?? null, nota: nota || null }, movimientos: resultado === 'hecho' ? p.movimientos.map((m) => ({ ...m, hecho: true })) : p.movimientos };
 }
 
-export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar: () => void }) {
+// Las entregas del recorrido de hoy, para elegir de cuál es una foto (la guía de un expreso, un remito sin PDV).
+export function entregasDeHoy(): Array<{ clave: string; nombre: string; pdv: string | null }> {
+  const vistas = new Set<string>();
+  return guardado().flatMap((r) => r.paradas)
+    .filter((p) => p.movimientos.some((m) => m.tipo === 'entrega') && !vistas.has(p.clave) && (vistas.add(p.clave), true))
+    .map((p) => ({ clave: p.clave, nombre: p.expreso ? p.expreso.cliente : p.nombre, pdv: p.movimientos.find((m) => m.npdv)?.npdv ?? null }));
+}
+
+// `alEntregar(parada)`: abre la cámara para la foto del remito (o de la guía del expreso) de esa parada.
+export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar: (parada?: string) => void }) {
   // Lo último que se trajo queda en el celular: sin señal (o si el celular recarga la app al volver de la cámara) el
   // recorrido de hoy se sigue viendo.
   const [recorridos, setRecorridos] = useState<RecorridoChofer[]>(guardado);
@@ -191,7 +200,7 @@ function ElegirApp({ p, alElegir, alCerrar }: { p: ParadaChofer; alElegir: (k: A
 
 function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntregar }: {
   p: ParadaChofer; tarde: boolean; hecha: boolean; enLinea: boolean; app: AppMapa | null; alElegirApp: (k: AppMapa) => void;
-  alMarcar: (resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => void; alEntregar: () => void;
+  alMarcar: (resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => void; alEntregar: (parada?: string) => void;
 }) {
   const [paso, setPaso] = useState<'botones' | 'motivo'>('botones');
   const [motivo, setMotivo] = useState('');
@@ -201,7 +210,7 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
   function marcar(resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, m?: string, n?: string) {
     // Una entrega hecha: directo a la foto del remito firmado. La cámara se abre ya, en el mismo toque: si se espera a que
     // conteste el servidor, el iPhone no la deja abrir.
-    if (resultado === 'hecho' && esEntrega) alEntregar();
+    if (resultado === 'hecho' && esEntrega) alEntregar(p.clave);
     alMarcar(resultado, m, n);
     setPaso('botones');
   }
@@ -223,7 +232,7 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
       {!enLinea && <p className="ruta-tarde">Sin señal no se puede marcar la parada.</p>}
       {paso === 'botones' && (hecha || p.visita ? (
         <div className="ruta-acciones">
-          {hecha && esEntrega && <button type="button" className="boton principal" onClick={alEntregar}>Sacar la foto del remito</button>}
+          {hecha && esEntrega && <button type="button" className="boton principal" onClick={() => alEntregar(p.clave)}>{p.expreso ? 'Sacar la foto de la guía' : 'Sacar la foto del remito'}</button>}
           {!hecha && <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}>{esEntrega ? 'Ahora sí: entregué' : 'Ahora sí: listo'}</button>}
           <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar(null)}>Deshacer</button>
         </div>

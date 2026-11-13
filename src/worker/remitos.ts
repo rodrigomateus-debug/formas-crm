@@ -48,10 +48,11 @@ export interface RemitoRow {
   recibido_el: string | null; firmado: number | null; reservas: number; notas: string | null; lectura: string; controles: string; candidatos: string;
   duplicado_de: number | null; intentos: number; leido_at: string | null; revisado_por: number | null; revisado_at: string | null;
   pdv_chofer: string | null; pide_pdv: number; created_at: string; updated_at: string;
+  parada?: string | null;   // la parada del recorrido de donde es la foto (la cámara se abrió desde ahí, o la eligió el chofer)
 }
 const SIN_DATA = `id, record_id, origen, file_id, nombre, mime, size, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, estado, motivo,
   repetir, numero, pdv, cuit, cliente, fecha, recibido_por, recibido_el, firmado, reservas, notas, lectura, controles, candidatos, duplicado_de,
-  intentos, leido_at, revisado_por, revisado_at, pdv_chofer, pide_pdv, created_at, updated_at`;
+  intentos, leido_at, revisado_por, revisado_at, pdv_chofer, pide_pdv, parada, created_at, updated_at`;
 
 // ---------- Datos que se controlan solos ----------
 
@@ -108,6 +109,15 @@ const aBytes = (d: ArrayBuffer | number[]) => (d instanceof ArrayBuffer ? d : ne
 export interface NuevoRemito {
   recordId?: number | null; origen: Origen; bytes: ArrayBuffer; mime: string; nombre: string;
   clave?: string | null; tokenId?: number | null; chofer?: string | null; lat?: number | null; lng?: number | null; tomadaEl?: string | null;
+  parada?: string | null;
+}
+// La clave de una parada de entrega del recorrido: p:<tarea del PDV>, o p:<tarea>:2 si el pedido va a varias direcciones.
+export const esClaveParada = (s: unknown): s is string => typeof s === 'string' && /^p:[\w-]{1,60}(:\d{1,2})?$/.test(s);
+// El PDV y el pedido de una parada de entrega.
+async function deParada(db: D1Database, clave: string | null | undefined) {
+  if (!esClaveParada(clave)) return null;
+  const f = await db.prepare('SELECT npdv, record_id FROM produccion WHERE task_id = ?').bind(clave.split(':')[1]).first<{ npdv: string | null; record_id: number | null }>();
+  return f ? { pdv: normPdv(f.npdv), recordId: f.record_id } : null;
 }
 
 const TIPOS = /^(image\/(jpeg|png|webp|gif|heic|heif)|application\/pdf)$/;
@@ -133,9 +143,10 @@ export async function guardarRemito(env: Env, ctx: Ctx, n: NuevoRemito): Promise
     const rec = await getRow(db, n.recordId);
     if (rec.object_type !== 'order') throw new HttpError(400, 'Los remitos van en un pedido.');
   }
-  const r = await db.prepare(`INSERT INTO remitos (record_id, origen, nombre, mime, size, data, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(n.recordId ?? null, n.origen, n.nombre.slice(0, 200) || 'remito', mime, n.bytes.byteLength,
-    n.bytes, hash, n.clave ?? null, ctx.user.id, n.tokenId ?? null, n.chofer ?? null, num(n.lat), num(n.lng), n.tomadaEl ?? null).first<{ id: number }>();
+  const r = await db.prepare(`INSERT INTO remitos (record_id, origen, nombre, mime, size, data, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, parada)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(n.recordId ?? null, n.origen, n.nombre.slice(0, 200) || 'remito', mime, n.bytes.byteLength,
+    n.bytes, hash, n.clave ?? null, ctx.user.id, n.tokenId ?? null, n.chofer ?? null, num(n.lat), num(n.lng), n.tomadaEl ?? null,
+    esClaveParada(n.parada) ? n.parada : null).first<{ id: number }>();
   return { id: r!.id, nuevo: true };
 }
 const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -397,7 +408,9 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
 
   // El PDV, que aparece dos veces; y el que escribió el chofer, si lo escribió.
   const leidos = [...new Set([normPdv(l.pdv_pedido_web), normPdv(l.pdv_observaciones)].filter(Boolean) as string[])];
-  const delChofer = normPdv(r.pdv_chofer);
+  // Si el remito no dice el PDV, vale el de la parada desde donde el chofer sacó la foto (o la que eligió).
+  const deLaParada = !r.pdv_chofer && !leidos.length ? (await deParada(db, r.parada))?.pdv ?? null : null;
+  const delChofer = normPdv(r.pdv_chofer) ?? deLaParada;
   let pdvs = leidos;
   let porChofer = false;          // el PDV lo puso el chofer (no se leía, o no coincidía en el remito)
   let contraLectura: string | null = null;   // el chofer escribió otro que el que dice el remito (bien leído)
@@ -538,11 +551,12 @@ async function cruzar(env: Env, r: RemitoRow, l: Lectura, b: Budget): Promise<Cr
 
 // ---------- La guía del expreso ----------
 
-// La guía que se ve en la foto queda en la entrega por expreso (entrega_expresos) para seguir el envío: la del pedido de
-// ese remito; si el remito no se pudo confirmar (la guía lo tapa), la del pedido de ese PDV si va por expreso; si no, la
-// única entrega por expreso sin guía del recorrido de ese día del chofer que mandó la foto. Una guía cargada no se pisa:
-// si es otra, queda avisado para Logística.
-async function cargarGuia(db: D1Database, r: RemitoRow, l: Lectura, recordId: number | null): Promise<{ ok: boolean | null; detalle: string }> {
+// La guía que se ve en la foto queda en la entrega por expreso (entrega_expresos) para seguir el envío. De qué entrega
+// es, en este orden: la parada desde la que el chofer sacó la foto (o la que eligió cuando la app le preguntó; si no
+// estaba marcada por expreso, se marca con el expreso de la guía); la del pedido del remito; la del pedido de ese PDV si
+// va por expreso. Si no se sabe, la app le pregunta al chofer de qué entrega es. Una guía cargada no se pisa: si es otra,
+// queda avisado para Logística.
+async function cargarGuia(db: D1Database, r: RemitoRow, l: Lectura, recordId: number | null): Promise<{ ok: boolean | null; detalle: string; recordId?: number | null }> {
   const g = l.guia_expreso!;
   const n = nombreGuia(g);
   const filas = async (where: string, ...b: unknown[]) => (await db.prepare(`SELECT clave, record_id, expreso, guia FROM entrega_expresos WHERE ${where}`).bind(...b)
@@ -557,26 +571,25 @@ async function cargarGuia(db: D1Database, r: RemitoRow, l: Lectura, recordId: nu
     if (!vacias.length) return { ok: true, detalle: `Guía ${n}: ya estaba cargada en la entrega por expreso.` };
     return { ok: otroExpreso ? null : true, detalle: `Guía ${n}: quedó cargada en la entrega por ${exp}${como}.${otroExpreso ? ` Ojo: la entrega decía ${exp} y la guía es de ${g.empresa}.` : ''}` };
   };
+  if (esClaveParada(r.parada)) {
+    const p = await deParada(db, r.parada);
+    const fs = await filas('clave = ?', r.parada);
+    if (fs.length) return { ...(await poner(fs, '')), recordId: p?.recordId ?? fs[0].record_id };
+    await db.prepare('INSERT OR IGNORE INTO entrega_expresos (clave, record_id, expreso, guia, at) VALUES (?, ?, ?, ?, ?)')
+      .bind(r.parada, p?.recordId ?? null, g.empresa ?? 'Expreso', g.numero, now()).run();
+    return { ok: true, recordId: p?.recordId ?? null, detalle: `Guía ${n}: la entrega${p?.pdv ? ` del PDV ${p.pdv}` : ''} quedó marcada por ${g.empresa ?? 'expreso'}, con esta guía.` };
+  }
   if (recordId) {
     const fs = await filas('record_id = ?', recordId);
-    if (fs.length) return poner(fs, '');
+    if (fs.length) return { ...(await poner(fs, '')), recordId };
   }
   const pdvs = [...new Set([normPdv(r.pdv_chofer), normPdv(l.pdv_pedido_web), normPdv(l.pdv_observaciones)].filter(Boolean) as string[])];
   if (!recordId && pdvs.length === 1) {
     const ids = (await pedidosConPdv(db, pdvs[0])).map((x) => x.id);
     const fs = ids.length ? await filas('record_id IN (SELECT value FROM json_each(?))', JSON.stringify(ids)) : [];
-    if (fs.length && new Set(fs.map((f) => f.record_id)).size === 1) return poner(fs, ` (la del PDV ${pdvs[0]})`);
+    if (fs.length && new Set(fs.map((f) => f.record_id)).size === 1) return { ...(await poner(fs, ` (la del PDV ${pdvs[0]})`)), recordId: fs[0].record_id };
   }
-  // Sin pedido (o el pedido no iba por expreso): el recorrido de ese día del chofer.
-  if (r.origen === 'chofer' && r.chofer) {
-    const dia = new Date(Date.parse(r.created_at) - 3 * 3600_000).toISOString().slice(0, 10);
-    const rutas = (await db.prepare('SELECT chofer, orden FROM cronograma_rutas WHERE fecha = ?').bind(dia).all<{ chofer: string | null; orden: string }>()).results;
-    const claves = rutas.filter((x) => x.chofer && norm(x.chofer) === norm(r.chofer!)).flatMap((x) => { try { return (JSON.parse(x.orden) as unknown[]).map(String); } catch { return []; } });
-    const fs = claves.length ? await filas("clave IN (SELECT value FROM json_each(?)) AND COALESCE(guia, '') = ''", JSON.stringify(claves)) : [];
-    if (fs.length === 1) return poner(fs, ` (la del recorrido de ${r.chofer})`);
-    if (fs.length > 1) return { ok: null, detalle: `Guía ${n}: ${r.chofer} tenía ${fs.length} entregas por expreso sin guía ese día; no se sabe de cuál es. Cargala en la parada.` };
-  }
-  return { ok: null, detalle: recordId ? `Guía ${n}: el pedido no estaba marcado para ir por expreso. Cargala en su parada («Mandar por expreso»).` : `Guía ${n}: no se sabe de qué entrega es. Cargala en su parada.` };
+  return { ok: null, detalle: r.origen === 'chofer' ? `Guía ${n}: no se sabe de qué entrega es; se le preguntó al chofer.` : `Guía ${n}: no se sabe de qué entrega es. Cargala en su parada («Mandar por expreso»).` };
 }
 
 // ---------- Leer un remito ----------
@@ -621,18 +634,24 @@ async function aplicarLectura(env: Env, r: RemitoRow, l: Lectura & { _modelo?: s
   const id = r.id;
   const c = await cruzar(env, r, l, b);
   // La guía del expreso, a la entrega por expreso del pedido (o del recorrido de hoy del chofer).
+  // Si no se sabe de qué entrega es, se le pregunta al chofer (elige la parada o escribe el PDV). Una foto que es solo la
+  // guía queda en el pedido de esa entrega, para verla ahí.
   if (l.guia_expreso) {
     const g = await cargarGuia(db, r, l, c.recordId);
     c.controles.push({ dato: 'Guía del expreso', ok: g.ok, detalle: g.detalle });
-    if (g.ok && !c.recordId) c.pidePdv = false;
+    if (!l.es_remito || !c.recordId) c.pidePdv = g.ok === null && r.origen === 'chofer';
+    if (!l.es_remito && g.recordId && !c.recordId) c.recordId = g.recordId;
+    if (!l.es_remito && g.ok !== null) c.motivo = `Es la guía de ${nombreGuia(l.guia_expreso)}, no un remito de Formas. ${g.detalle}`;
   }
   const items = l.items.filter((it) => it.descripcion || it.codigo);
   const ts = now();
+  // El PDV del remito: el que escribió el chofer, el leído o, si el remito no lo dice, el de la parada de la foto.
+  const pdvLeido = normPdv(r.pdv_chofer) ?? normPdv(l.pdv_pedido_web) ?? normPdv(l.pdv_observaciones) ?? (await deParada(db, r.parada))?.pdv ?? null;
   await db.batch([
     db.prepare(`UPDATE remitos SET record_id = ?, estado = ?, motivo = ?, repetir = ?, numero = ?, pdv = ?, cuit = ?, cliente = ?, fecha = ?,
         recibido_por = ?, recibido_el = ?, firmado = ?, reservas = ?, notas = ?, lectura = ?, controles = ?, candidatos = ?, duplicado_de = ?,
         pide_pdv = ?, intentos = intentos + ?, leido_at = ?, updated_at = ? WHERE id = ?`)
-      .bind(c.recordId, c.estado, c.motivo, c.repetir ? 1 : 0, normNumero(l.numero_remito), normPdv(r.pdv_chofer) ?? normPdv(l.pdv_pedido_web) ?? normPdv(l.pdv_observaciones),
+      .bind(c.recordId, c.estado, c.motivo, c.repetir ? 1 : 0, normNumero(l.numero_remito), pdvLeido,
         cuitValido(l.cuit_cliente) ? fmtCuit(cuitValido(l.cuit_cliente)!) : l.cuit_cliente, l.cliente, /^\d{4}-\d{2}-\d{2}$/.test(l.fecha ?? '') ? l.fecha : null,
         [l.sello_recepcion, l.aclaracion_firma].filter(Boolean).join(' · ') || null, /^\d{4}-\d{2}-\d{2}$/.test(l.fecha_recepcion ?? '') ? l.fecha_recepcion : null,
         l.firmado ? 1 : 0, l.recibido_con_reservas ? 1 : 0, l.notas, JSON.stringify(l), JSON.stringify(c.controles),
@@ -650,16 +669,22 @@ async function aplicarLectura(env: Env, r: RemitoRow, l: Lectura & { _modelo?: s
 // El chofer escribe el PDV: porque no se leía, porque no coincidía en el remito o porque ve que se leyó mal. Se vuelve a
 // cruzar con lo ya leído (sin otra lectura) y vale como el leído: tiene que cerrar con el CUIT o el remito en Finnegans,
 // y si contradice un PDV bien leído, solo con el remito en Finnegans; si no, lo revisa Logística. Solo sus remitos.
-export async function corregirPdv(env: Env, ctx: Ctx, id: number, valor: unknown) {
+// El chofer dice de qué entrega es una foto: escribe el PDV o elige la parada de su recorrido (`parada`).
+export async function corregirPdv(env: Env, ctx: Ctx, id: number, valor: unknown, parada?: unknown) {
   const db = env.DB;
   const r = await db.prepare(`SELECT ${SIN_DATA} FROM remitos WHERE id = ? AND token_id = ?`).bind(id, ctx.tokenId ?? -1).first<RemitoRow>();
   if (!r) throw new HttpError(404, 'No existe ese remito.');
   if (r.estado === 'descartado' || r.estado === 'duplicado') throw new HttpError(409, r.estado === 'duplicado' ? 'Ese remito ya estaba mandado.' : 'Logística descartó ese remito.');
-  const pdv = normPdv(valor);
+  let pdv = normPdv(valor), clave: string | null = r.parada ?? null;
+  if (parada != null && parada !== '') {
+    const p = esClaveParada(parada) ? await deParada(db, parada) : null;
+    if (!p?.pdv) throw new HttpError(400, 'Esa parada no es una entrega de un PDV. Escribí el número de PDV.');
+    pdv = p.pdv; clave = String(parada);
+  }
   if (!pdv) throw new HttpError(400, 'Escribí el número de PDV, solo con números.');
   if (pdv.length > 7) throw new HttpError(400, 'Ese número es muy largo para un PDV. Fijate en el remito y escribilo de nuevo.');
-  await db.prepare('UPDATE remitos SET pdv_chofer = ?, updated_at = ? WHERE id = ?').bind(pdv, now(), id).run();
-  const nuevo = { ...r, pdv_chofer: pdv };
+  await db.prepare('UPDATE remitos SET pdv_chofer = ?, parada = ?, updated_at = ? WHERE id = ?').bind(pdv, clave, now(), id).run();
+  const nuevo = { ...r, pdv_chofer: pdv, parada: clave };
   if (!r.leido_at) return env.ANTHROPIC_API_KEY ? leerRemito(env, id, { ctx }) : remitoPorId(db, id);
   let l: Lectura;
   try { l = limpiarLectura(JSON.parse(r.lectura) as Record<string, unknown>); } catch { return leerRemito(env, id, { ctx }); }
@@ -1097,8 +1122,9 @@ export function paraChofer(r: RemitoRow, items: Array<{ description: string | nu
   let guia: GuiaExpreso | null = null;
   try { guia = (JSON.parse(r.lectura || '{}') as Partial<Lectura>).guia_expreso ?? null; } catch { /* sin lectura */ }
   const cargada = guia && (JSON.parse(r.controles || '[]') as Control[]).some((c) => c.dato === 'Guía del expreso' && c.ok);
-  const deGuia = guia ? `Guía de ${nombreGuia(guia)}: ${cargada ? 'quedó cargada para seguir el envío.' : 'Logística la carga en la entrega.'} ` : '';
-  const mensaje = deGuia + (r.estado === 'ok' ? `Quedó en el pedido${r.pdv ? ` del PDV ${r.pdv}` : ''}. No tenés que hacer nada más.`
+  const deGuia = guia ? `Guía de ${nombreGuia(guia)}: ${cargada ? 'quedó cargada para seguir el envío.' : r.pide_pdv ? '¿de qué entrega es?' : 'Logística la carga en la entrega.'} ` : '';
+  // Si no se sabe de qué entrega es, la app lo pregunta (título y paradas para tocar): el mensaje solo dice qué guía es.
+  const mensaje = guia && r.pide_pdv && r.estado === 'revisar' ? `Es la guía de ${nombreGuia(guia)}.` : deGuia + (r.estado === 'ok' ? `Quedó en el pedido${r.pdv ? ` del PDV ${r.pdv}` : ''}. No tenés que hacer nada más.`
     : r.estado === 'duplicado' ? `Ese remito ya estaba mandado${r.pdv ? ` (PDV ${r.pdv})` : ''}. No hace falta mandarlo de nuevo.`
     : r.estado === 'descartado' ? `Logística lo descartó${r.motivo ? `: ${r.motivo}` : '.'}`
     : r.estado === 'revisar' ? (r.repetir ? (JSON.parse(r.lectura || '{}').motivo_repetir || 'No se lee bien. Sacá otra foto: el remito entero, de frente y sin sombra.')
@@ -1107,7 +1133,7 @@ export function paraChofer(r: RemitoRow, items: Array<{ description: string | nu
     : 'Llegó. Se lee en unos minutos; no tenés que hacer nada.');
   return {
     id: r.id, clave: r.clave, creado: r.created_at, estado: r.estado, repetir: r.estado === 'revisar' && !!r.repetir, mensaje,
-    pide_pdv: r.estado === 'revisar' && !!r.pide_pdv, pdv_chofer: r.pdv_chofer,
+    pide_pdv: r.estado === 'revisar' && !!r.pide_pdv, pdv_chofer: r.pdv_chofer, guia: guia ? { empresa: guia.empresa, numero: guia.numero } : null,
     numero: r.numero, pdv: r.pdv, cliente: r.cliente, items: items.map((i) => ({ descripcion: i.description ?? '', cantidad: i.quantity })),
     pedido: r.record_id && pedidoNombre ? { id: r.record_id, nombre: pedidoNombre } : null,
   };

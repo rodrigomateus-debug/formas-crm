@@ -400,7 +400,7 @@ hooks.post('/chofer/api/remitos', async (c) => {
   const tomada = s('tomada_el');
   const { id, nuevo } = await guardarRemito(c.env, ctx, {
     origen: 'chofer', bytes: await archivo.arrayBuffer(), mime: archivo.type || 'image/jpeg', nombre: archivo.name || 'remito.jpg',
-    clave: s('clave')?.slice(0, 80) || null, tokenId: ctx.tokenId ?? null, chofer: ctx.sourceDetail ?? null,
+    clave: s('clave')?.slice(0, 80) || null, tokenId: ctx.tokenId ?? null, chofer: ctx.sourceDetail ?? null, parada: s('parada'),
     lat: s('lat') == null ? null : Number(s('lat')), lng: s('lng') == null ? null : Number(s('lng')),
     tomadaEl: tomada && !Number.isNaN(Date.parse(tomada)) ? new Date(tomada).toISOString() : null,
   });
@@ -427,12 +427,13 @@ hooks.get('/chofer/manifest.webmanifest', async (c) => {
   if (/^fcrm_[0-9a-f]{48}$/.test(t)) Object.assign(m, { id: '/hooks/chofer/', start_url: `/hooks/chofer/#t=${t}` });
   return new Response(JSON.stringify(m), { headers: { 'content-type': 'application/manifest+json; charset=utf-8', 'cache-control': 'no-store' } });
 });
-// El chofer escribe el PDV de uno de sus remitos ({"pdv": "30706"}): no se leía, no coincidía o se leyó mal.
+// El chofer dice de qué entrega es una de sus fotos: escribe el PDV ({"pdv": "30706"}) o elige la parada de su recorrido
+// ({"parada": "p:…"}). No se leía, no coincidía, se leyó mal o es la guía de un expreso.
 hooks.post('/chofer/api/remitos/:id/pdv', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
-  const { pdv } = await c.req.json<{ pdv?: unknown }>().catch(() => ({ pdv: null }));
+  const { pdv, parada } = await c.req.json<{ pdv?: unknown; parada?: unknown }>().catch(() => ({ pdv: null, parada: null }));
   const id = Number(c.req.param('id'));
-  const r = await corregirPdv(c.env, ctx, id, pdv);
+  const r = await corregirPdv(c.env, ctx, id, pdv, parada);
   return c.json(paraChofer(r, (await itemsDe(c.env.DB, [id])).get(id) ?? [], await pedidoNombre(c.env.DB, r.record_id)));
 });
 // La app: index.html y sus archivos, desde dist/chofer.

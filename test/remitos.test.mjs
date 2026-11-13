@@ -79,6 +79,11 @@ const LECTURAS = {
     firmado: false, guia_expreso: { ...GUIA_VC, numero: '999000000001' } },
   GUIA_SOLA: { ...base, es_remito: false, numero_remito: '', pdv_pedido_web: '', pdv_observaciones: '', cliente: '', cuit_cliente: '', items: [], firmado: false,
     guia_expreso: { ...GUIA_VC, numero: '999000000777' } },
+  GUIA_SOLA2: { ...base, es_remito: false, numero_remito: '', pdv_pedido_web: '', pdv_observaciones: '', cliente: '', cuit_cliente: '', items: [], firmado: false,
+    guia_expreso: { ...GUIA_VC, numero: '999000000888' } },
+  // Un remito de Formas que no dice el PDV, sacado desde la parada: vale el PDV de la parada.
+  SINPDV_PARADA: { ...base, numero_remito: NRO(BASE_NRO + 82), pdv_pedido_web: '', pdv_observaciones: '', cliente: `CLIENTE A ${RUN} SA`, cuit_cliente: CUIT_A,
+    items: [item('GOR-1', 'Gorra bordada', 1)] },
   NOREM: { ...base, es_remito: false, numero_remito: null, pdv_pedido_web: null, pdv_observaciones: null, cliente: null, cuit_cliente: null, items: [] },
   OTROCUIT: { ...base, numero_remito: NRO(BASE_NRO + 8), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `OTRA EMPRESA ${RUN} SA`, cuit_cliente: CUIT_OTRO, items: [item('GOR-1', 'Gorra', 50)] },
   B1: { ...base, numero_remito: NRO(BASE_NRO + 10), pdv_pedido_web: PDV_B, pdv_observaciones: PDV_B, cliente: `CLIENTE B ${RUN} SRL`, cuit_cliente: CUIT_B, items: [item('GOR-1', 'Gorra bordada', 50)] },
@@ -621,15 +626,25 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   const g2 = await api('POST', '/hooks/chofer/api/remitos', form('GUIA_OTRA'), H);
   const otra = (await api('GET', `/records/order/${B.id}/remitos`)).data.remitos.find((x) => x.id === g2.data.id);
   assert.ok(otra.controles.some((c) => c.dato === 'Guía del expreso' && c.ok === null && /ya tenía la guía 999039601732/.test(c.detalle)), JSON.stringify(otra.controles));
-  // Solo la guía, sin el remito: va a la única entrega por expreso sin guía del recorrido de hoy de ese chofer.
-  const HOY = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
-  asUser = logi.email;
-  assert.equal((await api('PUT', '/cronograma/expreso', { clave: `p:guia-sola-${RUN}`, expreso: 'Vía Cargo' })).status, 200);
-  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: HOY, rutas: [{ chofer: `Juan ${RUN}`, base: 'roca', salida: 480, orden: [`p:guia-sola-${RUN}`] }] })).status, 200);
-  asUser = null;
+  // Solo la guía, sin el remito y sin saber de qué parada es: la app le pregunta al chofer de qué entrega es. Elige la
+  // parada (el PDV C, que no estaba marcado por expreso): queda marcada por Vía Cargo con esa guía.
   const g3 = await api('POST', '/hooks/chofer/api/remitos', form('GUIA_SOLA'), H);
-  assert.deepEqual([g3.data.repetir, g3.data.pide_pdv], [false, false], 'no pide otra foto ni el PDV: ya se sabe de qué entrega es');
-  assert.match(g3.data.mensaje, /^Guía de VIA CARGO 999000000777: quedó cargada/);
+  assert.deepEqual([g3.data.repetir, g3.data.pide_pdv, g3.data.guia?.numero], [false, true, '999000000777'], 'no pide otra foto: pregunta de qué entrega es');
+  assert.equal(g3.data.mensaje, 'Es la guía de VIA CARGO 999000000777.', 'la app pregunta de qué entrega es; el mensaje dice qué guía es');
+  assert.equal((await api('POST', `/hooks/chofer/api/remitos/${g3.data.id}/pdv`, { parada: 'p:no-existe' }, H)).status, 400);
+  const g3b = await api('POST', `/hooks/chofer/api/remitos/${g3.data.id}/pdv`, { parada: `p:remC${RUN}` }, H);
+  assert.equal(g3b.status, 200, JSON.stringify(g3b.data));
+  assert.deepEqual([g3b.data.pide_pdv, g3b.data.pedido?.id], [false, C.id]);
+  assert.match(g3b.data.mensaje, /^Guía de VIA CARGO 999000000777: quedó cargada para seguir el envío\./);
+  const enC = (await api('GET', `/records/order/${C.id}/remitos`)).data.remitos.find((x) => x.id === g3.data.id);
+  assert.ok(enC.controles.some((c) => c.dato === 'Guía del expreso' && c.ok && new RegExp(`entrega del PDV ${PDV_C} quedó marcada por VIA CARGO`).test(c.detalle)), JSON.stringify(enC.controles));
+  // La guía sacada desde la parada («Dejé en el expreso: foto de la guía»): ya se sabe de qué entrega es.
+  const g4 = await api('POST', '/hooks/chofer/api/remitos', form('GUIA_SOLA2', { parada: `p:remD${RUN}` }), H);
+  assert.deepEqual([g4.data.repetir, g4.data.pide_pdv, g4.data.pedido?.id], [false, false, D.id]);
+  assert.match(g4.data.mensaje, /^Guía de VIA CARGO 999000000888: quedó cargada/);
+  // Un remito de Formas que no dice el PDV, sacado desde la parada: toma el PDV de la parada.
+  const g5 = await api('POST', '/hooks/chofer/api/remitos', form('SINPDV_PARADA', { parada: `p:remC${RUN}` }), H);
+  assert.equal(g5.data.pdv, PDV_C);
 
   // Dar de baja el link: deja de andar.
   asUser = logi.email;

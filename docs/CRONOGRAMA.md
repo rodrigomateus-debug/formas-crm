@@ -104,10 +104,14 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   (con una bandera donde termina) lo tienen en cuenta. El chofer lo ve en su app: «terminás en … cerca de las …».
   Columnas `fin`, `fin_nombre` y `fin_direccion` de `cronograma_rutas` (migración `0060_recorrido_termina.sql`).
 - **La guía, sola desde la foto** (pedido de Rodrigo del 13/11/2026): cuando el chofer deja la mercadería en el expreso
-  saca la foto de la guía (muchas veces apoyada encima del remito). Al leerla, Claude saca la empresa y el número de guía
-  y la guía queda cargada en la entrega por expreso del pedido de ese remito; si el remito no se ve, en la del pedido de
-  ese PDV si va por expreso; si no, en la única entrega por expreso sin guía del recorrido de ese día del chofer. Una
-  guía ya cargada no se pisa (si es otra, queda avisado en el remito). Al chofer no se le pide otra foto por eso.
+  saca la foto de la guía (muchas veces apoyada encima del remito). Al leerla, Claude saca la empresa y el número de guía.
+  De qué entrega es: la parada desde la que abrió la cámara («Dejé en el expreso: foto de la guía», «Entregué»: la app
+  manda la parada con la foto); si la sacó con el botón general, la del pedido del remito, o la del pedido de ese PDV si
+  va por expreso; y si no se sabe, **la app le pregunta al chofer**: «¿De qué entrega es la guía?», con las entregas de
+  su recorrido de hoy para tocar (o el PDV para escribir). Si esa entrega no estaba marcada por expreso, queda marcada
+  con el expreso de la guía. Una guía ya cargada no se pisa (si es otra, queda avisado en el remito). Al chofer no se le
+  pide otra foto por eso. Lo mismo vale para un remito de Formas que no dice el PDV: toma el de la parada desde la que se
+  sacó, o la app le muestra las paradas para elegir.
 - **Seguimiento**: con Vía Cargo, la guía es un link a su seguimiento (`viacargo.com.ar/seguimiento-de-envio/<guía>`,
   el mismo que abre su buscador) en la tarjeta de la semana, en la parada y en el remito; de los demás expresos queda el
   número para copiar (`web/src/expresos.ts`, donde se suma otro expreso con link).

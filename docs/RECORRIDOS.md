@@ -24,7 +24,9 @@ que nada podía apuntar a un lugar):
 - **Cada destino tiene su id para siempre.** La planilla DESTINOS se sigue copiando una vez por día (o con «Traer la
   planilla ahora»), pero ahora **suma y actualiza**: reconoce cada lugar por nombre y dirección, los nuevos se agregan, los
   que la planilla sacó dejan de ofrecerse (los encargos viejos los siguen nombrando).
-- **Lo que se corrige en el Hub queda**: la copia de la planilla ya no lo pisa (en la lista dice «Corregido»).
+- **Lo que se corrige en el Hub queda**: la copia de la planilla ya no lo pisa (en la lista dice «Corregido»), y lo que
+  Logística sacó de la libreta no vuelve. Los destinos los corrige Logística (y quien edita el cronograma); cada uno
+  corrige los que cargó.
 - **Destinos nuevos desde el Hub**: «Nuevo destino» en la pestaña Destinos, o al cargar un encargo a una dirección que no
   está («Guardarlo en Destinos»). Una empresa del CRM elegida como destino también se suma, atada a su empresa.
 - **Al buscar un destino** aparecen juntos: los lugares de la libreta, las empresas del CRM (las que la persona ve, más
@@ -67,8 +69,8 @@ Validaciones: hace falta algo para llevar o retirar (o qué hacer, en las notas)
 | | Quien lo pidió | Logística, Producción y administradores | El chofer (app) |
 |---|---|---|---|
 | Cargar | Sí | Sí | — |
-| Cambiarlo o pasarlo a otro día | Mientras no esté hecho | Siempre | — |
-| Cancelarlo | El suyo | Cualquiera | — |
+| Cambiarlo o pasarlo a otro día | Mientras esté pendiente o no se haya podido | Siempre | — |
+| Cancelarlo | El suyo, si no está hecho (y volverlo a pendiente si lo canceló) | Cualquiera | — |
 | Marcarlo hecho | — | Sí (en la tarjeta, la ruta o el encargo) | Sí (en su parada) |
 | No se pudo | — | Sí | Sí, con el motivo |
 
@@ -82,7 +84,8 @@ cambia un encargo para hoy o para un día que ya tiene el recorrido armado, se l
   recorrido, juntos por lugar como en la ruta del día: entregas, retiros, egresos y encargos, el chofer si ya está armado,
   y los encargos propios. «Sumar algo acá» abre un encargo para ese lugar y ese día. **Perfil Ventas**: lo de clientes que
   no son suyos dice solo «Un cliente» y la localidad (sirve para ver que «el jueves van a Vicente López», sin ver de quién
-  es); los proveedores e impresores, con su nombre.
+  es); si su encargo cae en esa parada, se ve con el nombre que le puso ella. Los proveedores e impresores, con su
+  nombre. Como destino puede elegir sus empresas y los proveedores e impresores, no las de otras vendedoras.
 - **Encargos**: los propios (Logística ve también «De todos»), por estado, con el remito de traslado. «Últimos 6 meses»
   muestra el historial.
 - **Destinos**: la base de destinos, con cuántos viajes hubo a cada uno; se agregan y se corrigen. Para los
@@ -96,10 +99,12 @@ cambia un encargo para hoy o para un día que ya tiene el recorrido armado, se l
 - **Ruta del día**: el encargo va **en la parada del mismo lugar** si ese día ya se va ahí (el mismo destino de la
   libreta, la misma calle y altura, o la misma empresa o el mismo nombre si alguno no tiene altura: «IMPREFAS» de la
   libreta es el impresor IMPREFAS de ClickUp); si no, es una parada propia. Se ordena, se pasa de recorrido y se marca como
-  cualquier parada; «Marcar hecho» marca también sus encargos.
+  cualquier parada; «Marcar hecho» marca también sus encargos. Dos sucursales de la misma empresa (o la misma calle y
+  altura en dos localidades) son dos paradas.
 - **App del chofer**: en la parada, «Dejar …» y «Retirar …» de cada encargo, dónde buscar lo que lleva si no está en el
   depósito, a quién preguntar, el horario y si es urgente. «Listo» lo deja hecho y «No se pudo» lo deja así con el motivo
-  (se le avisa a quien lo pidió); «Deshacer» o «Para después» lo vuelven a como estaba.
+  (se le avisa a quien lo pidió); «Deshacer» o «Para después» lo vuelven a como estaba, salvo que Logística lo haya
+  cambiado después.
 
 ## Remito de traslado
 

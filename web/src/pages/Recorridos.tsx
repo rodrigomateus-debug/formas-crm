@@ -243,7 +243,7 @@ function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: nu
 // ---------- Destinos ----------
 
 interface DestinoFila { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; contacto: string | null;
-  telefono: string | null; observaciones: string | null; company_id: number | null; origen: string; editado: boolean; veces: number }
+  telefono: string | null; observaciones: string | null; company_id: number | null; origen: string; editado: boolean; veces: number; puede_editar: boolean }
 function Destinos() {
   const { meta } = useMeta();
   const toast = useToast();
@@ -283,7 +283,7 @@ function Destinos() {
             <thead><tr><th className="nosort">Destino</th><th className="nosort">Dirección</th><th className="nosort">Horario</th><th className="nosort">Contacto</th><th className="nosort numcol">Viajes (6 meses)</th></tr></thead>
             <tbody>
               {datos.destinos.map((d) => (
-                <tr key={d.id} onClick={() => meta.me.role !== 'viewer' && setEditando(d)}>
+                <tr key={d.id} onClick={() => d.puede_editar && setEditando(d)} style={d.puede_editar ? undefined : { cursor: 'default' }} title={d.puede_editar ? undefined : 'Los destinos de la libreta los corrige Logística'}>
                   <td><b>{lindo(d.nombre)}</b>{d.origen === 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }}>Nuevo en el Hub</span>}{d.editado && d.origen !== 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }} title="Lo que se corrigió acá la planilla ya no lo pisa">Corregido</span>}</td>
                   <td>{[d.direccion, d.localidad].filter(Boolean).join(', ')}</td>
                   <td>{d.horario}</td>
@@ -390,7 +390,9 @@ interface DiaDestino { fecha: string; feriado: string | null; viajes: string[]; 
 interface InfoDestino { destino: DestinoOpcion; lugar: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null; localidad: string | null } | null;
   dias: DiaDestino[]; habitual: Habitual | null; ultimos: Encargo[] }
 interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; bases: Base[]; organiza: boolean }
-const vacio = (): ItemEnc => ({ cant: null, que: '', pdv: null });
+// En la pantalla la cantidad es el texto que se escribe («2,5»); el servidor la pasa a número.
+type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
+const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
 
 export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; inicial?: { destino?: DestinoOpcion | null; fecha?: string }; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
@@ -399,8 +401,8 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
   const [sug, setSug] = useState<Sugerencias | null>(null);
   const [destino, setDestino] = useState<DestinoOpcion | null>(inicial?.destino ?? null);
   const [fecha, setFecha] = useState(inicial?.fecha ?? proximoHabil());
-  const [llevar, setLlevar] = useState<ItemEnc[]>([vacio()]);
-  const [retirar, setRetirar] = useState<ItemEnc[]>([vacio()]);
+  const [llevar, setLlevar] = useState<ItemForm[]>([vacio()]);
+  const [retirar, setRetirar] = useState<ItemForm[]>([vacio()]);
   const [extra, setExtra] = useState({ desde: '', hacia: '', horario: '', contacto: '', notas: '', urgente: false, record_id: null as number | null, motivo: '' });
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
@@ -635,8 +637,8 @@ function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpci
   );
 }
 
-function Items({ titulo, ayuda, items, onChange, editable }: { titulo: string; ayuda: string; items: ItemEnc[]; onChange: (x: ItemEnc[]) => void; editable: boolean }) {
-  const set = (i: number, k: keyof ItemEnc, v: string) => onChange(items.map((x, j) => (j === i ? { ...x, [k]: k === 'cant' ? (v === '' ? null : Number(v.replace(',', '.')) || null) : v || (k === 'pdv' ? null : '') } : x)));
+function Items({ titulo, ayuda, items, onChange, editable }: { titulo: string; ayuda: string; items: ItemForm[]; onChange: (x: ItemForm[]) => void; editable: boolean }) {
+  const set = (i: number, k: keyof ItemForm, v: string) => onChange(items.map((x, j) => (j === i ? { ...x, [k]: k === 'cant' ? (v.replace(/[^\d.,]/g, '') || null) : v || (k === 'pdv' ? null : '') } : x)));
   return (
     <div className="rc-items">
       <div className="rc-items-cab"><b>{titulo}</b><span className="muted small">{ayuda}</span></div>

@@ -35,7 +35,10 @@ export function limpiarItems(v: unknown): ItemEnc[] {
   if (!Array.isArray(v)) return [];
   return v.slice(0, MAX_ITEMS).map((x) => {
     const o = (x ?? {}) as Record<string, unknown>;
-    const cant = Number(String(o.cant ?? '').replace(',', '.'));
+    // «2,5», «1.500» (mil quinientos), «1.500,5»: como se escribe en Argentina.
+    let t = String(o.cant ?? '').trim();
+    if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.'); else if (/^\d{1,3}(\.\d{3})+$/.test(t)) t = t.replace(/\./g, '');
+    const cant = Number(t);
     return {
       cant: Number.isFinite(cant) && cant > 0 ? Math.round(cant * 100) / 100 : null,
       que: String(o.que ?? '').replace(/\s+/g, ' ').trim().slice(0, 200),
@@ -75,9 +78,11 @@ async function resolverDestino(env: Env, ctx: Ctx, d: DestinoInput) {
     return { lugar_id: l.id, company_id: l.company_id ?? companyId, destino: l.nombre, direccion: l.direccion ? direccionLugar(l) : texto(d.direccion, 300) };
   }
   if (companyId) {
+    // Una empresa que la persona ve (para Ventas, las suyas) o un proveedor o impresor.
     const c = await db.prepare(`SELECT id, name, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city FROM records r
-      WHERE r.id = ? AND r.object_type = 'company' AND r.archived = 0`).bind(companyId).first<{ id: number; name: string; address: string | null; city: string | null }>();
-    if (!c) throw new HttpError(400, 'Esa empresa ya no está.');
+      WHERE r.id = ? AND r.object_type = 'company' AND r.archived = 0 AND (${visibleSql('r', ctx.user)} OR json_extract(r.props, '$.tipo_de_relacion') = 'proveedor')`)
+      .bind(companyId).first<{ id: number; name: string; address: string | null; city: string | null }>();
+    if (!c) throw new HttpError(400, 'Esa empresa no está (o no la ves).');
     const dir = texto(d.direccion, 300) ?? ([c.address, c.city].filter(Boolean).join(', ') || null);
     // Si ya hay un destino de esa empresa en esa dirección, ese; si no, se suma a la libreta.
     const ya = (await db.prepare('SELECT * FROM lugares WHERE company_id = ? AND activo = 1').bind(c.id).all<Lugar>()).results
@@ -148,14 +153,31 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
   const esSuyo = e.user_id === ctx.user.id, org = organiza(ctx.user);
   if (!esSuyo && !org) throw new HttpError(403, 'Ese encargo lo cambia quien lo pidió o Logística.');
   if (e.origen !== 'hub') throw new HttpError(400, 'Es del historial de la planilla: no se cambia.');
+  // Quien lo pidió (sin organizar): mientras está pendiente o no se pudo, lo cambia o lo cancela; cancelado, solo lo vuelve
+  // a pendiente; hecho, ya no se toca.
+  if (!org) {
+    if (e.estado === 'hecho') throw new HttpError(400, 'Ya está hecho: no se cambia.');
+    if (e.estado === 'cancelado' && b.estado !== 'pendiente') throw new HttpError(400, 'Está cancelado: para cambiarlo, volvelo a pendiente.');
+  }
+  // Lo que tiene que quedar para hacer, antes de tocar nada.
+  const llevarN = b.llevar !== undefined ? limpiarItems(b.llevar) : e.llevar, retirarN = b.retirar !== undefined ? limpiarItems(b.retirar) : e.retirar;
+  const notasN = b.notas !== undefined ? texto(b.notas, 1000) : e.notas;
+  if (!llevarN.length && !retirarN.length && !notasN) throw new HttpError(400, 'Tiene que quedar algo para llevar o retirar (o qué hay que hacer, en las notas).');
+  if (b.fecha !== undefined && b.fecha !== e.fecha) {
+    if (!esDia(b.fecha)) throw new HttpError(400, 'La fecha tiene que ser AAAA-MM-DD.');
+    if (b.fecha < hoyBsAs() && !org) throw new HttpError(400, 'Ese día ya pasó.');
+  }
+  const recordN = b.record_id !== undefined && (Number(b.record_id) || null) !== e.record_id ? await registroValido(db, ctx.user, b.record_id) : undefined;
   const sets: string[] = [], vals: unknown[] = [];
   const set = (col: string, v: unknown) => { sets.push(`${col} = ?`); vals.push(v); };
   const cambios: string[] = [];
   if (b.estado !== undefined) {
     const estado = String(b.estado) as EstadoEnc;
     if (!ESTADOS.includes(estado)) throw new HttpError(400, 'Estado desconocido.');
-    // Quien lo pidió puede cancelarlo (o volverlo a pendiente); hecho y «no se pudo» lo marcan Logística y el chofer.
+    // Quien lo pidió puede cancelarlo (o volverlo a pendiente si lo había cancelado); hecho y «no se pudo» lo marcan
+    // Logística y el chofer.
     if (!org && !['pendiente', 'cancelado'].includes(estado)) throw new HttpError(403, 'Marcarlo hecho es de Logística (o del chofer, desde su app).');
+    if (!org && estado === 'pendiente' && e.estado !== 'cancelado' && e.estado !== 'pendiente') throw new HttpError(403, 'Volverlo a pendiente es de Logística.');
     if (estado !== e.estado) {
       set('estado', estado);
       set('motivo', ['no_se_pudo', 'cancelado'].includes(estado) ? texto(b.motivo, 300) : null);
@@ -163,11 +185,9 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
       cambios.push(estado === 'hecho' ? 'lo marcó hecho' : estado === 'cancelado' ? `lo canceló${texto(b.motivo, 300) ? `: ${texto(b.motivo, 300)}` : ''}`
         : estado === 'no_se_pudo' ? `marcó que no se pudo${texto(b.motivo, 300) ? `: ${texto(b.motivo, 300)}` : ''}` : 'lo volvió a pendiente');
     }
-  } else if (!org && !['pendiente', 'no_se_pudo'].includes(e.estado)) throw new HttpError(400, 'Ya está hecho o cancelado: no se cambia.');
+  }
   if (b.fecha !== undefined && b.fecha !== e.fecha) {
-    if (!esDia(b.fecha)) throw new HttpError(400, 'La fecha tiene que ser AAAA-MM-DD.');
-    if (b.fecha < hoyBsAs() && !org) throw new HttpError(400, 'Ese día ya pasó.');
-    set('fecha', b.fecha);
+    set('fecha', b.fecha as string);
     // Pasarlo a otro día lo deja pendiente otra vez (si no se pudo, se vuelve a intentar).
     if (e.estado === 'no_se_pudo' && b.estado === undefined) { set('estado', 'pendiente'); set('motivo', null); }
     cambios.push(`lo pasó al ${fechaCorta(b.fecha)}`);
@@ -177,21 +197,18 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
     set('lugar_id', d.lugar_id); set('company_id', d.company_id); set('destino', d.destino); set('direccion', d.direccion);
     if (d.destino !== e.destino) cambios.push(`cambió el destino a ${d.destino}`);
   }
-  if (b.llevar !== undefined) set('llevar', JSON.stringify(limpiarItems(b.llevar)));
-  if (b.retirar !== undefined) set('retirar', JSON.stringify(limpiarItems(b.retirar)));
+  if (b.llevar !== undefined) set('llevar', JSON.stringify(llevarN));
+  if (b.retirar !== undefined) set('retirar', JSON.stringify(retirarN));
   if (b.desde !== undefined) set('desde', await base(db, b.desde));
   if (b.hacia !== undefined) set('hacia', await base(db, b.hacia));
-  for (const [k, max] of [['horario', 120], ['contacto', 200], ['notas', 1000]] as const) if (b[k] !== undefined) set(k, texto(b[k], max));
+  for (const [k, max] of [['horario', 120], ['contacto', 200]] as const) if (b[k] !== undefined) set(k, texto(b[k], max));
+  if (b.notas !== undefined) set('notas', notasN);
   if (b.urgente !== undefined) set('urgente', b.urgente ? 1 : 0);
-  if (b.record_id !== undefined) set('record_id', await registroValido(db, ctx.user, b.record_id));
+  if (recordN !== undefined) set('record_id', recordN);
   if (!sets.length) return e;
   set('updated_at', now()); set('updated_by', ctx.user.id);
   await db.prepare(`UPDATE encargos SET ${sets.join(', ')} WHERE id = ?`).bind(...vals, id).run();
   const nuevo = await encargoPorId(db, id);
-  if (!nuevo.llevar.length && !nuevo.retirar.length && !nuevo.notas) {
-    await db.prepare('UPDATE encargos SET llevar = ?, retirar = ?, notas = ? WHERE id = ?').bind(JSON.stringify(e.llevar), JSON.stringify(e.retirar), e.notas, id).run();
-    throw new HttpError(400, 'Tiene que quedar algo para llevar o retirar (o qué hay que hacer, en las notas).');
-  }
   if (!esSuyo && cambios.length) await avisarEncargo(db, [e.user_id], id, `${ctx.user.name} ${cambios.join(' y ')}.`, ctx.user.id);
   if (esSuyo && !org) await avisarLogistica(db, ctx, nuevo, nuevo.estado === 'cancelado' ? `canceló su encargo a ${nuevo.destino}` : `cambió su encargo a ${nuevo.destino}`);
   return nuevo;
@@ -265,16 +282,18 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   const campos = { localidad: texto(b.localidad, 80), horario: texto(b.horario, 160), contacto: texto(b.contacto, 160), telefono: texto(b.telefono, 60), observaciones: texto(b.observaciones, 600) };
   if (id == null) {
     if (!nombre || !direccion) throw new HttpError(400, 'El destino necesita el nombre y la dirección.');
-    const nuevo = await crearLugar(db, ctx, { nombre, direccion, ...campos, company_id: Number(b.company_id) || null });
+    const nuevo = await crearLugar(db, ctx, { nombre, direccion, ...campos, company_id: organiza(ctx.user) ? Number(b.company_id) || null : null });
     return { id: nuevo };
   }
-  const l = await db.prepare('SELECT id FROM lugares WHERE id = ?').bind(id).first();
+  const l = await db.prepare('SELECT id, origen, created_by FROM lugares WHERE id = ?').bind(id).first<{ id: number; origen: string; created_by: number | null }>();
   if (!l) throw new HttpError(404, 'Ese destino ya no está.');
+  // La libreta la corrige Logística (y quien edita el cronograma); los demás, los destinos que cargaron ellos.
+  if (!organiza(ctx.user) && !(l.origen === 'hub' && l.created_by === ctx.user.id)) throw new HttpError(403, 'Los destinos de la libreta los corrige Logística. Si algo está mal, avisale.');
   const sets: string[] = [], vals: unknown[] = [];
   if (b.nombre !== undefined) { if (!nombre) throw new HttpError(400, 'El nombre no puede quedar vacío.'); sets.push('nombre = ?'); vals.push(nombre); }
   if (b.direccion !== undefined) { sets.push('direccion = ?', 'clave_dir = ?'); vals.push(direccion, direccion ? claveCalle(direccion) || null : null); }
   for (const k of Object.keys(campos) as Array<keyof typeof campos>) if (b[k] !== undefined) { sets.push(`${k} = ?`); vals.push(campos[k]); }
-  if (b.company_id !== undefined) { sets.push('company_id = ?'); vals.push(Number(b.company_id) || null); }
+  if (b.company_id !== undefined && organiza(ctx.user)) { sets.push('company_id = ?'); vals.push(Number(b.company_id) || null); }
   if (b.activo !== undefined) { if (!organiza(ctx.user)) throw new HttpError(403, 'Sacar un destino de la libreta es de Logística.'); sets.push('activo = ?'); vals.push(b.activo ? 1 : 0); }
   if (!sets.length) return { id };
   await db.prepare(`UPDATE lugares SET ${sets.join(', ')}, editado = 1, updated_at = ? WHERE id = ?`).bind(...vals, now(), id).run();
@@ -290,12 +309,13 @@ export async function listarDestinos(env: Env, user: User, q: string) {
   const desde = sumarDias(hoyBsAs(), -182);
   const { results } = await db.prepare(`SELECT l.*, (SELECT COUNT(*) FROM encargos e WHERE e.lugar_id = l.id AND e.fecha >= ?2 AND e.estado <> 'cancelado') AS veces
     FROM lugares l WHERE l.activo = 1 ${t ? "AND (lower(l.nombre) LIKE ?1 OR lower(COALESCE(l.direccion, '')) LIKE ?1 OR lower(COALESCE(l.localidad, '')) LIKE ?1)" : ''}
-    ORDER BY veces DESC, l.nombre LIMIT 100`).bind(`%${t}%`, desde).all<Lugar & { company_id: number | null; origen: string; editado: number; veces: number; localidad: string | null; zona: string | null; telefono: string | null }>();
+    ORDER BY veces DESC, l.nombre LIMIT 100`).bind(`%${t}%`, desde).all<Lugar & { company_id: number | null; origen: string; editado: number; veces: number; localidad: string | null; zona: string | null; telefono: string | null; created_by: number | null }>();
   const total = await db.prepare('SELECT COUNT(*) AS n FROM lugares WHERE activo = 1').first<{ n: number }>();
   return {
     total: total?.n ?? 0, copia: { at: cfg.at, filas: cfg.filas, error: cfg.error ?? null },
     destinos: results.map((l) => ({ id: l.id, nombre: l.nombre, direccion: l.direccion, localidad: l.localidad, zona: l.zona, horario: l.horario, contacto: l.contacto,
-      telefono: l.telefono, observaciones: l.observaciones, company_id: l.company_id, origen: l.origen, editado: !!l.editado, veces: l.veces })),
+      telefono: l.telefono, observaciones: l.observaciones, company_id: l.company_id, origen: l.origen, editado: !!l.editado, veces: l.veces,
+      puede_editar: organiza(user) || (l.origen === 'hub' && l.created_by === user.id) })),
   };
 }
 
@@ -528,7 +548,7 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
   for (let d = desde; d <= hasta; d = sumarDias(d, 1)) if (habiles.includes(d) || viajes.some((v) => v.fecha === d)) fechas.push(d);
   const out = fechas.map((fecha) => {
     const paradas: Array<{ clave: string; nombre: string; localidad: string | null; direccion: string | null; tipos: Record<string, number>; detalle: string[];
-      encargos: EncargoDia[]; anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null }> = [];
+      encargos: EncargoDia[]; anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; propio?: { nombre: string; direccion: string | null } }> = [];
     const delDia = viajes.filter((v) => v.fecha === fecha);
     // Primero lo de ClickUp (cada parada con su clave) y después los encargos, en la parada del mismo lugar o en una propia.
     for (const v of [...delDia.filter((x) => x.tipo !== 'encargo'), ...delDia.filter((x) => x.tipo === 'encargo')]) {
@@ -540,23 +560,28 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
       }
       if (!p) {
         const l = v.lugar_id ? lugares.get(v.lugar_id) : null;
+        // Se ve el nombre si la arma algo propio o un proveedor o impresor (o, fuera del perfil Ventas, siempre).
         p = { clave: v.clave!, nombre: v.nombre, localidad: l?.localidad ?? localidadDe(v.direccion), direccion: v.direccion ?? null, tipos: {}, detalle: [], encargos: [],
-          anonima: true, chofer: null, company_id: v.company_id ?? null, lugar_id: v.lugar_id ?? null };
+          anonima: ventas && !v.propio && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null, lugar_id: v.lugar_id ?? null };
         paradas.push(p);
       }
       p.tipos[v.tipo] = (p.tipos[v.tipo] ?? 0) + 1;
       if (!p.detalle.includes(v.detalle)) p.detalle.push(v.detalle);
-      // Se ve el nombre si es un proveedor o impresor, algo propio o, fuera del perfil Ventas, siempre.
-      if (!ventas || v.tipo === 'retiro' || v.tipo === 'egreso' || v.propio) p.anonima = false;
+      // Un retiro o egreso: es un proveedor o impresor, se ve. Algo propio que cae en la parada de otro cliente no la
+      // destapa: se ve con el nombre que le puso ella.
+      if (v.tipo === 'retiro' || v.tipo === 'egreso') p.anonima = false;
+      else if (v.propio && p.anonima && !p.propio) p.propio = { nombre: v.nombre, direccion: v.direccion ?? null };
       if (v.tipo === 'encargo') { const e = encs.find((x) => x.id === v.encargo_id)!; if (!ventas || e.user_id === user.id) p.encargos.push(e); }
       if (!p.localidad && v.direccion) p.localidad = localidadDe(v.direccion);
     }
     const delDiaRutas = rutas.results.filter((r) => r.fecha === fecha).map((r) => ({ chofer: r.chofer, orden: (JSON.parse(r.orden || '[]') as string[]).map(String) }));
     for (const [i, p] of paradas.entries()) {
       if (delDiaRutas.length) p.chofer = (delDiaRutas.find((r) => r.orden.some((c) => esDeLaParada(c, p.clave))) ?? delDiaRutas[0]).chofer;
+      const propio = p.propio;
+      delete p.propio;
       if (p.anonima) {
         p.clave = `otro-${i}`;
-        p.nombre = 'Un cliente'; p.direccion = null; p.company_id = null; p.lugar_id = null; p.detalle = [...new Set(p.detalle.map((d) => (d.startsWith('Entrega') ? 'Entrega' : d.startsWith('Encargo') ? 'Encargo' : d)))]; }
+        p.nombre = propio?.nombre ?? 'Un cliente'; p.direccion = propio?.direccion ?? null; p.company_id = null; p.lugar_id = null; p.detalle = [...new Set(p.detalle.map((d) => (d.startsWith('Entrega') ? 'Entrega' : d.startsWith('Encargo') ? 'Encargo' : d)))]; }
     }
     paradas.sort((a, b) => Number(b.encargos.length > 0) - Number(a.encargos.length > 0) || Number(a.anonima) - Number(b.anonima) || a.nombre.localeCompare(b.nombre));
     return { fecha, feriado: feriados.results.find((f) => f.fecha === fecha)?.nombre ?? null, armado: delDiaRutas.length > 0, paradas };
@@ -764,6 +789,8 @@ export function fechaPlanilla(s: string, mes: number, anio: number) {
   if (!n || n.length < 2) return null;
   let d = Number(n[0]), m = Number(n[1]), y = n[2] ? Number(n[2]) : anio;
   if (!n[2] && n[1].length > 2) { m = Number(n[1].slice(0, n[1].length - 4)); y = Number(n[1].slice(-4)); }
+  // Sin año, el más cercano a la pestaña: «30/12» en la de enero es de diciembre del año anterior.
+  else if (!n[2]) y = [anio, anio - 1, anio + 1].sort((a, b) => Math.abs(a * 12 + m - (anio * 12 + mes)) - Math.abs(b * 12 + m - (anio * 12 + mes)))[0];
   if (y < 100) y += 2000;
   const ok = (dd: number, mm: number, yy: number) => { const t = new Date(Date.UTC(yy, mm - 1, dd)); return t.getUTCMonth() === mm - 1 && t.getUTCDate() === dd; };
   const lejos = Math.abs((y * 12 + m) - (anio * 12 + mes)) > 1;

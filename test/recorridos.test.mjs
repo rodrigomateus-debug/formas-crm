@@ -141,6 +141,9 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   const e1 = r.data;
   assert.equal(e1.destino, `IMPREFAS ${RUN}`);
   assert.deepEqual(e1.llevar, [{ cant: 3, que: 'Muestras de termos', pdv: '31406' }]);
+  r = await api('POST', '/recorridos/encargos', { fecha: MANANA, lugar_id: imprefas.lugar_id, llevar: [{ cant: '2,5', que: 'Metros de lona' }, { cant: '1.500', que: 'Bolígrafos' }] });
+  assert.deepEqual(r.data.llevar.map((i) => i.cant), [2.5, 1500], 'las cantidades como se escriben acá');
+  assert.equal((await api('PATCH', `/recorridos/encargos/${r.data.id}`, { estado: 'cancelado' })).status, 200);
   assert.equal(e1.desde, 'matienzo');
   assert.equal(e1.estado, 'pendiente');
   // A una dirección suelta, guardándola en Destinos.
@@ -191,6 +194,21 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   assert.equal((await api('PATCH', `/recorridos/encargos/${e3.id}`, { notas: 'x' }, vera.email)).status, 403);
   assert.equal((await api('PATCH', `/recorridos/encargos/${e1.id}`, { estado: 'hecho' }, vera.email)).status, 403, 'hecho lo marca Logística o el chofer');
   assert.equal((await api('PATCH', `/recorridos/encargos/${e2.id}`, { estado: 'cancelado', motivo: 'Lo llevo yo' }, vera.email)).data.estado, 'cancelado');
+  // Un error de validación no deja nada cambiado a medias.
+  assert.equal((await api('PATCH', `/recorridos/encargos/${e1.id}`, { fecha: PASADO, llevar: [], retirar: [], notas: '' }, vera.email)).status, 400);
+  assert.equal((await api('GET', `/recorridos/encargos/${e1.id}`, undefined, vera.email)).data.fecha, MANANA);
+  // Una empresa que no ve no la puede usar de destino (ni ver su dirección).
+  assert.equal((await api('POST', '/recorridos/encargos', { fecha: PASADO, company_id: cliente.id, llevar: [{ que: 'x' }] }, vera.email)).status, 400);
+  // Los destinos de la libreta los corrige Logística; los que cargó ella, ella.
+  assert.equal((await api('PATCH', `/recorridos/libreta/${imprefas.lugar_id}`, { horario: '1 a 2' }, vera.email)).status, 403);
+  assert.equal((await api('PATCH', `/recorridos/libreta/${e2.lugar_id}`, { horario: '9 a 12' }, vera.email)).status, 200);
+  // Lo de ella que cae en la parada de un cliente ajeno no lo destapa.
+  const deVera = (await api('POST', '/recorridos/encargos', { fecha: PASADO, destino: { nombre: `Oficina de Vera ${RUN}`, direccion: `Av. Libertador ${N}, Vicente López` }, llevar: [{ que: 'Catálogo' }] }, vera.email)).data;
+  r = await api('GET', `/recorridos/agenda?desde=${PASADO}&dias=1`, undefined, vera.email);
+  const junta = r.data.dias[0].paradas.find((p) => p.encargos.some((e) => e.id === deVera.id));
+  assert.equal(junta.tipos.encargo, 2, 'va en la misma parada que el del cliente ajeno');
+  assert.equal(junta.nombre, `Oficina de Vera ${RUN}`, 'con el nombre que le puso ella');
+  assert.ok(!JSON.stringify(r.data).includes(`Cliente Secreto ${RUN}`), 'sin el nombre del cliente ajeno');
 
   // ---------- El cronograma: van en la parada de ese lugar ----------
   asUser = null;
@@ -204,7 +222,8 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   const semana = (await api('GET', `/cronograma?desde=${MANANA}&hasta=${MANANA}`)).data;
   assert.ok(semana.encargos.some((e) => e.id === e1.id && e.parada === parada.clave));
   assert.ok(semana.dias[MANANA].total >= 2);
-  // El chofer desde la tarjeta: pasa toda la parada.
+  // El chofer desde la tarjeta: pasa toda la parada. (Los recorridos de ese día, de cero: la prueba se repite sobre la misma base.)
+  await api('PUT', '/cronograma/ruta', { fecha: MANANA, rutas: [{ chofer: null, base: 'roca', salida: 510, orden: [] }] });
   r = await api('PUT', '/cronograma/chofer', { fecha: MANANA, ids: [`enc:${e1.id}`], chofer: `Gaby ${RUN}` });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.ok(r.data.movimientos >= 2, 'va toda la parada');
@@ -238,8 +257,31 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   assert.equal(enc.hecho_chofer, `Gaby ${RUN}`);
   notifs = (await api('GET', '/notificaciones', undefined, vera.email)).data.items;
   assert.ok(notifs.some((n) => n.encargo_id === e1.id && /hecho/.test(n.texto)), 'a quien lo pidió le llega el aviso');
+  assert.equal((await api('PATCH', `/recorridos/encargos/${e1.id}`, { estado: 'pendiente' }, vera.email)).status, 400, 'hecho: quien lo pidió ya no lo reabre');
+  assert.equal((await api('PATCH', `/recorridos/encargos/${e1.id}`, { estado: 'cancelado' }, vera.email)).status, 400, 'ni lo cancela');
   assert.equal(await marcar({ resultado: null }), 200, 'deshacer');
   assert.equal((await api('GET', `/recorridos/encargos/${e1.id}`)).data.estado, 'pendiente', 'vuelve a como estaba antes del chofer');
+  // Si Logística lo corrigió después, deshacer en la app no lo pisa.
+  assert.equal(await marcar({ resultado: 'hecho' }), 200);
+  assert.equal((await api('PATCH', `/recorridos/encargos/${e1.id}`, { estado: 'no_se_pudo', motivo: 'Lo devolvieron' })).status, 200);
+  assert.equal(await marcar({ resultado: null }), 200);
+  assert.equal((await api('GET', `/recorridos/encargos/${e1.id}`)).data.estado, 'no_se_pudo');
+  assert.equal((await api('PATCH', `/recorridos/encargos/${e1.id}`, { estado: 'pendiente' })).status, 200);
+
+  // Dos sucursales de la misma empresa el mismo día: dos paradas, cada una con su dirección.
+  const suc1 = (await api('POST', '/recorridos/libreta', { nombre: `Nestle ${RUN} (Vicente López)`, direccion: `Av. Libertador ${N + 2}`, localidad: 'Vicente López', company_id: cliente.id })).data.id;
+  const suc2 = (await api('POST', '/recorridos/libreta', { nombre: `Nestle ${RUN} (Florida)`, direccion: `Av. San Martín ${N + 3}`, localidad: 'Florida', company_id: cliente.id })).data.id;
+  const s1 = (await api('POST', '/recorridos/encargos', { fecha: PASADO, lugar_id: suc1, llevar: [{ que: 'Muestras' }] })).data;
+  const s2b = (await api('POST', '/recorridos/encargos', { fecha: PASADO, lugar_id: suc2, llevar: [{ que: 'Muestras' }] })).data;
+  r = (await api('GET', `/cronograma/ruta?fecha=${PASADO}`)).data;
+  const ps1 = r.paradas.find((p) => p.encargos.some((e) => e.id === s1.id)), ps2 = r.paradas.find((p) => p.encargos.some((e) => e.id === s2b.id));
+  assert.notEqual(ps1.clave, ps2.clave, 'cada sucursal es su parada');
+  assert.match(ps2.direccion, /San Martín/);
+  // Lo que Logística sacó de la libreta no vuelve con la copia de la planilla.
+  assert.equal((await api('PATCH', `/recorridos/libreta/${mad.lugar_id}`, { activo: false })).status, 200);
+  await api('POST', '/cronograma/lugares/actualizar');
+  assert.ok(!(await buscar(`dimilito ${RUN}`)).some((d) => d.lugar_id === mad.lugar_id), 'sigue afuera');
+  assert.equal((await api('PATCH', `/recorridos/libreta/${mad.lugar_id}`, { activo: true })).status, 200);
 
   // ---------- El remito de traslado ----------
   const n1 = (await api('POST', `/recorridos/encargos/${e1.id}/remito`, {}, vera.email)).data.remito;

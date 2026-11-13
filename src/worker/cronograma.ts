@@ -241,13 +241,19 @@ async function ponerChoferes(db: D1Database, movs: Movimiento[], encs: EncargoDi
     const rutas = porDia.get(m.fecha), base = claveParada(m);
     m.chofer = rutas?.length ? (rutas.find((r) => r.orden.some((c) => esDeLaParada(c, base))) ?? rutas[0]).chofer : null;
   }
-  // Un encargo va con el chofer de la parada en la que cae: la del mismo lugar si ese día ya se va ahí (como en la ruta
-  // del día, con lo que se sabe sin buscar afuera), o la suya.
+  // Un encargo va con el chofer de la parada en la que cae: la del mismo lugar si ese día ya se va ahí, o la suya. Como
+  // en la ruta del día: la entrega con la empresa del pedido y su dirección, el retiro o egreso con la dirección de la
+  // empresa (sin lo que se busca afuera, Finnegans o el mapa).
+  if (!encs.length) return;
+  const viajes = movs.filter((m) => m.tipo !== 'ingreso' && !m.retira_en);
+  const { empresaDePedido, dirEmpresa } = await empresasDe(db, [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],
+    [...new Set(viajes.map((m) => m.company_id).filter((x): x is number => !!x))]);
   const sitios = new Map<string, Sitio[]>();
-  for (const m of movs) {
-    if (m.tipo === 'ingreso' || m.retira_en) continue;
-    const dir = m.tipo === 'entrega' && m.record_id ? (dirs.get(m.record_id) ?? []).find((d) => !d.retira)?.direccion ?? null : null;
-    sitios.set(m.fecha, [...(sitios.get(m.fecha) ?? []), { clave: claveParada(m), nombre: (m.tipo === 'entrega' ? m.cliente : m.lugar) ?? '', company_id: m.tipo === 'entrega' ? null : m.company_id, direccion: dir }]);
+  for (const m of viajes) {
+    const company = m.tipo === 'entrega' ? empresaDePedido.get(m.record_id ?? -1) ?? null : m.company_id;
+    const dir = m.tipo === 'entrega' ? (m.record_id ? (dirs.get(m.record_id) ?? []).find((d) => !d.retira)?.direccion ?? null : null) ?? dirEmpresa.get(company ?? -1) ?? null
+      : dirEmpresa.get(company ?? -1) ?? null;
+    sitios.set(m.fecha, [...(sitios.get(m.fecha) ?? []), { clave: claveParada(m), nombre: (m.tipo === 'entrega' ? m.cliente : m.lugar) ?? '', company_id: company, direccion: dir }]);
   }
   for (const e of encs) {
     const del = sitios.get(e.fecha) ?? [];
@@ -257,6 +263,25 @@ async function ponerChoferes(db: D1Database, movs: Movimiento[], encs: EncargoDi
     e.parada = base;
     e.chofer = rutas?.length ? (rutas.find((r) => r.orden.some((c) => esDeLaParada(c, base))) ?? rutas[0]).chofer : null;
   }
+}
+
+// La empresa de cada pedido y la dirección de cada empresa (la de su ficha), en dos consultas.
+async function empresasDe(db: D1Database, pedidos: number[], empresas: number[]) {
+  const empresaDePedido = new Map<number, number>();
+  if (pedidos.length) {
+    const { results } = await db.prepare(`SELECT r.id, (SELECT c.id FROM associations s JOIN records c ON c.id = CASE WHEN s.from_id = r.id THEN s.to_id ELSE s.from_id END
+        AND c.object_type = 'company' AND c.archived = 0 WHERE s.from_id = r.id OR s.to_id = r.id ORDER BY s.is_primary DESC LIMIT 1) AS company_id
+      FROM records r WHERE r.id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(pedidos)).all<{ id: number; company_id: number | null }>();
+    for (const r of results) if (r.company_id) empresaDePedido.set(r.id, r.company_id);
+  }
+  const ids = [...new Set([...empresas, ...empresaDePedido.values()])];
+  const dirEmpresa = new Map<number, string>();
+  if (ids.length) {
+    const { results } = await db.prepare(`SELECT id, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city FROM records WHERE id IN (SELECT value FROM json_each(?))`)
+      .bind(JSON.stringify(ids)).all<{ id: number; address: string | null; city: string | null }>();
+    for (const e of results) if (e.address) dirEmpresa.set(e.id, [e.address, e.city].filter(Boolean).join(', '));
+  }
+  return { empresaDePedido, dirEmpresa };
 }
 
 // Los del desplegable «Chofer»: los choferes de la lista y los que tienen link de la app (Entregas → Choferes), sin
@@ -1020,27 +1045,46 @@ const nombreBase = (id: string | null, bases: Base[]) => (id ? bases.find((b) =>
 
 // Un lugar al que se va, para saber si dos cosas van al mismo lado: la parada de un movimiento, un encargo, un destino.
 export interface Sitio { clave?: string; nombre: string; company_id?: number | null; lugar_id?: number | null; direccion?: string | null }
+// La localidad de una dirección («Av. Libertador 1855, Vicente López» → «vicente lopez»), sin la provincia ni el país.
+function localidad(d: string | null | undefined) {
+  const p = String(d ?? '').split(',').slice(1).map((x) => norm(x).replace(/\b(provincia de|pcia\.? de|argentina|buenos aires|bs\.? as\.?)\b/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const l = p[0] ?? '';
+  return /^(caba|c a b a|capital federal|ciudad autonoma.*)$/.test(l) ? 'caba' : l;
+}
 // Son el mismo lugar si son el mismo destino de la libreta; si las dos tienen calle y altura, manda la dirección (dos
-// lugares de Nestlé son distintos, dos empresas en el mismo edificio son la misma parada); si no, la misma empresa o el
-// mismo nombre («IMPREFAS» de la libreta es el impresor IMPREFAS de ClickUp).
+// lugares de Nestlé son distintos, dos empresas en el mismo edificio son la misma parada), y la misma calle y altura en
+// dos localidades distintas son dos lugares; si no, la misma empresa o el mismo nombre («IMPREFAS» de la libreta es el
+// impresor IMPREFAS de ClickUp).
 export function mismoSitio(a: Sitio, b: Sitio) {
   if (a.lugar_id && a.lugar_id === b.lugar_id) return true;
   const ca = a.direccion ? claveCalle(a.direccion) : '', cb = b.direccion ? claveCalle(b.direccion) : '';
-  if (ca && cb) return ca === cb;
+  if (ca && cb) {
+    if (ca !== cb) return false;
+    const la = localidad(a.direccion), lb = localidad(b.direccion);
+    return !la || !lb || la === lb || la.includes(lb) || lb.includes(la);
+  }
   if (a.company_id && a.company_id === b.company_id) return true;
   const kb = new Set(clavesDeNombre(b.nombre));
   return clavesDeNombre(a.nombre).some((k) => kb.has(k));
 }
-// La parada propia de un encargo: la de su empresa (la misma que la de un retiro o un egreso en ese proveedor o impresor),
-// la de su lugar de la libreta o la de su dirección.
-export const claveEncargo = (e: Pick<EncargoDia, 'company_id' | 'lugar_id' | 'direccion' | 'destino'>) =>
-  e.company_id ? `e:${e.company_id}` : e.lugar_id ? `l:${e.lugar_id}` : `d:${(e.direccion ? claveCalle(e.direccion) : '') || claveProveedor(e.destino) || 'sin-destino'}`;
-// En qué parada cae un encargo: la del mismo lugar, si ese día ya se va ahí; si no, la suya.
+// La parada propia de un encargo: la de su lugar de la libreta, la de su empresa (la misma que la de un retiro o un egreso
+// en ese proveedor o impresor) o la de su dirección.
+export const claveEncargo = (e: Pick<EncargoDia, 'company_id' | 'lugar_id' | 'direccion' | 'destino'>) => {
+  if (e.lugar_id) return `l:${e.lugar_id}`;
+  if (e.company_id) return `e:${e.company_id}`;
+  const calle = e.direccion ? claveCalle(e.direccion) : '';
+  return calle ? `d:${calle}${localidad(e.direccion) ? `|${localidad(e.direccion)}` : ''}` : `d:${claveProveedor(e.destino) || 'sin-destino'}`;
+};
+// En qué parada cae un encargo: la del mismo lugar, si ese día ya se va ahí; si no, la suya. Una parada con la misma
+// clave pero en otra dirección (otra sucursal de la misma empresa) no es la misma: el encargo va aparte.
 export function anfitrion(e: EncargoDia, sitios: Sitio[]) {
   const propia = claveEncargo(e);
-  if (sitios.some((s) => s.clave === propia)) return propia;
   const yo: Sitio = { nombre: e.destino, company_id: e.company_id, lugar_id: e.lugar_id, direccion: e.direccion };
-  return sitios.find((s) => s.clave && mismoSitio(yo, s))?.clave ?? propia;
+  const misma = sitios.find((s) => s.clave === propia);
+  if (misma && mismoSitio(yo, misma)) return propia;
+  const otro = sitios.find((s) => s.clave && mismoSitio(yo, s));
+  if (otro) return otro.clave!;
+  return misma ? `x:${e.id}` : propia;
 }
 
 // Un aviso de la campanita sobre un encargo, a quien lo pidió (o a quienes se diga). No sale por mail.
@@ -1069,7 +1113,8 @@ async function encargosDelChofer(db: D1Database, chofer: string, encs: EncargoDi
       }
       e.estado = nuevo; e.motivo = porQue;
       out.push({ id: `enc:${e.id}`, tipo: 'encargo', antes });
-    } else if (prev.has(e.id) && e.estado !== antes) {
+    } else if (prev.has(e.id) && e.estado !== antes && e.hecho_chofer === chofer) {
+      // Si Logística lo cambió después (hecho_chofer queda vacío), queda como lo dejó Logística.
       stmts.push(db.prepare('UPDATE encargos SET estado = ?, motivo = NULL, hecho_chofer = NULL, hecho_at = NULL, updated_at = ? WHERE id = ?').bind(antes, ts, e.id));
       e.estado = antes; e.motivo = null;
     }
@@ -1220,10 +1265,10 @@ export function leerCsv(texto: string): string[][] {
   return filas;
 }
 
-interface LugaresConfig { url: string; at: number; filas: number; error?: string | null }
+interface LugaresConfig { url: string; at: number; filas: number; error?: string | null; intento?: number }
 export async function lugaresConfig(db: D1Database): Promise<LugaresConfig> {
   const r = await db.prepare("SELECT value FROM settings WHERE key = 'lugares'").first<{ value: string }>();
-  try { const c = r ? JSON.parse(r.value) : {}; return { url: String(c.url ?? ''), at: Number(c.at) || 0, filas: Number(c.filas) || 0, error: c.error ?? null }; } catch { return { url: '', at: 0, filas: 0 }; }
+  try { const c = r ? JSON.parse(r.value) : {}; return { url: String(c.url ?? ''), at: Number(c.at) || 0, filas: Number(c.filas) || 0, error: c.error ?? null, intento: Number(c.intento) || 0 }; } catch { return { url: '', at: 0, filas: 0 }; }
 }
 // La planilla tiene que ser una hoja de Google publicada como CSV.
 const urlValida = (env: Env, url: string) => /^https:\/\/docs\.google\.com\/spreadsheets\/.+output=csv/.test(url) || (!!env.LUGARES_CSV_URL && url === env.LUGARES_CSV_URL);
@@ -1239,7 +1284,8 @@ export async function actualizarLugares(env: Env, puede: boolean, forzar = false
   const db = env.DB;
   const cfg = await lugaresConfig(db);
   const url = env.LUGARES_CSV_URL || cfg.url;
-  const nunca = !cfg.filas && Date.now() - cfg.at > 3_600_000;
+  // Nunca se copió (por ejemplo, recién migrada): la copia la dispara cualquiera, pero si falló se reintenta en una hora.
+  const nunca = !cfg.filas && Date.now() - (cfg.intento ?? 0) > 3_600_000;
   if (!url || (!forzar && !nunca && (!puede || Date.now() - cfg.at < 86_400_000))) return cfg;
   const guardar = (c: LugaresConfig) => db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('lugares', ?)").bind(JSON.stringify(c)).run().then(() => c);
   try {
@@ -1270,7 +1316,7 @@ export async function actualizarLugares(env: Env, puede: boolean, forzar = false
           json_extract(value, '$.telefono'), json_extract(value, '$.contacto'), json_extract(value, '$.observaciones'), json_extract(value, '$.coordinacion'), json_extract(value, '$.clave_dir'),
           json_extract(value, '$.clave'), 'planilla', 1, ?2, ?3
         FROM json_each(?1) WHERE true
-        ON CONFLICT(clave_planilla) DO UPDATE SET visto = excluded.visto, activo = 1,
+        ON CONFLICT(clave_planilla) DO UPDATE SET visto = excluded.visto, activo = CASE WHEN lugares.editado = 1 THEN lugares.activo ELSE 1 END,
           nombre = CASE WHEN lugares.editado = 1 THEN lugares.nombre ELSE excluded.nombre END,
           direccion = CASE WHEN lugares.editado = 1 THEN lugares.direccion ELSE excluded.direccion END,
           localidad = CASE WHEN lugares.editado = 1 THEN lugares.localidad ELSE excluded.localidad END,
@@ -1292,7 +1338,7 @@ export async function actualizarLugares(env: Env, puede: boolean, forzar = false
   } catch (e) {
     console.error('cronograma: libreta', (e as Error).message);
     // Se anota el intento: no se reintenta en cada apertura de la ruta, sino en una hora.
-    return await guardar({ ...cfg, at: forzar ? cfg.at : Date.now() - 82_800_000, error: (e as Error).message.slice(0, 200) });
+    return await guardar({ ...cfg, at: forzar ? cfg.at : Date.now() - 82_800_000, intento: Date.now(), error: (e as Error).message.slice(0, 200) });
   }
 }
 // Los nombres con los que se reconoce cada lugar activo (lugares_claves), de nuevo. Con `ids`, solo esos (un lugar que se

@@ -11,7 +11,7 @@ app no cambia nada para nadie.
 |---|---|
 | ClickUp | La foto que suben a la tarea del PDV (o a un artículo) con el número del PDV como nombre, como hasta ahora (`clickup.ts`). |
 | Ficha del pedido | Botón «+ Remito» en la tarjeta «Entrega». Se lee en el momento. |
-| App del chofer | `https://<crm>/hooks/chofer/`, con el link personal de cada chofer (ver abajo). Se lee en el momento y el chofer ve el resultado. |
+| App del chofer | `https://<crm>/hooks/chofer/`, con el link personal de cada chofer (ver abajo) o, si es de Formas, con su usuario del Hub («Entrar con mi usuario de Formas», ver [CRONOGRAMA.md](CRONOGRAMA.md#la-app-del-chofer)). Se lee en el momento y el chofer ve el resultado. |
 
 ## Cómo se lee y a qué pedido va (`src/worker/remitos.ts`)
 

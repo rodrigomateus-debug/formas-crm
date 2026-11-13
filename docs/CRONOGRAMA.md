@@ -144,6 +144,17 @@ coordinación). La planilla sigue siendo donde se cargan y corrigen los lugares.
 En la misma app de los remitos (`/hooks/chofer/`, ver [REMITOS.md](REMITOS.md)), arriba: **«Tu recorrido de hoy»**, el
 que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay que retirar, dejar o entregar y «Cómo
 llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
+
+**Cómo entra** (pedido de Rodrigo del 13/11/2026):
+
+- **Chofer de afuera**: con su link personal (Entregas → Choferes), como siempre.
+- **Chofer de Formas**: sin link, con su usuario del Hub. Abre la app y toca **«Entrar con mi usuario de Formas»**
+  (`/chofer/entrar`): si ya tiene la sesión del Hub en el celular entra directo; si no, pasa por el login de siempre y
+  vuelve a la app. Ve el recorrido de hoy que tiene su nombre: el del chofer de la lista atado a su usuario («¿Es de
+  Formas?» al agregarlo desde el desplegable «Chofer») o, si no está en la lista, su nombre en el Hub. Tiene que estar
+  activo en Configuración → Usuarios. Sus remitos y lo que marca quedan a su nombre igual que con un link (en Entregas →
+  Choferes aparece como «entra con su usuario del Hub» desde que manda su primer remito); si Logística ya le había hecho
+  un link con su nombre, se sigue juntando todo ahí.
 En cada parada marca cómo le fue:
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo
@@ -164,6 +175,8 @@ vuelve, como siempre.
 | La libreta de direcciones: tablas `lugares` y `lugares_claves`, y de qué planilla se copia (settings `lugares`) | `migrations/0047_lugares.sql` |
 | Choferes y expresos (`transportistas`), entregas por expreso con su guía (`entrega_expresos`) y el otro lugar de salida de un recorrido | `migrations/0054_transportistas.sql` |
 | Recorridos que se ordenan solos o que alguien ordenó a mano (`cronograma_rutas.a_mano`) | `migrations/0057_recorridos_solos.sql` |
+| Choferes de Formas: el chofer de la lista atado a su usuario (`transportistas.user_id`) y su credencial sin link (`api_tokens.chofer_user_id`) | `migrations/0059_choferes_de_formas.sql` |
+| La app del chofer con el usuario del Hub: `usuarioParaChofer` (sesión del login o de Access) y `choferDeUsuario`; la entrada `/chofer/entrar` | `src/worker/auth.ts`, `src/worker/cronograma.ts`, `src/worker/login.ts` |
 | El chofer desde la tarjeta: `PUT /api/cronograma/chofer` (`{ fecha, ids, chofer }`, con los `id` de los movimientos de la tarjeta) | `asignarChofer` en `src/worker/cronograma.ts` |
 | Tablas `cronograma_hechos`, `cronograma_notas`, `feriados`, `geocodigos`, `cronograma_rutas`, `cronograma_visitas`, `direcciones_finnegans`, `direcciones_revisadas`; propiedades `direccion_entrega` (pedido) y `horario_recepcion` (empresa) | `migrations/0045_cronograma.sql` |
 | Movimientos, mover, marcar, notas, feriados, direcciones, ruta, chofer | `src/worker/cronograma.ts` |

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
-import { COOKIE_SESION, DIAS_SESION, firmar, leerCookie, leerFirmado, nuevaSesion, userByEmail } from './auth';
+import { authenticate, COOKIE_SESION, DIAS_SESION, firmar, leerCookie, leerFirmado, nuevaSesion, userByEmail } from './auth';
 
 // Login propio del CRM (pedido de Rodrigo del 12/11/2026): una pantalla con el Design System de Formas, la imagen
 // (productos con el logo de Formas) a un lado y «Ingresar con Google» al otro, en lugar de la pantalla genérica de Cloudflare Access. Se entra
@@ -94,6 +94,17 @@ login.get('/auth/google/callback', async (c) => {
   c.header('set-cookie', borrarIda);
   c.header('set-cookie', cookie(c.req.raw, COOKIE_SESION, await nuevaSesion(c.env, email), DIAS_SESION * 86400), { append: true });
   return c.redirect(volverSeguro(ida.volver));
+});
+
+// La app del chofer para los choferes de Formas (pedido de Rodrigo del 13/11/2026): «Entrar con mi usuario de Formas» pasa
+// por acá. Con la sesión del Hub (o la de Cloudflare Access, que la pide al llegar acá mientras siga adelante), directo a
+// la app, sin link; sin sesión, primero el login y después vuelve acá.
+login.get('/chofer/entrar', async (c) => {
+  try { await authenticate(c.env, c.req.raw); } catch (e) {
+    if (e instanceof HttpError && e.status === 401) return c.redirect('/login?volver=/chofer/entrar');
+    return c.html(pagina({ volver: '/chofer/entrar', aviso: (e as Error).message, esError: true, habilitado: configurado(c.env) }), 403, { 'cache-control': 'no-store' });
+  }
+  return c.redirect('/hooks/chofer/');
 });
 
 login.get('/auth/salir', (c) => {

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { http, qs, useToast, Icon } from '../lib';
+import { http, qs, useMeta, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, Modal } from '../components';
@@ -512,9 +512,12 @@ export function opcionesChofer({ choferes, expresos, actual, vacio, agregar }: {
 }
 
 // Agregar un chofer o un expreso a la lista, desde el desplegable «Chofer» (de la Ruta del día o de una tarjeta). Del
-// expreso se pide además la dirección, que es a donde se le lleva la mercadería (se puede buscar en la libreta).
+// expreso se pide además la dirección, que es a donde se le lleva la mercadería (se puede buscar en la libreta). Un chofer
+// de Formas va con su usuario del Hub: entra a la app del chofer con ese usuario, sin link, y ve lo que tiene asignado.
 export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloExpreso?: boolean; onListo: (nombre: string) => void; onCancelar: () => void }) {
   const toast = useToast();
+  const { meta } = useMeta();
+  const [usuario, setUsuario] = useState('');   // el usuario del Hub, si es un chofer de Formas
   const [nombre, setNombre] = useState('');
   const [tipo, setTipo] = useState<'chofer' | 'expreso'>(soloExpreso ? 'expreso' : 'chofer');
   const [direccion, setDireccion] = useState('');
@@ -524,7 +527,11 @@ export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloE
     e.preventDefault(); e.stopPropagation();
     if (nombre.trim().length < 2) return;
     setOcupado(true);
-    try { const r = await http<{ nombre: string }>('POST', '/cronograma/transportistas', { nombre, tipo, direccion }); toast(`${r.nombre} quedó en la lista de ${tipo === 'expreso' ? 'expresos' : 'choferes'}.`); onListo(r.nombre); }
+    try {
+      const r = await http<{ nombre: string }>('POST', '/cronograma/transportistas', { nombre, tipo, direccion, user_id: tipo === 'chofer' && usuario ? Number(usuario) : null });
+      toast(`${r.nombre} quedó en la lista de ${tipo === 'expreso' ? 'expresos' : 'choferes'}.${tipo === 'chofer' && usuario ? ' Entra a la app del chofer con su usuario, sin link.' : ''}`);
+      onListo(r.nombre);
+    }
     catch (err) { toast((err as Error).message, true); setOcupado(false); }
   }
   return (
@@ -535,10 +542,27 @@ export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloE
           <button type="button" className={`chip${tipo === 'expreso' ? ' on' : ''}`} aria-pressed={tipo === 'expreso'} onClick={() => setTipo('expreso')}>Expreso</button>
         </div>
       )}
+      {tipo === 'chofer' && meta && (
+        <label>¿Es de Formas?
+          <Select className="input sm" value={usuario} aria-label="Usuario del Hub" onChange={(e) => {
+            const u = meta.users.find((x) => String(x.id) === e.target.value);
+            const antes = meta.users.find((x) => String(x.id) === usuario);
+            if (u && (!nombre.trim() || nombre === antes?.name)) setNombre(u.name);
+            setUsuario(e.target.value);
+          }}>
+            <option value="">No, es de afuera: entra con un link</option>
+            <optgroup label="Sí, entra con su usuario del Hub">
+              {meta.users.filter((u) => u.active && !u.deleted_at).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </optgroup>
+          </Select>
+        </label>
+      )}
       <label>{tipo === 'expreso' ? 'Nombre del expreso' : 'Nombre del chofer'}<input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} maxLength={80} /></label>
       {tipo === 'expreso' && <label>Dirección del expreso (a dónde se le lleva)<input className="input sm" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" maxLength={300} /></label>}
       {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => setDireccion(l.direccion)}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
-      {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, además hay que crearle el link en Entregas → Choferes, con el mismo nombre.</span>}
+      {tipo === 'chofer' && <span className="muted small">{usuario
+        ? 'Abre la app del chofer en el celular y toca «Entrar con mi usuario de Formas»: ve el recorrido que tiene este nombre.'
+        : 'Para que vea su recorrido en el celular, además hay que crearle el link en Entregas → Choferes, con el mismo nombre.'}</span>}
       <div className="row"><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
     </form>
   );

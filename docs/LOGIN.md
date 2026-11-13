@@ -13,6 +13,9 @@ azul de Formas) y del otro el botón **Ingresar con Google**, que es la única f
   deja afuera en el próximo clic, aunque tenga la sesión abierta.
 - La sesión dura 30 días. **Cerrar sesión** está en el menú de tu usuario (tu foto, abajo a la izquierda), al final.
 - Los tokens (Claude, Darwin, chofer) siguen igual: no pasan por esta pantalla.
+- La app del chofer acepta también esta sesión: un chofer de Formas entra con su usuario, sin link («Entrar con mi
+  usuario de Formas», `/chofer/entrar`; ver [CRONOGRAMA.md](CRONOGRAMA.md#la-app-del-chofer)). Con Cloudflare Access
+  adelante, vale su sesión de Access.
 
 ## Cómo está hecho
 

@@ -1,4 +1,5 @@
-// Contrato con el servidor (/hooks/chofer/api) y el link personal del chofer.
+// Contrato con el servidor (/hooks/chofer/api) y el link personal del chofer. Un chofer de Formas entra sin link, con su
+// usuario del Hub: la sesión va sola en la cookie y los pedidos salen sin el token.
 import { instalada } from './instalar';
 
 export type RemitoChofer = {
@@ -22,6 +23,7 @@ export type RemitoChofer = {
 const API = '/hooks/chofer/api';
 const CLAVE_TOKEN = 'chofer-token';
 const CLAVE_NOMBRE = 'chofer-nombre';
+const CLAVE_USUARIO = 'chofer-usuario';   // entró con su usuario de Formas (para abrir sin señal)
 
 function leer(clave: string): string | null {
   try { return localStorage.getItem(clave); } catch { return null; }
@@ -29,8 +31,35 @@ function leer(clave: string): string | null {
 function guardar(clave: string, valor: string): void {
   try { localStorage.setItem(clave, valor); } catch { /* sin almacenamiento: sigue en memoria */ }
 }
+function borrar(clave: string): void {
+  try { localStorage.removeItem(clave); } catch { /* da igual */ }
+}
 
 let tokenEnMemoria: string | null = null;
+let conUsuario = false;
+
+/** Con el link, el token; con el usuario de Formas, nada: la sesión va en la cookie. */
+const cabeceras = (): Record<string, string> => (tokenEnMemoria ? { Authorization: `Bearer ${tokenEnMemoria}` } : {});
+/** Puede pedir: tiene link o entró con su usuario. */
+export function hayAcceso(): boolean { return !!tokenEnMemoria || conUsuario; }
+
+/** Sin link: se fija si la persona ya tiene la sesión del Hub (es de Formas). Sin señal, vale lo de la última vez. */
+export async function entrarConUsuario(): Promise<boolean> {
+  try {
+    const r = await fetch(API + '/yo', { cache: 'no-store', credentials: 'same-origin' });
+    if (!r.ok) { if (r.status === 401 || r.status === 403) borrar(CLAVE_USUARIO); return false; }
+    const { nombre } = (await r.json()) as { nombre: string };
+    conUsuario = true;
+    guardar(CLAVE_USUARIO, '1');
+    guardar(CLAVE_NOMBRE, nombre);
+    return true;
+  } catch {
+    conUsuario = leer(CLAVE_USUARIO) === '1';
+    return conUsuario;
+  }
+}
+/** Adónde ir para entrar con el usuario de Formas: el login del Hub, que después vuelve a la app. */
+export const ENTRAR_CON_USUARIO = '/chofer/entrar';
 
 /** Saca el token de un link (o de un texto pegado): «…#t=fcrm_xxx» o directamente «fcrm_xxx». */
 export function tokenDeTexto(texto: string): string | null {
@@ -89,12 +118,12 @@ function reintentable(status: number): boolean {
 }
 
 async function pedir<T>(ruta: string): Promise<T> {
-  if (!tokenEnMemoria) throw new LinkInvalido();
+  if (!hayAcceso()) throw new LinkInvalido();
   const corte = new AbortController();
   const reloj = setTimeout(() => corte.abort(), 20_000);
   let r: Response;
   try {
-    r = await fetch(API + ruta, { headers: { Authorization: `Bearer ${tokenEnMemoria}` }, signal: corte.signal, cache: 'no-store' });
+    r = await fetch(API + ruta, { headers: cabeceras(), signal: corte.signal, cache: 'no-store' });
   } catch {
     throw new SinSenal();
   } finally {
@@ -119,14 +148,14 @@ export async function pedirRemitos(): Promise<RemitoChofer[]> {
 
 /** El chofer escribe o corrige el número de PDV de un remito. No va a la cola: si no hay señal, se prueba de nuevo. */
 export async function corregirPdv(id: number, pdv: string): Promise<RemitoChofer> {
-  if (!tokenEnMemoria) throw new LinkInvalido();
+  if (!hayAcceso()) throw new LinkInvalido();
   const corte = new AbortController();
   const reloj = setTimeout(() => corte.abort(), 30_000);
   let r: Response;
   try {
     r = await fetch(`${API}/remitos/${id}/pdv`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
+      headers: { ...cabeceras(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ pdv }),
       signal: corte.signal,
     });
@@ -165,7 +194,7 @@ export type FotoParaMandar = {
     cuando la foto ya está entera del otro lado y solo falta que el servidor la lea. */
 export function mandarRemito(f: FotoParaMandar, alSubir: (parte: number) => void, alLeer: () => void): Promise<RemitoChofer> {
   return new Promise((resolver, rechazar) => {
-    if (!tokenEnMemoria) { rechazar(new LinkInvalido()); return; }
+    if (!hayAcceso()) { rechazar(new LinkInvalido()); return; }
     const datos = new FormData();
     datos.append('archivo', new File([f.blob], `remito-${f.clave}.jpg`, { type: 'image/jpeg' }));
     datos.append('clave', f.clave);
@@ -175,7 +204,7 @@ export function mandarRemito(f: FotoParaMandar, alSubir: (parte: number) => void
 
     const x = new XMLHttpRequest();
     x.open('POST', API + '/remitos');
-    x.setRequestHeader('Authorization', `Bearer ${tokenEnMemoria}`);
+    if (tokenEnMemoria) x.setRequestHeader('Authorization', `Bearer ${tokenEnMemoria}`);
     x.responseType = 'text';
     x.timeout = 120_000;
     x.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) alSubir(e.loaded / e.total); };
@@ -219,13 +248,13 @@ export async function pedirRuta(): Promise<RecorridoChofer[]> {
 
 /** El chofer marca una parada: la hizo, no se pudo (con el motivo) o la deja para después. Sin `resultado`, lo borra. */
 export async function marcarParada(clave: string, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string): Promise<void> {
-  if (!tokenEnMemoria) throw new LinkInvalido();
+  if (!hayAcceso()) throw new LinkInvalido();
   const corte = new AbortController();
   const reloj = setTimeout(() => corte.abort(), 30_000);
   let r: Response;
   try {
     r = await fetch(`${API}/ruta/parada`, {
-      method: 'POST', headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
+      method: 'POST', headers: { ...cabeceras(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ clave, resultado, motivo, nota }), signal: corte.signal,
     });
   } catch { throw new SinSenal(); } finally { clearTimeout(reloj); }

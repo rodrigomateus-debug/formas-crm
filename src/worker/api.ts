@@ -1079,7 +1079,9 @@ const linkChofer = (url: string, token: string) => `${new URL(url).origin}/hooks
 function logistica(ctx: Ctx) { if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador.'); }
 api.get('/choferes', async (c) => {
   logistica(c.get('ctx'));
+  // `usuario`: un chofer de Formas que entra con su usuario del Hub (cronograma.ts, choferDeUsuario); `con_link`: tiene link.
   const { results } = await c.env.DB.prepare(`SELECT t.id, t.name, t.created_at, t.last_used_at, t.revoked, u.name AS user_name,
+      t.chofer_user_id IS NOT NULL AS usuario, t.chofer_token IS NOT NULL AS con_link,
       (SELECT COUNT(*) FROM remitos r WHERE r.token_id = t.id) AS remitos,
       (SELECT MAX(r.created_at) FROM remitos r WHERE r.token_id = t.id) AS ultimo
     FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.source = 'chofer' ORDER BY t.revoked, t.name`).all();
@@ -1092,9 +1094,12 @@ api.post('/choferes', async (c) => {
   const nombre = String(name ?? '').trim();
   if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre del chofer.');
   // El recorrido del día se le asigna por nombre (cronograma.ts): dos links activos con el mismo nombre verían lo mismo.
-  const activos = (await c.env.DB.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0").all<{ name: string }>()).results;
+  const activos = (await c.env.DB.prepare("SELECT name, chofer_token, chofer_user_id FROM api_tokens WHERE source = 'chofer' AND revoked = 0")
+    .all<{ name: string; chofer_token: string | null; chofer_user_id: number | null }>()).results;
   const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
-  if (activos.some((a) => igual(a.name) === igual(nombre))) throw new HttpError(409, `Ya hay un link activo para «${nombre}». Dalo de baja primero, o usá otro nombre.`);
+  const ya = activos.find((a) => igual(a.name) === igual(nombre));
+  if (ya?.chofer_user_id && !ya.chofer_token) throw new HttpError(409, `«${nombre}» es de Formas y ya entra a la app con su usuario del Hub: no necesita link.`);
+  if (ya) throw new HttpError(409, `Ya hay un link activo para «${nombre}». Dalo de baja primero, o usá otro nombre.`);
   const token = newToken();
   const r = await c.env.DB.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source, chofer_token) VALUES (?, ?, ?, 'chofer', ?) RETURNING id")
     .bind(nombre.slice(0, 80), await sha256(token), ctx.user.id, token).first<{ id: number }>();

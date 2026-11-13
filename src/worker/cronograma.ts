@@ -8,6 +8,7 @@ import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
 import { MODELO } from './remitos';
+import { newToken, sha256 } from './auth';
 import { optimizar, simular, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
@@ -903,22 +904,56 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
 
 // ---------- Choferes y expresos ----------
 
-export interface Transportista { id: number; nombre: string; tipo: 'chofer' | 'expreso'; direccion: string | null }
+// `user_id`: un chofer de Formas, que entra a la app del chofer con su usuario del Hub (choferDeUsuario).
+export interface Transportista { id: number; nombre: string; tipo: 'chofer' | 'expreso'; direccion: string | null; user_id?: number | null }
 export async function listarTransportistas(db: D1Database) {
-  return (await db.prepare('SELECT id, nombre, tipo, direccion FROM transportistas WHERE activo = 1 ORDER BY nombre').all<Transportista>()).results;
+  return (await db.prepare('SELECT id, nombre, tipo, direccion, user_id FROM transportistas WHERE activo = 1 ORDER BY nombre').all<Transportista>()).results;
 }
-// Agrega un chofer o un expreso a la lista (o, si ya estaba, le cambia el tipo o la dirección y lo vuelve a activar).
-export async function guardarTransportista(db: D1Database, ctx: Ctx, b: { nombre?: unknown; tipo?: unknown; direccion?: unknown }) {
+// Agrega un chofer o un expreso a la lista (o, si ya estaba, le cambia el tipo o la dirección y lo vuelve a activar). Un
+// chofer de Formas va con su usuario del Hub (`user_id`): entra a la app sin link y ve el recorrido que tiene este nombre.
+export async function guardarTransportista(db: D1Database, ctx: Ctx, b: { nombre?: unknown; tipo?: unknown; direccion?: unknown; user_id?: unknown }) {
   exigir(ctx);
   const nombre = String(b.nombre ?? '').replace(/\s+/g, ' ').trim().slice(0, 80);
   const tipo = b.tipo === 'expreso' ? 'expreso' : 'chofer';
   const direccion = tipo === 'expreso' ? String(b.direccion ?? '').replace(/\s+/g, ' ').trim().slice(0, 300) || null : null;
   if (nombre.length < 2) throw new HttpError(400, 'Escribí el nombre.');
+  let userId: number | null = null;
+  if (tipo === 'chofer' && b.user_id != null && b.user_id !== '') {
+    userId = Number(b.user_id);
+    const u = await db.prepare('SELECT id FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL').bind(userId).first();
+    if (!u) throw new HttpError(400, 'Ese usuario no está activo en el Hub.');
+    // Un usuario es un solo chofer: si estaba con otro nombre, se le saca de ahí.
+    await db.prepare('UPDATE transportistas SET user_id = NULL WHERE user_id = ? AND lower(nombre) != lower(?)').bind(userId, nombre).run();
+  }
   const todos = (await db.prepare('SELECT id, nombre FROM transportistas').all<{ id: number; nombre: string }>()).results;
   const ya = todos.find((x) => norm(x.nombre) === norm(nombre));
-  if (ya) { await db.prepare('UPDATE transportistas SET nombre = ?, tipo = ?, direccion = COALESCE(?, direccion), activo = 1 WHERE id = ?').bind(nombre, tipo, direccion, ya.id).run(); return { id: ya.id, nombre, tipo }; }
-  const r = await db.prepare('INSERT INTO transportistas (nombre, tipo, direccion, created_by) VALUES (?, ?, ?, ?) RETURNING id').bind(nombre, tipo, direccion, ctx.user.id).first<{ id: number }>();
+  if (ya) {
+    await db.prepare('UPDATE transportistas SET nombre = ?, tipo = ?, direccion = COALESCE(?, direccion), user_id = COALESCE(?, user_id), activo = 1 WHERE id = ?')
+      .bind(nombre, tipo, direccion, userId, ya.id).run();
+    return { id: ya.id, nombre, tipo };
+  }
+  const r = await db.prepare('INSERT INTO transportistas (nombre, tipo, direccion, user_id, created_by) VALUES (?, ?, ?, ?, ?) RETURNING id').bind(nombre, tipo, direccion, userId, ctx.user.id).first<{ id: number }>();
   return { id: r!.id, nombre, tipo };
+}
+
+// Un chofer de Formas que entra a la app del chofer con su usuario del Hub, sin link (pedido de Rodrigo del 13/11/2026).
+// Su nombre de chofer es el de la lista que está atado a su usuario o, si no hay, su nombre en el Hub: ve el recorrido de
+// hoy que tiene ese nombre. Sus remitos y lo que marca quedan en una credencial suya, como la de un link pero que no se
+// puede copiar: la de su usuario o, si Logística ya le había hecho un link con su nombre, esa (así no se parte su
+// historial). Se arma recién cuando manda su primer remito (`crear`), así mirar la app no lo suma a la lista de choferes.
+export async function choferDeUsuario(env: Env, user: User, crear = false): Promise<Ctx> {
+  const db = env.DB;
+  const deLista = await db.prepare("SELECT nombre FROM transportistas WHERE user_id = ? AND tipo = 'chofer' AND activo = 1 ORDER BY id DESC").bind(user.id).first<{ nombre: string }>();
+  const nombre = deLista?.nombre ?? user.name;
+  const activos = (await db.prepare("SELECT id, name, chofer_user_id FROM api_tokens WHERE source = 'chofer' AND revoked = 0").all<{ id: number; name: string; chofer_user_id: number | null }>()).results;
+  let t = activos.find((x) => x.chofer_user_id === user.id) ?? activos.find((x) => !x.chofer_user_id && norm(x.name) === norm(nombre));
+  if (t && !t.chofer_user_id) await db.prepare('UPDATE api_tokens SET chofer_user_id = ? WHERE id = ?').bind(user.id, t.id).run();
+  if (!t && crear) {
+    const r = await db.prepare("INSERT INTO api_tokens (name, token_hash, user_id, source, chofer_user_id) VALUES (?, ?, ?, 'chofer', ?) RETURNING id")
+      .bind(nombre, await sha256(newToken()), user.id, user.id).first<{ id: number }>();
+    t = { id: r!.id, name: nombre, chofer_user_id: user.id };
+  }
+  return { user, source: 'chofer', sourceDetail: nombre, tokenId: t?.id };
 }
 export async function quitarTransportista(db: D1Database, ctx: Ctx, id: number) {
   exigir(ctx);

@@ -591,7 +591,8 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
   );
 }
 
-interface Chofer { id: number; name: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string; remitos: number; ultimo: string | null }
+// `usuario`: es de Formas y entra con su usuario del Hub; `con_link`: además tiene link (o solo link, si no es de Formas).
+interface Chofer { id: number; name: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string; remitos: number; ultimo: string | null; usuario?: number; con_link?: number }
 function Choferes() {
   const toast = useToast();
   const res = useAsync(() => http<Chofer[]>('GET', '/choferes'), []);
@@ -613,7 +614,7 @@ function Choferes() {
   };
   return (
     <div className="stack" style={{ gap: 12, marginTop: 12 }}>
-      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su link personal a la app de remitos: lo abre en el celular, saca la foto del remito firmado y queda en el pedido. El link solo sirve para eso. Si lo pierde, «Ver link» te lo muestra para mandárselo de nuevo; si cambia de celular o el link quedó en manos de otro, dalo de baja y creá uno nuevo.</p>
+      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su link personal a la app de remitos: lo abre en el celular, saca la foto del remito firmado y queda en el pedido. El link solo sirve para eso. Si lo pierde, «Ver link» te lo muestra para mandárselo de nuevo; si cambia de celular o el link quedó en manos de otro, dalo de baja y creá uno nuevo. Los choferes de Formas no necesitan link: abren la app y tocan «Entrar con mi usuario de Formas».</p>
       <form className="row" style={{ gap: 6 }} onSubmit={(ev) => { ev.preventDefault(); crear(); }}>
         <input className="input" placeholder="Nombre del chofer" value={nombre} onChange={(ev) => setNombre(ev.target.value)} style={{ maxWidth: 280 }} />
         <button className="btn primary" disabled={nombre.trim().length < 2}>Crear link</button>
@@ -635,10 +636,10 @@ function Choferes() {
           <div key={c.id} className={`assoc-item${c.revoked ? ' muted' : ''}`}>
             <div className="grow" style={{ minWidth: 0 }}>
               <div>{c.name}{c.revoked ? ' (dado de baja)' : ''}</div>
-              <div className="small muted">{c.remitos} remitos{c.ultimo ? ` · el último ${fmtDate(c.ultimo, true)}` : ''} · creado por {c.user_name}</div>
+              <div className="small muted">{c.remitos} remitos{c.ultimo ? ` · el último ${fmtDate(c.ultimo, true)}` : ''}{c.usuario && !c.con_link ? ' · entra con su usuario del Hub' : ` · creado por ${c.user_name}`}{c.usuario && c.con_link ? ' · también entra con su usuario del Hub' : ''}</div>
             </div>
-            {!c.revoked && <button className="btn sm" onClick={() => verLink(c)}>Ver link</button>}
-            {!c.revoked && <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>}
+            {!c.revoked && (!c.usuario || !!c.con_link) && <button className="btn sm" onClick={() => verLink(c)}>Ver link</button>}
+            {!c.revoked && (!c.usuario || !!c.con_link) && <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>}
           </div>
         ))}
         {!res.data?.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay choferes.'}</div>}

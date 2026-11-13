@@ -286,7 +286,7 @@ test('remitos: la app del chofer, la lectura con Claude, el cruce con el pedido 
   asUser = null;
   assert.ok(!JSON.stringify((await api('GET', '/choferes')).data).includes(ch.token), 'la lista no trae los links');
   const H = { authorization: `Bearer ${ch.token}` };
-  assert.deepEqual((await api('GET', '/hooks/chofer/api/yo', undefined, H)).data, { nombre: `Juan ${RUN}` });
+  assert.deepEqual((await api('GET', '/hooks/chofer/api/yo', undefined, H)).data, { nombre: `Juan ${RUN}`, usuario: false }, 'entra con su link, no con un usuario del Hub');
   assert.equal((await api('GET', '/records/order', undefined, H)).status, 403, 'el link del chofer no abre el CRM');
   assert.equal((await api('POST', '/hooks/bundle', {}, H)).status, 403, 'ni las otras entradas');
   const api2 = (await api('POST', '/tokens', { name: `API ${RUN}`, source: 'api' })).data.token;

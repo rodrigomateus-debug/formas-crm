@@ -236,6 +236,13 @@ export type ParadaChofer = {
   /** Lo que dice la libreta de direcciones de ese lugar. */
   lugar?: { horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null } | null;
   movimientos: Array<{ id: string; tipo: string; npdv: string | null; cliente: string | null; articulo: string; cantidad: number | null; hecho: boolean }>;
+  /** Lo que pidió alguien para esta parada (Recorridos del Hub): qué dejar, qué retirar, a quién preguntar. */
+  encargos?: EncargoChofer[];
+};
+export type ItemChofer = { cant: number | null; que: string; pdv: string | null };
+export type EncargoChofer = {
+  id: number; llevar: ItemChofer[]; retirar: ItemChofer[]; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
+  notas: string | null; urgente: boolean; quien: string | null; estado: 'pendiente' | 'hecho' | 'no_se_pudo' | 'cancelado';
 };
 type LugarChofer = { nombre: string; direccion: string; lat: number | null; lng: number | null };
 /** `fin`: dónde termina (null: en la última parada); `vuelve`: es el mismo lugar de donde sale. Sin `fin` (servidor de

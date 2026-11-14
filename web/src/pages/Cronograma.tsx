@@ -7,6 +7,7 @@ import { Avatar, Modal } from '../components';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
+import { EncargoModal, ESTADO as ESTADO_ENC, itemTexto, type Encargo } from './Recorridos';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. Cada día con
 // sus entregas, ingresos, retiros y egresos, armados solos con las fechas de cada artículo en ClickUp. Arrastrar una
@@ -31,6 +32,7 @@ interface DiaResumen { total: number; pendientes: number; atrasados: number }
 interface Vista {
   hoy: string; desde: string; hasta: string; movimientos: Mov[]; notas: Nota[]; feriados: Record<string, string>; dias: Record<string, DiaResumen>;
   sin_fecha: SinFecha[]; puede_editar: boolean; choferes?: string[]; expresos?: string[];
+  encargos?: Encargo[];   // lo que pidió alguien al recorrido de cada día (Recorridos)
 }
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
@@ -97,6 +99,7 @@ function tarjetas(movs: Mov[]): Tarjeta[] {
 }
 const coincide = (m: { npdv: string | null; cliente: string | null; articulo: string; lugar?: string | null }, q: string) =>
   !q || [m.npdv, m.cliente, m.articulo, m.lugar].some((x) => (x ?? '').toLowerCase().includes(q));
+const coincideEnc = (e: Encargo, q: string) => !q || [e.destino, e.quien, e.notas, ...e.llevar.map(itemTexto), ...e.retirar.map(itemTexto)].some((x) => (x ?? '').toLowerCase().includes(q));
 
 export default function CronogramaPage() {
   const [sp, setSp] = useSearchParams();
@@ -110,9 +113,10 @@ export default function CronogramaPage() {
   const [unidad, setUnidad] = useState('');
   const [pendientes, setPendientes] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
-  const [nuevoPara, setNuevoPara] = useState<Tarjeta | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
+  const [nuevoPara, setNuevoPara] = useState<Tarjeta | Encargo | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
+  const [encargo, setEncargo] = useState<number | null>(null);   // el encargo abierto
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
-  const arrastre = useRef<{ ids: string[]; tipo: Tipo; de: string | null; pdv: string } | null>(null);
+  const arrastre = useRef<{ ids: string[]; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
   const pedido = useRef(0);
 
   const ir = (cambios: Record<string, string | null>) => setSp((p) => { const n = new URLSearchParams(p); for (const [k, v] of Object.entries(cambios)) { if (v == null) n.delete(k); else n.set(k, v); } return n; }, { replace: true });
@@ -133,8 +137,10 @@ export default function CronogramaPage() {
   const q = buscar.trim().toLowerCase();
   const unidades = useMemo(() => [...new Set((v?.movimientos ?? []).map((m) => m.unidad).filter((u): u is string => !!u))].sort(), [v]);
   const movs = useMemo(() => (v?.movimientos ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad) && (!pendientes || !m.hecho)), [v, q, unidad, pendientes]);
-  // Sábado y domingo se ven si tienen algo: un movimiento, una nota o un feriado.
-  const finDeSemana = [5, 6].filter((i) => { const d = sumar(semana, i); return movs.some((m) => m.fecha === d) || !!v?.notas.some((n) => n.fecha === d); });
+  // Los encargos no son de una unidad de negocio: con ese filtro no se ven.
+  const encs = useMemo(() => (v?.encargos ?? []).filter((e) => coincideEnc(e, q) && !unidad && (!pendientes || e.estado !== 'hecho')), [v, q, unidad, pendientes]);
+  // Sábado y domingo se ven si tienen algo: un movimiento, un encargo, una nota o un feriado.
+  const finDeSemana = [5, 6].filter((i) => { const d = sumar(semana, i); return movs.some((m) => m.fecha === d) || encs.some((e) => e.fecha === d) || !!v?.notas.some((n) => n.fecha === d); });
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
 
@@ -169,17 +175,38 @@ export default function CronogramaPage() {
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
   }
+  // Un encargo: pasarlo a otro día, marcarlo hecho o elegirle el chofer (su parada pasa a ese recorrido, como las tarjetas).
+  async function encargoA(e: Encargo, cambios: { fecha?: string; estado?: string }) {
+    setDatos((d) => d && { ...d, encargos: (d.encargos ?? []).map((x) => (x.id === e.id ? { ...x, ...cambios } as Encargo : x)) });
+    try {
+      await http('PATCH', `/recorridos/encargos/${e.id}`, cambios);
+      toast(cambios.fecha ? `Encargo a ${lindo(e.destino)}: pasó al ${diaCorto(cambios.fecha)}.${e.user_id ? ' Se le avisó a quien lo pidió.' : ''}` : cambios.estado === 'hecho' ? 'Encargo hecho.' : 'Encargo pendiente otra vez.');
+    } catch (err) { toast((err as Error).message, true); }
+    void cargar();
+  }
+  async function choferEnc(e: Encargo, chofer: string) {
+    if (chofer === '+') { setNuevoPara(e); return; }
+    setDatos((d) => d && { ...d, encargos: (d.encargos ?? []).map((x) => (x.id === e.id ? { ...x, chofer: chofer || null } : x)) });
+    try {
+      const r = await http<{ chofer: string | null; recorrido: number; movimientos: number }>('PUT', '/cronograma/chofer', { fecha: e.fecha, ids: [`enc:${e.id}`], chofer });
+      toast(`Encargo a ${lindo(e.destino)}: ${r.chofer ? `va con ${r.chofer}` : 'quedó sin chofer'} el ${diaCorto(e.fecha)} (recorrido ${r.recorrido}).${r.movimientos > 1 ? ' Va toda la parada de ese lugar.' : ''}`);
+    } catch (err) { toast((err as Error).message, true); }
+    void cargar();
+  }
   const soltar = (fecha: string) => {
     const a = arrastre.current;
     arrastre.current = null; setSobre(null);
-    if (a && a.de !== fecha) void mover(a.ids, a.tipo, fecha, a.pdv);
+    if (a && a.de !== fecha) {
+      if (a.tipo === 'encargo') { const e = v?.encargos?.find((x) => String(x.id) === a.ids[0]); if (e) void encargoA(e, { fecha }); }
+      else void mover(a.ids, a.tipo, fecha, a.pdv);
+    }
   };
 
   const total = movs.length, hechos = movs.filter((m) => m.hecho).length;
   return (
     <div className="content cr-page">
       <div className="page-head">
-        <h1>Cronograma {v && <span className="muted small">{total} movimientos · {hechos} hechos</span>}</h1>
+        <h1>Cronograma {v && <span className="muted small">{total} movimientos · {hechos} hechos{encs.length ? ` · ${encs.length} encargo${encs.length === 1 ? '' : 's'}` : ''}</span>}</h1>
         <div className="row" role="group" aria-label="Vista">
           <button type="button" className={`btn sm${vista === 'semana' ? ' primary' : ''}`} aria-pressed={vista === 'semana'} onClick={() => ir({ vista: null })}><Icon name="calendar" size={14} />Semana</button>
           <button type="button" className={`btn sm${vista === 'ruta' ? ' primary' : ''}`} aria-pressed={vista === 'ruta'} onClick={() => ir({ vista: 'ruta', dia })}><Icon name="route" size={14} />Ruta del día</button>
@@ -204,7 +231,7 @@ export default function CronogramaPage() {
             )}
             <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)} />Solo lo pendiente</label>
             <span className="grow" />
-            <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}</div>
+            <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}<span className="cr-k-X" title="Lo que alguien pidió en Recorridos"><i />Encargos</span></div>
           </div>
           {v && !puede && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves el cronograma para saber cuándo sale cada cosa. Lo editan Logística, Producción y los administradores.</div>}
           {!v && !error && <div className="empty plain">Cargando la semana…</div>}
@@ -212,8 +239,8 @@ export default function CronogramaPage() {
             <div className="cr-scroll">
               <div className="cr-semana" style={{ gridTemplateColumns: `repeat(${dias.length}, minmax(214px, 1fr))` }}>
                 {dias.map((d) => {
-                  const delDia = movs.filter((m) => m.fecha === d), notas = v.notas.filter((n) => n.fecha === d);
-                  const pend = delDia.filter((m) => !m.hecho).length;
+                  const delDia = movs.filter((m) => m.fecha === d), notas = v.notas.filter((n) => n.fecha === d), encDia = encs.filter((e) => e.fecha === d);
+                  const pend = delDia.filter((m) => !m.hecho).length + encDia.filter((e) => e.estado !== 'hecho').length, cuantos = delDia.length + encDia.length;
                   return (
                     <section key={d} className={`cr-dia${d === v.hoy ? ' hoy' : ''}${v.feriados[d] ? ' feriado' : ''}${sobre === d ? ' sobre' : ''}`}
                       onDragOver={(e) => { if (arrastre.current && puede) { e.preventDefault(); if (sobre !== d) setSobre(d); } }}
@@ -222,8 +249,8 @@ export default function CronogramaPage() {
                       <header className="cr-dia-cab">
                         <div className="cr-dia-tit"><b>{DIAS[D(d).getDay()]}</b><span className="num">{D(d).getDate()}/{D(d).getMonth() + 1}</span>{d === v.hoy && <span className="cr-hoy">Hoy</span>}</div>
                         <div className="cr-dia-sub">
-                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{delDia.length ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${delDia.length}` : `${delDia.length} hechos`) : 'Sin movimientos'}</span>
-                          {delDia.some((m) => m.tipo !== 'ingreso') && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
+                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{cuantos ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${cuantos}` : `${cuantos} hechos`) : 'Sin movimientos'}</span>
+                          {(delDia.some((m) => m.tipo !== 'ingreso') || encDia.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
                         </div>
                         <Feriado dia={d} nombre={v.feriados[d]} puede={puede} onCambio={cargar} />
                       </header>
@@ -241,6 +268,15 @@ export default function CronogramaPage() {
                             </div>
                           );
                         })}
+                        {encDia.length > 0 && (
+                          <div className="cr-carril cr-k-X">
+                            <h3>Encargos <span className="num">{encDia.length}</span></h3>
+                            {encDia.map((e) => <TarjetaEncargo key={e.id} e={e} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []}
+                              onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })}
+                              onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
+                              onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />)}
+                          </div>
+                        )}
                         <Notas dia={d} notas={notas} puede={puede} onCambio={cargar} />
                       </div>
                     </section>
@@ -259,10 +295,11 @@ export default function CronogramaPage() {
           <CronogramaRuta fecha={dia} semana={semana} hoy={datos?.hoy ?? hoyIso()} resumen={datos?.dias ?? {}} onFecha={(d) => ir({ dia: d })} onAbrir={setPreview} onCambio={cargar} />
         </Suspense>
       )}
+      {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); }} />}
       {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
       {nuevoPara && (
         <Modal title="Agregar chofer o expreso" onClose={() => setNuevoPara(null)}>
-          <NuevoTransportista onCancelar={() => setNuevoPara(null)} onListo={(nombre) => { const t = nuevoPara; setNuevoPara(null); void asignar(t, nombre); }} />
+          <NuevoTransportista onCancelar={() => setNuevoPara(null)} onListo={(nombre) => { const t = nuevoPara; setNuevoPara(null); if ('movs' in t) void asignar(t, nombre); else void choferEnc(t, nombre); }} />
         </Modal>
       )}
     </div>
@@ -417,6 +454,52 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
         </div>
       )}
       {!puede && t.hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
+    </article>
+  );
+}
+
+// Un encargo (Recorridos): a dónde, quién lo pidió y qué se deja o se retira. Se arrastra a otro día, se le elige el
+// chofer y se marca hecho como las demás tarjetas; un clic lo abre.
+function TarjetaEncargo({ e, hoy, puede, choferes, expresos, onAbrir, onChofer, onMover, onMarcar, onArrastrar }: {
+  e: Encargo; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onAbrir: () => void; onChofer: (c: string) => void; onMover: (f: string) => void;
+  onMarcar: () => void; onArrastrar: (on: boolean) => void;
+}) {
+  const hecho = e.estado === 'hecho', atrasado = !hecho && e.fecha < hoy;
+  const lineas = [...e.llevar.map((i) => ['Deja', i] as const), ...e.retirar.map((i) => ['Retira', i] as const)];
+  return (
+    <article className={`cr-tarjeta abre${hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}`} draggable={puede}
+      onDragStart={(ev) => { ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', `enc:${e.id}`); } catch { /* no hace falta */ } onArrastrar(true); ev.currentTarget.classList.add('arrastrando'); }}
+      onDragEnd={(ev) => { ev.currentTarget.classList.remove('arrastrando'); onArrastrar(false); }}
+      onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button, a, .popover, .select-pop, [role="dialog"]')) onAbrir(); }}>
+      <div className="cr-t-rol"><Icon name="route" size={11} />Encargo{e.quien ? ` · ${e.quien.split(' ')[0]}` : ''}</div>
+      <div className="cr-t-quien"><span>{lindo(e.destino)}</span></div>
+      {lineas.length > 0 && (
+        <div className="cr-t-prods">
+          {lineas.map(([que, i], k) => <div key={k}><b>{que}</b><span>{itemTexto(i)}</span></div>)}
+        </div>
+      )}
+      {!lineas.length && e.notas && <div className="cr-t-item">{e.notas}</div>}
+      {(e.urgente || e.estado === 'no_se_pudo' || e.horario) && (
+        <div className="cr-t-tags">
+          {e.urgente && <span className="cr-tag late">Urgente</span>}
+          {e.estado === 'no_se_pudo' && <span className="cr-tag riesgo"><Icon name="alert" size={11} />{ESTADO_ENC.no_se_pudo.nombre}{e.motivo ? `: ${e.motivo}` : ''}</span>}
+          {e.horario && <span className="cr-tag">{e.horario}</span>}
+        </div>
+      )}
+      {puede && !hecho ? (
+        <div className="cr-t-chofer">
+          <Select className={`input cr-chofer${e.chofer ? '' : ' vacio'}`} value={e.chofer ?? ''} aria-label="Chofer" title={e.chofer ? `Chofer: ${e.chofer}` : 'Elegir el chofer'} onChange={(ev) => onChofer(ev.target.value)}>
+            {opcionesChofer({ choferes, expresos, actual: e.chofer, vacio: 'Sin chofer', agregar: 'Agregar chofer o expreso…' })}
+          </Select>
+        </div>
+      ) : e.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{e.chofer}</div>}
+      {puede && (
+        <div className="cr-t-acc">
+          <SelectorFecha valor={e.fecha} onElegir={(f) => f && onMover(f)} label="Pasar a otro día" className="cr-mini" title="Pasar a otro día"><Icon name="calendar" size={13} /></SelectorFecha>
+          <button type="button" className={`cr-check${hecho ? ' on' : ''}`} aria-pressed={hecho} aria-label={hecho ? 'Volver a pendiente' : 'Marcar como hecho'} title={hecho ? 'Volver a pendiente' : 'Marcar como hecho'} onClick={onMarcar}><Icon name="check" size={12} /></button>
+        </div>
+      )}
+      {!puede && hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
   );
 }

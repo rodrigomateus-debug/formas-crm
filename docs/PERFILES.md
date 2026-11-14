@@ -33,6 +33,8 @@ Una vendedora (perfil Comercial que no es administradora) ve:
   descargar, para mandárselo al cliente si tiene una duda. Cargarlos, revisarlos, asignarlos y cerrar la entrega es de
   Logística.
 - **Inicio**: sus números; no el ranking «Ganado por vendedora» ni los números de otras.
+- **Recorridos** ([RECORRIDOS.md](RECORRIDOS.md)): carga sus encargos y ve los suyos. En los próximos días ve a qué
+  proveedores e impresores va el recorrido; lo de clientes que no son suyos dice solo «Un cliente» y la localidad.
 
 No ve ni hace:
 

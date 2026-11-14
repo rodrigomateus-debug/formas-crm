@@ -6,6 +6,7 @@ import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
+import { EncargoModal, itemTexto, type Encargo } from './Recorridos';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -17,6 +18,7 @@ interface Parada {
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
   expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
   company_id: number | null; record_id: number | null; movimientos: Mov[];
+  encargos?: Encargo[];   // lo que pidió alguien para ese día en ese lugar (Recorridos)
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
@@ -43,6 +45,9 @@ const TANDA = 25;   // el servidor acepta de a 25 artículos por vez
 const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedido', finnegans: 'Del pedido en Finnegans', ultima_entrega: 'De la última entrega a este cliente', empresa: 'De la ficha de la empresa', libreta: 'De la libreta de direcciones', expreso: 'La dirección del expreso' };
 const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
+
+// Una parada está hecha cuando están hechos sus movimientos de ClickUp y sus encargos.
+const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
 
 // Las paradas que no están en ningún recorrido van al primero; las que ya no existen se sacan.
 function acomodar(rutas: Recorrido[], paradas: Parada[]): Recorrido[] {
@@ -85,6 +90,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   // se le está cargando el expreso.
   const [panel, setPanel] = useState<'chofer' | 'salida' | 'fin' | null>(null);
   const [expresando, setExpresando] = useState<string | null>(null);
+  const [encargo, setEncargo] = useState<number | null>(null);   // el encargo que se abrió para ver o cambiar
   const arrastre = useRef<string | null>(null);
   const [sobre, setSobre] = useState<string | null>(null);
   const pedido = useRef(0);
@@ -197,13 +203,16 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     toast(`Recorrido reordenado: unos ${duracion(antes - despues)} menos.`);
   };
   async function marcar(p: Parada) {
-    const hecho = !p.movimientos.every((m) => m.hecho);
+    const hecho = !hechaParada(p);
     const porTipo = new Map<Tipo, string[]>();
     for (const m of p.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
-    setDatos((d) => d && { ...d, paradas: d.paradas.map((x) => (x.clave === p.clave ? { ...x, movimientos: x.movimientos.map((m) => ({ ...m, hecho })) } : x)) });
+    const encs = (p.encargos ?? []).filter((e) => (e.estado === 'hecho') !== hecho);
+    setDatos((d) => d && { ...d, paradas: d.paradas.map((x) => (x.clave === p.clave ? { ...x, movimientos: x.movimientos.map((m) => ({ ...m, hecho })),
+      encargos: (x.encargos ?? []).map((e) => ({ ...e, estado: hecho ? 'hecho' : 'pendiente' })) } : x)) });
     try {
       let cambiados = 0;
       for (const [tipo, ids] of porTipo) for (let i = 0; i < ids.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + TANDA), tipo, hecho })).cambiados;
+      for (const e of encs) await http('PATCH', `/recorridos/encargos/${e.id}`, { estado: hecho ? 'hecho' : 'pendiente' });
       toast(!hecho ? `${p.nombre}: quedó como pendiente.` : `${p.nombre}: hecho.${cambiados ? ` ${cambiados} artículo${cambiados === 1 ? ' cambió' : 's cambiaron'} de estado en ClickUp.` : ''}`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar(); onCambio();
@@ -237,7 +246,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   if (error) return <>{cab}<div className="aviso warn small">{error}</div></>;
   if (!datos || !act) return <>{cab}<div className="empty plain">Armando la ruta del {diaLargo(fecha).toLowerCase()}…</div></>;
 
-  const movs = act.paradas.flatMap((p) => p.movimientos), hechos = movs.filter((m) => m.hecho).length, tarde = act.sim.paradas.filter((s) => s.tarde > 0).length;
+  const movs = act.paradas.flatMap((p) => [...p.movimientos.map((m) => m.hecho), ...(p.encargos ?? []).map((e) => e.estado === 'hecho')]), hechos = movs.filter(Boolean).length, tarde = act.sim.paradas.filter((s) => s.tarde > 0).length;
   const sinBase = !punto(act.base);
   return (
     <div className="cr-ruta">
@@ -291,7 +300,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       {panel === 'fin' && puede && <OtroLugar titulo="Dónde termina este recorrido" onCancelar={() => setPanel(null)} onElegir={(l) => { setPanel(null); void guardarYa(rutas.map((r, i) => (i === act.i ? { ...r, fin: 'otro', fin_otro: l } : r))); }} />}
 
       <div className="cr-kpis">
-        <div><span>Paradas</span><b className="num">{act.paradas.length}<small>{movs.length} movimientos</small></b></div>
+        <div><span>Paradas</span><b className="num">{act.paradas.length}<small>{movs.length} {movs.length === 1 ? 'cosa' : 'cosas'} para hacer</small></b></div>
         <div><span>Recorrido</span><b className="num">{act.sim.km.toFixed(0)}<small>km{act.real ? '' : ' aprox.'}</small></b></div>
         <div><span>En la calle</span><b className="num">{duracion(act.sim.fin - act.r.salida)}</b></div>
         <div><span>{act.vuelve ? 'Vuelve' : 'Termina'}</span><b className="num">{hhmm(act.sim.fin)}</b></div>
@@ -305,9 +314,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       <div className="cr-ruta-cuerpo">
         <ol className="cr-paradas">
           <li className="cr-parada base"><div className="cr-n base"><Icon name="home" size={13} /></div><div><div className="cr-p-nombre">{act.base?.nombre}</div><div className="cr-p-sub">{act.base?.direccion}</div></div><div className="cr-eta"><b className="num">{hhmm(act.r.salida)}</b><span>sale</span></div></li>
-          {!act.paradas.length && <li className="empty plain">{datos.paradas.length ? 'Este recorrido no tiene paradas. Pasale alguna desde otro recorrido.' : 'Este día no hay retiros, egresos ni entregas.'}</li>}
+          {!act.paradas.length && <li className="empty plain">{datos.paradas.length ? 'Este recorrido no tiene paradas. Pasale alguna desde otro recorrido.' : 'Este día no hay retiros, egresos, entregas ni encargos.'}</li>}
           {act.paradas.map((p, i) => {
-            const s = act.sim.paradas[i], todo = p.movimientos.every((m) => m.hecho);
+            const s = act.sim.paradas[i], todo = hechaParada(p);
             const entregas = [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
             return [
               <Tramo key={`t${p.clave}`} t={s.tramo} />,
@@ -336,6 +345,16 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   </div>
                 )}
                 <div className="cr-p-movs">
+                  {(p.encargos ?? []).map((e) => (
+                    <div key={`e${e.id}`} className={`cr-k-X${e.estado === 'hecho' ? ' ok' : ''}`}>
+                      <i /><span><b>Encargo</b><button type="button" className="cr-link" onClick={() => setEncargo(e.id)}>de {e.quien?.split(' ')[0] ?? 'alguien'}</button>
+                        {e.urgente ? ' · urgente' : ''}{e.llevar.length ? ` · deja ${e.llevar.map(itemTexto).join(', ')}` : ''}{e.retirar.length ? ` · retira ${e.retirar.map(itemTexto).join(', ')}` : ''}
+                        {!e.llevar.length && !e.retirar.length && e.notas ? ` · ${e.notas}` : ''}
+                        {e.desde && e.desde !== datos.bases[0]?.id && e.llevar.length ? ` · está en ${datos.bases.find((b) => b.id === e.desde)?.nombre ?? e.desde}` : ''}
+                        {e.hacia && e.hacia !== datos.bases[0]?.id && e.retirar.length ? ` · va a ${datos.bases.find((b) => b.id === e.hacia)?.nombre ?? e.hacia}` : ''}
+                        {e.contacto ? ` · preguntar por ${e.contacto}` : ''}{e.horario ? ` · ${e.horario}` : ''}{e.estado === 'no_se_pudo' && e.motivo ? ` · no se pudo: ${e.motivo}` : ''}</span>
+                    </div>
+                  ))}
                   {p.movimientos.map((m) => (
                     <div key={m.id} className={`cr-k-${carrilDe(m.tipo).k}${m.hecho ? ' ok' : ''}`}>
                       <i /><span><b>{carrilDe(m.tipo).uno}</b>{m.record_id ? <button type="button" className="cr-link" onClick={() => onAbrir(m.record_id!)}>PDV {m.npdv}</button> : `PDV ${m.npdv ?? '—'}`}
@@ -410,6 +429,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             {datos.llegan.length ? datos.llegan.map((m) => <div key={m.id} className={m.hecho ? 'ok' : ''}><i /><span><b>{m.lugar ?? 'Proveedor'}</b>PDV {m.npdv ?? '—'} {m.cliente ?? ''}{m.articulo ? ` · ${cantidad(m)}` : ''}</span></div>)
               : <div className="muted small">Nada para recibir este día.</div>}
           </section>
+          {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); onCambio(); }} />}
           {(datos.retiran?.length ?? 0) > 0 && (
             <section className="cr-llegan cr-k-E">
               <h3>Retiran en Formas <span className="muted">(lo retira el cliente: no es parte del recorrido)</span></h3>
@@ -593,7 +613,7 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, ubicando, onUbic
       a.paradas.forEach((p, i) => {
         if (p.lat == null || p.lng == null) return;
         todos.push([p.lat, p.lng]);
-        const s = a.sim.paradas[i], hecha = p.movimientos.every((x) => x.hecho);
+        const s = a.sim.paradas[i], hecha = hechaParada(p);
         // Los números no se arrastran, salvo el de la parada a la que se le está corrigiendo la ubicación.
         const mio = ubicando?.clave === p.clave;
         const mk = L.marker(mio && ubicando.lat != null && ubicando.lng != null ? [ubicando.lat, ubicando.lng] : [p.lat, p.lng], {

@@ -12,6 +12,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Servicios (envío, setup de logo, «Artículos varios»: renglones que se cobran pero no se producen): [docs/PRODUCCION.md](docs/PRODUCCION.md#servicios-los-renglones-que-no-se-producen).
 - Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
 - Cronograma (reemplaza la planilla semanal de Logística: entregas, ingresos, retiros y egresos por día, la ruta del día en el mapa por chofer y el recorrido en la app del chofer): [docs/CRONOGRAMA.md](docs/CRONOGRAMA.md).
+- Recorridos (reemplaza la planilla «Recorridos» de Logística: cualquiera le pide al recorrido de un día que lleve o retire algo, con una sola base de destinos, «ya van mañana a ese lugar» y el remito de traslado): [docs/RECORRIDOS.md](docs/RECORRIDOS.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
 - Perfiles y qué ve cada uno (el perfil Ventas ve lo suyo): [docs/PERFILES.md](docs/PERFILES.md).
 

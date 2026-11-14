@@ -25,3 +25,5 @@ GOOGLE_OAUTH_TOKEN_URL=http://localhost:8795/google/token
 GEOCODER_URL=http://localhost:8797/geo
 # La libreta de direcciones del cronograma: la planilla publicada como CSV, simulada.
 LUGARES_CSV_URL=http://localhost:8797/lugares.csv
+# Recorridos (test/recorridos.test.mjs): la Sheets API (el historial de la planilla vieja), simulada.
+SHEETS_API_URL=http://localhost:8797/sheets

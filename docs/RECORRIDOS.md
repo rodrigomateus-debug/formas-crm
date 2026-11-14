@@ -136,7 +136,7 @@ Configuración → «Traer el historial»):
 
 | Qué | Dónde |
 |---|---|
-| Tablas `encargos` y columnas nuevas de `lugares` (origen, editado, activo, empresa, clave de la planilla), avisos de encargos, configuración del remito | `migrations/0063_recorridos.sql` |
+| Tablas `encargos` y columnas nuevas de `lugares` (origen, editado, activo, empresa, clave de la planilla), avisos de encargos, configuración del remito | `migrations/0064_recorridos.sql` |
 | Encargos, destinos, sugerencias, días del destino, agenda, remito e historial | `src/worker/recorridos.ts` |
 | La copia de la libreta (merge), los encargos en la semana, en la ruta del día (`anfitrion`, `mismoSitio`) y en la app del chofer | `src/worker/cronograma.ts` |
 | API `/api/recorridos/…` | `src/worker/api.ts` |

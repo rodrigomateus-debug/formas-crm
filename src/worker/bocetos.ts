@@ -3,6 +3,7 @@ import { HttpError } from './env';
 import { primaryCompanyId } from './associations';
 import { subirArchivo } from './drive';
 import { copiarLogoElegido } from './logos';
+import { tocarActividad } from './records';
 
 // Bocetos de producción (pedido de Rodrigo del 6/11/2026): por producto del pedido, PDF o imagen. A veces se hacen antes
 // del pedido (en el negocio) y a veces después; primero puede ir una referencia rápida (una foto) y después el técnico con
@@ -70,6 +71,7 @@ export async function subirBoceto(env: Env, ctx: Ctx, rec: { id: number; object_
   const row = await db.prepare(`INSERT INTO bocetos (record_id, producto, producto_nombre, tipo, version, nombre, mime, size, drive_id, drive_link, user_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(rec.id, producto, datos.producto_nombre?.trim() || producto, tipo, version, archivo.name || 'boceto',
     mime, archivo.size, f.id, f.link, ctx.user.id).first<{ id: number }>();
+  await tocarActividad(db, rec.id).run();   // subir un boceto cuenta como actividad
   return (await db.prepare(`SELECT ${COLS} FROM bocetos b WHERE b.id = ?`).bind(row!.id).first<Boceto>())!;
 }
 
@@ -109,6 +111,7 @@ export async function usarEnPedido(db: D1Database, ctx: Ctx, id: number, orderId
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(orderId, producto, productoNombre || producto || b.producto_nombre, b.tipo, b.estado, version,
     b.nombre, b.mime, b.size, b.drive_id, b.drive_link, b.id, ctx.user.id).first<{ id: number }>();
   await copiarLogoElegido(db, b.record_id, b.producto ?? b.producto_nombre, orderId, producto);
+  await tocarActividad(db, orderId).run();
   return bocetoPorId(db, row!.id);
 }
 

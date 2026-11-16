@@ -123,7 +123,7 @@ const COLUMNS: Record<string, string> = {
   closedate: 'r.close_date',
   createdate: 'r.created_at',
   hs_lastmodifieddate: 'r.updated_at',
-  notes_last_updated: 'r.last_activity_at',
+  notes_last_updated: 'COALESCE(r.last_activity_at, r.created_at)',
   notes_last_contacted: 'r.last_contacted_at',
   notes_next_activity_date: 'r.next_activity_at',
   hs_v2_date_entered_current_stage: 'r.stage_entered_at',
@@ -161,7 +161,7 @@ export function rowToRecord(row: RecordRow): CrmRecord {
       hs_object_id: row.id,
       createdate: row.created_at,
       hs_lastmodifieddate: row.updated_at,
-      notes_last_updated: row.last_activity_at,
+      notes_last_updated: row.last_activity_at ?? row.created_at,
       notes_last_contacted: row.last_contacted_at,
       notes_next_activity_date: row.next_activity_at,
       ...(row.object_type === 'deal' ? { hs_v2_date_entered_current_stage: row.stage_entered_at } : {}),
@@ -429,6 +429,8 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
         .bind(c.name, JSON.stringify(next), c.owner_id, c.pipeline_id, c.stage_id, c.amount, next.closedate, ts, ts, id);
     }
   }
+  // Mover de etapa un negocio o un pedido cuenta como actividad.
+  if (stageMoved || changed.includes('hs_pipeline_stage')) stmts.push(tocarActividad(db, id, ts));
   await db.batch(stmts);
   if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
   // La empresa cambió de tipo de relación: sus contactos lo siguen (relacion.ts).
@@ -720,13 +722,29 @@ export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, 
 
 // ---------- Fechas de actividad (Última actividad / Último contacto / Próxima actividad) ----------
 
+// «Última actividad» (pedido de Rodrigo del 16/11/2026): lo último que pasó con el registro, nunca vacía, porque cargarlo
+// ya es actividad. Cuenta el alta, las notas, mails, llamadas, reuniones y WhatsApp, las tareas completadas, los mensajes
+// de la conversación, los cambios de etapa (de negocios y pedidos) y los bocetos y logos que se suben. Va sobre la fila
+// de `records` que se actualiza; `ts` es el parámetro con la hora de ahora (las reuniones por venir no cuentan).
+export const ultimaActividadSql = (ts: string) => `MAX(records.created_at, COALESCE(records.stage_entered_at, ''),
+    COALESCE((SELECT MAX(CASE WHEN a.type = 'task' THEN a.completed_at ELSE a.occurred_at END) FROM activities a JOIN activity_links l ON l.activity_id = a.id
+      WHERE l.record_id = records.id AND a.archived = 0 AND (a.type != 'task' OR a.status = 'COMPLETED') AND a.occurred_at <= ${ts}), ''),
+    COALESCE((SELECT MAX(m.created_at) FROM mensajes m WHERE m.record_id = records.id AND m.borrado_at IS NULL), ''),
+    COALESCE((SELECT MAX(c.changed_at) FROM changes c WHERE c.record_id = records.id AND c.prop IN ('dealstage', 'hs_pipeline_stage')), ''),
+    COALESCE((SELECT MAX(b.created_at) FROM bocetos b WHERE b.record_id = records.id), ''),
+    COALESCE((SELECT MAX(g.created_at) FROM logos g WHERE g.company_id = records.id), ''),
+    COALESCE((SELECT MAX(g.created_at) FROM logos g WHERE g.record_id = records.id), ''))`;
+
+// Algo que cuenta como actividad acaba de pasar (cambio de etapa, boceto, logo): la «Última actividad» pasa a ser ahora.
+export const tocarActividad = (db: D1Database, recordId: number, ts = now()) =>
+  db.prepare("UPDATE records SET last_activity_at = MAX(COALESCE(last_activity_at, ''), ?) WHERE id = ?").bind(ts, recordId);
+
 export async function refreshActivityDates(db: D1Database, recordIds: number[]) {
   const ids = [...new Set(recordIds)].filter(Boolean);
   if (!ids.length) return;
   const ts = now();
   const stmts = ids.map((id) => db.prepare(`UPDATE records SET
-    last_activity_at = (SELECT MAX(a.occurred_at) FROM activities a JOIN activity_links l ON l.activity_id = a.id
-      WHERE l.record_id = ?1 AND a.archived = 0 AND a.type != 'task' AND a.occurred_at <= ?2),
+    last_activity_at = ${ultimaActividadSql('?2')},
     last_contacted_at = (SELECT MAX(a.occurred_at) FROM activities a JOIN activity_links l ON l.activity_id = a.id
       WHERE l.record_id = ?1 AND a.archived = 0 AND a.type IN ('email', 'call', 'meeting', 'whatsapp') AND a.occurred_at <= ?2
       AND (a.type != 'email' OR a.direction = 'out')),

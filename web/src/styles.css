@@ -462,19 +462,29 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .preview-sum { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; }
 .preview-sum .input.select-like { height: 30px; font-size: 13px; width: auto; max-width: 100%; display: inline-flex; }
 /* «Chat en Darwin» (components.tsx): el ícono en el verde de WhatsApp, para que se entienda adónde lleva. */
-.chat-darwin svg { color: #1a9e4f; flex: none; }
-[data-theme="dark"] .chat-darwin svg { color: #3ccf75; }
+/* Botones de chat con los colores de cada marca (ChatDarwin y ChatWhatsApp en components.tsx): Darwin en su azul
+   (#3A58ED), WhatsApp en su verde (#25D366). En la tarjeta del tablero van solo con el logo (.chat-ico). */
+.chat-darwin, .chat-wa { gap: 5px; font-weight: 600; }
+.chat-darwin svg, .chat-wa svg { flex: none; }
+.btn.chat-darwin, .chat-darwin { background: #eef1fe; color: #2c45c9; border: 1px solid #c9d2fb; }
+.chat-darwin svg { color: #3a58ed; }
+.btn.chat-darwin:hover, .btn.chat-darwin:focus-visible { background: #dfe5fd; color: #2239ad; }
+.btn.chat-wa, .chat-wa { background: #e9f9ef; color: #0b7a3a; border: 1px solid #b6ebc9; }
+.chat-wa svg { color: #25d366; }
+.btn.chat-wa:hover, .btn.chat-wa:focus-visible { background: #d6f4e1; color: #08652f; }
+[data-theme="dark"] .chat-darwin { background: rgba(58, 88, 237, .18); color: #aebcff; border-color: rgba(58, 88, 237, .45); }
+[data-theme="dark"] .chat-darwin svg { color: #7d93ff; }
+[data-theme="dark"] .chat-darwin:hover { background: rgba(58, 88, 237, .3); color: #c9d3ff; }
+[data-theme="dark"] .chat-wa { background: rgba(37, 211, 102, .14); color: #7ee3a5; border-color: rgba(37, 211, 102, .4); }
+[data-theme="dark"] .chat-wa svg { color: #25d366; }
+[data-theme="dark"] .chat-wa:hover { background: rgba(37, 211, 102, .24); color: #a6f0c2; }
+.card .card-actions .chat-ico { flex: none; width: 28px; height: 26px; padding: 0; justify-content: center; border-radius: var(--r-pill); }
 /* Teléfonos que abren el chat de WhatsApp (WhatsAppLink en components.tsx), en la tabla, la ficha y la vista previa. */
 .wa-link { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; vertical-align: middle; }
 .wa-link svg { color: #1a9e4f; flex: none; }
 [data-theme="dark"] .wa-link svg { color: #3ccf75; }
-/* En la tarjeta del tablero resalta entre los íconos grises: pastilla verde suave, como las etiquetas «ok». */
-.card .card-actions .chat-darwin { background: var(--ui-positive-soft); color: var(--ui-positive-ink); border: 1px solid color-mix(in srgb, var(--ui-positive) 35%, transparent);
-  border-radius: var(--r-pill); padding: 0 8px 0 6px; font-weight: 600; gap: 3px; flex: none; }
 /* La última actividad, en un solo renglón aunque la tarjeta sea angosta. */
 .card .card-actions > .grow.small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.card .card-actions .chat-darwin svg { color: currentColor; }
-.card .card-actions .chat-darwin:hover, .card .card-actions .chat-darwin:focus-visible { background: color-mix(in srgb, var(--ui-positive) 22%, var(--ui-surface)); color: var(--ui-positive-ink); }
 /* Valor del negocio con su lápiz (ValorEditable): en la vista previa y debajo del nombre en la ficha. */
 .valor { display: inline-flex; align-items: center; gap: 4px; }
 .valor-lapiz { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-control); background: transparent;

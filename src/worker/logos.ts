@@ -2,6 +2,7 @@ import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { primaryCompanyId } from './associations';
 import { subirArchivo } from './drive';
+import { tocarActividad } from './records';
 
 // Logos del cliente (pedido de Rodrigo del 13/11/2026): el original «en curvas» (AI, EPS, CDR, SVG, PDF…) se sube una vez a
 // la empresa (Drive: <empresa>/Logos) y se usa en todos sus pedidos y negocios. En cada producto (y su boceto) se elige cuál
@@ -125,6 +126,8 @@ export async function subirLogo(env: Env, ctx: Ctx, companyId: number, archivo: 
   const row = await db.prepare(`INSERT INTO logos (company_id, etiqueta, nombre, formato, mime, size, vectorial, vista, curvas, principal, drive_id, drive_link, user_id, record_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(companyId, datos.etiqueta?.trim() || null, archivo.name || `logo.${r.formato}`, r.formato, r.mime,
     archivo.size, r.vectorial ? 1 : 0, r.vista, r.curvas, hay ? 0 : 1, f.id, f.link, ctx.user.id, datos.recordId ?? null).first<{ id: number }>();
+  // Subir un logo cuenta como actividad de la empresa y del pedido o negocio desde donde se subió.
+  await db.batch([tocarActividad(db, companyId), ...(datos.recordId ? [tocarActividad(db, datos.recordId)] : [])]);
   return logoPorId(db, row!.id);
 }
 

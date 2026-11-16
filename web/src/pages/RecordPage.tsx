@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
-import { Avatar, ChatDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
+import { Avatar, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
@@ -39,7 +39,7 @@ export default function RecordPage() {
   return (
     <div className="content flush record-wrap">
       <div className="record">
-        <aside className="left"><LeftPanel type={type} record={record} onChange={refresh} produccion={data.data.produccion} /></aside>
+        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} /></aside>
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
@@ -157,6 +157,14 @@ function KeyPropsModal({ type, onClose }: { type: ObjectType; onClose: () => voi
   );
 }
 
+// WhatsApp directo con el cliente del negocio: el celular del contacto principal (o el primero que tenga) y, si no hay,
+// el número del hilo de Darwin.
+function WhatsAppDelNegocio({ record, associations }: { record: CrmRecord; associations?: Assoc }) {
+  const contactos = [...(associations?.contact ?? [])].sort((a, b) => Number(!!b.primary) - Number(!!a.primary));
+  const c = contactos.find((x) => whatsappUrl(x.props?.mobilephone || x.props?.phone));
+  return <ChatWhatsApp phone={c ? c.props.mobilephone || c.props.phone : telDeDarwin(record.props.link_a_darwin)} quien={c?.name} />;
+}
+
 function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r: CrmRecord) {
   if (type === 'contact') return [r.props.jobtitle, r.props.company].filter(Boolean).join(' · ') || r.props.email;
   if (type === 'company') return r.props.domain;
@@ -164,7 +172,7 @@ function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r:
   return r.props.pdv_finnegans ? `PDV ${r.props.pdv_finnegans}` : '';
 }
 
-function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; record: CrmRecord; onChange: () => void; produccion?: Loaded['produccion'] }) {
+function LeftPanel({ type, record, associations, onChange, produccion }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion'] }) {
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
@@ -218,7 +226,7 @@ function LeftPanel({ type, record, onChange, produccion }: { type: ObjectType; r
         <div className="row wrap">
           {type === 'contact' && whatsappUrl(record.props.mobilephone || record.props.phone) && <a className="btn sm wa-link" href={whatsappUrl(record.props.mobilephone || record.props.phone)} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
-          {type === 'deal' && <ChatDarwin url={record.props.link_a_darwin} />}
+          {type === 'deal' && <><ChatDarwin url={record.props.link_a_darwin} /><WhatsAppDelNegocio record={record} associations={associations} /></>}
           {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
           {type !== 'order' && (
             <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas Hub para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
@@ -1096,7 +1104,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
             <div className="preview-sum">
               {summary.map(([k, v]) => <div key={k}><span className="muted">{k}:</span> {v}</div>)}
             </div>
-            {type === 'deal' && <div style={{ marginTop: 8 }}><ChatDarwin url={record.props.link_a_darwin} /></div>}
+            {type === 'deal' && <div className="row wrap" style={{ marginTop: 8 }}><ChatDarwin url={record.props.link_a_darwin} /><WhatsAppDelNegocio record={record} associations={associations} /></div>}
           </div>
         </div>
         <div className="rec-actions">

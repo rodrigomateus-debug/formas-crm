@@ -418,10 +418,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                 {ubicando?.clave === p.clave && (
                   <div className="cr-ubicar">
                     <span>Arrastrá el número <b>{i + 1}</b> en el mapa hasta donde queda de verdad. Vale para esta dirección en todas las rutas.{p.punto_manual ? ' Ya tiene una ubicación corregida a mano.' : ''}</span>
-                    <div className="row" style={{ flexWrap: 'wrap' }}>
-                      <button type="button" className="btn sm primary" disabled={ubicando.lat == null} onClick={() => fijar(p)}>Guardar ubicación</button>
+                    <div className="acciones">
                       <button type="button" className="btn sm ghost" onClick={() => setUbicando(null)}>Cancelar</button>
                       {p.punto_manual && <button type="button" className="btn sm ghost" onClick={() => rebuscar(p)}>Volver a buscar en el mapa</button>}
+                      <button type="button" className="btn sm primary" disabled={ubicando.lat == null} onClick={() => fijar(p)}>Guardar ubicación</button>
                     </div>
                   </div>
                 )}
@@ -483,9 +483,9 @@ function OtroLugar({ titulo = 'De dónde sale este recorrido', onElegir, onCance
     <div className="cr-panel">
       <label>{titulo}<input className="input sm" autoFocus value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar o dirección" /></label>
       {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => onElegir({ nombre: l.nombre, direccion: l.direccion })}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
-      <div className="row">
-        {/\d/.test(texto) && texto.length > 5 && <button type="button" className="btn sm" onClick={() => onElegir({ nombre: texto, direccion: texto })}>Usar «{texto}» como dirección</button>}
+      <div className="acciones">
         <button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button>
+        {/\d/.test(texto) && texto.length > 5 && <button type="button" className="btn sm" onClick={() => onElegir({ nombre: texto, direccion: texto })}>Usar «{texto}» como dirección</button>}
       </div>
     </div>
   );
@@ -514,10 +514,10 @@ function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id:
           <option value="+"><span className="select-nuevo"><Icon name="plus" size={13} />Agregar expreso…</span></option>
         </Select></label>
       <label>Número de guía (se puede cargar después)<input className="input sm" value={guia} onChange={(e) => setGuia(e.target.value)} maxLength={80} /></label>
-      <div className="row" style={{ flexWrap: 'wrap' }}>
-        <button type="submit" className="btn sm primary" disabled={!expreso}>Guardar</button>
-        {p.expreso && <button type="button" className="btn sm ghost" onClick={() => guardar('')}>Va directo al cliente</button>}
+      <div className="acciones">
         <button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button>
+        {p.expreso && <button type="button" className="btn sm ghost" onClick={() => guardar('')}>Va directo al cliente</button>}
+        <button type="submit" className="btn sm primary" disabled={!expreso}>Guardar</button>
       </div>
     </form>
   );
@@ -539,10 +539,10 @@ function FijarHora({ p, llega, onGuardar, onCancelar }: { p: Parada; llega: numb
         <input type="time" className="input sm" value={hora} onChange={(e) => setHora(e.target.value)} aria-label="Hora" required />
       </div>
       <span className="muted small">{modo === 'a_las' ? 'Llega entre 15 minutos antes y 15 después.' : modo === 'antes' ? 'Tiene que llegar antes de esa hora.' : 'No antes de esa hora.'} El recorrido se ordena solo para cumplirla, junto con las demás horas fijadas.</span>
-      <div className="row">
-        <button type="submit" className="btn sm primary" disabled={ocupado || !hora}>Fijar la hora</button>
-        {p.pactada && <button type="button" className="btn sm ghost" disabled={ocupado} onClick={() => guardar(null)}>Sacar la hora</button>}
+      <div className="acciones">
         <button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button>
+        {p.pactada && <button type="button" className="btn sm ghost" disabled={ocupado} onClick={() => guardar(null)}>Sacar la hora</button>}
+        <button type="submit" className="btn sm primary" disabled={ocupado || !hora}>Fijar la hora</button>
       </div>
     </form>
   );
@@ -607,7 +607,7 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
         </ul>
       )}
       {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
-      <div className="row"><button type="submit" className="btn sm primary" disabled={guardando}>Guardar</button><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button></div>
+      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando}>Guardar</button></div>
     </form>
   );
 }

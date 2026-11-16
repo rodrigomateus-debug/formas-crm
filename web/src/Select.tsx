@@ -67,9 +67,11 @@ export function useFloating(anchor: RefObject<HTMLElement | null>, pop: RefObjec
   return { style, place };
 }
 
-export function Select({ value, onChange, children, className = 'input', style, disabled, autoFocus, title, id, placeholder, ...aria }: {
+export function Select({ value, onChange, children, className = 'input', style, disabled, autoFocus, title, id, placeholder, onCerrar, ...aria }: {
   value?: string | number | null; onChange?: (e: ChangeEvent) => void; children?: ReactNode; className?: string; style?: CSSProperties;
   disabled?: boolean; autoFocus?: boolean; title?: string; id?: string; placeholder?: string; 'aria-label'?: string;
+  /** Al cerrarse la lista, se haya elegido algo o no (la edición en el lugar se cierra si no cambió nada). */
+  onCerrar?: () => void;
 }) {
   const opts = useMemo(() => { const o: Opt[] = []; collect(children, o); return o; }, [children]);
   const v = value == null ? '' : String(value);
@@ -84,7 +86,7 @@ export function Select({ value, onChange, children, className = 'input', style, 
   const typed = useRef({ s: '', t: 0 });
   const listId = useId();
   const withSearch = opts.length > 10;
-  const close = (focus = true) => { setOpen(false); setQ(''); if (focus) btn.current?.focus(); };
+  const close = (focus = true) => { setOpen(false); setQ(''); if (focus) btn.current?.focus(); onCerrar?.(); };
   const { style: popStyle, place } = useFloating(btn, pop, open, () => close(false));
 
   const shown = useMemo(() => {

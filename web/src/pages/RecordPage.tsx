@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
-import { Avatar, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
+import { Avatar, EditarEnLinea, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
@@ -207,7 +207,7 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
         <div className="title"><Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
           <div className="grow"><h1>{record.name}</h1>
             {type === 'deal'
-              ? <div className="muted small rec-valor"><ValorEditable record={record} onSaved={onChange} />{stageOf(meta, record.props.dealstage) ? ` · ${stageOf(meta, record.props.dealstage)!.stage.label}` : ''}</div>
+              ? <div className="muted small rec-valor"><ValorEditable record={record} onSaved={onChange} />{stageOf(meta, record.props.dealstage) ? <span className="rec-etapa">{` · ${stageOf(meta, record.props.dealstage)!.stage.label}`}</span> : ''}</div>
               : <div className="muted small">{subtitle(meta, type, record)}</div>}
             {/* Pedidos: la etapa y quién lo tiene en producción, igual que en la vista previa y en la tarjeta del tablero. */}
             {type === 'order' && (record.props.hs_pipeline_stage || produccion) && (
@@ -270,15 +270,27 @@ function PropRow({ type, prop, record, onSave, onHistory }: { type: ObjectType; 
   const [val, setVal] = useState<unknown>(record.props[prop.name]);
   const shown = formatValue(meta, type, prop.name, record.props[prop.name], record.props);
   const ro = !!prop.read_only || prop.name === 'dealstage' || prop.name === 'pipeline';
+  const [saving, setSaving] = useState(false);
+  // Los desplegables guardan al elegir (como en la tabla); el resto, con ✓ o Enter. El campo ocupa el lugar del dato.
+  const instant = ['owner', 'enum', 'bool'].includes(prop.type);
+  const enviando = useRef(false);
+  const guardar = async (v: unknown) => {
+    if (String(v ?? '') === String(record.props[prop.name] ?? '')) { setEdit(false); return; }
+    setSaving(true);
+    enviando.current = true;
+    try { await onSave(prop.name, v); setEdit(false); } catch { /* el aviso ya se mostró */ } finally { setSaving(false); enviando.current = false; }
+  };
+  // Un desplegable que se cierra sin elegir otra cosa (la misma opción, Esc o clic afuera) cierra la edición.
+  const alCerrarLista = () => setTimeout(() => { if (!enviando.current) setEdit(false); }, 0);
   if (edit) {
     return (
-      <div className="prop prop-edit">
+      <div className="prop editando">
         <div className="k">{prop.label}</div>
-        <PropertyInput prop={prop} type={type} value={val} onChange={setVal} autoFocus />
-        <div className="row">
-          <button className="btn sm primary" onClick={async () => { try { await onSave(prop.name, val); setEdit(false); } catch { /* el aviso ya se mostró */ } }}>Guardar</button>
-          <button className="btn sm" onClick={() => { setVal(record.props[prop.name]); setEdit(false); }}>Cancelar</button>
-        </div>
+        <EditarEnLinea guardando={saving} multilinea={prop.type === 'text' || prop.type === 'multienum'} sinConfirmar={instant}
+          sucio={String(val ?? '') !== String(record.props[prop.name] ?? '')}
+          onGuardar={() => guardar(val)} onCancelar={() => { setVal(record.props[prop.name]); setEdit(false); }}>
+          <PropertyInput prop={prop} type={type} value={val} onChange={(v) => { setVal(v); if (instant) void guardar(v); }} onCerrar={instant ? alCerrarLista : undefined} autoFocus />
+        </EditarEnLinea>
       </div>
     );
   }

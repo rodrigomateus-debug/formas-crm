@@ -496,8 +496,30 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .valor-lapiz { display: inline-grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: var(--r-control); background: transparent;
   color: var(--ui-ink-3); cursor: pointer; }
 .valor-lapiz:hover, .valor-lapiz:focus-visible { background: var(--ui-surface-sunken); color: var(--accent-ink); }
-.valor-edit { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.valor-edit .input { width: 150px; }
+/* Botones de un formulario dentro de la página: Cancelar a la izquierda y la acción principal al final, a la derecha
+   (el mismo orden que en los cuadros y en la edición de las celdas). */
+.acciones { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
+/* Edición en el lugar (EditarEnLinea en components.tsx): el campo, en el renglón del dato, con ✓ y ✕ al lado. */
+.en-linea { --control-h: 28px; --control-h-sm: 28px; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.en-linea.multi { align-items: flex-start; }
+.en-linea-campo { flex: 1; min-width: 0; }
+.en-linea-campo > .input, .en-linea-campo > .input-afijo { width: 100%; }
+.en-linea textarea.input { min-height: 72px; }
+.en-linea .btn.icon { flex: none; }
+.en-linea .btn.icon.ghost { color: var(--ui-ink-3); }
+.en-linea .btn.icon.ghost:hover { color: var(--ui-ink); }
+.en-linea-campo > .stack { padding: 4px 0; }
+/* Signo de la moneda dentro del campo. */
+.input-afijo { position: relative; display: inline-flex; align-items: center; }
+.input-afijo > span { position: absolute; left: 9px; color: var(--text-3); font-size: 13px; pointer-events: none; }
+.input-afijo > .input { padding-left: 28px; }
+.valor-edit { display: inline-flex; margin: -5px 0; }
+/* Mientras se edita el valor en la ficha, la etapa de al lado se oculta (está en la barra de etapas): así no baja de renglón. */
+.rec-valor:has(.valor-edit) .rec-etapa { display: none; }
+.valor-edit .en-linea-campo { flex: none; width: 160px; }
+/* Números sin las flechitas del navegador (en todos los campos numéricos). */
+.input.num::-webkit-inner-spin-button, .input.num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.input.num { -moz-appearance: textfield; appearance: textfield; }
 .rec-valor { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 13px; }
 .act-btn { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--ui-ink-2); background: none; border: 0; cursor: pointer; width: 56px; padding: 0; white-space: nowrap; }
 .act-btn span.ic { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--ui-line-strong); display: grid; place-items: center; background: var(--ui-surface); color: var(--accent-ink);
@@ -522,7 +544,8 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .prop:hover .k .hist { visibility: visible; }
 .prop .v { min-height: 20px; word-break: break-word; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
 .prop .v.blank { color: var(--text-3); }
-.prop-edit { display: flex; flex-direction: column; gap: 6px; }
+.prop.editando { cursor: default; background: var(--ui-surface-sunken); }
+.prop.editando .en-linea { margin: -4px 0; }
 .stage-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; }
 .stage-field { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 250px; max-width: 320px; }
 .stage-field > span { min-width: 50px; }

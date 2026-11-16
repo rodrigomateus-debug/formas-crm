@@ -636,7 +636,7 @@ export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloE
       {tipo === 'expreso' && <label>Dirección del expreso (a dónde se le lleva)<input className="input sm" value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" maxLength={300} /></label>}
       {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => setDireccion(l.direccion)}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
       {tipo === 'chofer' && <span className="muted small">Para que vea su recorrido en el celular, creale su código en Choferes (en Entregas → Choferes, si sos administrador), con el mismo nombre.</span>}
-      <div className="row"><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
+      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button><button type="submit" className="btn sm primary" disabled={ocupado || nombre.trim().length < 2}>Agregar</button></div>
     </form>
   );
 }

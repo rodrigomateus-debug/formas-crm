@@ -565,8 +565,8 @@ function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (
             <label className="field">Dirección<input className="input" value={suelto.direccion} onChange={(e) => setSuelto({ ...suelto, direccion: e.target.value })} placeholder="Calle y altura, localidad" /></label>
           </div>
           <label className="small row"><input type="checkbox" checked={suelto.guardar} onChange={(e) => setSuelto({ ...suelto, guardar: e.target.checked })} />Guardarlo en Destinos (para la próxima)</label>
-          <div className="row"><button type="button" className="btn sm primary" disabled={!suelto.direccion.trim()} onClick={() => onElegir({ tipo: 'suelto', key: 'd', nombre: suelto.nombre.trim() || suelto.direccion.trim(), direccion: suelto.direccion.trim(), detalle: null, lugar_id: null, company_id: null, ...{ guardar: suelto.guardar } } as DestinoOpcion)}>Usar esta dirección</button>
-            <button type="button" className="btn sm ghost" onClick={() => setOtro(false)}>Cancelar</button></div>
+          <div className="acciones"><button type="button" className="btn sm ghost" onClick={() => setOtro(false)}>Cancelar</button>
+            <button type="button" className="btn sm primary" disabled={!suelto.direccion.trim()} onClick={() => onElegir({ tipo: 'suelto', key: 'd', nombre: suelto.nombre.trim() || suelto.direccion.trim(), direccion: suelto.direccion.trim(), detalle: null, lugar_id: null, company_id: null, ...{ guardar: suelto.guardar } } as DestinoOpcion)}>Usar esta dirección</button></div>
         </div>
       ) : <button type="button" className="cr-link" onClick={() => setOtro(true)}><Icon name="plus" size={12} />Otro lugar (una dirección que no está en la base)</button>}
     </div>

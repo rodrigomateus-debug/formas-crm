@@ -603,10 +603,10 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
                   onElegir={(o) => { setVarios((v) => [...(v ?? []), { id: o.id, nombre: o.name }]); setSumar(false); }} />
               : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setSumar(true)}>+ Sumar otro pedido</button>}
             {varios.length > 0 && r.items.length > 0 && <ParesProductos r={r} pedidos={varios} pares={pares} onChange={setPares} />}
-            <div className="row wrap" style={{ gap: 6 }}>
+            <div className="acciones">
+              <button className="btn sm ghost" disabled={ocupado} onClick={() => { setVarios(null); setSumar(false); }}>Cancelar</button>
               <button className="btn sm primary" disabled={ocupado || !varios.length} onClick={confirmarVarios}>
                 {varios.length > 1 ? `Confirmar en los ${varios.length} pedidos` : varios.length ? `Es de «${varios[0].nombre}»` : 'Elegí los pedidos'}</button>
-              <button className="btn sm ghost" disabled={ocupado} onClick={() => { setVarios(null); setSumar(false); }}>Cancelar</button>
             </div>
           </div>
         ) : (

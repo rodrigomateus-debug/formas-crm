@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
-import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type Simulacion, type TramosReales } from '../ruta';
+import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 import { EncargoModal, itemTexto, type Encargo } from './Recorridos';
 
@@ -20,6 +20,8 @@ interface Parada {
   company_id: number | null; record_id: number | null; movimientos: Mov[];
   encargos?: Encargo[];   // lo que pidió alguien para ese día en ese lugar (Recorridos)
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
+  // La hora fijada a mano (pedido de Rodrigo del 16/11/2026): `horario` ya es esa ventana y el orden más corto la cumple.
+  pactada?: { modo: ModoHora; min: number; texto: string } | null; estricto?: boolean;
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
 }
@@ -84,6 +86,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [reales, setReales] = useState<Record<string, Real>>({});
   const [caliente, setCaliente] = useState<string | null>(null);
   const [editando, setEditando] = useState<string | null>(null);
+  const [fijando, setFijando] = useState<string | null>(null);   // la parada a la que se le está fijando la hora
   // La parada a la que se le está corrigiendo la ubicación en el mapa (solo ese número se puede arrastrar) y dónde se soltó.
   const [ubicando, setUbicando] = useState<{ clave: string; lat?: number; lng?: number } | null>(null);
   // Paneles de la barra del recorrido (agregar un chofer o un expreso, elegir otro lugar de salida) y la parada a la que
@@ -176,6 +179,18 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const act = armadas[Math.min(activa, armadas.length - 1)];
   // Guarda ya y vuelve a pedir la ruta: hace falta cuando el cambio necesita algo del servidor (ubicar en el mapa el lugar
   // de salida que se eligió).
+  // Fijar (o sacar) la hora de una parada: lo que estaba sin guardar se guarda primero, y el recorrido vuelve del servidor
+  // ya ordenado solo para cumplir esa hora y las demás.
+  async function fijarHora(p: Parada, modo: ModoHora | null, hora: string) {
+    try {
+      const pend = porGuardar.current;
+      if (sucio.current && pend) { sucio.current = false; porGuardar.current = null; await http('PUT', '/cronograma/ruta', pend); }
+      await http('PUT', '/cronograma/hora', { fecha, clave: p.clave, modo, hora });
+      toast(modo ? `${lindo(p.nombre)}: ${modo === 'antes' ? 'antes de las' : modo === 'desde' ? 'desde las' : 'a las'} ${hora}. El recorrido se ordenó para cumplirla.` : `${lindo(p.nombre)}: sin hora fijada.`);
+    } catch (e) { toast((e as Error).message, true); return; }
+    setFijando(null); tocado.current = false; setRutas([]);
+    void cargar(); onCambio();
+  }
   async function guardarYa(nuevas: Recorrido[]) {
     sucio.current = false; porGuardar.current = null; tocado.current = true;
     setRutas(Object.assign(nuevas, { fecha }));
@@ -335,7 +350,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                     : ' · sin guía todavía'}</div>}
                   <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ?? 'Sin dirección cargada'}</div>
                 </div>
-                <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></div>
+                <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}>{s.espera > 1 && !s.tramo.sinUbicar
+                  // Llega antes de su horario (o de la hora fijada): la hora es la de cuando se la atiende.
+                  ? <><b className="num">{hhmm(s.llega + s.espera)}</b><span>llega {hhmm(s.llega)}</span></>
+                  : <><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></>}</div>
                 {p.lugar && (p.lugar.contacto || p.lugar.telefono || p.lugar.observaciones || p.lugar.coordinacion || (p.lugar.horario && !p.horario)) && (
                   <div className="cr-libreta" title={`De la libreta de direcciones: ${p.lugar.nombre}`}>
                     {p.lugar.horario && !p.horario && <span><b>Horario</b>{p.lugar.horario}</span>}
@@ -375,7 +393,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                     <span><b>{p.visita.resultado === 'salteada' ? 'El chofer la dejó para después' : MOTIVO[p.visita.motivo ?? 'otro'] ?? 'No se pudo'}</b>{p.visita.nota ? `: ${p.visita.nota}` : ''} · {p.visita.chofer ?? 'Chofer'}, {horaDe(p.visita.at)}</span></div>
                 )}
                 <div className="cr-p-pie">
-                  {(p.horario || s.espera > 1) && <span className={`cr-tag${s.tarde ? ' late' : ''}`}>{p.horario ? `Recibe de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : ''}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>}
+                  {p.pactada ? <span className={`cr-tag fija${s.tarde ? ' late' : ''}`} title="Hora fijada a mano: el recorrido se ordena para cumplirla"><Icon name="timer" size={11} />{p.pactada.texto}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>
+                    : (p.horario || s.espera > 1) && <span className={`cr-tag${s.tarde ? ' late' : ''}`}>{p.horario ? `Recibe de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : ''}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>}
+                  {puede && <button type="button" className="cr-link" onClick={() => setFijando(fijando === p.clave ? null : p.clave)}>{p.pactada ? 'Cambiar la hora' : 'Fijar hora'}</button>}
                   {p.lat == null && <span className="cr-tag riesgo"><Icon name="alert" size={11} />{p.direccion ? 'No se encontró en el mapa' : 'Falta la dirección'}</span>}
                   {p.visita?.resultado === 'hecho' && <span className="cr-tag">Lo marcó {p.visita.chofer ?? 'el chofer'} a las {horaDe(p.visita.at)}</span>}
                   {puede && <button type="button" className="cr-link" onClick={() => marcar(p)}>{todo ? 'Volver a pendiente' : 'Marcar hecho'}</button>}
@@ -403,6 +423,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                 )}
                 {expresando === p.clave && <PorExpreso p={p} expresos={datos.expresos ?? []} onListo={() => { setExpresando(null); void cargar(); onCambio(); }} />}
                 {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
+                {fijando === p.clave && <FijarHora p={p} llega={s.tramo.sinUbicar ? null : s.llega} onGuardar={(modo, hora) => fijarHora(p, modo, hora)} onCancelar={() => setFijando(null)} />}
               </li>,
             ];
           })}
@@ -493,6 +514,31 @@ function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id:
         <button type="submit" className="btn sm primary" disabled={!expreso}>Guardar</button>
         {p.expreso && <button type="button" className="btn sm ghost" onClick={() => guardar('')}>Va directo al cliente</button>}
         <button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button>
+      </div>
+    </form>
+  );
+}
+
+// Fijar la hora de una parada: «a las 12:00» (llega entre 15 minutos antes y 15 después), «antes de las…» o «desde las…».
+function FijarHora({ p, llega, onGuardar, onCancelar }: { p: Parada; llega: number | null; onGuardar: (modo: ModoHora | null, hora: string) => Promise<void>; onCancelar: () => void }) {
+  const dos = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m) % 60).padStart(2, '0')}`;
+  const [modo, setModo] = useState<ModoHora>(p.pactada?.modo ?? 'a_las');
+  const [hora, setHora] = useState(p.pactada ? dos(p.pactada.min) : llega != null ? dos(Math.round(llega / 15) * 15) : '12:00');
+  const [ocupado, setOcupado] = useState(false);
+  const guardar = async (m: ModoHora | null) => { setOcupado(true); await onGuardar(m, hora); setOcupado(false); };
+  return (
+    <form className="cr-editar cr-fijar" onSubmit={(e) => { e.preventDefault(); if (hora) void guardar(modo); }}>
+      <div className="row" role="group" aria-label="Cómo">
+        {([['a_las', 'A las'], ['antes', 'Antes de las'], ['desde', 'Desde las']] as const).map(([k, t]) => (
+          <button key={k} type="button" className={`chip${modo === k ? ' on' : ''}`} aria-pressed={modo === k} onClick={() => setModo(k)}>{t}</button>
+        ))}
+        <input type="time" className="input sm" value={hora} onChange={(e) => setHora(e.target.value)} aria-label="Hora" required />
+      </div>
+      <span className="muted small">{modo === 'a_las' ? 'Llega entre 15 minutos antes y 15 después.' : modo === 'antes' ? 'Tiene que llegar antes de esa hora.' : 'No antes de esa hora.'} El recorrido se ordena solo para cumplirla, junto con las demás horas fijadas.</span>
+      <div className="row">
+        <button type="submit" className="btn sm primary" disabled={ocupado || !hora}>Fijar la hora</button>
+        {p.pactada && <button type="button" className="btn sm ghost" disabled={ocupado} onClick={() => guardar(null)}>Sacar la hora</button>}
+        <button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button>
       </div>
     </form>
   );

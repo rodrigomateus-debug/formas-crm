@@ -343,7 +343,8 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.equal(imp.lat, -34.699);
   r = (await api('GET', '/cronograma/ruta?fecha=2026-11-16')).data;
   assert.ok(r.llegan.some((m) => m.npdv === PDV && m.tipo === 'ingreso'));
-  assert.ok(!r.paradas.some((p) => p.movimientos.some((m) => m.npdv === PDV)));
+  // (Solo el ingreso: el retiro de la gorra es de hoy, y hoy puede ser el 16/11.)
+  assert.ok(!r.paradas.some((p) => p.movimientos.some((m) => m.npdv === PDV && m.tipo === 'ingreso')));
 
   // Correr un punto en el mapa: queda ahí y no se vuelve a buscar.
   const geoAntes = consultasGeo;

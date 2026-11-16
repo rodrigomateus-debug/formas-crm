@@ -8,7 +8,7 @@ import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
 import { MODELO } from './remitos';
-import { optimizar, simular, type Destino, type Punto } from '../../web/src/ruta';
+import { optimizar, simular, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
 // repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
@@ -79,6 +79,7 @@ export interface Movimiento {
   expreso?: { nombre: string; guia: string | null } | null;   // la entrega va por un expreso (entrega_expresos)
   dominio?: string | null;   // el dominio de la empresa de la tarjeta (el cliente en las entregas; si no, el proveedor o impresor), para su logo
   chofer?: string | null;    // en la semana: el chofer (o expreso) del recorrido del día en el que está su parada
+  hora?: string | null;      // en la semana: la hora fijada a mano en su parada («A las 12:00»)
   retira_en?: string | null; // en la semana: lo retira el cliente en Formas (tarjeta «Entrega»), así que no es parada de nadie
 }
 // La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
@@ -203,7 +204,14 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   for (const n of notas.results) { const d = (dias[n.fecha] ??= { total: 0, pendientes: 0, atrasados: 0 }); d.total++; if (!n.hecho) { d.pendientes++; if (n.fecha < hoy) d.atrasados++; } }
   const deLaSemana = movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta);
   const encargos = encs.filter((e) => e.fecha >= q.desde && e.fecha <= q.hasta);
-  const [, , quienes] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, encargos, q.desde, q.hasta), choferesYExpresos(db)]);
+  const [, , quienes, horas] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, encargos, q.desde, q.hasta), choferesYExpresos(db),
+    horasDelDia(db, q.desde, q.hasta)]);
+  // La hora fijada en la ruta del día, en la tarjeta de su parada (un pedido que va a varias direcciones: la primera).
+  if (horas.size) {
+    const texto = (fecha: string, clave: string | undefined) => { const h = clave ? horas.get(`${fecha}|${clave}`) : null; return h ? textoPactada(h) : null; };
+    for (const m of deLaSemana) if (m.tipo !== 'ingreso') m.hora = texto(m.fecha, claveParada(m));
+    for (const e of encargos) e.hora = texto(e.fecha, e.parada);
+  }
   return {
     hoy, desde: q.desde, hasta: q.hasta,
     movimientos: deLaSemana, encargos,
@@ -570,6 +578,55 @@ export async function guardarDireccion(env: Env, ctx: Ctx, b: { record_id?: unkn
   return { ok: true };
 }
 
+// ---------- Horas fijadas a mano ----------
+
+const MODOS: ModoHora[] = ['a_las', 'antes', 'desde'];
+export async function horasDelDia(db: D1Database, desde: string, hasta: string) {
+  const { results } = await db.prepare('SELECT fecha, clave, modo, minutos FROM cronograma_horas WHERE fecha BETWEEN ? AND ?').bind(desde, hasta)
+    .all<{ fecha: string; clave: string; modo: ModoHora; minutos: number }>();
+  return new Map(results.map((h) => [`${h.fecha}|${h.clave}`, { modo: h.modo, min: h.minutos } as Pactada]));
+}
+// Fijar (o sacar, sin `modo`) la hora de una parada ese día. El recorrido que la tiene vuelve a ordenarse solo, para
+// cumplirla junto con las demás horas fijadas: deja de estar «ordenado a mano».
+export async function guardarHora(db: D1Database, ctx: Ctx, b: { fecha?: unknown; clave?: unknown; modo?: unknown; hora?: unknown }) {
+  exigir(ctx);
+  if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
+  const clave = String(b.clave ?? '');
+  if (!/^[a-z]+:.{1,200}$/i.test(clave)) throw new HttpError(400, 'Falta la parada.');
+  if (b.modo == null || b.modo === '') {
+    await db.prepare('DELETE FROM cronograma_horas WHERE fecha = ? AND clave = ?').bind(b.fecha, clave).run();
+  } else {
+    if (!MODOS.includes(b.modo as ModoHora)) throw new HttpError(400, 'La hora es «a las», «antes de las» o «desde las».');
+    const m = String(b.hora ?? '').match(/^(\d{1,2})(?::(\d{2}))?$/);
+    const min = m ? Number(m[1]) * 60 + Number(m[2] ?? 0) : NaN;
+    if (!m || Number(m[1]) > 23 || Number(m[2] ?? 0) > 59) throw new HttpError(400, 'La hora va como 12:00.');
+    await db.prepare('INSERT OR REPLACE INTO cronograma_horas (fecha, clave, modo, minutos, user_id, at) VALUES (?, ?, ?, ?, ?, ?)').bind(b.fecha, clave, b.modo, min, ctx.user.id, now()).run();
+  }
+  // El recorrido que tiene esa parada (o, si no está en ninguno, el primero, que es donde cae) se ordena solo otra vez.
+  const r = await db.prepare(`UPDATE cronograma_rutas SET a_mano = 0, updated_by = ?, updated_at = ? WHERE fecha = ? AND EXISTS (SELECT 1 FROM json_each(orden) WHERE value = ?)`)
+    .bind(ctx.user.id, now(), b.fecha, clave).run();
+  if (!r.meta.changes) await db.prepare('UPDATE cronograma_rutas SET a_mano = 0 WHERE fecha = ? AND n = (SELECT MIN(n) FROM cronograma_rutas WHERE fecha = ?)').bind(b.fecha, b.fecha).run();
+  return { ok: true };
+}
+
+// Un horario escrito a mano, como viene en los encargos y en la libreta: «9 a 13», «antes de las 14 hs», «después de las
+// 15», «luego del mediodía», «a las 12», «por la mañana». En minutos desde las 0:00.
+export function ventanaDe(s: unknown): [number, number] | null {
+  const r = horarioDe(s);
+  if (r) return r;
+  const t = norm(String(s ?? ''));
+  const hora = (h: string, m?: string) => Number(h) * 60 + Number(m ?? 0);
+  let x = t.match(/antes de(?: las?)? (\d{1,2})(?:[:.](\d{2}))?/);
+  if (x && Number(x[1]) <= 23) return [0, hora(x[1], x[2])];
+  x = t.match(/(?:despues|luego|desde|a partir) de(?:l| las?)? (\d{1,2})(?:[:.](\d{2}))?/);
+  if (x && Number(x[1]) <= 23) return [hora(x[1], x[2]), 24 * 60 - 1];
+  if (/(despues|luego|pasado) del mediodia|por la tarde|a la tarde/.test(t)) return [13 * 60, 24 * 60 - 1];
+  if (/por la manana|a la manana|antes del mediodia/.test(t)) return [0, 12 * 60];
+  x = t.match(/(?:^|a las? )(\d{1,2})(?:[:.](\d{2}))?\s*(?:hs?\.?)?\s*$/);
+  if (x && Number(x[1]) <= 23) return ventanaPactada({ modo: 'a_las', min: hora(x[1], x[2]) });
+  return null;
+}
+
 // ---------- El mapa: dónde queda cada dirección ----------
 
 interface Geo { lat: number; lng: number; manual: boolean }
@@ -641,6 +698,8 @@ export interface Parada {
   visita?: Visita | null;   // lo que marcó el chofer en la app
   expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
   lugar?: LugarInfo | null; // lo que dice la libreta de direcciones de ese lugar
+  pactada?: (Pactada & { texto: string }) | null;   // la hora fijada a mano en la ruta del día; `horario` ya es esa ventana
+  estricto?: boolean;
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
@@ -780,14 +839,25 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
       lista_.push(p); paradas.set(clave, p);
     }
     p.encargos.push(e);
-    if (!p.horario && horarioDe(e.horario)) { p.horario = horarioDe(e.horario); p.horario_texto = e.horario; }
+    if (!p.horario && ventanaDe(e.horario)) { p.horario = ventanaDe(e.horario); p.horario_texto = e.horario; }
   }
   // Lo que dice la libreta del lugar al que se va (horario, contacto, observaciones), reconocido por calle y altura.
   const porDir = await lugaresPorDireccion(db, lista_.filter((p) => p.direccion && !p.lugar).map((p) => p.direccion!));
   for (const p of lista_) {
     if (!p.lugar && p.direccion) { const l = porDir.get(claveCalle(p.direccion)); if (l) p.lugar = infoLugar(l); }
-    if (p.lugar && !p.horario && horarioDe(p.lugar.horario)) { p.horario = horarioDe(p.lugar.horario); p.horario_texto = p.lugar.horario; }
+    if (p.lugar && !p.horario && ventanaDe(p.lugar.horario)) { p.horario = ventanaDe(p.lugar.horario); p.horario_texto = p.lugar.horario; }
     if (p.lugar && !buscar) p.lugar.coordinacion = null;
+  }
+  // Las horas fijadas a mano (pedido de Rodrigo del 16/11/2026): la parada tiene que estar en ese horario. Si además tiene
+  // horario de recepción, el que cumple los dos; si no hay, manda la hora fijada.
+  const horas = await horasDelDia(db, fecha, fecha);
+  for (const p of lista_) {
+    const h = horas.get(`${fecha}|${p.clave}`);
+    if (!h) continue;
+    const v = ventanaPactada(h), r = p.horario;
+    p.pactada = { ...h, texto: textoPactada(h) };
+    p.horario = r && Math.max(r[0], v[0]) < Math.min(r[1], v[1]) ? [Math.max(r[0], v[0]), Math.min(r[1], v[1])] : v;
+    p.estricto = true;
   }
   const guardadas = (await db.prepare('SELECT n, chofer, base, base_nombre, base_direccion, salida, orden, a_mano, fin, fin_nombre, fin_direccion FROM cronograma_rutas WHERE fecha = ? ORDER BY n').bind(fecha)
     .all<{ n: number; chofer: string | null; base: string | null; base_nombre: string | null; base_direccion: string | null; salida: number; orden: string; a_mano: number;
@@ -934,7 +1004,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
         fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
-          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario,
+          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
@@ -1016,6 +1086,7 @@ export interface EncargoDia {
   origen: string; created_at: string;
   chofer?: string | null;   // en la semana: el chofer del recorrido en el que cae su parada
   parada?: string;          // en la semana: la parada en la que cae
+  hora?: string | null;     // en la semana: la hora fijada a mano en esa parada
 }
 export interface EncargoFila {
   id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; destino: string; direccion: string | null; lugar_id: number | null;

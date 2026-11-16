@@ -85,7 +85,17 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   por un factor según la hora, como un día de tránsito moderado (`web/src/ruta.ts`: 1,6 de 7 a 10, 1,35 de 10 a 12,
   1,4 de 12 a 14, 1,3 de 14 a 16:30, 1,65 de 16:30 a 19:30). Más el tiempo en cada parada (8 minutos y 4 por movimiento).
 - **Horario de recepción** («9 a 13», propiedad nueva de la empresa): si el orden deja una parada fuera de horario,
-  queda en rojo.
+  queda en rojo. El horario escrito en un encargo o en la libreta también cuenta, aunque esté escrito como «antes de las
+  14 hs», «después de las 15», «luego del mediodía» o «a las 12».
+- **Hora fijada a mano** (pedido de Rodrigo del 16/11/2026): «Fijar hora» en cada parada, con **A las** (llega entre 15
+  minutos antes y 15 después), **Antes de las** o **Desde las**. El recorrido que la tiene **se vuelve a ordenar solo**
+  para cumplirla junto con las demás horas fijadas y los horarios de recepción (aunque estuviera ordenado a mano): llegar
+  tarde a una hora fijada pesa mucho más que llegar tarde a un horario de recepción, así que el orden más corto la cumple
+  aunque el recorrido quede más largo. Si además el lugar tiene horario de recepción, vale lo que cumpla los dos. La parada
+  dice «A las 12:00» (en rojo si igual llega tarde); si llega antes, la hora de la parada es la de cuando se la atiende,
+  con «llega 9:36» abajo. Se ve también en la tarjeta de la semana y en la app del chofer. «Sacar la hora» la quita. Es de
+  esa parada ese día: tabla `cronograma_horas` (migración `0065_horas_pactadas.sql`), `PUT /api/cronograma/hora`
+  (`{ fecha, clave, modo: 'a_las' | 'antes' | 'desde', hora: '12:00' }`, sin `modo` la saca). Prueba: `test/horas.test.mjs`.
 - **Mapa**: OpenStreetMap. El dibujo y la distancia por calles salen del servicio público de OSRM; si no contesta, el
   recorrido se ve en línea recta y los tiempos son estimados (dice cuál de los dos es). Los números del mapa no se arrastran. Para corregir un punto mal
   ubicado: «Corregir ubicación» en su parada, se arrastra solo ese número y se guarda con «Guardar ubicación» (vale para

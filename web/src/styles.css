@@ -1811,3 +1811,9 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
   .rc-item { grid-template-columns: 56px minmax(0, 1fr) 64px 28px; }
   .rc-dias { grid-template-columns: 1fr; }
 }
+
+/* Hora fijada a mano en una parada de la ruta del día. */
+.cr-tag.fija { background: var(--accent-soft); color: var(--accent-ink); }
+.cr-tag.fija.late { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.cr-fijar .row { flex-wrap: wrap; }
+.cr-fijar input[type="time"] { width: 120px; }

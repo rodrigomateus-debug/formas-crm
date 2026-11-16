@@ -504,6 +504,8 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .en-linea.multi { align-items: flex-start; }
 .en-linea-campo { flex: 1; min-width: 0; }
 .en-linea-campo > .input, .en-linea-campo > .input-afijo { width: 100%; }
+/* El alto lo fija cada lugar (--control-h): también para un campo .sm, que si no queda en 32 px y tapa lo de arriba. */
+.en-linea .input:not(textarea) { height: var(--control-h); }
 .en-linea textarea.input { min-height: 72px; }
 .en-linea .btn.icon { flex: none; }
 .en-linea .btn.icon.ghost { color: var(--ui-ink-3); }
@@ -513,7 +515,7 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .input-afijo { position: relative; display: inline-flex; align-items: center; }
 .input-afijo > span { position: absolute; left: 9px; color: var(--text-3); font-size: 13px; pointer-events: none; }
 .input-afijo > .input { padding-left: 28px; }
-.valor-edit { display: inline-flex; margin: -5px 0; }
+.valor-edit { --control-h: 24px; --control-h-sm: 24px; display: inline-flex; }
 /* Mientras se edita el valor en la ficha, la etapa de al lado se oculta (está en la barra de etapas): así no baja de renglón. */
 .rec-valor:has(.valor-edit) .rec-etapa { display: none; }
 .valor-edit .en-linea-campo { flex: none; width: 160px; }
@@ -545,7 +547,9 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .prop .v { min-height: 20px; word-break: break-word; white-space: pre-wrap; font-variant-numeric: tabular-nums; }
 .prop .v.blank { color: var(--text-3); }
 .prop.editando { cursor: default; background: var(--ui-surface-sunken); }
-.prop.editando .en-linea { margin: -4px 0; }
+/* El campo, de 24 px y 2 px debajo de la etiqueta (sin taparla): el renglón mide lo mismo que sin editar (no empuja nada). */
+.prop.editando .en-linea { --control-h: 24px; --control-h-sm: 24px; margin-top: 2px; }
+.prop.editando:has(.en-linea:not(.multi)) { padding-bottom: 0; }
 .stage-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 10px; }
 .stage-field { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 1 1 250px; max-width: 320px; }
 .stage-field > span { min-width: 50px; }

@@ -207,7 +207,7 @@ cada vez que ese producto se vuelve a vender, aparece sola.
 - Código: `src/worker/notasproducto.ts`, `web/src/notasProducto.tsx`, `web/src/pages/NotasProductos.tsx`. API:
   `GET /api/productos/notas`, `GET /api/productos/sku/:sku`, `POST /api/productos/sku/:sku/notas` (JSON o formulario con
   `foto`), `PATCH`/`DELETE /api/productos/notas/:id`, `GET /api/productos/notas/:id/foto`. Migración
-  `0066_notas_producto.sql`; prueba en `test/notas-producto.test.mjs`.
+  `0067_notas_producto.sql`; prueba en `test/notas-producto.test.mjs`.
 
 ## Cómo está hecho
 

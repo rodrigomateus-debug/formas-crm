@@ -378,19 +378,25 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
   };
   return (
     <>
-      <div className="row" style={{ marginBottom: 6 }}>
-        <span className="small muted">Pipeline</span>
-        <Select className="input sm" style={{ width: 240 }} value={pipe.id} onChange={async (e) => {
-          try { await http('PATCH', `/records/deal/${record.id}`, { props: { pipeline: e.target.value } }); onChange(); } catch (er) { toast((er as Error).message, true); }
-        }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</Select>
-        <span className="grow" />
-        {record.props.hs_v2_date_entered_current_stage && <span className="small muted">En esta etapa desde {fmtDate(record.props.hs_v2_date_entered_current_stage)}</span>}
+      {/* Con 10 o más etapas en la columna del medio los nombres no entraban (quedaban «Le», «Nu», «En»…): la etapa se
+          elige de una lista con el nombre completo y abajo queda una barra fina de avance (cada tramo, con su nombre al pasar). */}
+      <div className="stage-head">
+        <label className="stage-field"><span className="small muted">Pipeline</span>
+          <Select className="input sm" value={pipe.id} aria-label="Pipeline" onChange={async (e) => {
+            try { await http('PATCH', `/records/deal/${record.id}`, { props: { pipeline: e.target.value } }); onChange(); } catch (er) { toast((er as Error).message, true); }
+          }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</Select></label>
+        <label className="stage-field"><span className="small muted">Etapa</span>
+          <Select className="input sm" value={cur?.id ?? ''} placeholder="Elegir etapa" aria-label="Etapa" onChange={(e) => {
+            const s = pipe.stages.find((x) => x.id === e.target.value);
+            if (s && s.id !== cur?.id) go(s);
+          }}>{pipe.stages.map((s, i) => <option key={s.id} value={s.id}>{`${i + 1}. ${s.label}`}</option>)}</Select></label>
+        {record.props.hs_v2_date_entered_current_stage && <span className="small muted stage-since">Desde {fmtDate(record.props.hs_v2_date_entered_current_stage)}</span>}
       </div>
-      <div className="stagebar">
+      <div className="stagebar" role="group" aria-label="Avance por etapas">
         {pipe.stages.map((s, i) => {
           const cls = s.id === cur?.id ? (s.is_closed ? (s.is_won ? 'won' : 'lost') : 'cur') : !s.is_closed && i < curIdx && !cur?.is_closed ? 'done' : '';
-          return <button key={s.id} className={cls} title={`${s.label} · ${Math.round(s.probability * 100)}%`}
-            onClick={() => s.id !== cur?.id && go(s)}>{s.label}</button>;
+          return <button key={s.id} className={cls} title={`${s.label} · ${Math.round(s.probability * 100)}%`} aria-label={s.label}
+            aria-current={s.id === cur?.id ? 'step' : undefined} onClick={() => s.id !== cur?.id && go(s)} />;
         })}
       </div>
       {ask && <StageProps deal={record} stage={ask.stage} missing={ask.missing} onClose={() => setAsk(null)} onSave={(extra) => { const a = ask; setAsk(null); go(a.stage, extra); }} />}

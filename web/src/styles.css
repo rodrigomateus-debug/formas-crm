@@ -1817,3 +1817,16 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .cr-tag.fija.late { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 .cr-fijar .row { flex-wrap: wrap; }
 .cr-fijar input[type="time"] { width: 120px; }
+
+/* Choferes (pages/Choferes.tsx): el código de cada chofer, a mano. */
+.ch-panel { gap: 12px; max-width: 760px; }
+.ch-crear { display: flex; gap: 8px; flex-wrap: wrap; } .ch-crear .input { flex: 1 1 220px; max-width: 320px; }
+.ch-sug { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ch-ayuda { margin: 0; }
+.ch-fila { border-bottom: 1px solid var(--ui-line); } .ch-fila:last-child { border-bottom: 0; }
+.ch-cab { display: flex; align-items: center; gap: 10px; padding: 10px 14px; flex-wrap: wrap; }
+.ch-ic { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); flex: none; }
+.ch-acceso { display: flex; flex-direction: column; gap: 8px; padding: 4px 14px 14px 56px; }
+.ch-fila.abierta { background: var(--ui-surface-sunken); }
+.ch-bajas summary { cursor: pointer; margin-bottom: 6px; }
+@media (max-width: 640px) { .ch-acceso { padding-left: 14px; } }

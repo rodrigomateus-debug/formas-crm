@@ -6,6 +6,7 @@ import { BotonArchivos } from './Bocetos';
 import { DireccionesEntrega } from './Direcciones';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
+import { ChoferesPanel } from './Choferes';
 
 // Remitos de entrega (src/worker/remitos.ts): la tarjeta de la ficha del pedido (qué se entregó, qué falta y los
 // remitos, vengan de ClickUp, del CRM o de la app del chofer) y la bandeja de Logística (lo que hay que revisar y los
@@ -365,7 +366,8 @@ function RemitoFila({ r, orderId, onCambio, soloVer }: { r: Remito; orderId?: nu
 export default function RemitosPage() {
   const { meta } = useMeta();
   const [tab, setTab] = useState<'revisar' | 'revisados' | 'choferes'>('revisar');
-  const puede = meta.me.role === 'admin' || meta.me.profile === 'logistica';
+  // Los choferes: el perfil Logística los tiene en la barra lateral (Choferes.tsx); los administradores, acá.
+  const puede = meta.me.role === 'admin';
   return (
     <div className="content">
       <div className="page-head"><h1>Entregas</h1></div>
@@ -374,7 +376,7 @@ export default function RemitosPage() {
         <button role="tab" aria-selected={tab === 'revisados'} className={`tab${tab === 'revisados' ? ' on' : ''}`} onClick={() => setTab('revisados')}>Revisados</button>
         {puede && <button role="tab" aria-selected={tab === 'choferes'} className={`tab${tab === 'choferes' ? ' on' : ''}`} onClick={() => setTab('choferes')}>Choferes</button>}
       </div>
-      {tab === 'revisar' ? <Bandeja /> : tab === 'revisados' ? <Revisados /> : <Choferes />}
+      {tab === 'revisar' ? <Bandeja /> : tab === 'revisados' ? <Revisados /> : <div style={{ marginTop: 12 }}><ChoferesPanel /></div>}
     </div>
   );
 }
@@ -612,61 +614,3 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
   );
 }
 
-interface Chofer { id: number; name: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string; remitos: number; ultimo: string | null }
-function Choferes() {
-  const toast = useToast();
-  const res = useAsync(() => http<Chofer[]>('GET', '/choferes'), []);
-  const [nombre, setNombre] = useState('');
-  // El acceso de un chofer: su código (lo escribe una vez en la app) y su link (entra directo).
-  const [nuevo, setNuevo] = useState<{ nombre: string; link: string; codigo: string; app: string } | null>(null);
-  const crear = async () => {
-    try { const r = await http<{ link: string; codigo: string; app: string }>('POST', '/choferes', { name: nombre }); setNuevo({ nombre, link: r.link, codigo: r.codigo, app: r.app }); setNombre(''); res.reload(); }
-    catch (err) { toast((err as Error).message, true); }
-  };
-  const revocar = async (c: Chofer) => {
-    if (!confirm(`¿Dar de baja el acceso de ${c.name}? Su código y su link dejan de andar: no puede ver su recorrido ni mandar remitos.`)) return;
-    try { await http('DELETE', `/choferes/${c.id}`); res.reload(); } catch (err) { toast((err as Error).message, true); }
-  };
-  const copiar = async (t: string, que = 'Link') => { try { await navigator.clipboard.writeText(t); toast(`${que} copiado`); } catch { toast('No se pudo copiar: seleccionalo y copialo a mano.', true); } };
-  // El código y el link de un chofer ya creado, para volver a pasárselos si los perdió.
-  const verLink = async (c: Chofer) => {
-    try { const r = await http<{ link: string; codigo: string; app: string }>('GET', `/choferes/${c.id}/link`); setNuevo({ nombre: c.name, link: r.link, codigo: r.codigo, app: r.app }); }
-    catch (err) { toast((err as Error).message, true); }
-  };
-  return (
-    <div className="stack" style={{ gap: 12, marginTop: 12 }}>
-      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su acceso a la app de remitos y de su recorrido: un <b>código de 8 números</b> que escribe una sola vez en la app (después queda guardado en el celular), o su link, que entra directo. Solo sirve para eso. Si lo pierde, «Ver código» te lo muestra de nuevo; si cambia de celular o quedó en manos de otro, dalo de baja y creá uno nuevo.</p>
-      <form className="row" style={{ gap: 6 }} onSubmit={(ev) => { ev.preventDefault(); crear(); }}>
-        <input className="input" placeholder="Nombre del chofer" value={nombre} onChange={(ev) => setNombre(ev.target.value)} style={{ maxWidth: 280 }} />
-        <button className="btn primary" disabled={nombre.trim().length < 2}>Crear acceso</button>
-      </form>
-      {nuevo && (
-        <div className="panel panel-body stack" style={{ gap: 8 }}>
-          <b>Acceso de {nuevo.nombre}</b>
-          <div className="codigo-chofer num" aria-label={`Código ${nuevo.codigo.split('').join(' ')}`}>{nuevo.codigo.slice(0, 4)} {nuevo.codigo.slice(4)}</div>
-          <span className="small muted">Que abra <b>{nuevo.app.replace(/^https?:\/\//, '')}</b> en el celular y escriba este código. Es una sola vez: queda guardado (conviene agregar la app a la pantalla de inicio). O mandale el link, que entra directo.</span>
-          <input className="input" readOnly value={nuevo.link} onFocus={(ev) => ev.target.select()} aria-label="Link" />
-          <div className="row wrap" style={{ gap: 6 }}>
-            <button className="btn sm" onClick={() => copiar(nuevo.codigo, 'Código')}>Copiar código</button>
-            <button className="btn sm" onClick={() => copiar(nuevo.link)}>Copiar link</button>
-            <a className="btn sm wa-link" href={`https://wa.me/?text=${encodeURIComponent(`Para la app de remitos de Formas abrí este link: ${nuevo.link}\nO entrá a ${nuevo.app} y escribí tu código: ${nuevo.codigo.slice(0, 4)} ${nuevo.codigo.slice(4)}`)}`} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Mandar por WhatsApp</a>
-            <button className="btn sm ghost" onClick={() => setNuevo(null)}>Cerrar</button>
-          </div>
-        </div>
-      )}
-      <div className="panel">
-        {(res.data ?? []).map((c) => (
-          <div key={c.id} className={`assoc-item${c.revoked ? ' muted' : ''}`}>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div>{c.name}{c.revoked ? ' (dado de baja)' : ''}</div>
-              <div className="small muted">{c.remitos} remitos{c.ultimo ? ` · el último ${fmtDate(c.ultimo, true)}` : ''} · creado por {c.user_name}</div>
-            </div>
-            {!c.revoked && <button className="btn sm" onClick={() => verLink(c)}>Ver código</button>}
-            {!c.revoked && <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>}
-          </div>
-        ))}
-        {!res.data?.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay choferes.'}</div>}
-      </div>
-    </div>
-  );
-}

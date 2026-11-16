@@ -139,8 +139,11 @@ guardadas en el celular y se mandan solas cuando vuelve; reintentar nunca duplic
    Actions). El despliegue la carga en el Worker. Sin la clave, los remitos se guardan igual y se leen cuando esté.
 2. **Logística:** los usuarios de Logística, con el perfil Logística (Configuración → Usuarios). Ellos y los
    administradores reciben los faltantes y pueden finalizar entregas y crear los links de los choferes.
-3. **Choferes:** crear el acceso de cada uno en Entregas → Choferes (con el nombre del chofer) y pasarle el código o el
-   link. Los choferes no tienen mail de Formas, así que no entran con un usuario: abren la app (`/hooks/chofer/`),
+3. **Choferes:** crear el acceso de cada uno en **Choferes**, en la barra lateral del perfil Logística (pedido de Rodrigo
+   del 16/11/2026; los administradores lo tienen en Entregas → Choferes), con el nombre del chofer, y pasarle el código o
+   el link. Los choferes del cronograma que todavía no tienen código aparecen arriba para crearlo con un clic, y el código
+   de cada uno se ve en su fila con «Ver código» (la lista no trae los códigos: se piden de a uno; `GET /api/choferes/sugeridos`
+   da los que faltan). Los choferes no tienen mail de Formas, así que no entran con un usuario: abren la app (`/hooks/chofer/`),
    escriben su **código de 8 números una sola vez** y queda guardado en el celular (pedido de Rodrigo del 13/11/2026); o
    abren su link, que entra directo. Es la misma app para todos; el acceso es la llave personal de cada uno: dice quién
    mandó cada remito y se puede dar de baja sin tocar a los demás. La app misma les muestra cómo agregarla a la pantalla

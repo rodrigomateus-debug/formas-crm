@@ -86,6 +86,8 @@ el resto vale lo mismo que en el perfil Producción: pedidos, todos; negocios, n
 listas en el menú, y solo los proveedores e impresores y los que están en algún pedido; Inicio con sus tareas, sin los
 números de ventas; crear, solo pedidos. Lo que edita no cambia: revisa los remitos y cierra las entregas, arma el
 cronograma y la ruta del día y organiza los encargos de Recorridos. La pantalla Producción la mira (la edita Producción).
+En la barra lateral tiene además **Choferes** (el código de cada chofer para su app; pedido de Rodrigo del 16/11/2026),
+que solo aparece en el perfil Logística: los administradores lo tienen en Entregas → Choferes.
 
 Se controla en el mismo lugar (`src/worker/alcance.ts`, `esOperaciones`: Producción o Logística), también con Claude.
 Prueba: `test/ventas.test.mjs`.

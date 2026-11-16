@@ -106,8 +106,8 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 - **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido (y el de cada tarjeta de la semana) tiene
   los choferes, los expresos (transportes de terceros) y «+ Agregar chofer o expreso…». Todos los desplegables del
   cronograma (Chofer, Sale de, Pasar a…, Expreso) son el del Hub (`web/src/Select.tsx`), no la lista del navegador. Del expreso se guarda además su dirección, que es a donde se le lleva la
-  mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Entregas → Choferes, con
-  el mismo nombre): un chofer puede estar en la lista sin link.
+  mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Choferes en la barra lateral de
+  Logística, o Entregas → Choferes, con el mismo nombre): un chofer puede estar en la lista sin link.
 - **Una entrega por expreso.** En la parada de una entrega, «Mandar por expreso»: se elige el expreso y, cuando se
   despacha, se carga el **número de guía** para seguir el envío. La parada pasa a ser el expreso (con su dirección) y dice
   para qué cliente es; en la semana la tarjeta lleva «Expreso … · guía …». Es del PDV: vale para todas sus entregas. «Va
@@ -180,7 +180,7 @@ En la misma app de los remitos (`/hooks/chofer/`, ver [REMITOS.md](REMITOS.md)),
 que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay que retirar, dejar o entregar y «Cómo
 llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
 Entra con su **código de 8 números**, que escribe una sola vez y queda guardado en el celular, o con su link (los dos se
-crean en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
+crean en Choferes, en la barra lateral de Logística, o en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
 **Cómo llegar** (pedido de Rodrigo del 13/11/2026): cada parada tiene a la derecha el botón de navegación, que abre la
 dirección sin abrir la parada. La primera vez pregunta con qué app va (Google Maps, Waze y, en el iPhone, Apple Maps) y
 después abre directo con esa; se cambia en «Cómo llegar con» de la parada abierta. Arriba de las paradas, **«Todo el

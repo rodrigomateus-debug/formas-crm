@@ -12,6 +12,7 @@ import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
 import RecorridosPage from './pages/Recorridos';
+import ChoferesPage from './pages/Choferes';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
@@ -33,6 +34,7 @@ export default function App() {
   const ventas = esVentas(meta.me);
   // Perfiles Producción y Logística: sin la parte comercial (contactos, empresas y negocios).
   const produccion = esOperaciones(meta.me);   // Producción y Logística: sin la parte comercial
+  const logistica = meta.me.profile === 'logistica';   // la barra lateral de Logística suma Choferes
   useEffect(() => {
     if (ventas) { setRemitos(null); return; }
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
@@ -59,6 +61,8 @@ export default function App() {
         {/* Recorridos: todos cargan lo que el chofer tiene que llevar o retirar (recorridos.ts). */}
         <NavLink to="/recorridos" className="nav-link"><Icon name="route" />Recorridos</NavLink>
         {!ventas && <NavLink to="/cronograma" className="nav-link"><Icon name="calendar" />Cronograma</NavLink>}
+        {/* Perfil Logística: el código de cada chofer para su app, a mano (los administradores, en Entregas → Choferes). */}
+        {logistica && <NavLink to="/choferes" className="nav-link"><Icon name="volante" />Choferes</NavLink>}
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
           {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
@@ -85,6 +89,7 @@ export default function App() {
           {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
           <Route path="/recorridos" element={<RecorridosPage />} />
+          {(logistica || meta.me.role === 'admin') && <Route path="/choferes" element={<ChoferesPage />} />}
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />

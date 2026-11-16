@@ -1132,6 +1132,18 @@ api.get('/choferes', async (c) => {
     FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.source = 'chofer' ORDER BY t.revoked, t.name`).all();
   return c.json(results);
 });
+// Los choferes de la lista del cronograma (transportistas) que todavía no tienen código activo: en la pantalla Choferes
+// aparecen para crearles el código con un clic, con el mismo nombre (así ven su recorrido).
+api.get('/choferes/sugeridos', async (c) => {
+  logistica(c.get('ctx'));
+  const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const [ts, activos] = await c.env.DB.batch([
+    c.env.DB.prepare("SELECT nombre FROM transportistas WHERE activo = 1 AND tipo = 'chofer' ORDER BY nombre"),
+    c.env.DB.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0"),
+  ]);
+  const con = new Set((activos.results as Array<{ name: string }>).map((a) => igual(a.name)));
+  return c.json({ nombres: (ts.results as Array<{ nombre: string }>).map((t) => t.nombre).filter((n) => !con.has(igual(n))) });
+});
 api.post('/choferes', async (c) => {
   const ctx = c.get('ctx');
   logistica(ctx);

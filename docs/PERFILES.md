@@ -8,7 +8,7 @@ Configuración → Usuarios.
 | Admin | Todo, incluida Configuración. |
 | Comercial (Ventas) | Lo suyo (ver abajo). |
 | Producción | Lo suyo: pedidos, Producción, Entregas y Cronograma (ver abajo). Edita Producción. |
-| Logística | Por ahora, todo. Revisa remitos y cierra entregas. |
+| Logística | Producción, Pedidos, Entregas, Recorridos y Cronograma (ver abajo). Revisa remitos y cierra entregas. |
 
 Permisos (para los que no son Admin): **Edita** crea y edita; **Edita y borra** además borra y restaura; **Solo mira** no
 cambia nada.
@@ -79,7 +79,17 @@ superadmin usa «Ver como» (Configuración → Usuarios, el ojito).
 
 Pruebas: `test/ventas.test.mjs`.
 
+## Perfil Logística (pedido de Rodrigo del 16/11/2026)
+
+Logística trabaja con lo de operaciones: **Producción**, **Pedidos**, **Entregas**, **Recorridos** y **Cronograma**. Para
+el resto vale lo mismo que en el perfil Producción: pedidos, todos; negocios, ninguno; contactos y empresas, sin sus
+listas en el menú, y solo los proveedores e impresores y los que están en algún pedido; Inicio con sus tareas, sin los
+números de ventas; crear, solo pedidos. Lo que edita no cambia: revisa los remitos y cierra las entregas, arma el
+cronograma y la ruta del día y organiza los encargos de Recorridos. La pantalla Producción la mira (la edita Producción).
+
+Se controla en el mismo lugar (`src/worker/alcance.ts`, `esOperaciones`: Producción o Logística), también con Claude.
+Prueba: `test/ventas.test.mjs`.
+
 ### Pendiente / a revisar
 
 - Si alguien menciona a una vendedora en la conversación de un pedido que no es suyo, ella no lo ve (ni en la bandeja).
-- Logística sigue viendo todo; cuando se defina, va en el mismo `alcance.ts`.

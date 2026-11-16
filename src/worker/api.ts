@@ -31,7 +31,7 @@ import { actualizarFotos, fotosEstado } from './fotos';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
-import { assertActividadVisible, assertVisible, esProduccion, esVentas, idsVisibles, restringido, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarDestinos, listarEncargos,
   numerarRemito, recorridosConfig, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
@@ -65,8 +65,8 @@ api.use('*', async (c, next) => {
     const sin = verRemitos ? undefined : SIN_VENTAS.find(([re]) => re.test(c.req.path));
     if (sin) sinVentas(ctx, sin[1]);
   }
-  // Perfil Producción: no crea negocios (no los ve).
-  if (esProduccion(ctx.user) && c.req.method === 'POST' && /\/records\/deal$/.test(c.req.path)) throw new HttpError(403, 'Los negocios no están en el perfil Producción.');
+  // Perfiles Producción y Logística: no crean negocios (no los ven).
+  if (esOperaciones(ctx.user) && c.req.method === 'POST' && /\/records\/deal$/.test(c.req.path)) throw new HttpError(403, `Los negocios no están en el perfil ${nombrePerfil(ctx.user)}.`);
   if (restringido(ctx.user)) {
     const m = RUTA_REGISTRO.exec(c.req.path);
     if (m) await registroVisible(c, Number(m[1]));

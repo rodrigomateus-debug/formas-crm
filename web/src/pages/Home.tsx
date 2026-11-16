@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
-import { http, qs, useMeta, esVentas, esProduccion, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
+import { http, qs, useMeta, esVentas, esOperaciones, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 
@@ -18,7 +18,7 @@ export default function Home() {
   // Perfil Ventas: siempre sus números (el servidor no le da los del equipo).
   const ventas = esVentas(meta.me);
   // Perfil Producción: Inicio con sus tareas, sin los números de ventas.
-  const prod = esProduccion(meta.me);
+  const prod = esOperaciones(meta.me);
   const [owner, setOwner] = useState(!ventas && (meta.me.role === 'admin' || meta.me.role === 'manager') ? 'all' : 'me');
   const [unidades, setUnidades] = useState<string[]>([]);
   const u = unidades.length ? unidades.join(',') : undefined;

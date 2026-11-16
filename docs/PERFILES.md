@@ -98,8 +98,8 @@ La barra lateral va en grupos, cada uno con una línea sutil arriba (`App.tsx`):
 
 - arriba, sin título: Inicio, Tareas y Conversaciones;
 - **CRM**: Contactos, Empresas, Negocios y Pedidos (Producción y Logística ven solo Pedidos);
-- **Operaciones**, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas, y Choferes en el perfil
-  Logística. El perfil Ventas ve solo Recorridos.
+- **Operaciones**, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas, Choferes en el perfil
+  Logística y, al final, Notas de productos. El perfil Ventas ve Recorridos y Notas de productos.
 
 Al abrir el Hub, el perfil **Producción** arranca en **Producción** y el perfil **Logística** en el **Cronograma**
 (`PANTALLA_INICIAL`); los demás, en Inicio. Es solo al abrirlo: «Inicio» sigue llevando a Inicio.

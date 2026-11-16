@@ -9,7 +9,7 @@ import { refrescarNoLeidas } from './pages/Conversacion';
 // marcado. Un clic lleva al mensaje (o a la tarea, o al pedido) y la marca leída. Se actualiza sola cada 45 segundos.
 
 export interface Notificacion {
-  id: number; kind: 'mencion' | 'respuesta' | 'tarea' | 'registro' | 'entrega' | string; record_id: number | null; object_type: ObjectType | null;
+  id: number; kind: 'mencion' | 'respuesta' | 'tarea' | 'registro' | 'entrega' | 'producto' | string; record_id: number | null; object_type: ObjectType | null;
   name: string | null; activity_id: number | null; subject: string | null; mensaje_id: number | null; texto: string | null; by_user: number | null;
   created_at: string; leido_at: string | null;
   encargo_id?: number | null; encargo_destino?: string | null; encargo_fecha?: string | null;
@@ -49,6 +49,8 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
     case 'respuesta': return { titulo: <><b>{quien}</b> te respondió en {reg}</>, detalle: n.texto, icono: 'reply', destino: `${aReg}?conversacion=1&mensaje=${n.mensaje_id ?? ''}` };
     case 'tarea': return { titulo: <><b>{quien}</b> te asignó una tarea</>, detalle: n.subject, icono: 'task', destino: '/tasks' };
     case 'encargo': return { titulo: <>Tu encargo a <b>{n.encargo_destino ?? 'un destino'}</b>{n.encargo_fecha ? ` (${Number(n.encargo_fecha.slice(8))}/${Number(n.encargo_fecha.slice(5, 7))})` : ''}</>, detalle: n.texto, icono: 'route', destino: `/recorridos?tab=encargos&encargo=${n.encargo_id ?? ''}` };
+    // Entró un pedido con un producto que tiene notas de Producción (notasproducto.ts): el texto dice cuál y qué pasa.
+    case 'producto': return { titulo: <>Ojo con un producto de {reg}</>, detalle: n.texto, icono: 'alert', destino: aReg };
     case 'entrega': return { titulo: <>Faltan entregas en {reg}</>, detalle: 'Según los remitos, todavía falta entregar algo.', icono: 'truck', destino: aReg };
     default: return { titulo: <><b>{quien}</b> te asignó {reg}</>, detalle: null, icono: n.object_type ?? 'note', destino: aReg };
   }

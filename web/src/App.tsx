@@ -18,6 +18,9 @@ import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
 import { Campanita } from './Notificaciones';
 
+// Pantalla con la que abre cada perfil (pedido de Rodrigo del 16/11/2026); el resto, Inicio.
+const PANTALLA_INICIAL: Record<string, string> = { produccion: '/produccion', logistica: '/cronograma' };
+
 export default function App() {
   const { meta } = useMeta();
   const [menu, setMenu] = useState(false);
@@ -40,6 +43,13 @@ export default function App() {
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
   }, [loc.pathname, ventas]);
 
+  // Al abrir el Hub (no al tocar «Inicio»): el perfil Producción arranca en Producción y Logística en el Cronograma.
+  const navigate = useNavigate();
+  useEffect(() => {
+    const inicio = PANTALLA_INICIAL[meta.me.profile];
+    if (inicio && loc.pathname === '/') navigate(inicio, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Mensajes sin leer en las conversaciones que sigue (y si lo mencionaron).
   const sinLeer = useNoLeidas();
   return (
@@ -50,17 +60,19 @@ export default function App() {
         <NavLink to="/tasks" className="nav-link"><Icon name="task" />Tareas{tasks ? <span className="count">{tasks}</span> : null}</NavLink>
         <NavLink to="/conversaciones" className="nav-link"><Icon name="chat" />Conversaciones
           {sinLeer.no_leidos ? <span className={`count badge${sinLeer.menciones ? ' mencion' : ''}`} title={sinLeer.menciones ? `${sinLeer.no_leidos} sin leer · te mencionaron` : `${sinLeer.no_leidos} sin leer`}>{sinLeer.menciones ? '@ ' : ''}{sinLeer.no_leidos}</span> : null}</NavLink>
+        {/* Cada grupo, con una línea sutil arriba (pedido de Rodrigo del 16/11/2026): CRM y, aparte, Operaciones. */}
         <div className="nav-group">CRM</div>
         {!produccion && <NavLink to="/contacts" className="nav-link"><Icon name="contact" />Contactos</NavLink>}
         {!produccion && <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>}
         {!produccion && <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>}
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
-        {/* Perfil Ventas: sin Producción ni Entregas. */}
+        {/* Operaciones, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas. Perfil Ventas: solo Recorridos. */}
+        <div className="nav-group">Operaciones</div>
         {!ventas && <NavLink to="/produccion" className="nav-link"><Icon name="printer" />Producción</NavLink>}
-        {!ventas && <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>}
+        {!ventas && <NavLink to="/cronograma" className="nav-link"><Icon name="calendar" />Cronograma</NavLink>}
         {/* Recorridos: todos cargan lo que el chofer tiene que llevar o retirar (recorridos.ts). */}
         <NavLink to="/recorridos" className="nav-link"><Icon name="route" />Recorridos</NavLink>
-        {!ventas && <NavLink to="/cronograma" className="nav-link"><Icon name="calendar" />Cronograma</NavLink>}
+        {!ventas && <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>}
         {/* Perfil Logística: el código de cada chofer para su app, a mano (los administradores, en Entregas → Choferes). */}
         {logistica && <NavLink to="/choferes" className="nav-link"><Icon name="volante" />Choferes</NavLink>}
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}

@@ -92,6 +92,18 @@ que solo aparece en el perfil Logística: los administradores lo tienen en Entre
 Se controla en el mismo lugar (`src/worker/alcance.ts`, `esOperaciones`: Producción o Logística), también con Claude.
 Prueba: `test/ventas.test.mjs`.
 
+## Barra lateral y pantalla de inicio (pedido de Rodrigo del 16/11/2026)
+
+La barra lateral va en grupos, cada uno con una línea sutil arriba (`App.tsx`):
+
+- arriba, sin título: Inicio, Tareas y Conversaciones;
+- **CRM**: Contactos, Empresas, Negocios y Pedidos (Producción y Logística ven solo Pedidos);
+- **Operaciones**, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas, y Choferes en el perfil
+  Logística. El perfil Ventas ve solo Recorridos.
+
+Al abrir el Hub, el perfil **Producción** arranca en **Producción** y el perfil **Logística** en el **Cronograma**
+(`PANTALLA_INICIAL`); los demás, en Inicio. Es solo al abrirlo: «Inicio» sigue llevando a Inicio.
+
 ### Pendiente / a revisar
 
 - Si alguien menciona a una vendedora en la conversación de un pedido que no es suyo, ella no lo ve (ni en la bandeja).

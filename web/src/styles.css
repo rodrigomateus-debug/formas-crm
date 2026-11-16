@@ -459,6 +459,12 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .rec-head .title { display: flex; gap: 12px; align-items: center; }
 .rec-head .title h1 { font-size: 20px; line-height: 1.3; letter-spacing: 0; word-break: break-word; }
 .rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* Tres puntitos al lado del nombre en la ficha (combinar, clonar, borrar). */
+.rec-menu { position: relative; display: inline-flex; align-self: flex-start; flex: none; }
+.rec-menu-btn { width: 30px; height: 30px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); background: none;
+  color: var(--ui-ink-3); cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.rec-menu-btn:hover, .rec-menu-btn.on { background: var(--ui-surface-sunken); color: var(--accent-ink); }
+.popover .opt.danger-text:hover { background: var(--ui-negative-soft); }
 .preview-sum { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 13px; }
 .preview-sum .input.select-like { height: 30px; font-size: 13px; width: auto; max-width: 100%; display: inline-flex; }
 /* «Chat en Darwin» (components.tsx): el ícono en el verde de WhatsApp, para que se entienda adónde lleva. */

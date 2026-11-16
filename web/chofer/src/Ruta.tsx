@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { marcarParada, pedirRuta, SinSenal, type ItemChofer, type ParadaChofer, type RecorridoChofer } from './api';
 import { hhmm, simular } from '../../src/ruta';
@@ -97,7 +97,30 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
   // Lo último que se trajo queda en el celular: sin señal (o si el celular recarga la app al volver de la cámara) el
   // recorrido de hoy se sigue viendo.
   const [recorridos, setRecorridos] = useState<RecorridoChofer[]>(guardado);
-  const [abierta, setAbierta] = useState<string | null>(null);
+  // La parada abierta, en su pantalla. Suma un paso al historial: el «atrás» del celular vuelve al recorrido. Queda
+  // anotada por si el celular recarga la app al volver de la cámara.
+  const [abierta, setAbierta] = useState<string | null>(() => {
+    try { return (history.state as { chofer_parada?: string } | null)?.chofer_parada ?? sessionStorage.getItem('chofer-parada') ?? null; } catch { return null; }
+  });
+  useEffect(() => {
+    const atras = () => { const c = (history.state as { chofer_parada?: string } | null)?.chofer_parada ?? null; setAbierta(c); try { if (c) sessionStorage.setItem('chofer-parada', c); else sessionStorage.removeItem('chofer-parada'); } catch { /* da igual */ } };
+    window.addEventListener('popstate', atras);
+    return () => window.removeEventListener('popstate', atras);
+  }, []);
+  const abrir = (clave: string) => {
+    setAbierta(clave);
+    try { sessionStorage.setItem('chofer-parada', clave); } catch { /* da igual */ }
+    try { const st = history.state as { chofer_parada?: string } | null; if (st?.chofer_parada) history.replaceState({ chofer_parada: clave }, ''); else history.pushState({ chofer_parada: clave }, ''); } catch { /* da igual */ }
+  };
+  // Si volvió a abrirse la app (de la cámara) con una parada abierta, el «atrás» tiene que volver al recorrido.
+  useEffect(() => {
+    try { if (abierta && !(history.state as { chofer_parada?: string } | null)?.chofer_parada) history.pushState({ chofer_parada: abierta }, ''); } catch { /* da igual */ }
+  }, []);
+  const cerrar = () => {
+    setAbierta(null);
+    try { sessionStorage.removeItem('chofer-parada'); } catch { /* da igual */ }
+    try { if ((history.state as { chofer_parada?: string } | null)?.chofer_parada) history.back(); } catch { /* da igual */ }
+  };
   const [app, setApp] = useState<AppMapa | null>(appGuardada);
   const [eligiendo, setEligiendo] = useState<ParadaChofer | null>(null);   // la parada para la que se elige la app
   const [aviso, setAviso] = useState('');
@@ -116,7 +139,6 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
   const marcar = (p: ParadaChofer, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => {
     setAviso('');
     cambiarParada(p.clave, (x) => optimista(x, resultado, motivo, nota));
-    if (resultado) setAbierta(null);
     marcarParada(p.clave, resultado, motivo, nota).then(() => traer(), (e) => {
       cambiarParada(p.clave, () => p);
       setAviso(`${p.nombre}: ${e instanceof SinSenal ? 'no se guardó porque no hay señal. Marcala de nuevo cuando vuelva.' : 'no se pudo guardar. Marcala de nuevo.'}`);
@@ -154,12 +176,11 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
               {r.paradas.map((p, i) => {
                 const s = sim.paradas[i], hecha = hechaP(p);
                 const estado = hecha ? (conFoto(p) ? 'hecha' : 'hecha sin-foto') : p.visita?.resultado === 'no_se_pudo' ? 'fallo' : p.visita?.resultado === 'salteada' ? 'salteada' : '';
-                const ver = abierta === p.clave;
                 const ir = app ? linkA(app, p) : null;
                 return (
                   <li key={p.clave} className={estado}>
                     <div className="ruta-fila">
-                      <button type="button" className="ruta-parada" aria-expanded={ver} onClick={() => setAbierta(ver ? null : p.clave)}>
+                      <button type="button" className="ruta-parada" aria-haspopup="dialog" onClick={() => abrir(p.clave)}>
                         <span className="ruta-n">{hecha ? '✓' : estado === 'fallo' ? '!' : i + 1}</span>
                         <span className="ruta-quien"><strong>{p.nombre}</strong>{p.expreso && <span>Expreso: dejar para {p.expreso.cliente}{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</span>}<span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span>
                           {estado === 'fallo' && <em>{MOTIVOS.find((m) => m[0] === p.visita!.motivo)?.[1] ?? 'No se pudo'}{p.visita!.nota ? `: ${p.visita!.nota}` : ''}</em>}
@@ -172,7 +193,6 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
                         ? <a className="ruta-ir" href={ir} target="_blank" rel="noreferrer" aria-label={`Cómo llegar a ${p.nombre} con ${APPS.find((a) => a.k === app)?.nombre}`}><Icono nombre="navegar" /></a>
                         : <button type="button" className="ruta-ir" aria-label={`Cómo llegar a ${p.nombre}`} onClick={() => setEligiendo(p)}><Icono nombre="navegar" /></button>)}
                     </div>
-                    {ver && <Detalle p={p} tarde={s.tarde > 0} hecha={hecha} conFoto={conFoto(p)} enLinea={enLinea} app={app} alElegirApp={elegirApp} alMarcar={(...a) => marcar(p, ...a)} alEntregar={alEntregar} />}
                   </li>
                 );
               })}
@@ -181,6 +201,22 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
           </section>
         );
       })}
+      {(() => {
+        // La parada abierta: en qué recorrido está, su número, su hora y la siguiente que falta.
+        for (const r of conParadas) {
+          const i = r.paradas.findIndex((x) => x.clave === abierta);
+          if (i < 0) continue;
+          const base = r.base.lat != null && r.base.lng != null ? { lat: r.base.lat, lng: r.base.lng } : null;
+          const vuelve = r.fin === undefined || !!r.vuelve;
+          const sim = simular(base, r.paradas, r.salida, null, vuelve ? base : r.fin ? (r.fin.lat != null && r.fin.lng != null ? { lat: r.fin.lat, lng: r.fin.lng } : null) : 'ultima');
+          const p = r.paradas[i], s = sim.paradas[i];
+          const siguiente = [...r.paradas.slice(i + 1), ...r.paradas.slice(0, i)].find((x) => !hechaP(x) && x.visita?.resultado !== 'no_se_pudo') ?? null;
+          return <PantallaParada key="parada" p={p} n={i + 1} total={r.paradas.length} llega={s.llega} sinUbicar={s.tramo.sinUbicar} tarde={s.tarde > 0} hecha={hechaP(p)} conFoto={conFoto(p)}
+            enLinea={enLinea} app={app} siguiente={siguiente} alElegirApp={elegirApp} alMarcar={(...a) => marcar(p, ...a)} alEntregar={alEntregar} alVolver={cerrar}
+            alSiguiente={() => siguiente && abrir(siguiente.clave)} />;
+        }
+        return null;
+      })()}
       {eligiendo && <ElegirApp p={eligiendo} alElegir={(k) => { elegirApp(k); setEligiendo(null); }} alCerrar={() => setEligiendo(null)} />}
     </>
   );
@@ -219,73 +255,131 @@ function ElegirApp({ p, alElegir, alCerrar }: { p: ParadaChofer; alElegir: (k: A
   );
 }
 
-function Detalle({ p, tarde, hecha, conFoto, enLinea, app, alElegirApp, alMarcar, alEntregar }: {
-  p: ParadaChofer; tarde: boolean; hecha: boolean; conFoto: boolean; enLinea: boolean; app: AppMapa | null; alElegirApp: (k: AppMapa) => void;
-  alMarcar: (resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => void; alEntregar: (parada?: string) => void;
+// La parada abierta (pedido de Rodrigo del 16/11/2026): una pantalla propia que entra desde la derecha, como si el chofer
+// entrara a la parada, con el lugar y la dirección grandes, qué hacer, a quién preguntar y, abajo y siempre a mano, los
+// botones. Se vuelve con la flecha o con el «atrás» del celular. Después de hacerla queda abierta (para la foto del remito)
+// y ofrece la siguiente.
+const QUE: Record<string, string> = { entrega: 'Entrega', retiro_proveedor: 'Retiro', retiro_impresor: 'Retiro', egreso: 'Egreso' };
+function PantallaParada({ p, n, total, llega, sinUbicar, tarde, hecha, conFoto, enLinea, app, siguiente, alElegirApp, alMarcar, alEntregar, alVolver, alSiguiente }: {
+  p: ParadaChofer; n: number; total: number; llega: number; sinUbicar: boolean; tarde: boolean; hecha: boolean; conFoto: boolean; enLinea: boolean; app: AppMapa | null;
+  siguiente: ParadaChofer | null; alElegirApp: (k: AppMapa) => void; alMarcar: (resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => void;
+  alEntregar: (parada?: string) => void; alVolver: () => void; alSiguiente: () => void;
 }) {
   const [paso, setPaso] = useState<'botones' | 'motivo'>('botones');
   const [motivo, setMotivo] = useState('');
   const [nota, setNota] = useState('');
+  const cuerpo = useRef<HTMLDivElement>(null);
+  // Otra parada (la siguiente): arriba de todo y con los botones de siempre.
+  useEffect(() => { setPaso('botones'); setMotivo(''); setNota(''); cuerpo.current?.scrollTo({ top: 0 }); }, [p.clave]);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') alVolver(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [alVolver]);
   const esEntrega = p.movimientos.some((m) => m.tipo === 'entrega');
   const encs = p.encargos ?? [];
   const soloRetiros = p.movimientos.every((m) => m.tipo.startsWith('retiro')) && encs.every((e) => !e.llevar.length && e.retirar.length > 0);
-  function marcar(resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, m?: string, n?: string) {
+  function marcar(resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, m?: string, n2?: string) {
     // Hecha (una entrega, un retiro, un egreso, un encargo): directo a la foto del remito, que es obligatoria en todas. La
     // cámara se abre ya, en el mismo toque: si se espera a que conteste el servidor, el iPhone no la deja abrir.
     if (resultado === 'hecho') alEntregar(p.clave);
-    alMarcar(resultado, m, n);
+    alMarcar(resultado, m, n2);
     setPaso('botones');
   }
-  return (
-    <div className="ruta-detalle">
-      <ul>
-        {p.movimientos.map((m) => <li key={m.id} className={m.hecho ? 'hecho' : ''}><strong>{TIPO[m.tipo] ?? m.tipo}</strong> PDV {m.npdv ?? '—'}{m.cliente ? ` ${m.cliente}` : ''}
-          {m.articulo ? ` · ${m.cantidad != null ? `${num.format(m.cantidad)} ` : ''}${m.articulo}` : ''}</li>)}
-        {encs.flatMap((e) => [
-          ...e.llevar.map((i, k) => <li key={`${e.id}l${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Dejar</strong> {item(i)}{e.desde ? <em> (lo buscás en {e.desde})</em> : null}</li>),
-          ...e.retirar.map((i, k) => <li key={`${e.id}r${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Retirar</strong> {item(i)}{e.hacia ? <em> (va a {e.hacia})</em> : null}</li>),
-          ...(!e.llevar.length && !e.retirar.length && e.notas ? [<li key={`${e.id}n`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Hacer</strong> {e.notas}</li>] : []),
-        ])}
-      </ul>
-      {encs.map((e) => (e.urgente || e.contacto || e.horario || (e.notas && (e.llevar.length || e.retirar.length))) && (
-        <p key={`x${e.id}`} className={e.urgente ? 'ruta-tarde' : ''}>{[e.urgente ? 'Urgente: tiene que ser hoy' : '', e.contacto ? `Preguntá por ${e.contacto}` : '', e.horario ? `Horario: ${e.horario}` : '',
-          e.llevar.length || e.retirar.length ? e.notas ?? '' : '', e.quien ? `(lo pidió ${e.quien.split(' ')[0]})` : ''].filter(Boolean).join(' · ')}</p>
-      ))}
-      {p.pactada ? <p className="ruta-tarde">Hora fijada: {p.pactada.charAt(0).toLowerCase() + p.pactada.slice(1)}{tarde ? '. Vas justo' : ''}</p>
-        : p.horario ? <p className={tarde ? 'ruta-tarde' : ''}>Reciben de {hhmm(p.horario[0])} a {hhmm(p.horario[1])}{tarde ? ': vas justo' : ''}</p> : p.lugar?.horario ? <p>Horario: {p.lugar.horario}</p> : null}
-      {(p.lugar?.contacto || p.lugar?.telefono) && <p>Preguntá por {[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</p>}
-      {p.lugar?.observaciones && <p>{p.lugar.observaciones}</p>}
-      {destinoDe(p) && (
-        <div className="ruta-llegar">
-          <p className="ruta-llegar-tit"><Icono nombre="navegar" tamano={20} />Cómo llegar con</p>
-          <BotonesApps p={p} app={app} alElegir={alElegirApp} />
-        </div>
-      )}
-      {!enLinea && <p className="ruta-tarde">Sin señal no se puede marcar la parada.</p>}
-      {paso === 'botones' && (hecha || p.visita ? (
-        <div className="ruta-acciones">
-          {hecha && !conFoto && <p className="ruta-sin-foto">Falta la foto del remito. Es obligatoria: sin ella, la parada no queda completa.</p>}
-          {hecha && <button type="button" className={conFoto ? 'boton chico' : 'boton principal'} onClick={() => alEntregar(p.clave)}>{conFoto ? 'Sacar otra foto' : p.expreso ? 'Sacar la foto de la guía' : 'Sacar la foto del remito'}</button>}
+  const tipos = [...new Set([...p.movimientos.map((m) => QUE[m.tipo] ?? m.tipo), ...(encs.length ? ['Encargo'] : [])])];
+  const estado = hecha ? { t: conFoto ? 'Hecha' : 'Hecha · falta la foto del remito', c: conFoto ? 'bien' : 'mal' }
+    : p.visita?.resultado === 'no_se_pudo' ? { t: `No se pudo: ${MOTIVOS.find((x) => x[0] === p.visita!.motivo)?.[1] ?? 'otro motivo'}${p.visita.nota ? ` (${p.visita.nota})` : ''}`, c: 'mal' }
+    : p.visita?.resultado === 'salteada' ? { t: 'La dejaste para después', c: 'neutro' } : { t: 'Pendiente', c: 'acento' };
+  const telefonos = [...new Set([p.lugar?.telefono, ...encs.map((e) => e.contacto)].map((t) => String(t ?? '').match(/(\+?\d[\d\s-]{6,}\d)/)?.[1]?.replace(/[\s-]/g, '')).filter((x): x is string => !!x))];
+  const contacto = [p.lugar?.contacto, p.lugar?.telefono].filter(Boolean).join(' · ');
+  return createPortal(
+    <div className="parada-pantalla" role="dialog" aria-modal="true" aria-labelledby="parada-titulo">
+      <header className="parada-cab">
+        <button type="button" className="parada-volver" onClick={alVolver}><Icono nombre="atras" tamano={22} />Recorrido</button>
+        <span className="parada-cuenta">Parada {n} de {total}</span>
+      </header>
+      <div className="parada-cuerpo" ref={cuerpo}>
+        <section className="parada-hero">
+          <span className={`parada-estado ${estado.c}`}>{estado.t}</span>
+          <h2 id="parada-titulo">{p.nombre}</h2>
+          {tipos.length > 0 && <p className="parada-tipos">{tipos.map((t) => <span key={t}>{t}</span>)}</p>}
+          {p.expreso && <p className="parada-expreso">Es un expreso: dejá la mercadería para <b>{p.expreso.cliente}</b>{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</p>}
+          <p className="parada-dir"><Icono nombre="lugar" tamano={22} /><span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span></p>
+          <p className={`parada-llega${tarde ? ' tarde' : ''}`}><Icono nombre="reloj" tamano={20} />
+            <span>{sinUbicar ? 'Sin hora estimada' : <>Llegás cerca de las <b>{hhmm(llega)}</b></>}
+              {p.pactada ? <> · <b>{p.pactada}</b></> : p.horario ? ` · reciben de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : p.lugar?.horario ? ` · horario: ${p.lugar.horario}` : ''}
+              {tarde ? ' · vas justo' : ''}</span></p>
+          {destinoDe(p) && (
+            <div className="ruta-llegar">
+              <p className="ruta-llegar-tit"><Icono nombre="navegar" tamano={20} />Cómo llegar con</p>
+              <BotonesApps p={p} app={app} alElegir={alElegirApp} />
+            </div>
+          )}
+        </section>
+
+        <section className="parada-seccion">
+          <h3>Qué hay que hacer</h3>
+          <ul className="parada-que">
+            {p.movimientos.map((m) => <li key={m.id} className={m.hecho ? 'hecho' : ''}><strong>{TIPO[m.tipo] ?? m.tipo}</strong>
+              <span>{m.articulo ? `${m.cantidad != null ? `${num.format(m.cantidad)} ` : ''}${m.articulo}` : 'Lo del pedido'}<small>PDV {m.npdv ?? '—'}{m.cliente ? ` · ${m.cliente}` : ''}</small></span></li>)}
+            {encs.flatMap((e) => [
+              ...e.llevar.map((it, k) => <li key={`${e.id}l${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Dejar</strong><span>{item(it)}{e.desde ? <small>Lo buscás en {e.desde}</small> : null}</span></li>),
+              ...e.retirar.map((it, k) => <li key={`${e.id}r${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Retirar</strong><span>{item(it)}{e.hacia ? <small>Va a {e.hacia}</small> : null}</span></li>),
+              ...(!e.llevar.length && !e.retirar.length && e.notas ? [<li key={`${e.id}n`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Hacer</strong><span>{e.notas}</span></li>] : []),
+            ])}
+          </ul>
+          {encs.map((e) => (e.urgente || e.horario || e.quien || (e.notas && (e.llevar.length || e.retirar.length))) && (
+            <p key={`x${e.id}`} className={e.urgente ? 'ruta-tarde' : 'parada-nota'}>{[e.urgente ? 'Urgente: tiene que ser hoy' : '', e.horario ? `Horario: ${e.horario}` : '',
+              e.llevar.length || e.retirar.length ? e.notas ?? '' : '', e.quien ? `Lo pidió ${e.quien.split(' ')[0]}` : ''].filter(Boolean).join(' · ')}</p>
+          ))}
+        </section>
+
+        {(contacto || p.lugar?.observaciones || encs.some((e) => e.contacto)) && (
+          <section className="parada-seccion">
+            <h3>En el lugar</h3>
+            {contacto && <p>Preguntá por <b>{contacto}</b></p>}
+            {encs.filter((e) => e.contacto).map((e) => <p key={`c${e.id}`}>Preguntá por <b>{e.contacto}</b></p>)}
+            {p.lugar?.observaciones && <p className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{p.lugar.observaciones}</span></p>}
+            {telefonos.length > 0 && <div className="parada-llamar">{telefonos.map((t) => <a key={t} className="boton chico" href={`tel:${t}`}>Llamar {t}</a>)}</div>}
+          </section>
+        )}
+
+        {hecha && (conFoto
+          ? <p className="parada-foto bien"><Icono nombre="bien" tamano={22} />La foto del remito ya está.</p>
+          : <p className="ruta-sin-foto">Falta la foto del remito. Es obligatoria: sin ella, la parada no queda completa.</p>)}
+        {!enLinea && <p className="ruta-tarde">Sin señal no se puede marcar la parada.</p>}
+
+        {paso === 'motivo' && (
+          <form id={`motivo-${p.clave}`} className="ruta-motivo" onSubmit={(e) => { e.preventDefault(); if (motivo) marcar('no_se_pudo', motivo, nota); }}>
+            <fieldset><legend>¿Qué pasó?</legend>
+              {MOTIVOS.filter(([k]) => (k === 'no_listo' ? !esEntrega : k === 'rechazo' ? esEntrega : true)).map(([k, t]) => (
+                <label key={k} className={motivo === k ? 'elegido' : ''}><input type="radio" name={`motivo-${p.clave}`} checked={motivo === k} onChange={() => setMotivo(k)} />{t}</label>))}
+            </fieldset>
+            <input className="campo" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Algo más para Logística (opcional)" aria-label="Nota para Logística" maxLength={300} />
+          </form>
+        )}
+      </div>
+
+      <footer className="parada-acciones">
+        {paso === 'motivo' ? (<>
+          <button type="submit" form={`motivo-${p.clave}`} className="boton principal" disabled={!motivo || !enLinea}>Avisar a Logística</button>
+          <button type="button" className="boton chico" onClick={() => setPaso('botones')}>Volver</button>
+        </>) : hecha || p.visita ? (<>
+          {hecha && <button type="button" className={conFoto ? 'boton chico' : 'boton principal'} onClick={() => alEntregar(p.clave)}><Icono nombre="camara" />{conFoto ? 'Sacar otra foto' : p.expreso ? 'Sacar la foto de la guía' : 'Sacar la foto del remito'}</button>}
           {!hecha && <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}>{esEntrega ? 'Ahora sí: entregué' : 'Ahora sí: listo'}</button>}
-          <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar(null)}>Deshacer</button>
-        </div>
-      ) : (
-        <div className="ruta-acciones">
-          <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}>{p.expreso ? 'Dejé en el expreso: foto de la guía' : esEntrega ? 'Entregué: sacar foto del remito' : soloRetiros ? 'Retiré todo: sacar foto del remito' : 'Listo: sacar foto del remito'}</button>
-          <button type="button" className="boton chico" disabled={!enLinea} onClick={() => setPaso('motivo')}>No se pudo</button>
-          <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar('salteada')}>Para después</button>
-        </div>
-      ))}
-      {paso === 'motivo' && (
-        <form className="ruta-motivo" onSubmit={(e) => { e.preventDefault(); if (motivo) marcar('no_se_pudo', motivo, nota); }}>
-          <fieldset><legend>¿Qué pasó?</legend>
-            {MOTIVOS.filter(([k]) => (k === 'no_listo' ? !esEntrega : k === 'rechazo' ? esEntrega : true)).map(([k, t]) => (
-              <label key={k} className={motivo === k ? 'elegido' : ''}><input type="radio" name={`motivo-${p.clave}`} checked={motivo === k} onChange={() => setMotivo(k)} />{t}</label>))}
-          </fieldset>
-          <input className="campo" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Algo más para Logística (opcional)" aria-label="Nota para Logística" maxLength={300} />
-          <div className="ruta-acciones"><button type="submit" className="boton principal" disabled={!motivo || !enLinea}>Avisar a Logística</button><button type="button" className="boton chico" onClick={() => setPaso('botones')}>Volver</button></div>
-        </form>
-      )}
-    </div>
+          <div className="parada-fila">
+            <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar(null)}>Deshacer</button>
+            {siguiente && <button type="button" className="boton chico" onClick={alSiguiente}>Siguiente: {siguiente.nombre}</button>}
+          </div>
+        </>) : (<>
+          <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}><Icono nombre="camara" />{p.expreso ? 'Dejé en el expreso: foto de la guía' : esEntrega ? 'Entregué: sacar foto del remito' : soloRetiros ? 'Retiré todo: sacar foto del remito' : 'Listo: sacar foto del remito'}</button>
+          <div className="parada-fila">
+            <button type="button" className="boton chico" disabled={!enLinea} onClick={() => setPaso('motivo')}>No se pudo</button>
+            <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar('salteada')}>Para después</button>
+          </div>
+        </>)}
+      </footer>
+    </div>,
+    document.body,
   );
 }

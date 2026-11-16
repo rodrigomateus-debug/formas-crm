@@ -196,6 +196,12 @@ dónde termina el recorrido. Google Maps acepta hasta 9 paradas en el medio más
 próximas 10 y, al hacerlas, el botón abre las que siguen. Waze no deja cargar varias paradas por link: con Waze se va
 parada por parada (la app lo avisa).
 
+**La parada abierta** (pedido de Rodrigo del 16/11/2026): tocar una parada abre su propia pantalla, que entra desde la
+derecha, como si entrara a la parada: «← Recorrido» y «Parada 3 de 16» arriba; el lugar, en qué estado está y la
+dirección grandes, la hora estimada (y la fijada o el horario de recepción), «Cómo llegar»; qué hay que hacer; en el lugar
+a quién preguntar, las observaciones y, si hay teléfono, «Llamar»; y abajo, fijos, los botones. Se vuelve con la flecha o
+con el «atrás» del celular. Hecha, queda abierta (para la foto del remito) y ofrece «Siguiente» con la próxima que falta.
+
 En cada parada marca cómo le fue (se ve en el momento; si no se pudo guardar, vuelve a como estaba y lo avisa arriba):
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo

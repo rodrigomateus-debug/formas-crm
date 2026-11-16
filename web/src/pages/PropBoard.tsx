@@ -130,7 +130,8 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
 }) {
   const { meta } = useMeta();
   const onOpen = (id: number, t?: Activity['type']) => acciones.current.onOpen?.(id, t);
-  const stale = r.props.notes_last_updated && Date.now() - Date.parse(r.props.notes_last_updated) > 30 * 86_400_000;
+  const ultima = r.props.notes_last_updated || r.props.createdate;   // nunca vacía: cargarlo ya es actividad
+  const stale = ultima && Date.now() - Date.parse(ultima) > 30 * 86_400_000;
   const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen(r.id, t); };
   const subtitle = subtitleDe(type, r);
   return (
@@ -154,8 +155,8 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
         {type === 'order' && <Adjuntos r={r} />}
-        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={`Última actividad${r.props.notes_last_updated ? `: ${fmtRelative(r.props.notes_last_updated)}` : ''}`}>
-          {r.props.notes_last_updated ? fmtRelative(r.props.notes_last_updated, true) : 'Sin actividad'}
+        <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={`Última actividad${ultima ? `: ${fmtRelative(ultima)}` : ''}`}>
+          {ultima ? fmtRelative(ultima, true) : ''}
         </span>
       </div>
     </div>

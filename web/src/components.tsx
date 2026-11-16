@@ -48,14 +48,45 @@ export function UserChip({ id, name, empty = 'Sin asignar', size = 'sm' }: { id:
 // buscador del desplegable siga encontrando por nombre.
 export const userOption = (u: User, extra = '') => <><Avatar name={u.name} photo={u.photo_url} size="xs" />{u.name}{extra}</>;
 
-// «Chat en Darwin»: va directo a la conversación de WhatsApp del negocio en Darwin (su «Link a Darwin»). Con el ícono de
-// WhatsApp para que se entienda adónde lleva; es lo único que se muestra del link (no se repite como texto).
-export function ChatDarwin({ url, className = 'btn sm', label = 'Chat en Darwin' }: { url: unknown; className?: string; label?: string }) {
+// Logos de Darwin y de WhatsApp para los botones de chat (pedido de Rodrigo del 16/11/2026): rellenos con el color del
+// texto, así cada botón los pinta con los colores de su marca (.chat-darwin, .chat-wa en styles.css).
+const DARWIN_PATH = 'M19.3978 85.1412C24.4382 82.8424 29.5116 82.7496 34.6593 82.6984C43.7061 82.6083 52.6197 81.4561 60.9291 77.6017C70.3997 73.2086 76.4638 65.8102 79.6422 55.9727C82.1252 48.2874 82.7415 40.3691 82.7207 32.3616C82.67 12.8892 98.2288 0.000271914 114.667 4.75382e-09C132.804 -0.000304621 146.655 14.6398 146.687 32.7619C146.702 41.594 147.369 50.3465 150.726 58.7509C156.266 72.6178 167.165 78.911 181.234 81.5112C188.714 82.8937 196.337 81.8719 203.715 83.3821C216.955 86.0924 226.987 96.2848 228.866 109.437C230.785 122.862 225.867 133.694 214.566 141.419C209.315 145.009 203.429 146.621 197 146.478C187.313 146.262 177.795 147.357 168.851 151.35C157.529 156.406 151.545 165.574 148.592 177.262C146.485 185.601 147.675 194.142 146.337 202.512C144.032 216.917 131.014 228.452 115.913 229.234C101.593 229.976 87.3383 219.502 83.7668 205.614C79.455 188.847 88.2828 172.297 104.652 166.615C108.352 165.331 112.26 165.223 116.154 165.032C124.381 164.628 132.57 164.298 140.469 161.275C153.217 156.396 160.417 147.105 163.334 134.192C166.255 121.256 166.183 108.226 163.412 95.3165C159.726 78.1518 148.381 67.6516 130.758 65.1434C119.16 63.4926 107.484 63.3335 95.8968 65.6625C78.8441 69.0898 67.8859 81.239 65.2509 98.366C64.0466 106.194 65.07 114.164 63.2318 121.826C60.3768 133.726 52.7443 141.898 41.0908 145.288C29.1374 148.766 18.1083 145.927 9.2445 136.903C-7.2649 120.094 -0.305749 93.7658 19.3978 85.1412Z';
+const WHATSAPP_PATH = 'M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.16-.17.2-.35.22-.64.08-.3-.15-1.26-.47-2.39-1.48-.88-.79-1.48-1.76-1.65-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.92-2.2-.24-.59-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48 0 1.46 1.07 2.88 1.21 3.07.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.63.71.22 1.36.19 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.41-.08-.13-.27-.2-.57-.35m-5.42 7.4h-.01a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.88 9.89-9.88 2.64 0 5.12 1.03 6.99 2.9a9.83 9.83 0 0 1 2.89 6.99c0 5.45-4.44 9.88-9.88 9.88m8.41-18.3A11.82 11.82 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.89c0 2.1.55 4.14 1.59 5.95L.06 24l6.3-1.65a11.88 11.88 0 0 0 5.68 1.45h.01c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.17-3.48-8.41z';
+export function MarcaDarwin({ size = 14 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 230 230" aria-hidden="true"><path d={DARWIN_PATH} fill="currentColor" /></svg>;
+}
+export function MarcaWhatsApp({ size = 14 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true"><path d={WHATSAPP_PATH} fill="currentColor" /></svg>;
+}
+
+// El teléfono del cliente que trae el «Link a Darwin» al final (…/conversations/all/15552-5493511234567), por si el
+// negocio no tiene contacto con celular.
+export function telDeDarwin(url: unknown) {
+  const d = String(url ?? '').split('/').pop()?.split('-').pop()?.replace(/\D/g, '') ?? '';
+  return d.length >= 10 ? `+${d}` : undefined;
+}
+
+// «Chat en Darwin»: va directo a la conversación del negocio en Darwin (su «Link a Darwin»), con el logo y los colores de
+// Darwin. Solo aparece si el cliente habló con Darwin. `compacto`: solo el logo (en la tarjeta del tablero).
+export function ChatDarwin({ url, className = 'btn sm', label = 'Chat en Darwin', compacto }: { url: unknown; className?: string; label?: string; compacto?: boolean }) {
   const href = safeUrl(url);
   if (!href) return null;
   return (
-    <a className={`${className} chat-darwin`} href={href} target="_blank" rel="noreferrer" title="Chat en Darwin: abrir la conversación de WhatsApp"
-      onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}><Icon name="whatsapp" size={14} />{label}</a>
+    <a className={`${className} chat-darwin${compacto ? ' chat-ico' : ''}`} href={href} target="_blank" rel="noreferrer" title="Chat en Darwin: abrir la conversación del cliente con Darwin"
+      aria-label={compacto ? 'Chat en Darwin' : undefined}
+      onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}><MarcaDarwin size={compacto ? 15 : 14} />{!compacto && label}</a>
+  );
+}
+
+// «WhatsApp»: abre el chat de WhatsApp directo con el cliente (su celular), con el logo y los colores de WhatsApp.
+export function ChatWhatsApp({ phone, quien, className = 'btn sm', label = 'WhatsApp', compacto }: { phone: unknown; quien?: string; className?: string; label?: string; compacto?: boolean }) {
+  const href = whatsappUrl(phone);
+  if (!href) return null;
+  const title = `Abrir WhatsApp${quien ? ` con ${quien}` : ''} (${String(phone)})`;
+  return (
+    <a className={`${className} chat-wa${compacto ? ' chat-ico' : ''}`} href={href} target="_blank" rel="noreferrer" title={title}
+      aria-label={compacto ? title : undefined}
+      onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}><MarcaWhatsApp size={compacto ? 15 : 14} />{!compacto && label}</a>
   );
 }
 

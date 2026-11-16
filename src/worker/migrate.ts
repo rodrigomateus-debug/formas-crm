@@ -3,7 +3,7 @@ import type { Ctx, Env, ObjectType, User } from './env';
 import { HttpError, now } from './env';
 import { requireRole } from './auth';
 import { Meta, type Property } from './meta';
-import { displayName, emailDomain, mergeRecords, normDomain, normPhone, splitName, updateRecord, NATIVE_ID_START, type Props } from './records';
+import { displayName, emailDomain, mergeRecords, normDomain, normPhone, splitName, ultimaActividadSql, updateRecord, NATIVE_ID_START, type Props } from './records';
 import { ORDER_STAGE_ALIAS } from './seed';
 
 // Carga masiva desde HubSpot (la usa scripts/migrate-hubspot.mjs). Conserva los ids de HubSpot en registros,
@@ -213,8 +213,7 @@ migrate.post('/', async (c) => {
       if (!results.length) return c.json({ done: true });
       const ts = now();
       await db.prepare(`UPDATE records SET
-        last_activity_at = (SELECT MAX(a.occurred_at) FROM activities a JOIN activity_links l ON l.activity_id = a.id
-          WHERE l.record_id = records.id AND a.archived = 0 AND a.type != 'task' AND a.occurred_at <= ?1),
+        last_activity_at = ${ultimaActividadSql('?1')},
         last_contacted_at = (SELECT MAX(a.occurred_at) FROM activities a JOIN activity_links l ON l.activity_id = a.id
           WHERE l.record_id = records.id AND a.archived = 0 AND a.type IN ('email', 'call', 'meeting', 'whatsapp') AND a.occurred_at <= ?1 AND (a.type != 'email' OR a.direction = 'out')),
         next_activity_at = (SELECT MIN(COALESCE(a.due_at, a.occurred_at)) FROM activities a JOIN activity_links l ON l.activity_id = a.id

@@ -4,11 +4,11 @@ import {
   http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
-import { ChatDarwin, Modal, PropertyInput, UserAvatar } from '../components';
+import { ChatDarwin, ChatWhatsApp, Modal, PropertyInput, UserAvatar, telDeDarwin } from '../components';
 import { Select } from '../Select';
 
 // Lo que el servidor agrega a cada tarjeta: contacto y empresa asociados y la próxima actividad.
-export interface CardInfo { contact?: { id: number; name: string }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } }
+export interface CardInfo { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } }
 type Card = CrmRecord & { card?: CardInfo };
 interface Column { stage: Stage; total: number; amount: number; weighted: number; deals: Card[] }
 
@@ -230,7 +230,9 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
   const onOpen = (id: number, t?: Activity['type']) => acciones.current.onOpen?.(id, t);
   const onSelect = canSelect ? (id: number) => acciones.current.onSelect?.(id) : undefined;
   const day = 86_400_000;
-  const stale = d.props.notes_last_updated && Date.now() - Date.parse(d.props.notes_last_updated) > 14 * day;
+  // Última actividad: nunca vacía (cargar el negocio ya es actividad); si faltara, la fecha de creación.
+  const ultima = d.props.notes_last_updated || d.props.createdate;
+  const stale = ultima && Date.now() - Date.parse(ultima) > 14 * day;
   const entered = d.props.hs_v2_date_entered_current_stage ? Date.parse(d.props.hs_v2_date_entered_current_stage) : NaN;
   const days = Number.isNaN(entered) ? null : Math.max(0, Math.floor((Date.now() - entered) / day));
   const next = d.card?.next;
@@ -266,10 +268,12 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${d.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Escribir un mail" aria-label={`Mail en ${d.name}`} onClick={(e) => act(e, 'email')}><Icon name="email" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${d.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
-        {darwin && <ChatDarwin url={darwin} className="btn ghost sm" label="Chat" />}
+        {/* Chat: en Darwin (si el cliente habló con Darwin) y directo por WhatsApp con su celular. */}
+        {darwin && <ChatDarwin url={darwin} className="btn sm" compacto />}
+        <ChatWhatsApp phone={d.card?.contact?.phone || telDeDarwin(darwin)} quien={d.card?.contact?.name} className="btn sm" compacto />
         <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }}
-          title={`${stale ? 'Inactivo hace más de 14 días' : 'Última actividad'}${d.props.notes_last_updated ? `: ${fmtRelative(d.props.notes_last_updated)}` : ''}`}>
-          {stale && <Icon name="timer" size={12} />} {d.props.notes_last_updated ? fmtRelative(d.props.notes_last_updated, true) : 'Sin actividad'}
+          title={`${stale ? 'Inactivo hace más de 14 días' : 'Última actividad'}${ultima ? `: ${fmtRelative(ultima)}` : ''}`}>
+          {stale && <Icon name="timer" size={12} />} {ultima ? fmtRelative(ultima, true) : ''}
         </span>
       </div>
     </div>

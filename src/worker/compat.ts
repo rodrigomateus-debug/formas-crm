@@ -111,7 +111,7 @@ async function recordOut(db: D1Database, rows: RecordRow[], wanted: string[] | n
     const p: Record<string, unknown> = { ...r.props, ...(extra.get(row.id) ?? {}), ...(hist.get(row.id) ?? {}) };
     p.hubspot_owner_id = om.toHs(p.owner_id);
     p.hubspot_owner_assigneddate = ownerAt.get(row.id) ?? null;
-    p.hs_lastactivitydate = row.last_activity_at;
+    p.hs_lastactivitydate = row.last_activity_at ?? row.created_at;
     if (row.object_type === 'contact') p.hs_whatsapp_phone_number = p.hs_whatsapp_phone_number ?? p.mobilephone ?? null;
     if (row.object_type === 'deal') {
       p.amount_in_home_currency = row.amount;

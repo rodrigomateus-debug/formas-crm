@@ -616,74 +616,129 @@ export async function guardarRecorridosConfig(db: D1Database, ctx: Ctx, b: Parti
 
 // El número del remito de traslado de un encargo: el que tiene o, la primera vez, el siguiente (el mismo número que seguía
 // la planilla).
+// El número siguiente de los remitos de traslado (el que seguía la planilla), para un encargo o un egreso.
+async function siguienteNumero(db: D1Database) {
+  const r = await db.prepare(`UPDATE settings SET value = json_set(value, '$.remito_ultimo', COALESCE(json_extract(value, '$.remito_ultimo'), 0) + 1)
+    WHERE key = 'recorridos' RETURNING json_extract(value, '$.remito_ultimo') AS n`).first<{ n: number }>();
+  if (!r) throw new HttpError(500, 'Falta la configuración del remito.');
+  return r.n;
+}
 export async function numerarRemito(db: D1Database, ctx: Ctx, id: number) {
   exigirPedir(ctx);
   const e = await encargoPorId(db, id);
   if (e.remito) return { remito: e.remito };
-  const r = await db.prepare(`UPDATE settings SET value = json_set(value, '$.remito_ultimo', COALESCE(json_extract(value, '$.remito_ultimo'), 0) + 1)
-    WHERE key = 'recorridos' RETURNING json_extract(value, '$.remito_ultimo') AS n`).first<{ n: number }>();
-  if (!r) throw new HttpError(500, 'Falta la configuración del remito.');
+  const n = await siguienteNumero(db);
   // Si otro lo numeró recién, queda el primero.
-  await db.prepare('UPDATE encargos SET remito = COALESCE(remito, ?) WHERE id = ?').bind(r.n, id).run();
+  await db.prepare('UPDATE encargos SET remito = COALESCE(remito, ?) WHERE id = ?').bind(n, id).run();
   return { remito: (await encargoPorId(db, id)).remito };
 }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-// El remito de traslado (el informal, «no válido como factura») para imprimir: dos copias en una hoja A4, una queda en el
-// destino y la firmada vuelve a Formas. Con la marca de Formas y los datos de la empresa de la planilla.
+export interface DatosRemito {
+  titulo: string; numero: number | null; fecha: string; destino: string; direccion: string | null; contacto: string | null;
+  items: ItemEnc[]; ademas?: string | null; notas?: string | null;
+}
+// El remito de traslado (el informal, «no válido como factura») para imprimir: una hoja A4 por remito (pedido de Rodrigo
+// del 16/11/2026); se imprime dos veces, una copia queda en el destino y la firmada vuelve a Formas. Con la marca de Formas
+// y los datos de la empresa de la planilla.
+export async function htmlRemito(db: D1Database, d: DatosRemito) {
+  const cfg = await recorridosConfig(db);
+  const numero = d.numero ? `N° ${cfg.remito_pv}-${String(d.numero).padStart(9, '0')}` : 'Sin numerar';
+  const [y, m, dd] = d.fecha.split('-');
+  const filas = d.items.map((i) => `<tr><td class="c">${i.cant != null ? esc(new Intl.NumberFormat('es-AR').format(i.cant)) : ''}</td><td class="c">${esc(i.pdv ?? '')}</td><td>${esc(i.que)}</td></tr>`).join('');
+  const vacias = Array.from({ length: Math.max(0, 14 - d.items.length) }, () => '<tr><td>&nbsp;</td><td></td><td></td></tr>').join('');
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(d.titulo)} ${esc(numero)}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef0f6; color: #11143a; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .barra { max-width: 186mm; margin: 16px auto 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .barra button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 0; background: #000085; color: #fff; cursor: pointer; }
+  .barra span { color: #4a4e6e; }
+  .hoja { max-width: 186mm; min-height: 273mm; margin: 16px auto; background: #fff; padding: 12mm; display: flex; flex-direction: column; gap: 6mm; }
+  header { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6mm; align-items: start; border-bottom: 2.5px solid #000085; padding-bottom: 4mm; }
+  .marca { display: flex; flex-direction: column; gap: 2mm; } .marca img { width: 40mm; }
+  .empresa { display: flex; flex-direction: column; font-size: 10.5px; color: #3b3f63; } .empresa b { font-size: 12.5px; color: #11143a; }
+  .letra { border: 2px solid #11143a; width: 18mm; text-align: center; padding: 1.5mm 0; } .letra b { font-size: 28px; display: block; line-height: 1; } .letra span { font-size: 7.5px; display: block; }
+  .datos { display: flex; flex-direction: column; align-items: flex-end; text-align: right; gap: 1mm; } .datos b { text-transform: uppercase; font-size: 13px; letter-spacing: .02em; }
+  .num { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+  .destino { display: grid; grid-template-columns: 1fr 1.4fr; gap: 3mm 8mm; padding: 4mm; border: 1px solid #d9dcea; border-radius: 2mm; }
+  .destino div { display: flex; flex-direction: column; } .destino span { font-size: 10px; text-transform: uppercase; color: #6b6f8e; letter-spacing: .04em; } .destino b { font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; } th { text-align: left; font-size: 10.5px; text-transform: uppercase; color: #fff; background: #000085; padding: 2mm 3mm; }
+  td { border-bottom: 1px solid #d9dcea; padding: 2.2mm 3mm; font-size: 13px; } td.c { text-align: center; font-variant-numeric: tabular-nums; }
+  .nota { margin: 0; font-size: 12.5px; color: #3b3f63; }
+  footer { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10mm; padding-top: 14mm; }
+  footer div { border-top: 1px solid #11143a; padding-top: 1.5mm; font-size: 11px; } footer span { color: #6b6f8e; }
+  .recibi { margin-top: auto; font-weight: 700; font-size: 12px; }
+  @media print { body { background: #fff; } .barra { display: none; } .hoja { margin: 0; max-width: none; min-height: 271mm; padding: 0; } }
+</style></head><body>
+<div class="barra"><button type="button" onclick="window.print()">Imprimir</button><span>${esc(d.numero ? 'Una hoja A4 por remito. Imprimilo dos veces: una copia queda en el destino y la firmada vuelve a Formas.' : 'Todavía sin número: se numera al imprimirlo desde el Hub.')}</span></div>
+<main class="hoja">
+  <header>
+    <div class="marca"><img src="/login/formas-logo.png" alt="Formas"><div class="empresa"><b>Formas Publicitarias SA</b><span>B. Matienzo 1308 · Florida (1602), Buenos Aires</span><span>Responsable Inscripto</span><span>Ing. Brutos CM 901-227475-1 · Inic. Act. 1/1/2007</span></div></div>
+    <div class="letra"><b>R</b><span>No válido como factura</span></div>
+    <div class="datos"><b>${esc(d.titulo)}</b><span class="num">${esc(numero)}</span><span>Fecha: ${esc(`${dd}/${m}/${y}`)}</span></div>
+  </header>
+  <div class="destino"><div><span>Señor/es</span><b>${esc(d.destino)}</b></div><div><span>Dirección</span><b>${esc(d.direccion ?? '')}</b></div>
+    ${d.contacto ? `<div><span>Atención</span><b>${esc(d.contacto)}</b></div>` : ''}</div>
+  <table><thead><tr><th style="width:16%">Cantidad</th><th style="width:16%">PDV</th><th>Producto</th></tr></thead>
+    <tbody>${filas}${vacias}</tbody></table>
+  ${d.ademas ? `<p class="nota"><b>Además se retira:</b> ${esc(d.ademas)}</p>` : ''}
+  ${d.notas ? `<p class="nota">${esc(d.notas)}</p>` : ''}
+  <div class="recibi">Recibí conforme</div>
+  <footer><div><br><span>Firma</span></div><div><br><span>Aclaración</span></div><div><br><span>DNI</span></div></footer>
+</main>
+<script>if (location.hash === '#imprimir') window.addEventListener('load', () => setTimeout(() => window.print(), 300));</script>
+</body></html>`;
+}
+
+// El remito de traslado de un encargo: lo que se lleva (o, si solo retira, lo que se retira).
 export async function remitoHtml(db: D1Database, user: User, id: number) {
   const e = await encargoPorId(db, id);
   if (esVentas(user) && e.user_id !== user.id) throw new HttpError(403, 'Es un encargo de otra persona.');
-  const cfg = await recorridosConfig(db);
-  const numero = e.remito ? `N° ${cfg.remito_pv}-${String(e.remito).padStart(9, '0')}` : 'Sin numerar';
-  const [y, m, d] = e.fecha.split('-');
-  const filas = (items: ItemEnc[]) => items.map((i) => `<tr><td class="c">${i.cant != null ? esc(new Intl.NumberFormat('es-AR').format(i.cant)) : ''}</td><td class="c">${esc(i.pdv ?? '')}</td><td>${esc(i.que)}</td></tr>`).join('');
-  const vacias = (n: number) => Array.from({ length: Math.max(0, n) }, () => '<tr><td>&nbsp;</td><td></td><td></td></tr>').join('');
-  const items = e.llevar.length ? e.llevar : e.retirar;
-  const titulo = e.llevar.length ? 'Remito de traslado de mercadería' : 'Constancia de retiro de mercadería';
-  const copia = (cual: string) => `
-  <section class="remito">
-    <header>
-      <div class="marca"><img src="/login/formas-logo.png" alt="Formas"><div class="empresa"><b>Formas Publicitarias SA</b><span>B. Matienzo 1308 · Florida (1602), Buenos Aires</span><span>Responsable Inscripto · Ing. Brutos CM 901-227475-1 · Inic. Act. 1/1/2007</span></div></div>
-      <div class="letra"><b>R</b><span>No válido como factura</span></div>
-      <div class="datos"><b>${esc(titulo)}</b><span class="num">${esc(numero)}</span><span>Fecha: ${esc(`${d}/${m}/${y}`)}</span><span class="copia">${esc(cual)}</span></div>
-    </header>
-    <div class="destino"><div><span>Señor/es</span><b>${esc(e.destino)}</b></div><div><span>Dirección</span><b>${esc(e.direccion ?? '')}</b></div>
-      ${e.contacto ? `<div><span>Atención</span><b>${esc(e.contacto)}</b></div>` : ''}</div>
-    <table><thead><tr><th style="width:16%">Cantidad</th><th style="width:16%">PDV</th><th>Producto</th></tr></thead>
-      <tbody>${filas(items)}${vacias(6 - items.length)}</tbody></table>
-    ${e.llevar.length && e.retirar.length ? `<p class="nota"><b>Además se retira:</b> ${esc(e.retirar.map((i) => [i.cant, i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ')).join(' · '))}</p>` : ''}
-    ${e.notas ? `<p class="nota">${esc(e.notas)}</p>` : ''}
-    <footer><div>Recibí conforme<br><span>Firma</span></div><div><br><span>Aclaración</span></div><div><br><span>DNI</span></div></footer>
-  </section>`;
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(titulo)} ${esc(numero)}</title>
-<style>
-  @page { size: A4; margin: 10mm; }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: #eef0f6; color: #11143a; font: 12px/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .hoja { max-width: 190mm; margin: 16px auto; background: #fff; padding: 0; }
-  .barra { max-width: 190mm; margin: 16px auto 0; display: flex; gap: 8px; align-items: center; }
-  .barra button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 0; background: #000085; color: #fff; cursor: pointer; }
-  .barra span { color: #4a4e6e; }
-  .remito { padding: 9mm 10mm; height: 138mm; display: flex; flex-direction: column; gap: 4mm; }
-  .remito + .remito { border-top: 1px dashed #9aa0bf; }
-  header { display: grid; grid-template-columns: 1fr auto 1fr; gap: 5mm; align-items: start; border-bottom: 2px solid #000085; padding-bottom: 3mm; }
-  .marca { display: flex; gap: 3mm; align-items: center; } .marca img { width: 30mm; }
-  .empresa { display: flex; flex-direction: column; font-size: 9.5px; color: #3b3f63; } .empresa b { font-size: 11px; color: #11143a; }
-  .letra { border: 1.5px solid #11143a; width: 15mm; text-align: center; padding: 1mm 0; } .letra b { font-size: 22px; display: block; line-height: 1; } .letra span { font-size: 6.5px; display: block; }
-  .datos { display: flex; flex-direction: column; align-items: flex-end; text-align: right; } .datos b { text-transform: uppercase; font-size: 11px; letter-spacing: .02em; }
-  .num { font-variant-numeric: tabular-nums; font-weight: 600; } .copia { margin-top: 1mm; font-size: 9px; text-transform: uppercase; color: #6a1; font-weight: 700; letter-spacing: .06em; }
-  .destino { display: grid; grid-template-columns: 1fr 1.4fr; gap: 1mm 6mm; } .destino div { display: flex; flex-direction: column; } .destino span { font-size: 9px; text-transform: uppercase; color: #6b6f8e; } .destino b { font-size: 12.5px; }
-  table { width: 100%; border-collapse: collapse; } th { text-align: left; font-size: 9.5px; text-transform: uppercase; color: #fff; background: #000085; padding: 1.5mm 2mm; }
-  td { border-bottom: 1px solid #d9dcea; padding: 1.6mm 2mm; } td.c { text-align: center; font-variant-numeric: tabular-nums; }
-  .nota { margin: 0; font-size: 11px; color: #3b3f63; }
-  footer { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8mm; } footer div { border-top: 1px solid #11143a; padding-top: 1mm; font-size: 10px; } footer span { color: #6b6f8e; }
-  @media print { body { background: #fff; } .barra { display: none; } .hoja { margin: 0; max-width: none; } }
-</style></head><body>
-<div class="barra"><button type="button" onclick="window.print()">Imprimir</button><span>${esc(e.remito ? 'Dos copias: una queda en el destino, la firmada vuelve a Formas.' : 'Todavía sin número: se numera al imprimirlo desde el Hub.')}</span></div>
-<main class="hoja">${copia('Original · para el destino')}${copia('Duplicado · vuelve firmado a Formas')}</main>
-<script>if (location.hash === '#imprimir') window.addEventListener('load', () => setTimeout(() => window.print(), 300));</script>
-</body></html>`;
+  const texto = (i: ItemEnc) => [i.cant, i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ');
+  return htmlRemito(db, {
+    titulo: e.llevar.length ? 'Remito de traslado de mercadería' : 'Constancia de retiro de mercadería', numero: e.remito, fecha: e.fecha,
+    destino: e.destino, direccion: e.direccion, contacto: e.contacto, items: e.llevar.length ? e.llevar : e.retirar,
+    ademas: e.llevar.length && e.retirar.length ? e.retirar.map(texto).join(' · ') : null, notas: e.notas,
+  });
+}
+
+// ---------- El remito de traslado de un egreso (cronograma) ----------
+
+// Lo que se le lleva al impresor ese día, de todos los PDV de esa parada (pedido de Rodrigo del 16/11/2026): se arma con
+// los egresos de ClickUp, se numera la primera vez (el mismo número que los de Recorridos) y se vuelve a armar si cambian.
+export async function remitoEgreso(env: Env, ctx: Ctx, b: { fecha?: unknown; clave?: unknown }) {
+  if (!organiza(ctx.user)) throw new HttpError(403, 'El remito de traslado de un egreso lo imprime Logística (o Producción).');
+  if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
+  const clave = String(b.clave ?? '');
+  const db = env.DB;
+  const egresos = (await movimientos(db, b.fecha, b.fecha)).movs.filter((m) => m.tipo === 'egreso' && claveParada(m) === clave);
+  if (!egresos.length) throw new HttpError(404, 'Ese día no hay egresos para ese impresor.');
+  const items: ItemEnc[] = egresos.map((m) => ({ cant: m.cantidad, que: m.articulo || 'Artículo', pdv: m.npdv }));
+  const destino = egresos[0].lugar ?? 'Impresor';
+  // La dirección: la de la ficha del impresor o, si no tiene, la de la libreta si hay un lugar que se llama igual.
+  const emp = egresos[0].company_id ? await db.prepare("SELECT json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city FROM records WHERE id = ?")
+    .bind(egresos[0].company_id).first<{ address: string | null; city: string | null }>() : null;
+  const libreta = emp?.address ? null : unicoLugar((await lugaresPara(db, [destino])).get(destino)?.exactos ?? []);
+  const direccion = emp?.address ? [emp.address, emp.city].filter(Boolean).join(', ') : libreta?.direccion ? direccionLugar(libreta) : null;
+  const ya = await db.prepare('SELECT id, numero FROM remitos_traslado WHERE fecha = ? AND clave = ?').bind(b.fecha, clave).first<{ id: number; numero: number }>();
+  if (ya) {
+    await db.prepare('UPDATE remitos_traslado SET destino = ?, direccion = ?, items = ?, updated_at = ? WHERE id = ?').bind(destino, direccion, JSON.stringify(items), now(), ya.id).run();
+    return { id: ya.id, numero: ya.numero };
+  }
+  const numero = await siguienteNumero(db);
+  const r = await db.prepare(`INSERT INTO remitos_traslado (numero, fecha, clave, destino, direccion, items, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(fecha, clave) DO UPDATE SET items = excluded.items, updated_at = excluded.created_at RETURNING id, numero`)
+    .bind(numero, b.fecha, clave, destino, direccion, JSON.stringify(items), ctx.user.id).first<{ id: number; numero: number }>();
+  return { id: r!.id, numero: r!.numero };
+}
+export async function remitoEgresoHtml(db: D1Database, user: User, id: number) {
+  if (!organiza(user)) throw new HttpError(403, 'El remito de traslado de un egreso lo ven Logística y Producción.');
+  const r = await db.prepare('SELECT * FROM remitos_traslado WHERE id = ?').bind(id).first<{ numero: number; fecha: string; destino: string; direccion: string | null; items: string }>();
+  if (!r) throw new HttpError(404, 'Ese remito ya no está.');
+  return htmlRemito(db, { titulo: 'Remito de traslado de mercadería', numero: r.numero, fecha: r.fecha, destino: r.destino, direccion: r.direccion, contacto: null,
+    items: (() => { try { return JSON.parse(r.items) as ItemEnc[]; } catch { return []; } })() });
 }
 
 // ---------- El historial de la planilla ----------

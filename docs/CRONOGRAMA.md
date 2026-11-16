@@ -61,6 +61,13 @@ parada del mismo lugar en la ruta del día.
 - **Encargos** (pedido de Rodrigo del 13/11/2026): lo que alguien pidió en [Recorridos](RECORRIDOS.md), en un carril verde
   de cada día. Se arrastran a otro día, se les elige el chofer (pasa toda la parada de ese lugar) y se marcan hechos como
   las demás tarjetas; un clic abre el encargo. A quien lo pidió le llega un aviso si se lo cambian.
+- **Remito de traslado de un egreso** (pedido de Rodrigo del 16/11/2026): en la tarjeta de un egreso, el ícono de la
+  impresora (y «Remito de traslado» en su parada de la Ruta del día) arma el remito con todo lo que va a ese impresor ese
+  día, de todos sus PDV, como el de los encargos de [Recorridos](RECORRIDOS.md): una hoja A4 por remito, con el número que
+  sigue el de la planilla. Se numera la primera vez y, si cambian los egresos, se vuelve a armar con el mismo número
+  (`POST /api/cronograma/remito-traslado` con `{ fecha, clave }`, tabla `remitos_traslado`).
+- **La foto del remito** es obligatoria en todas las paradas: la Ruta del día dice cuáles ya la tienen y cuáles no (ver
+  [REMITOS.md](REMITOS.md#remitos-internos-y-foto-obligatoria-en-todas-las-paradas-pedido-de-rodrigo-del-16112026)).
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque
@@ -106,8 +113,8 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 - **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido (y el de cada tarjeta de la semana) tiene
   los choferes, los expresos (transportes de terceros) y «+ Agregar chofer o expreso…». Todos los desplegables del
   cronograma (Chofer, Sale de, Pasar a…, Expreso) son el del Hub (`web/src/Select.tsx`), no la lista del navegador. Del expreso se guarda además su dirección, que es a donde se le lleva la
-  mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Entregas → Choferes, con
-  el mismo nombre): un chofer puede estar en la lista sin link.
+  mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Choferes en la barra lateral de
+  Logística, o Entregas → Choferes, con el mismo nombre): un chofer puede estar en la lista sin link.
 - **Una entrega por expreso.** En la parada de una entrega, «Mandar por expreso»: se elige el expreso y, cuando se
   despacha, se carga el **número de guía** para seguir el envío. La parada pasa a ser el expreso (con su dirección) y dice
   para qué cliente es; en la semana la tarjeta lleva «Expreso … · guía …». Es del PDV: vale para todas sus entregas. «Va
@@ -180,7 +187,7 @@ En la misma app de los remitos (`/hooks/chofer/`, ver [REMITOS.md](REMITOS.md)),
 que Logística armó con su nombre. Cada parada con la hora aproximada, qué hay que retirar, dejar o entregar y «Cómo
 llegar» (abre el mapa del celular). Es solo el de hoy: el link del chofer no ve ni marca otros días. No puede haber dos links activos con el mismo nombre.
 Entra con su **código de 8 números**, que escribe una sola vez y queda guardado en el celular, o con su link (los dos se
-crean en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
+crean en Choferes, en la barra lateral de Logística, o en Entregas → Choferes, con el mismo nombre que tiene en el desplegable «Chofer»; ver [REMITOS.md](REMITOS.md)).
 **Cómo llegar** (pedido de Rodrigo del 13/11/2026): cada parada tiene a la derecha el botón de navegación, que abre la
 dirección sin abrir la parada. La primera vez pregunta con qué app va (Google Maps, Waze y, en el iPhone, Apple Maps) y
 después abre directo con esa; se cambia en «Cómo llegar con» de la parada abierta. Arriba de las paradas, **«Todo el
@@ -188,6 +195,12 @@ recorrido en Google Maps»** abre la navegación desde donde está el chofer con
 dónde termina el recorrido. Google Maps acepta hasta 9 paradas en el medio más el destino: si faltan más, abre las
 próximas 10 y, al hacerlas, el botón abre las que siguen. Waze no deja cargar varias paradas por link: con Waze se va
 parada por parada (la app lo avisa).
+
+**La parada abierta** (pedido de Rodrigo del 16/11/2026): tocar una parada abre su propia pantalla, que entra desde la
+derecha, como si entrara a la parada: «← Recorrido» y «Parada 3 de 16» arriba; el lugar, en qué estado está y la
+dirección grandes, la hora estimada (y la fijada o el horario de recepción), «Cómo llegar»; qué hay que hacer; en el lugar
+a quién preguntar, las observaciones y, si hay teléfono, «Llamar»; y abajo, fijos, los botones. Se vuelve con la flecha o
+con el «atrás» del celular. Hecha, queda abierta (para la foto del remito) y ofrece «Siguiente» con la próxima que falta.
 
 En cada parada marca cómo le fue (se ve en el momento; si no se pudo guardar, vuelve a como estaba y lo avisa arriba):
 

@@ -34,8 +34,8 @@ import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarDestinos, listarEncargos,
-  numerarRemito, recorridosConfig, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
-import { archivoDeRemito, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
+  numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
+import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -1046,7 +1046,8 @@ api.get('/records/order/:id/remitos', async (c) => {
   const id = Number(c.req.param('id'));
   await getRow(c.env.DB, id, 'order');
   // Perfil Ventas: solo los remitos de este pedido (no los «puede ser de este» de otros pedidos, que revisa Logística).
-  const remitos = (await remitosDelPedido(c.env.DB, id)).filter((r) => !esVentas(c.get('ctx').user) || r.record_id === id || (r.pedidos ?? []).some((p) => p.id === id));
+  // Y solo los de entrega: los internos (retiros, egresos, encargos) son de Producción y Logística.
+  const remitos = (await remitosDelPedido(c.env.DB, id)).filter((r) => !esVentas(c.get('ctx').user) || (r.tipo === 'entrega' && (r.record_id === id || (r.pedidos ?? []).some((p) => p.id === id))));
   const sinLeer = remitos.filter((r) => r.estado === 'sin_leer' && r.record_id === id).slice(0, 2);
   if (sinLeer.length && c.env.ANTHROPIC_API_KEY) {
     c.executionCtx.waitUntil((async () => { const b = Budget.of(c.env); for (const r of sinLeer) await leerRemito(c.env, r.id, { budget: b }).catch((e) => console.error('remito', r.id, (e as Error).message)); })());
@@ -1063,14 +1064,25 @@ api.post('/records/order/:id/remitos', async (c) => {
   const form = await c.req.formData();
   const archivo = form.get('archivo');
   if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del remito.');
-  const { id: rid } = await guardarRemito(c.env, ctx, { recordId: id, origen: 'crm', bytes: await archivo.arrayBuffer(), mime: archivo.type || 'application/octet-stream', nombre: archivo.name });
-  const r = await leerRemito(c.env, rid, { ctx });
+  // «Interno» (un remito de un proveedor o de un impresor, uno de traslado): no se lee y no cuenta para la entrega. Ventas
+  // sube solo los de entrega.
+  const interno = form.get('tipo') === 'interno' && !esVentas(ctx.user);
+  const { id: rid } = await guardarRemito(c.env, ctx, { recordId: id, origen: 'crm', bytes: await archivo.arrayBuffer(), mime: archivo.type || 'application/octet-stream', nombre: archivo.name,
+    tipo: interno ? 'interno' : 'entrega', pedidos: interno ? [id] : [] });
+  const r = interno ? await remitoPorId(c.env.DB, rid) : await leerRemito(c.env, rid, { ctx });
   return c.json({ remito: remitoPublico(r, (await itemsDe(c.env.DB, [rid])).get(rid)), entrega: await calcularEntrega(c.env.DB, id) }, 201);
+});
+// Logística corrige si un remito es de entrega (al cliente) o interno (proveedor, impresor, traslado).
+api.patch('/remitos/:id/tipo', async (c) => {
+  const r = await cambiarTipoRemito(c.env, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ tipo?: string }>()).tipo);
+  return c.json({ remito: remitoPublico(r, (await itemsDe(c.env.DB, [r.id])).get(r.id)) });
 });
 api.get('/remitos/:id/archivo', async (c) => {
   const id = Number(c.req.param('id'));
-  // Perfil Ventas: el remito de alguno de sus pedidos (el principal o los otros del mismo remito).
+  // Perfil Ventas: el remito de entrega de alguno de sus pedidos (el principal o los otros del mismo remito).
   if (esVentas(c.get('ctx').user)) {
+    const t = await c.env.DB.prepare('SELECT tipo FROM remitos WHERE id = ?').bind(id).first<{ tipo: string }>();
+    if (t?.tipo === 'interno') throw new HttpError(403, 'Es un remito interno: lo ven Producción y Logística.');
     const { results } = await c.env.DB.prepare('SELECT record_id FROM remitos WHERE id = ?1 AND record_id IS NOT NULL UNION SELECT record_id FROM remito_pedidos WHERE remito_id = ?1')
       .bind(id).all<{ record_id: number }>();
     if (!(await idsVisibles(c.env.DB, c.get('ctx').user, results.map((r) => r.record_id))).size) throw new HttpError(403, 'Este remito es de pedidos de otra vendedora.', { ajeno: true });
@@ -1132,6 +1144,18 @@ api.get('/choferes', async (c) => {
       (SELECT MAX(r.created_at) FROM remitos r WHERE r.token_id = t.id) AS ultimo
     FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.source = 'chofer' ORDER BY t.revoked, t.name`).all();
   return c.json(results);
+});
+// Los choferes de la lista del cronograma (transportistas) que todavía no tienen código activo: en la pantalla Choferes
+// aparecen para crearles el código con un clic, con el mismo nombre (así ven su recorrido).
+api.get('/choferes/sugeridos', async (c) => {
+  logistica(c.get('ctx'));
+  const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const [ts, activos] = await c.env.DB.batch([
+    c.env.DB.prepare("SELECT nombre FROM transportistas WHERE activo = 1 AND tipo = 'chofer' ORDER BY nombre"),
+    c.env.DB.prepare("SELECT name FROM api_tokens WHERE source = 'chofer' AND revoked = 0"),
+  ]);
+  const con = new Set((activos.results as Array<{ name: string }>).map((a) => igual(a.name)));
+  return c.json({ nombres: (ts.results as Array<{ nombre: string }>).map((t) => t.nombre).filter((n) => !con.has(igual(n))) });
 });
 api.post('/choferes', async (c) => {
   const ctx = c.get('ctx');
@@ -1426,6 +1450,9 @@ api.get('/cronograma/ruta', async (c) => {
 api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
 // El chofer de una tarjeta de la semana: su parada pasa al recorrido de ese chofer ese día.
 api.put('/cronograma/chofer', async (c) => c.json(await asignarChofer(c.env, c.get('ctx'), await c.req.json())));
+// El remito de traslado de los egresos de una parada (lo que se le lleva al impresor ese día, de todos sus PDV).
+api.post('/cronograma/remito-traslado', async (c) => c.json(await remitoEgreso(c.env, c.get('ctx'), await c.req.json())));
+api.get('/cronograma/remito-traslado/:id', async (c) => c.html(await remitoEgresoHtml(c.env.DB, c.get('ctx').user, Number(c.req.param('id')))));
 // La hora fijada a mano en una parada de la ruta del día («a las 12:00»): el recorrido se vuelve a ordenar solo.
 api.put('/cronograma/hora', async (c) => c.json(await guardarHora(c.env.DB, c.get('ctx'), await c.req.json())));
 // Choferes y expresos: la lista del desplegable «Chofer», y las entregas que van por expreso con su guía.

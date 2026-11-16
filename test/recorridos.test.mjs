@@ -293,6 +293,7 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   assert.match(r.data, new RegExp(String(n1).padStart(9, '0')));
   assert.match(r.data, /Muestras de termos/);
   assert.match(r.data, /Recibí conforme/);
+  assert.equal(r.data.split('<main class="hoja">').length - 1, 1, 'una hoja A4 por remito (se imprime dos veces)');
   assert.equal((await api('GET', `/recorridos/encargos/${e3.id}/remito`, undefined, vera.email)).status, 403);
 
   // ---------- El historial de la planilla vieja ----------

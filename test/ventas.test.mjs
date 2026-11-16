@@ -224,4 +224,15 @@ test('perfil Logística: producción, pedidos, entregas, recorridos y cronograma
   }
   assert.equal((await call('PUT', '/cronograma/feriados', { fecha: '2031-01-02', nombre: `Prueba ${R}` }, L)).status, 200, 'edita el cronograma');
   assert.equal((await call('PUT', '/cronograma/feriados', { fecha: '2031-01-02', nombre: '' }, L)).status, 200);
+  // Choferes, en su barra lateral: los del cronograma sin código aparecen para crearlo con un clic.
+  assert.equal((await call('POST', '/cronograma/transportistas', { nombre: `Pepe ${R}`, tipo: 'chofer' }, L)).status, 200);
+  assert.ok((await call('GET', '/choferes/sugeridos', undefined, L)).data.nombres.includes(`Pepe ${R}`));
+  const pepe = await call('POST', '/choferes', { name: `Pepe ${R}` }, L);
+  assert.equal(pepe.status, 201);
+  assert.match(pepe.data.codigo, /^\d{8}$/);
+  assert.ok(!(await call('GET', '/choferes/sugeridos', undefined, L)).data.nombres.includes(`Pepe ${R}`), 'con código ya no se sugiere');
+  assert.equal((await call('GET', `/choferes/${pepe.data.id}/link`, undefined, L)).data.codigo, pepe.data.codigo, 'el código, de a uno');
+  const pia = (await call('POST', '/users', { email: `pia.chof.${R}@formas.ar`, name: `Pia Chof ${R}`, profile: 'produccion', role: 'member' })).data;
+  assert.equal((await call('GET', '/choferes/sugeridos', undefined, { 'x-dev-user': pia.email })).status, 403, 'es de Logística');
+  assert.equal((await call('DELETE', `/choferes/${pepe.data.id}`, undefined, L)).status, 200);
 });

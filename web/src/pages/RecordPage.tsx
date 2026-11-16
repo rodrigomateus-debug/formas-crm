@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
-import { Avatar, EditarEnLinea, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
+import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
@@ -706,12 +706,12 @@ function RazonSocialCard({ type, recordId, clave, onCambio }: { type: ObjectType
             <button className="btn sm" disabled={ocupado} onClick={() => setModo(modo === 'asignar' ? '' : 'asignar')} title="La razón social queda como una de las de esa empresa">Es de una empresa que ya está…</button>
             {!d.de && <button className="btn sm" disabled={ocupado} onClick={() => { setNombre(''); setModo(modo === 'nombre' ? '' : 'nombre'); }} title="Una empresa nueva con otro nombre (la marca), que factura con esta razón social">Crear empresa con otro nombre…</button>}
           </div>
-          {modo === 'asignar' && <RecordPicker type="company" placeholder="Buscar la empresa…" onPick={(c) => resolver({ accion: 'asignar', company_id: c.id })} />}
+          {modo === 'asignar' && <div onKeyDown={alEsc(() => setModo(''))}><RecordPicker type="company" placeholder="Buscar la empresa…" onPick={(c) => resolver({ accion: 'asignar', company_id: c.id })} /></div>}
           {modo === 'nombre' && (
-            <div className="row" style={{ gap: 6 }}>
-              <input className="input grow" autoFocus placeholder="Nombre de la empresa (la marca)" value={nombre} onChange={(e) => setNombre(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && nombre.trim()) resolver({ accion: 'crear_con_nombre', name: nombre.trim() }); }} />
-              <button className="btn sm primary" disabled={ocupado || !nombre.trim()} onClick={() => resolver({ accion: 'crear_con_nombre', name: nombre.trim() })}>Crear</button>
-            </div>
+            <EditarEnLinea confirmar="Crear la empresa" guardando={ocupado} sucio={!!nombre.trim()} onCancelar={() => setModo('')}
+              onGuardar={() => { if (nombre.trim()) resolver({ accion: 'crear_con_nombre', name: nombre.trim() }); }}>
+              <input className="input" autoFocus placeholder="Nombre de la empresa (la marca)" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+            </EditarEnLinea>
           )}
         </div>
       )}
@@ -1002,7 +1002,7 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
       <div className="panel-head"><h3>{title} <span className="muted small">({items.length})</span></h3>
         {!lleno && <button className="btn sm" onClick={() => setMode(mode ? '' : 'pick')}>+ Agregar</button>}</div>
       {mode === 'pick' && (
-        <div className="panel-body stack">
+        <div className="panel-body stack" onKeyDown={alEsc(() => setMode(''))}>
           <RecordPicker type={toType} exclude={[record.id, ...items.map((i) => i.id)]} onPick={add} />
           <button className="btn sm" onClick={() => setMode('create')}>Crear {OBJECTS[toType].single.toLowerCase()} nuevo</button>
         </div>

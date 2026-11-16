@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
+import { alEsc, useEsc } from '../components';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
@@ -90,6 +91,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [fijando, setFijando] = useState<string | null>(null);   // la parada a la que se le está fijando la hora
   // La parada a la que se le está corrigiendo la ubicación en el mapa (solo ese número se puede arrastrar) y dónde se soltó.
   const [ubicando, setUbicando] = useState<{ clave: string; lat?: number; lng?: number } | null>(null);
+  // Corregir la ubicación: Esc lo cancela aunque el foco esté en el mapa (se arrastra el marcador).
+  useEsc(!!ubicando, () => setUbicando(null));
   // Paneles de la barra del recorrido (agregar un chofer o un expreso, elegir otro lugar de salida) y la parada a la que
   // se le está cargando el expreso.
   const [panel, setPanel] = useState<'chofer' | 'salida' | 'fin' | null>(null);
@@ -480,7 +483,7 @@ function OtroLugar({ titulo = 'De dónde sale este recorrido', onElegir, onCance
   const lugares = useLugares(buscar);
   const texto = buscar.trim();
   return (
-    <div className="cr-panel">
+    <div className="cr-panel" onKeyDown={alEsc(onCancelar)}>
       <label>{titulo}<input className="input sm" autoFocus value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar o dirección" /></label>
       {lugares.length > 0 && <ul className="cr-lugares">{lugares.map((l) => <li key={l.id}><button type="button" onClick={() => onElegir({ nombre: l.nombre, direccion: l.direccion })}><b>{l.nombre}</b><span>{l.direccion}</span></button></li>)}</ul>}
       <div className="acciones">
@@ -507,7 +510,7 @@ function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id:
   };
   if (nuevo) return <div className="cr-editar"><NuevoTransportista soloExpreso onCancelar={() => setNuevo(false)} onListo={(n) => { setLista((l) => (l.some((x) => x.nombre === n) ? l : [...l, { id: -Date.now(), nombre: n, direccion: null }])); setExpreso(n); setNuevo(false); }} /></div>;
   return (
-    <form className="cr-editar" onSubmit={(e) => { e.preventDefault(); if (expreso) void guardar(expreso); }}>
+    <form className="cr-editar" onKeyDown={alEsc(onListo)} onSubmit={(e) => { e.preventDefault(); if (expreso) void guardar(expreso); }}>
       <label>Expreso
         <Select className="input sm" value={expreso} placeholder="Elegí un expreso" aria-label="Expreso" onChange={(e) => { if (e.target.value === '+') setNuevo(true); else setExpreso(e.target.value); }}>
           {[...new Set([...lista.map((x) => x.nombre), ...(expreso ? [expreso] : [])])].map((n) => <option key={n} value={n}>{n}</option>)}
@@ -531,7 +534,7 @@ function FijarHora({ p, llega, onGuardar, onCancelar }: { p: Parada; llega: numb
   const [ocupado, setOcupado] = useState(false);
   const guardar = async (m: ModoHora | null) => { setOcupado(true); await onGuardar(m, hora); setOcupado(false); };
   return (
-    <form className="cr-editar cr-fijar" onSubmit={(e) => { e.preventDefault(); if (hora) void guardar(modo); }}>
+    <form className="cr-editar cr-fijar" onKeyDown={alEsc(onCancelar)} onSubmit={(e) => { e.preventDefault(); if (hora) void guardar(modo); }}>
       <div className="row" role="group" aria-label="Cómo">
         {([['a_las', 'A las'], ['antes', 'Antes de las'], ['desde', 'Desde las']] as const).map(([k, t]) => (
           <button key={k} type="button" className={`chip${modo === k ? ' on' : ''}`} aria-pressed={modo === k} onClick={() => setModo(k)}>{t}</button>
@@ -593,7 +596,7 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
     } catch (err) { toast((err as Error).message, true); setGuardando(false); }
   }
   return (
-    <form className="cr-editar" onSubmit={guardar}>
+    <form className="cr-editar" onKeyDown={alEsc(onListo)} onSubmit={guardar}>
       <label>{esEntrega ? 'Dirección de entrega de este pedido' : 'Dirección de la empresa'}
         <input className="input sm" autoFocus value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" /></label>
       <label>Buscar en la libreta de direcciones

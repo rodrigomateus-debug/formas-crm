@@ -102,12 +102,34 @@ export function WhatsAppLink({ phone, children }: { phone: unknown; children?: R
   );
 }
 
+// Esc cancela un formulario o una lista que se abrió dentro de la página (se pone en su onKeyDown). Si un desplegable de
+// adentro está abierto, Esc lo cierra primero a él (lo marca con preventDefault). No llega a un cuadro (Modal) de atrás.
+export const alEsc = (cancelar: () => void) => (e: React.KeyboardEvent) => {
+  if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); cancelar(); }
+};
+// Campo que guarda al salir de él (sin ✓ ni ✕): Enter guarda (sale del campo) y Esc vuelve al valor de antes, sin guardar.
+export const teclasAlSalir = (antes: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.currentTarget.value = antes; e.currentTarget.blur(); }
+};
+// Lo mismo cuando el foco no queda adentro (por ejemplo, mientras se arrastra un marcador en el mapa).
+export function useEsc(activo: boolean, cancelar: () => void) {
+  const cb = useRef(cancelar);
+  cb.current = cancelar;
+  useEffect(() => {
+    if (!activo) return;
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); cb.current(); } };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [activo]);
+}
+
 // Edición en el lugar (ficha y vista previa): el dato se cambia por su campo en el mismo renglón, con ✓ y ✕ al lado, sin
 // una fila de botones abajo que empuje todo. Enter guarda (en un texto largo, Ctrl+Enter, porque Enter es otra línea) y Esc
 // cancela. Si no se cambió nada, un clic afuera también lo cierra; con cambios queda abierto hasta ✓ o ✕, para no perderlos.
-export function EditarEnLinea({ children, onGuardar, onCancelar, guardando, sucio, multilinea, sinConfirmar, className = '' }: {
+export function EditarEnLinea({ children, onGuardar, onCancelar, guardando, sucio, multilinea, sinConfirmar, className = '', confirmar = 'Guardar' }: {
   children: ReactNode; onGuardar: () => void; onCancelar: () => void; guardando?: boolean; sucio?: boolean;
-  multilinea?: boolean; sinConfirmar?: boolean; className?: string;
+  multilinea?: boolean; sinConfirmar?: boolean; className?: string; confirmar?: string;
 }) {
   const ref = useRef<HTMLFormElement>(null);
   const cancelar = useRef(onCancelar);
@@ -122,12 +144,12 @@ export function EditarEnLinea({ children, onGuardar, onCancelar, guardando, suci
     <form ref={ref} className={`en-linea${multilinea ? ' multi' : ''} ${className}`} onClick={(e) => e.stopPropagation()}
       onSubmit={(e) => { e.preventDefault(); if (!guardando) onGuardar(); }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && !e.defaultPrevented) { e.stopPropagation(); onCancelar(); }
+        if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); onCancelar(); }
         else if (multilinea && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!guardando) onGuardar(); }
       }}>
       <div className="en-linea-campo">{children}</div>
-      {!sinConfirmar && <button type="submit" className="btn sm icon primary" disabled={guardando} aria-label="Guardar"
-        title={multilinea ? 'Guardar (Ctrl+Enter)' : 'Guardar (Enter)'}><Icon name="check" size={15} /></button>}
+      {!sinConfirmar && <button type="submit" className="btn sm icon primary" disabled={guardando} aria-label={confirmar}
+        title={`${confirmar} (${multilinea ? 'Ctrl+Enter' : 'Enter'})`}><Icon name="check" size={15} /></button>}
       <button type="button" className="btn sm icon ghost" disabled={guardando} aria-label="Cancelar" title="Cancelar (Esc)" onClick={onCancelar}><Icon name="x" size={15} /></button>
     </form>
   );

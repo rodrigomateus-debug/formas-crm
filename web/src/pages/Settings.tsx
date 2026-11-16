@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon, verComo } from '../lib';
-import { Avatar, FilterRow, Modal, MultiPick, UserChip, describeFilter, filterableProps, opsFor, userOption } from '../components';
+import { Avatar, FilterRow, Modal, teclasAlSalir, MultiPick, UserChip, describeFilter, filterableProps, opsFor, userOption } from '../components';
 import { Select } from '../Select';
 
 const TABS: Array<[string, string]> = [['users', 'Usuarios'], ['properties', 'Propiedades'], ['pipelines', 'Pipelines'], ['tags', 'Etiquetas'], ['integrations', 'Integraciones y Claude'], ['inbound', 'Registro de entradas']];
@@ -567,8 +567,12 @@ function Gmail() {
         {!st.data.has_credentials && <p className="small muted" style={{ margin: 0 }}>Hace falta cargar el secreto GOOGLE_SA_JSON (cuenta de servicio con delegación de dominio y permiso gmail.readonly). Ver README, «Gmail».</p>}
         <label className="row"><input type="checkbox" checked={cfg.enabled} disabled={!st.data.has_credentials} onChange={(e) => save({ enabled: e.target.checked })} />Registrar mails automáticamente</label>
         <label className="row"><input type="checkbox" checked={cfg.create_contacts_on_sent} onChange={(e) => save({ create_contacts_on_sent: e.target.checked })} />Crear el contacto cuando le escribimos a alguien nuevo</label>
-        <label className="field">Dominios propios (no se registran)<input className="input" defaultValue={cfg.internal_domains.join(', ')} onBlur={(e) => save({ internal_domains: e.target.value.split(/[,\s]+/).filter(Boolean) })} /></label>
-        <label className="field">Dominios que nunca se registran (proveedores, avisos)<input className="input" defaultValue={cfg.ignore_domains.join(', ')} onBlur={(e) => save({ ignore_domains: e.target.value.split(/[,\s]+/).filter(Boolean) })} /></label>
+        <label className="field">Dominios propios (no se registran)<input className="input" defaultValue={cfg.internal_domains.join(', ')} title="Se guarda al salir del campo o con Enter; Esc deshace"
+          onKeyDown={teclasAlSalir(cfg.internal_domains.join(', '))}
+          onBlur={(e) => { const v = e.target.value.split(/[,\s]+/).filter(Boolean); if (v.join(', ') !== cfg.internal_domains.join(', ')) save({ internal_domains: v }); }} /></label>
+        <label className="field">Dominios que nunca se registran (proveedores, avisos)<input className="input" defaultValue={cfg.ignore_domains.join(', ')} title="Se guarda al salir del campo o con Enter; Esc deshace"
+          onKeyDown={teclasAlSalir(cfg.ignore_domains.join(', '))}
+          onBlur={(e) => { const v = e.target.value.split(/[,\s]+/).filter(Boolean); if (v.join(', ') !== cfg.ignore_domains.join(', ')) save({ ignore_domains: v }); }} /></label>
         <div className="row">
           <button className="btn" disabled={busy || !st.data.has_credentials || !cfg.enabled} onClick={async () => {
             setBusy(true);

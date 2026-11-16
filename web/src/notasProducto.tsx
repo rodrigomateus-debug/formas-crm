@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { http, cabecerasVerComo, useToast, Icon, recordUrl, fmtDate, fmtRelative } from './lib';
-import { Modal, UserAvatar } from './components';
+import { Modal, UserAvatar, alEsc } from './components';
 import { Select } from './Select';
 
 // Notas de producto (pedido de Rodrigo del 16/11/2026; src/worker/notasproducto.ts): lo que Producción aprendió de un
@@ -231,6 +231,7 @@ function Nota({ n, f, puede, onCambio }: { n: NotaProducto; f: Ficha; puede: boo
   const [gravedad, setGravedad] = useState<Gravedad>(n.gravedad);
   const [todos, setTodos] = useState(!!n.modelo);
   const g = GRAVEDAD[n.gravedad];
+  const cancelarEdicion = () => { setEditando(false); setTexto(n.texto); setTipo(n.tipo); setGravedad(n.gravedad); setTodos(!!n.modelo); };
   const cambiar = async (body: Record<string, unknown>, ok: string) => {
     try { await http('PATCH', `/productos/notas/${n.id}`, body); toast(ok); setEditando(false); onCambio(); }
     catch (e) { toast((e as Error).message, true); }
@@ -252,7 +253,11 @@ function Nota({ n, f, puede, onCambio }: { n: NotaProducto; f: Ficha; puede: boo
         {n.archivada_at && <span className="small muted">· ya no aplica desde {fmtDate(n.archivada_at)}</span>}
       </div>
       {editando ? (
-        <div className="stack" style={{ gap: 6, marginTop: 6 }}>
+        // Esc cancela y Ctrl+Enter guarda, como en la nota nueva y en la edición en el lugar del resto del CRM.
+        <div className="stack" style={{ gap: 6, marginTop: 6 }} onKeyDown={(e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && texto.trim()) { e.preventDefault(); void cambiar({ texto, tipo, gravedad, ...(deOtroSku ? {} : { todos_colores: todos }) }, 'Nota actualizada'); return; }
+          alEsc(cancelarEdicion)(e);
+        }}>
           <textarea className="input" rows={3} value={texto} onChange={(e) => setTexto(e.target.value)} maxLength={2000} autoFocus />
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Select className="input sm" style={{ width: 210 }} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo de nota">
@@ -261,7 +266,7 @@ function Nota({ n, f, puede, onCambio }: { n: NotaProducto; f: Ficha; puede: boo
             <ElegirGravedad value={gravedad} onChange={setGravedad} />
             {(f.modelo || n.modelo) && !deOtroSku && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />Todos los colores</label>}
             <span className="grow" />
-            <button type="button" className="btn ghost sm" onClick={() => { setEditando(false); setTexto(n.texto); setTipo(n.tipo); setGravedad(n.gravedad); setTodos(!!n.modelo); }}>Cancelar</button>
+            <button type="button" className="btn ghost sm" onClick={cancelarEdicion}>Cancelar</button>
             <button type="button" className="btn primary sm" disabled={!texto.trim()} onClick={() => cambiar({ texto, tipo, gravedad, ...(deOtroSku ? {} : { todos_colores: todos }) }, 'Nota actualizada')}>Guardar</button>
           </div>
         </div>

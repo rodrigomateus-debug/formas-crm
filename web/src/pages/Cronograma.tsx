@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
-import { Avatar, Modal } from '../components';
+import { Avatar, EditarEnLinea, Modal, alEsc } from '../components';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -534,10 +534,12 @@ function Notas({ dia, notas, puede, onCambio }: { dia: string; notas: Nota[]; pu
         </div>
       ))}
       {puede && (abierto ? (
-        <form className="cr-nota-form" onSubmit={(e) => { e.preventDefault(); if (!texto.trim()) return; void http('POST', '/cronograma/notas', { fecha: dia, texto }).then(() => { setTexto(''); setAbierto(false); onCambio(); }, (err) => toast((err as Error).message, true)); }}>
-          <input className="input sm" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Llevar el sobre a…" aria-label="Nota del día" onKeyDown={(e) => { if (e.key === 'Escape') setAbierto(false); }} />
-          <button type="submit" className="btn sm primary">Agregar</button>
-        </form>
+        <EditarEnLinea className="cr-nota-form" confirmar="Agregar" sucio={!!texto.trim()} onCancelar={() => setAbierto(false)} onGuardar={() => {
+          if (!texto.trim()) return;
+          void http('POST', '/cronograma/notas', { fecha: dia, texto }).then(() => { setTexto(''); setAbierto(false); onCambio(); }, (err) => toast((err as Error).message, true));
+        }}>
+          <input className="input sm" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Llevar el sobre a…" aria-label="Nota del día" />
+        </EditarEnLinea>
       ) : <button type="button" className="cr-agregar" onClick={() => setAbierto(true)}><Icon name="plus" size={12} />Nota</button>)}
     </div>
   );
@@ -551,10 +553,9 @@ function Feriado({ dia, nombre, puede, onCambio }: { dia: string; nombre?: strin
   if (nombre) return <div className="cr-feriado"><span>{nombre}</span>{puede && <button type="button" className="cr-mini" aria-label="Sacar el feriado" title="No es feriado" onClick={() => guardar('')}><Icon name="x" size={12} /></button>}</div>;
   if (!puede) return null;
   return abierto ? (
-    <form className="cr-nota-form" onSubmit={(e) => { e.preventDefault(); if (texto.trim()) void guardar(texto.trim()); }}>
-      <input className="input sm" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Nombre del feriado" onKeyDown={(e) => { if (e.key === 'Escape') setAbierto(false); }} />
-      <button type="submit" className="btn sm">Guardar</button>
-    </form>
+    <EditarEnLinea className="cr-nota-form" sucio={texto !== 'Feriado'} onCancelar={() => setAbierto(false)} onGuardar={() => { if (texto.trim()) void guardar(texto.trim()); }}>
+      <input className="input sm" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} aria-label="Nombre del feriado" />
+    </EditarEnLinea>
   ) : <button type="button" className="cr-agregar feriado" onClick={() => setAbierto(true)}>Marcar feriado</button>;
 }
 
@@ -625,7 +626,7 @@ export function NuevoTransportista({ soloExpreso, onListo, onCancelar }: { soloE
     catch (err) { toast((err as Error).message, true); setOcupado(false); }
   }
   return (
-    <form className="cr-panel" onSubmit={guardar}>
+    <form className="cr-panel" onKeyDown={alEsc(onCancelar)} onSubmit={guardar}>
       {!soloExpreso && (
         <div className="row" role="group" aria-label="Qué es">
           <button type="button" className={`chip${tipo === 'chofer' ? ' on' : ''}`} aria-pressed={tipo === 'chofer'} onClick={() => setTipo('chofer')}>Chofer</button>

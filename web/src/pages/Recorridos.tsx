@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative } from '../lib';
-import { Modal } from '../components';
+import { Modal, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
@@ -559,7 +559,7 @@ function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (
       )}
       {!res && !sug && <div className="muted small">Buscando tus destinos de siempre…</div>}
       {otro ? (
-        <div className="rc-otro">
+        <div className="rc-otro" onKeyDown={alEsc(() => setOtro(false))}>
           <div className="rc-2">
             <label className="field">Nombre<input className="input" value={suelto.nombre} onChange={(e) => setSuelto({ ...suelto, nombre: e.target.value })} placeholder="Casa de…, Oficina de…" /></label>
             <label className="field">Dirección<input className="input" value={suelto.direccion} onChange={(e) => setSuelto({ ...suelto, direccion: e.target.value })} placeholder="Calle y altura, localidad" /></label>

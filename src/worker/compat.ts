@@ -20,7 +20,7 @@ export const compat = new Hono<App>();
 // Solo en sus rutas (/crm/…): el compat también está montado en la raíz y no tiene que tocar el resto.
 compat.use('/crm/*', async (c, next) => {
   const ctx = c.get('ctx');
-  if (ctx && restringido(ctx.user)) throw new HttpError(403, 'La API compatible con HubSpot es para los tableros y las integraciones: no está en los perfiles Ventas ni Producción.');
+  if (ctx && restringido(ctx.user)) throw new HttpError(403, 'La API compatible con HubSpot es para los tableros y las integraciones: no está en los perfiles Ventas, Producción ni Logística.');
   await next();
 });
 

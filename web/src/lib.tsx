@@ -30,6 +30,9 @@ export const esVentas = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'co
 // Perfil Producción: los pedidos, Producción, Entregas y Cronograma; sin la parte comercial (contactos, empresas y negocios
 // solo los que están en un pedido o son proveedores, y sin sus listas). Lo controla el servidor (alcance.ts).
 export const esProduccion = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'produccion' && u.role !== 'admin';
+// Producción y Logística (pedido de Rodrigo del 16/11/2026): Producción, Pedidos, Entregas, Recorridos y Cronograma, sin la
+// parte comercial (src/worker/alcance.ts).
+export const esOperaciones = (u: Pick<User, 'profile' | 'role'>) => (u.profile === 'produccion' || u.profile === 'logistica') && u.role !== 'admin';
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
 export interface Meta {

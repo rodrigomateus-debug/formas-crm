@@ -195,3 +195,33 @@ test('perfil Producción: pedidos y proveedores; nada de la parte comercial', as
     assert.equal((await call('GET', p, undefined, P)).status, 200, p);
   }
 });
+
+// Perfil Logística (pedido de Rodrigo del 16/11/2026): Producción, Pedidos, Entregas, Recorridos y Cronograma, con las
+// mismas reglas que Producción para el resto; sigue editando el cronograma y cerrando entregas.
+test('perfil Logística: producción, pedidos, entregas, recorridos y cronograma; nada de la parte comercial', async () => {
+  const R = `${RUN}l`;
+  const lu = (await call('POST', '/users', { email: `lu.log.${R}@formas.ar`, name: `Lu Log ${R}`, profile: 'logistica', role: 'member' })).data;
+  const L = { 'x-dev-user': lu.email };
+  const cliente = await crear('company', { name: `Cliente Log ${R}` });
+  const pedido = await crear('order', { hs_order_name: `PDV Log ${R}` }, [cliente.id]);
+  const negocio = await crear('deal', { dealname: `Negocio Log ${R}`, pipeline: 'default', dealstage: 'appointmentscheduled' }, [cliente.id]);
+  const proveedor = await crear('company', { name: `Imprenta Log ${R}`, tipo_de_relacion: 'proveedor' });
+  const prospecto = await crear('company', { name: `Prospecto Log ${R}` });
+
+  // Pedidos, el cliente del pedido y el proveedor, sí.
+  for (const [t, r] of [['order', pedido], ['company', cliente], ['company', proveedor]]) {
+    assert.equal((await call('GET', `/records/${t}/${r.id}`, undefined, L)).status, 200, `${t} ${r.name}`);
+  }
+  // Negocios y empresas que no están en un pedido, no.
+  const neg = await call('GET', `/records/deal/${negocio.id}`, undefined, L);
+  assert.deepEqual([neg.status, neg.data.error], [403, 'Los negocios no están en el perfil Logística.']);
+  assert.equal((await call('GET', `/records/deal?q=${R}`, undefined, L)).data.total, 0);
+  assert.equal((await call('GET', `/records/company/${prospecto.id}`, undefined, L)).status, 403);
+  assert.equal((await call('POST', '/records/deal', { props: { dealname: 'x', pipeline: 'default', dealstage: 'appointmentscheduled' } }, L)).status, 403);
+  // Sus pantallas: Producción (mira), Entregas, Recorridos y Cronograma (edita).
+  for (const p of ['/produccion', '/remitos/revisar', '/remitos/revisados', '/recorridos/agenda', '/recorridos/encargos?todos=1', '/cronograma?desde=2026-11-09&hasta=2026-11-15']) {
+    assert.equal((await call('GET', p, undefined, L)).status, 200, p);
+  }
+  assert.equal((await call('PUT', '/cronograma/feriados', { fecha: '2031-01-02', nombre: `Prueba ${R}` }, L)).status, 200, 'edita el cronograma');
+  assert.equal((await call('PUT', '/cronograma/feriados', { fecha: '2031-01-02', nombre: '' }, L)).status, 200);
+});

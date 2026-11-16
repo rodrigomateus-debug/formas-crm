@@ -26,20 +26,26 @@ import { assertDealVisible } from './pipelines';
 //     (tipo de relación «proveedor») y los que están en algún pedido (el cliente y sus contactos).
 //   - Tareas, actividad y conversaciones: las suyas y las de lo que ve.
 //   - Producción, Entregas y Cronograma, como siempre.
-// Logística, por ahora, sigue viendo todo.
+// Logística (pedido de Rodrigo del 16/11/2026), lo mismo que Producción: Producción, Pedidos, Entregas, Recorridos y
+// Cronograma, sin la parte comercial. Cada uno sigue editando lo suyo (Producción, la pantalla de Producción; Logística,
+// los remitos y las entregas; los dos, el cronograma y los recorridos).
 
 export const esVentas = (u: User) => u.profile === 'comercial' && u.role !== 'admin';
 export const esProduccion = (u: User) => u.profile === 'produccion' && u.role !== 'admin';
+export const esLogistica = (u: User) => u.profile === 'logistica' && u.role !== 'admin';
+// Producción y Logística: los perfiles de operaciones, que ven los pedidos y no la parte comercial.
+export const esOperaciones = (u: User) => esProduccion(u) || esLogistica(u);
+export const nombrePerfil = (u: User) => (esLogistica(u) ? 'Logística' : esProduccion(u) ? 'Producción' : 'Ventas');
 // Perfiles que no ven todo el CRM (cada uno con su regla, abajo).
-export const restringido = (u: User) => esVentas(u) || esProduccion(u);
+export const restringido = (u: User) => esVentas(u) || esOperaciones(u);
 
 // Condición SQL «el registro `al` lo ve la vendedora». El id va escrito en la consulta (es un entero de la base, no un
 // dato del pedido): así sirve igual en consultas con ? que con ?1, ?2… La subconsulta no depende de la fila: SQLite la
 // arma una sola vez (sus registros y lo asociado a ellos), que es poco aunque la lista sea de miles.
 export function visibleSql(al: string, user: User) {
-  // Producción: los pedidos; de contactos y empresas, los proveedores y los que están en algún pedido (por el índice de
-  // asociaciones de cada registro: es una búsqueda corta por fila).
-  if (esProduccion(user)) {
+  // Producción y Logística: los pedidos; de contactos y empresas, los proveedores y los que están en algún pedido (por el
+  // índice de asociaciones de cada registro: es una búsqueda corta por fila).
+  if (esOperaciones(user)) {
     return `(${al}.object_type = 'order' OR (${al}.object_type IN ('company', 'contact') AND (json_extract(${al}.props, '$.tipo_de_relacion') = 'proveedor'
       OR EXISTS (SELECT 1 FROM associations pa WHERE pa.to_id = ${al}.id AND pa.from_type = 'order'))))`;
   }
@@ -68,7 +74,7 @@ async function duenio(db: D1Database, ownerId: number | null) {
 const NOMBRE: Record<string, string> = { contact: 'Este contacto', company: 'Esta empresa', deal: 'Este negocio', order: 'Este pedido' };
 
 export async function puedeVer(db: D1Database, user: User, row: Pick<RecordRow, 'id' | 'object_type' | 'owner_id'>) {
-  if (esProduccion(user)) {
+  if (esOperaciones(user)) {
     if (row.object_type === 'order') return true;
     if (row.object_type === 'deal') return false;
     return !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${visibleSql('r', user)}`).bind(row.id).first());
@@ -82,9 +88,9 @@ export async function puedeVer(db: D1Database, user: User, row: Pick<RecordRow, 
 export async function assertVisible(db: D1Database, meta: Meta, user: User, row: RecordRow) {
   if (row.object_type === 'deal') await assertDealVisible(meta, user, row.pipeline_id);
   if (await puedeVer(db, user, row)) return;
-  if (esProduccion(user)) {
-    throw new HttpError(403, row.object_type === 'deal' ? 'Los negocios no están en el perfil Producción.'
-      : `${NOMBRE[row.object_type] ?? 'Este registro'} no está en ningún pedido ni es un proveedor: no está en el perfil Producción.`, { ajeno: true });
+  if (esOperaciones(user)) {
+    throw new HttpError(403, row.object_type === 'deal' ? `Los negocios no están en el perfil ${nombrePerfil(user)}.`
+      : `${NOMBRE[row.object_type] ?? 'Este registro'} no está en ningún pedido ni es un proveedor: no está en el perfil ${nombrePerfil(user)}.`, { ajeno: true });
   }
   const de = await duenio(db, row.owner_id);
   throw new HttpError(403, `${NOMBRE[row.object_type] ?? 'Este registro'} es de ${de ?? 'otra vendedora'}: lo ven ${de ? 'ella' : 'quien lo tiene'} y los administradores. Si lo necesitás, pedile a un administrador que te lo pase.`, { ajeno: true });
@@ -101,7 +107,7 @@ export async function idsVisibles(db: D1Database, user: User, ids: number[]) {
 export async function assertActividadVisible(db: D1Database, user: User, activityId: number) {
   if (!restringido(user)) return;
   const ok = await db.prepare(`SELECT 1 FROM activities a WHERE a.id = ? AND ${actividadVisibleSql('a', user)}`).bind(activityId).first();
-  if (!ok) throw new HttpError(403, esProduccion(user) ? 'Esta actividad es de registros que no están en el perfil Producción.' : 'Esta actividad es de registros de otra vendedora.', { ajeno: true });
+  if (!ok) throw new HttpError(403, esOperaciones(user) ? `Esta actividad es de registros que no están en el perfil ${nombrePerfil(user)}.` : 'Esta actividad es de registros de otra vendedora.', { ajeno: true });
 }
 
 // Pantallas y funciones que Ventas no tiene.

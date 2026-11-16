@@ -180,6 +180,35 @@ importador, el CRM le pone ese proveedor y lo escribe en ClickUp, así se ve igu
 - En la lista, al pasar por la celda del proveedor se ve «Por el SKU ZEC-…» mientras siga el que puso el CRM.
 - Migración `0058_proveedor_por_sku.sql`; prueba en `test/produccion.test.mjs`.
 
+### Notas de producto
+
+Pedido de Rodrigo del 16/11/2026. Producción documenta lo que pasa con un producto de importador («la serigrafía se sale»,
+«el bordado tapa el bolsillo», «la tinta se borra», «es de mala calidad») y la nota queda atada al **SKU**, no al pedido:
+cada vez que ese producto se vuelve a vender, aparece sola.
+
+- **Dónde se carga:** en Producción, «+ Nota» al lado del artículo (aparece al pasar el mouse); también en los productos
+  del pedido y en la pantalla **Notas de productos** («Abrir un SKU»). Cada nota tiene un **tipo** (serigrafía, bordado,
+  grabado láser, tampografía, sublimación, calidad del producto, durabilidad de la impresión, otro), una **gravedad**
+  (Dato útil, Ojo, No recomendado), una foto opcional (en Drive: `Notas de productos/<SKU>`) y queda con el pedido y el
+  artículo donde pasó.
+- **Todos los colores:** si el SKU termina en una variante corta («IMP_P18.030**.03**», «ZEC-1234**-AZ**»), se puede
+  marcar «Vale para todos los colores» y la nota se ve en todos los SKU de ese modelo (`modeloDe`). Si no se puede
+  separar el color con seguridad, la nota es solo de ese SKU.
+- **Los SKU genéricos** (`_GE_`, como `PS_GE_2000`) no llevan notas: el mismo código es vasos, naipes y paletas.
+- **Dónde se ve:** en Producción y en los productos del pedido, un aviso al lado del producto («Ojo», «Evitar», «2 notas»,
+  con el color de la más grave). Un clic abre la **ficha del SKU**: sus notas (las vigentes primero, las más graves
+  arriba), cargar otra, y **dónde se vendió** (los pedidos con ese SKU que quien mira puede ver).
+- **Aviso:** cuando se leen los productos de un pedido abierto (al entrar o al abrirlo) y un SKU tiene una nota vigente
+  «Ojo» o «No recomendado» escrita en otro pedido, llega a la campanita de la vendedora del pedido y de Producción. Uno
+  solo por persona, pedido y SKU; solo en el CRM, no por mail.
+- **Quién:** escriben Producción y los administradores; ven todos (también Ventas). Cambiar o borrar una nota: quien la
+  escribió o un administrador. Si el problema ya no pasa (el importador cambió el producto o el lote), cualquiera de
+  Producción la marca **«Ya no aplica»**: deja de avisar y queda en el historial.
+- Código: `src/worker/notasproducto.ts`, `web/src/notasProducto.tsx`, `web/src/pages/NotasProductos.tsx`. API:
+  `GET /api/productos/notas`, `GET /api/productos/sku/:sku`, `POST /api/productos/sku/:sku/notas` (JSON o formulario con
+  `foto`), `PATCH`/`DELETE /api/productos/notas/:id`, `GET /api/productos/notas/:id/foto`. Migración
+  `0066_notas_producto.sql`; prueba en `test/notas-producto.test.mjs`.
+
 ## Cómo está hecho
 
 | Qué | Dónde |

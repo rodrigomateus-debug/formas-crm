@@ -213,6 +213,14 @@ deja elegido. Al subirlo se revisa si los textos están en curvas. Con el boceto
 misma subtarea, y Producción avisa «Sin logo» o «Logo» (con textos o no vectorial) en los artículos que faltan producir.
 Detalle en [docs/LOGOS.md](docs/LOGOS.md).
 
+## Notas de productos
+
+Producción anota lo que pasa con un producto de importador («la serigrafía se sale», «el bordado tapa el bolsillo», «la
+tinta se borra») y queda atado al SKU: cada vez que se vuelve a vender, se ve en Producción y en los productos del pedido,
+y le llega un aviso a la vendedora y a Producción. La ficha del SKU junta sus notas (con foto, gravedad y si vale para todos
+los colores) y los pedidos donde se vendió; la pantalla «Notas de productos» las lista todas. Los SKU genéricos no llevan
+notas. Detalle en [docs/PRODUCCION.md](docs/PRODUCCION.md#notas-de-producto).
+
 ## Preparar la reunión con Claude
 
 En la ficha de una empresa, contacto o negocio, «Preparar reunión con Claude» abre claude.ai con el pedido escrito. Claude usa

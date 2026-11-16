@@ -7,6 +7,7 @@ import { estadosPec, PRODUCCION_TARJETA_SQL, produccionDePedido, type Persona } 
 import { clavePedido } from './totales';
 import { HttpError } from './env';
 import { estadosSinServicios, pedirRelectura, TIPO_SQL, tipoPorDefecto } from './servicios';
+import { admiteNotas, avisarNotasDelPedido, resumenNotas, skuDe } from './notasproducto';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -132,6 +133,9 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
         const etapa = s.conServicios && s.estados.length ? generalStage(s.estados) : null;
         if (etapa && etapa !== props.hs_pipeline_stage) await pedirRelectura(db, taskId);
       }
+      // Si algún producto tiene notas de Producción («ojo», «no recomendado»), el aviso a la vendedora y a Producción
+      // (notasproducto.ts; uno solo por persona, pedido y SKU).
+      if (!error) await avisarNotasDelPedido(db, recordId).catch((e) => console.error('notas de producto: aviso', recordId, (e as Error).message));
     }
   }
   const clave = clavePedido(props.pedido_finnegans);
@@ -150,10 +154,14 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   const prod = await produccionDePedido(db, recordId);
   // El color de cada estado, el mismo que en ClickUp.
   const estados = results.some((r) => r.status) ? await estadosPec(db) : [];
+  // Las notas de Producción de cada SKU (notasproducto.ts): qué pasó con este producto en otras ventas.
+  const notas = await resumenNotas(db, results.map((r) => r.code));
   // Un servicio (envío, setup, un adicional) no se produce: va sin estado de producción ni asignados (servicios.ts).
   const items = results.map((r, i) => ({
     code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], tipo: r.tipo,
     status: r.tipo === 'servicio' ? null : r.status, clickup_task: r.clickup_task,
+    // El SKU, si puede llevar notas (los genéricos no), y el resumen de sus notas vigentes.
+    sku: r.tipo !== 'servicio' && admiteNotas(r.code) ? skuDe(r.code) : null, notas: r.tipo !== 'servicio' ? notas.get(skuDe(r.code)) ?? null : null,
     asignados: (r.tipo !== 'servicio' && r.clickup_task && prod?.porTarea.get(r.clickup_task)) || [],
     status_color: estados.find((e) => e.status === String(r.status ?? '').toLowerCase().trim())?.color ?? null,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',

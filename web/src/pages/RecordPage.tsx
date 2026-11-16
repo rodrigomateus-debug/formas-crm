@@ -10,6 +10,7 @@ import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivo
 import { Select } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
+import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
@@ -663,7 +664,9 @@ function RazonSocialCard({ type, recordId, clave, onCambio }: { type: ObjectType
 }
 
 interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[];
-  tipo?: 'producto' | 'servicio' }   // servicio: envío, setup, un adicional… no se produce, así que va sin logo, boceto ni estado
+  tipo?: 'producto' | 'servicio';   // servicio: envío, setup, un adicional… no se produce, así que va sin logo, boceto ni estado
+  clickup_task?: string | null;
+  sku?: string | null; notas?: ResumenNotas | null }   // las notas de Producción del SKU (notasProducto.tsx); los genéricos no tienen
 interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[];
   produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } | null }
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
@@ -673,6 +676,8 @@ interface OrderProducts { pedido: string | null; configured: boolean; clickup?: 
 // se vuelve a pedir para que el «3/5» de la tarjeta se actualice enseguida; aviso de Rodrigo del 13/11/2026).
 function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: number; max: number; onCambio?: () => void; empresas?: string }) {
   const res = useAsync(() => http<OrderProducts>('GET', `/records/order/${recordId}/products`), [recordId]);
+  // Se cargó o cambió una nota de producto: el aviso del producto se actualiza.
+  useCambioNotas(() => res.reload());
   const [all, setAll] = useState(false);
   const d = res.data;
   const items = d?.items ?? [];
@@ -688,7 +693,10 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const esServicio = (it: ProductRow) => it.tipo === 'servicio';
   const productos: ProductoRef[] = items.filter((it) => !esServicio(it)).map((it) => ({ key: it.code || it.name, nombre: it.name }));
   const nServicios = items.filter(esServicio).length;
-  const admin = useMeta().meta.me.role === 'admin';
+  const me = useMeta().meta.me;
+  const admin = me.role === 'admin';
+  // Notas de producto: las escriben Producción y los administradores (notasproducto.ts).
+  const puedeNotas = me.role !== 'viewer' && (admin || me.profile === 'produccion');
   // Solo un administrador cambia el tipo de un renglón; vale para ese código en este pedido.
   const cambiarTipo = async (it: ProductRow) => {
     const tipo = esServicio(it) ? 'producto' : 'servicio';
@@ -751,6 +759,7 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
               </div>
             )) : (
             <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+              <NotasDelProducto sku={it.sku} resumen={it.notas} nombre={it.name} foto={it.image_url} recordId={recordId} taskId={it.clickup_task} puedeAgregar={puedeNotas} />
               <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={(b) => abrir(b)} />
               <LogoProducto type="order" recordId={recordId} producto={it.code || it.name} productoNombre={it.name} res={lg.data} onCambio={() => lg.reload()} />
               {pg && pg.fase !== 'leyendo' && pg.producto === (it.code || it.name)

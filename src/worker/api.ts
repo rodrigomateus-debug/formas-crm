@@ -28,6 +28,7 @@ import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoce
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { finnegansState, syncFacturas } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
+import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
@@ -1337,6 +1338,39 @@ api.patch('/produccion/:task', async (c) => {
   const b = await c.req.json<{ campo?: string; valor?: unknown }>();
   return c.json({ pdv: await editarProduccion(c.env, c.get('ctx'), c.req.param('task'), String(b.campo ?? ''), b.valor) });
 });
+// ---------- Notas de producto (notasproducto.ts): lo que pasó con un producto de importador, atado a su SKU ----------
+// Las ven todos (también Ventas, que vende el producto); las escriben Producción y los administradores.
+
+api.get('/productos/notas', async (c) => {
+  const q = c.req.query();
+  return c.json(await productosConNotas(c.env.DB, { buscar: q.q, tipo: q.tipo, gravedad: q.gravedad, archivadas: q.archivadas === '1' }));
+});
+api.get('/productos/sku/:sku', async (c) => c.json(await fichaProducto(c.env, c.get('ctx').user, c.req.param('sku'))));
+// Una nota nueva: JSON o, con foto, un formulario (texto, tipo, gravedad, todos_colores, record_id, task_id, producto, foto).
+api.post('/productos/sku/:sku/notas', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  if ((c.req.header('content-type') ?? '').includes('multipart/form-data')) {
+    const form = await c.req.formData();
+    const datos: Record<string, unknown> = {};
+    for (const k of ['texto', 'tipo', 'gravedad', 'todos_colores', 'record_id', 'task_id', 'producto']) { const v = form.get(k); if (typeof v === 'string') datos[k] = v; }
+    const foto = form.get('foto');
+    return c.json(await crearNotaProducto(c.env, ctx, c.req.param('sku'), datos, foto instanceof File ? foto : null), 201);
+  }
+  return c.json(await crearNotaProducto(c.env, ctx, c.req.param('sku'), await c.req.json()), 201);
+});
+api.patch('/productos/notas/:id', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  return c.json(await editarNotaProducto(c.env, ctx, Number(c.req.param('id')), await c.req.json()));
+});
+api.delete('/productos/notas/:id', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  return c.json(await borrarNotaProducto(c.env, ctx, Number(c.req.param('id'))));
+});
+api.get('/productos/notas/:id/foto', async (c) => fotoNotaProducto(c.env, Number(c.req.param('id'))));
+
 // ---------- Recorridos (recorridos.ts): los encargos al recorrido y la base de destinos ----------
 // Para todos los perfiles (también Ventas): cada uno carga y ve lo suyo; Logística, todo.
 

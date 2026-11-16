@@ -61,6 +61,13 @@ parada del mismo lugar en la ruta del día.
 - **Encargos** (pedido de Rodrigo del 13/11/2026): lo que alguien pidió en [Recorridos](RECORRIDOS.md), en un carril verde
   de cada día. Se arrastran a otro día, se les elige el chofer (pasa toda la parada de ese lugar) y se marcan hechos como
   las demás tarjetas; un clic abre el encargo. A quien lo pidió le llega un aviso si se lo cambian.
+- **Remito de traslado de un egreso** (pedido de Rodrigo del 16/11/2026): en la tarjeta de un egreso, el ícono de la
+  impresora (y «Remito de traslado» en su parada de la Ruta del día) arma el remito con todo lo que va a ese impresor ese
+  día, de todos sus PDV, como el de los encargos de [Recorridos](RECORRIDOS.md): una hoja A4 por remito, con el número que
+  sigue el de la planilla. Se numera la primera vez y, si cambian los egresos, se vuelve a armar con el mismo número
+  (`POST /api/cronograma/remito-traslado` con `{ fecha, clave }`, tabla `remitos_traslado`).
+- **La foto del remito** es obligatoria en todas las paradas: la Ruta del día dice cuáles ya la tienen y cuáles no (ver
+  [REMITOS.md](REMITOS.md#remitos-internos-y-foto-obligatoria-en-todas-las-paradas-pedido-de-rodrigo-del-16112026)).
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque

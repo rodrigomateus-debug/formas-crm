@@ -230,6 +230,8 @@ export function mandarRemito(f: FotoParaMandar, alSubir: (parte: number) => void
 // ---------- El recorrido del día (Cronograma del CRM) ----------
 export type ParadaChofer = {
   clave: string; nombre: string; direccion: string | null; lat: number | null; lng: number | null; horario: [number, number] | null;
+  /** Cuántas fotos del remito llegaron de esta parada hoy (es obligatoria en todas). */
+  fotos?: number;
   /** La hora fijada por Logística («A las 12:00»): `horario` ya es esa ventana. */
   pactada?: string | null;
   visita: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null } | null;

@@ -30,6 +30,9 @@ export interface Remito {
   // en «Revisados»: a qué producto del pedido va cada renglón (pedido: de cuál, en un remito de varios pedidos)
   pares?: Array<{ position: number; pedido?: number; i: number; name: string; cantidad: number }>;
   pedidos?: Array<{ id: number; nombre: string }>;   // los pedidos del remito: el principal primero y, si es de varios, los otros
+  // 'entrega': el remito de Formas al cliente; 'interno': el de un retiro, un egreso o un encargo (proveedor, impresor,
+  // traslado), para Producción y Logística, que no cuenta para la entrega (pedido de Rodrigo del 16/11/2026).
+  tipo?: 'entrega' | 'interno'; parada?: string | null; fecha_parada?: string | null; tomada_el?: string | null;
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
 // Un renglón de los remitos (clave: cuál es, para asignarlo a mano a productos del pedido).
@@ -50,9 +53,10 @@ const ESTADO: Record<Remito['estado'], [string, string]> = {
 const titulo = (r: Remito) => r.numero ?? (r.origen === 'clickup' && r.nombre ? r.nombre : 'Remito sin número leído');
 const origenDe = (r: Remito) => (r.origen === 'clickup' ? 'De ClickUp' : r.origen === 'chofer' ? `Chofer${r.chofer ? `: ${r.chofer}` : ''}` : 'Subido en el CRM');
 
-async function subirRemito(orderId: number, f: File) {
+async function subirRemito(orderId: number, f: File, tipo: 'entrega' | 'interno' = 'entrega') {
   const fd = new FormData();
   fd.append('archivo', await achicarImagen(f));
+  fd.append('tipo', tipo);
   const res = await fetch(`/api/records/order/${orderId}/remitos`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
   const data = await res.json().catch(() => ({})) as { error?: string };
   if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
@@ -70,14 +74,16 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
   const [asignar, setAsignar] = useState<string | null>(null);   // la clave del renglón que se asigna a productos del pedido
   const d = res.data;
   const e = d?.entrega;
-  const remitos = d?.remitos ?? [];
+  // Los de entrega (al cliente) y los internos (retiros, egresos, encargos: Producción y Logística), aparte.
+  const remitos = (d?.remitos ?? []).filter((r) => r.tipo !== 'interno'), internos = (d?.remitos ?? []).filter((r) => r.tipo === 'interno');
   const recargar = () => { res.reload(); onChange?.(); };
-  const subir = async (files: File[]) => {
+  const subir = async (files: File[], tipo: 'entrega' | 'interno' = 'entrega') => {
     setSubiendo(files.length);
     for (const f of files) {
       try {
-        const { remito: r } = await subirRemito(record.id, f);
-        toast(r.estado === 'ok' ? `Remito leído${r.numero ? ` (${r.numero})` : ''}: cuenta para la entrega.`
+        const { remito: r } = await subirRemito(record.id, f, tipo);
+        toast(tipo === 'interno' ? 'Remito interno guardado en el pedido (no cuenta para la entrega al cliente).'
+          : r.estado === 'ok' ? `Remito leído${r.numero ? ` (${r.numero})` : ''}: cuenta para la entrega.`
           : r.estado === 'duplicado' ? 'Ese remito ya estaba en el pedido.'
           : r.estado === 'sin_leer' ? `Remito guardado. ${r.motivo ?? 'Se lee en unos minutos.'}`
           : `Remito guardado, para revisar: ${r.motivo ?? 'no se pudo confirmar.'}`, r.estado === 'revisar');
@@ -109,7 +115,8 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       <div className="panel-head">
         <h3>Entrega</h3>
         {e?.estado && <EstadoEntrega value={e.estado} />}
-        {puedeEditar && <BotonArchivos onArchivos={subir} title="Subir la foto o el PDF del remito firmado">{subiendo ? 'Leyendo…' : '+ Remito'}</BotonArchivos>}
+        {puedeEditar && <BotonArchivos onArchivos={subir} title="Subir la foto o el PDF del remito firmado por el cliente">{subiendo ? 'Leyendo…' : '+ Remito'}</BotonArchivos>}
+        {puedeEditar && <BotonArchivos onArchivos={(f) => subir(f, 'interno')} title="Subir un remito interno: de un proveedor, de un impresor o de traslado (no cuenta para la entrega al cliente)">+ Interno</BotonArchivos>}
       </div>
       {/* La dirección (o las direcciones) de entrega, con qué va a cada una (Direcciones.tsx). */}
       <DireccionesEntrega orderId={record.id} onChange={onChange} />
@@ -189,6 +196,9 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       {remitos.length > 0 && <div className="remitos-sub small muted">Remitos ({remitos.length})</div>}
       {remitos.map((r) => <RemitoFila key={r.id} r={r} orderId={record.id} onCambio={recargar} soloVer={!puedeEditar} />)}
       {!remitos.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay remitos. Llegan solos de ClickUp y de la app del chofer, o subí la foto acá.'}</div>}
+      {/* Los internos no los ve Ventas (el servidor no se los manda). */}
+      {internos.length > 0 && <div className="remitos-sub small muted">Remitos internos ({internos.length}) · retiros, egresos y encargos, para Producción y Logística</div>}
+      {internos.map((r) => <RemitoInterno key={r.id} r={r} orderId={record.id} puede={!!d?.puede_finalizar} onCambio={recargar} />)}
       {d && !d.lector && remitos.some((r) => r.estado === 'sin_leer') && <div className="panel-body small muted">Los remitos se leen cuando esté conectada la API de Claude (Configuración → Integraciones).</div>}
       {finalizar && e && <FinalizarModal orderId={record.id} faltan={faltan} onClose={() => setFinalizar(false)} onDone={() => { setFinalizar(false); recargar(); }} />}
       {asignar && e && <AsignarModal orderId={record.id} entrega={e} clave={asignar} onClose={() => setAsignar(null)} onDone={() => { setAsignar(null); recargar(); }} />}
@@ -300,6 +310,28 @@ function GuiaExpreso({ g }: { g: NonNullable<Remito['guia']> }) {
       {g.destinatario && <span className="muted">para {g.destinatario}{g.localidad ? ` (${g.localidad})` : ''}</span>}
       <button type="button" className="link-btn" onClick={copiar}>Copiar</button>
       {url && <a className="link-btn" href={url} target="_blank" rel="noreferrer">Ver el seguimiento</a>}
+    </div>
+  );
+}
+
+// Un remito interno en el pedido: la foto (de qué día y de qué chofer) y, si es de varios PDV, los otros pedidos. No se lee.
+// Si en realidad es el remito de entrega al cliente, Logística lo pasa a «de entrega» y se lee.
+function RemitoInterno({ r, orderId, puede, onCambio }: { r: Remito; orderId: number; puede: boolean; onCambio: () => void }) {
+  const toast = useToast();
+  const otros = (r.pedidos ?? []).filter((p) => p.id !== orderId);
+  const pasar = async () => {
+    try { await http('PATCH', `/remitos/${r.id}/tipo`, { tipo: 'entrega' }); toast('Pasó a remito de entrega: se lee y cuenta para la entrega.'); onCambio(); }
+    catch (err) { toast((err as Error).message, true); }
+  };
+  return (
+    <div className="remito-fila interno">
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <span className="tag">Interno</span>
+        <b className="grow">{r.fecha_parada ? `Foto del ${fmtDate(r.fecha_parada)}` : fmtDate(r.tomada_el ?? r.created_at, true)}</b>
+        <a className="btn sm" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer">Ver</a>
+        {puede && <button className="btn sm ghost" onClick={pasar} title="Es el remito firmado por el cliente: que cuente para la entrega">Es de entrega</button>}
+      </div>
+      <div className="small muted">{origenDe(r)}{otros.length ? ` · también de ${otros.map((p) => p.nombre).join(', ')}` : ''}</div>
     </div>
   );
 }

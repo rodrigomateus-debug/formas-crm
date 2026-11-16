@@ -7,7 +7,7 @@ import { Avatar, Modal } from '../components';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
-import { EncargoModal, ESTADO as ESTADO_ENC, itemTexto, type Encargo } from './Recorridos';
+import { EncargoModal, ESTADO as ESTADO_ENC, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. Cada día con
 // sus entregas, ingresos, retiros y egresos, armados solos con las fechas de cada artículo en ClickUp. Arrastrar una
@@ -26,6 +26,7 @@ export interface Mov {
   chofer?: string | null;     // quién hace la parada ese día (el chofer o el expreso de su recorrido); no viene en los ingresos
   retira_en?: string | null;  // lo retira el cliente en Formas: no es parada de nadie
   hora?: string | null;       // la hora fijada a mano en su parada, en la ruta del día («A las 12:00»)
+  parada?: string;            // la clave de su parada en la ruta del día
 }
 interface Nota { id: number; fecha: string; texto: string; hecho: number }
 interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -401,6 +402,7 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
   t: Tarjeta; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
   onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
 }) {
+  const toast = useToast();
   const atrasado = !t.hecho && t.fecha < hoy;
   // Hasta tres productos a la vista; el resto se abre con «+ N productos más», así un pedido largo no estira la columna.
   const [todo, setTodo] = useState(false);
@@ -451,6 +453,9 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
       ) : t.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{t.chofer}</div>)}
       {puede && (
         <div className="cr-t-acc">
+          {/* Un egreso: el remito de traslado de lo que se le lleva al impresor ese día (todos sus PDV), para imprimir. */}
+          {t.tipo === 'egreso' && t.movs[0]?.parada && <button type="button" className="cr-mini" aria-label="Remito de traslado" title="Imprimir el remito de traslado (todo lo que va a este impresor ese día)"
+            onClick={() => abrirRemitoEgreso(t.fecha, t.movs[0].parada!, toast)}><Icon name="printer" size={13} /></button>}
           <SelectorFecha valor={t.fecha} onElegir={(f) => f && onMover(f)} label="Pasar a otro día" className="cr-mini" title="Pasar a otro día"><Icon name="calendar" size={13} /></SelectorFecha>
           <button type="button" className={`cr-check${t.hecho ? ' on' : ''}`} aria-pressed={t.hecho} aria-label={t.hecho ? 'Volver a pendiente' : 'Marcar como hecho'} title={t.hecho ? 'Volver a pendiente' : 'Marcar como hecho'} onClick={onMarcar}><Icon name="check" size={12} /></button>
         </div>

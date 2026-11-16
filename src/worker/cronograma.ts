@@ -80,6 +80,7 @@ export interface Movimiento {
   dominio?: string | null;   // el dominio de la empresa de la tarjeta (el cliente en las entregas; si no, el proveedor o impresor), para su logo
   chofer?: string | null;    // en la semana: el chofer (o expreso) del recorrido del día en el que está su parada
   hora?: string | null;      // en la semana: la hora fijada a mano en su parada («A las 12:00»)
+  parada?: string;           // en la semana: la clave de su parada en la ruta del día (para el remito de traslado de un egreso)
   retira_en?: string | null; // en la semana: lo retira el cliente en Formas (tarjeta «Entrega»), así que no es parada de nadie
 }
 // La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
@@ -206,6 +207,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   const encargos = encs.filter((e) => e.fecha >= q.desde && e.fecha <= q.hasta);
   const [, , quienes, horas] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, encargos, q.desde, q.hasta), choferesYExpresos(db),
     horasDelDia(db, q.desde, q.hasta)]);
+  for (const m of deLaSemana) if (m.tipo !== 'ingreso') m.parada = claveParada(m);
   // La hora fijada en la ruta del día, en la tarjeta de su parada (un pedido que va a varias direcciones: la primera).
   if (horas.size) {
     const texto = (fecha: string, clave: string | undefined) => { const h = clave ? horas.get(`${fecha}|${clave}`) : null; return h ? textoPactada(h) : null; };
@@ -699,6 +701,7 @@ export interface Parada {
   expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
   lugar?: LugarInfo | null; // lo que dice la libreta de direcciones de ese lugar
   pactada?: (Pactada & { texto: string }) | null;   // la hora fijada a mano en la ruta del día; `horario` ya es esa ventana
+  fotos?: number;           // las fotos del remito que mandó el chofer de esta parada ese día (obligatoria en todas)
   estricto?: boolean;
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
@@ -875,6 +878,15 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   const visitas = new Map((await db.prepare('SELECT clave, resultado, motivo, nota, chofer, at FROM cronograma_visitas WHERE fecha = ?').bind(fecha)
     .all<Visita & { clave: string }>()).results.map((x) => [x.clave, x]));
   for (const p of lista_) { const x = visitas.get(p.clave); p.visita = x ? { resultado: x.resultado, motivo: x.motivo, nota: x.nota, chofer: x.chofer, at: x.at } : null; }
+  // Las fotos del remito de cada parada (pedido de Rodrigo del 16/11/2026): las que el chofer sacó desde esa parada y, en
+  // una entrega, también las que mandó ese día con el botón general y se ataron a su pedido.
+  const fotos = (await db.prepare(`SELECT id, parada, record_id FROM remitos WHERE estado != 'descartado'
+      AND (fecha_parada = ?1 OR (origen = 'chofer' AND substr(datetime(created_at, '-3 hours'), 1, 10) = ?1))`).bind(fecha)
+    .all<{ id: number; parada: string | null; record_id: number | null }>()).results;
+  for (const p of lista_) {
+    const pedidos = new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!));
+    p.fotos = new Set(fotos.filter((f) => f.parada === p.clave || (/^p:/.test(p.clave) && !f.parada && f.record_id && pedidos.has(f.record_id))).map((f) => f.id)).size;
+  }
 
   // «Sale de» y «Termina en»: un depósito de Formas o, con «otro», el lugar que se eligió (con su punto en el mapa).
   const rutas: RutaGuardada[] = guardadas.length
@@ -1004,7 +1016,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
         fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
-          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null,
+          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, fotos: p.fotos ?? 0,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
@@ -1015,6 +1027,19 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
       };
     }),
   };
+}
+
+// Los pedidos de una parada de ese día (sus movimientos y sus encargos): a ellos queda atado el remito interno que el
+// chofer saca ahí (un retiro en un impresor puede ser de varios PDV).
+export async function pedidosDeParada(env: Env, user: User, fecha: string, clave: string) {
+  const r = await rutaDelDia(env, user, fecha);
+  const p = r.paradas.find((x) => x.clave === clave);
+  if (!p) return [];
+  const ids = [...new Set([...p.movimientos.map((m) => m.record_id), ...p.encargos.map((e) => e.record_id)].filter((x): x is number => !!x))];
+  if (!ids.length) return [];
+  const { results } = await env.DB.prepare("SELECT id FROM records WHERE object_type = 'order' AND id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(ids)).all<{ id: number }>();
+  const pedidos = new Set(results.map((x) => x.id));
+  return ids.filter((id) => pedidos.has(id));
 }
 
 // Por qué no se pudo hacer una parada. Son los motivos que usan las apps de reparto (nadie para recibir, cerrado,

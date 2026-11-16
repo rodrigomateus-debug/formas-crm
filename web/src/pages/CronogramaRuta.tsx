@@ -6,7 +6,7 @@ import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
-import { EncargoModal, itemTexto, type Encargo } from './Recorridos';
+import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -22,6 +22,7 @@ interface Parada {
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
   // La hora fijada a mano (pedido de Rodrigo del 16/11/2026): `horario` ya es esa ventana y el orden más corto la cumple.
   pactada?: { modo: ModoHora; min: number; texto: string } | null; estricto?: boolean;
+  fotos?: number;   // las fotos del remito que mandó el chofer de esta parada (obligatoria en todas)
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
 }
@@ -396,8 +397,11 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   {p.pactada ? <span className={`cr-tag fija${s.tarde ? ' late' : ''}`} title="Hora fijada a mano: el recorrido se ordena para cumplirla"><Icon name="timer" size={11} />{p.pactada.texto}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>
                     : (p.horario || s.espera > 1) && <span className={`cr-tag${s.tarde ? ' late' : ''}`}>{p.horario ? `Recibe de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : ''}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>}
                   {puede && <button type="button" className="cr-link" onClick={() => setFijando(fijando === p.clave ? null : p.clave)}>{p.pactada ? 'Cambiar la hora' : 'Fijar hora'}</button>}
+                  {puede && p.movimientos.some((m) => m.tipo === 'egreso') && <button type="button" className="cr-link" onClick={() => abrirRemitoEgreso(fecha, p.clave, toast)}><Icon name="printer" size={12} />Remito de traslado</button>}
                   {p.lat == null && <span className="cr-tag riesgo"><Icon name="alert" size={11} />{p.direccion ? 'No se encontró en el mapa' : 'Falta la dirección'}</span>}
                   {p.visita?.resultado === 'hecho' && <span className="cr-tag">Lo marcó {p.visita.chofer ?? 'el chofer'} a las {horaDe(p.visita.at)}</span>}
+                  {(p.fotos ?? 0) > 0 ? <span className="cr-tag" title="La foto del remito que mandó el chofer: está en los pedidos de la parada"><Icon name="image" size={11} />{p.fotos === 1 ? 'Foto del remito' : `${p.fotos} fotos del remito`}</span>
+                    : (todo || p.visita?.resultado === 'hecho') && <span className="cr-tag riesgo" title="La foto del remito es obligatoria en todas las paradas"><Icon name="alert" size={11} />Sin foto del remito</span>}
                   {puede && <button type="button" className="cr-link" onClick={() => marcar(p)}>{todo ? 'Volver a pendiente' : 'Marcar hecho'}</button>}
                   {puede && !p.expreso && (p.company_id || entregas.length > 0) && <button type="button" className="cr-link" onClick={() => setEditando(editando === p.clave ? null : p.clave)}>{p.direccion ? 'Corregir dirección' : 'Cargar dirección'}</button>}
                   {puede && /^p:/.test(p.clave) && <button type="button" className="cr-link" onClick={() => setExpresando(expresando === p.clave ? null : p.clave)}>{p.expreso ? (p.expreso.guia ? 'Cambiar expreso o guía' : 'Cargar la guía') : 'Mandar por expreso'}</button>}

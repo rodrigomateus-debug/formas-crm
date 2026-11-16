@@ -15,6 +15,16 @@ const TIPO: Record<string, string> = { entrega: 'Entregar', retiro_proveedor: 'R
 const MOTIVOS: Array<[string, string]> = [['nadie', 'No había nadie'], ['cerrado', 'Estaba cerrado'], ['direccion', 'No encontré la dirección'], ['rechazo', 'No lo quisieron recibir'], ['no_listo', 'No estaba listo'], ['otro', 'Otro motivo']];
 const num = new Intl.NumberFormat('es-AR');
 const item = (i: ItemChofer) => [i.cant != null ? num.format(i.cant) : '', i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ');
+// Las paradas a las que el chofer ya les mandó la foto del remito desde este celular hoy (aunque todavía no haya salido,
+// sin señal): así no le pide la foto de nuevo. Lo de otro celular lo dice el servidor (`fotos`).
+const CLAVE_FOTOS = 'chofer-fotos-paradas';
+export function fotosLocales(): string[] {
+  try { const g = JSON.parse(localStorage.getItem(CLAVE_FOTOS) ?? '{}') as { dia?: string; paradas?: string[] }; return g.dia === hoy() ? g.paradas ?? [] : []; } catch { return []; }
+}
+export function anotarFoto(parada: string) {
+  try { localStorage.setItem(CLAVE_FOTOS, JSON.stringify({ dia: hoy(), paradas: [...new Set([...fotosLocales(), parada])] })); } catch { /* sin almacenamiento */ }
+  window.dispatchEvent(new Event('chofer-foto'));
+}
 // Hecha: la marcó él, o están hechos sus artículos y sus encargos.
 const hechaP = (p: ParadaChofer) => p.visita?.resultado === 'hecho' || (p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho'));
 const CLAVE = 'chofer-ruta';
@@ -79,6 +89,11 @@ export function entregasDeHoy(): Array<{ clave: string; nombre: string; pdv: str
 
 // `alEntregar(parada)`: abre la cámara para la foto del remito (o de la guía del expreso) de esa parada.
 export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar: (parada?: string) => void }) {
+  // La foto del remito es obligatoria en todas las paradas (pedido de Rodrigo del 16/11/2026): las hechas sin foto quedan
+  // marcadas hasta que la saque.
+  const [locales, setLocales] = useState<string[]>(fotosLocales);
+  useEffect(() => { const f = () => setLocales(fotosLocales()); window.addEventListener('chofer-foto', f); return () => window.removeEventListener('chofer-foto', f); }, []);
+  const conFoto = (p: ParadaChofer) => (p.fotos ?? 0) > 0 || locales.includes(p.clave);
   // Lo último que se trajo queda en el celular: sin señal (o si el celular recarga la app al volver de la cámara) el
   // recorrido de hoy se sigue viendo.
   const [recorridos, setRecorridos] = useState<RecorridoChofer[]>(guardado);
@@ -120,11 +135,13 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
         const destino = vuelve ? base : r.fin ? (r.fin.lat != null && r.fin.lng != null ? { lat: r.fin.lat, lng: r.fin.lng } : null) : 'ultima' as const;
         const sim = simular(base, r.paradas, r.salida, null, destino);
         const hechas = r.paradas.filter(hechaP).length;
+        const sinFoto = r.paradas.filter((p) => hechaP(p) && !conFoto(p)).length;
         const lugarFin = vuelve ? r.base : r.fin ?? null;
         const todo = linkRecorrido(r.paradas.filter((p) => !hechaP(p) && p.visita?.resultado !== 'no_se_pudo'), lugarFin ? destinoDe(lugarFin) : null);
         return (
           <section key={r.n} className="ruta" aria-labelledby={`titulo-ruta-${r.n}`}>
             <h2 id={`titulo-ruta-${r.n}`}>Tu recorrido de hoy <span className="cuenta">{hechas}/{r.paradas.length}</span></h2>
+            {sinFoto > 0 && <p className="ruta-sin-foto" role="status">{sinFoto === 1 ? 'A una parada hecha le falta' : `A ${sinFoto} paradas hechas les falta`} la foto del remito: abrila y sacala.</p>}
             <p className="ruta-sale">Salís de {r.base.nombre} a las {hhmm(r.salida)} · {vuelve ? 'volvés' : r.fin ? `terminás en ${r.fin.nombre}` : 'terminás en la última parada'} cerca de las {hhmm(sim.fin)}</p>
             {todo && (
               <div className="ruta-todo">
@@ -136,7 +153,7 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
             <ol className="lista ruta-lista">
               {r.paradas.map((p, i) => {
                 const s = sim.paradas[i], hecha = hechaP(p);
-                const estado = hecha ? 'hecha' : p.visita?.resultado === 'no_se_pudo' ? 'fallo' : p.visita?.resultado === 'salteada' ? 'salteada' : '';
+                const estado = hecha ? (conFoto(p) ? 'hecha' : 'hecha sin-foto') : p.visita?.resultado === 'no_se_pudo' ? 'fallo' : p.visita?.resultado === 'salteada' ? 'salteada' : '';
                 const ver = abierta === p.clave;
                 const ir = app ? linkA(app, p) : null;
                 return (
@@ -146,7 +163,8 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
                         <span className="ruta-n">{hecha ? '✓' : estado === 'fallo' ? '!' : i + 1}</span>
                         <span className="ruta-quien"><strong>{p.nombre}</strong>{p.expreso && <span>Expreso: dejar para {p.expreso.cliente}{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</span>}<span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span>
                           {estado === 'fallo' && <em>{MOTIVOS.find((m) => m[0] === p.visita!.motivo)?.[1] ?? 'No se pudo'}{p.visita!.nota ? `: ${p.visita!.nota}` : ''}</em>}
-                          {estado === 'salteada' && <em>La dejaste para después</em>}</span>
+                          {estado === 'salteada' && <em>La dejaste para después</em>}
+                          {hecha && !conFoto(p) && <em>Falta la foto del remito</em>}</span>
                         <span className="ruta-hora">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}{p.pactada && <small>{p.pactada}</small>}</span>
                       </button>
                       {/* Cómo llegar, sin abrir la parada: con la app que eligió; la primera vez, pregunta cuál. */}
@@ -154,7 +172,7 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
                         ? <a className="ruta-ir" href={ir} target="_blank" rel="noreferrer" aria-label={`Cómo llegar a ${p.nombre} con ${APPS.find((a) => a.k === app)?.nombre}`}><Icono nombre="navegar" /></a>
                         : <button type="button" className="ruta-ir" aria-label={`Cómo llegar a ${p.nombre}`} onClick={() => setEligiendo(p)}><Icono nombre="navegar" /></button>)}
                     </div>
-                    {ver && <Detalle p={p} tarde={s.tarde > 0} hecha={hecha} enLinea={enLinea} app={app} alElegirApp={elegirApp} alMarcar={(...a) => marcar(p, ...a)} alEntregar={alEntregar} />}
+                    {ver && <Detalle p={p} tarde={s.tarde > 0} hecha={hecha} conFoto={conFoto(p)} enLinea={enLinea} app={app} alElegirApp={elegirApp} alMarcar={(...a) => marcar(p, ...a)} alEntregar={alEntregar} />}
                   </li>
                 );
               })}
@@ -201,8 +219,8 @@ function ElegirApp({ p, alElegir, alCerrar }: { p: ParadaChofer; alElegir: (k: A
   );
 }
 
-function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntregar }: {
-  p: ParadaChofer; tarde: boolean; hecha: boolean; enLinea: boolean; app: AppMapa | null; alElegirApp: (k: AppMapa) => void;
+function Detalle({ p, tarde, hecha, conFoto, enLinea, app, alElegirApp, alMarcar, alEntregar }: {
+  p: ParadaChofer; tarde: boolean; hecha: boolean; conFoto: boolean; enLinea: boolean; app: AppMapa | null; alElegirApp: (k: AppMapa) => void;
   alMarcar: (resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => void; alEntregar: (parada?: string) => void;
 }) {
   const [paso, setPaso] = useState<'botones' | 'motivo'>('botones');
@@ -212,9 +230,9 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
   const encs = p.encargos ?? [];
   const soloRetiros = p.movimientos.every((m) => m.tipo.startsWith('retiro')) && encs.every((e) => !e.llevar.length && e.retirar.length > 0);
   function marcar(resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, m?: string, n?: string) {
-    // Una entrega hecha: directo a la foto del remito firmado. La cámara se abre ya, en el mismo toque: si se espera a que
-    // conteste el servidor, el iPhone no la deja abrir.
-    if (resultado === 'hecho' && esEntrega) alEntregar(p.clave);
+    // Hecha (una entrega, un retiro, un egreso, un encargo): directo a la foto del remito, que es obligatoria en todas. La
+    // cámara se abre ya, en el mismo toque: si se espera a que conteste el servidor, el iPhone no la deja abrir.
+    if (resultado === 'hecho') alEntregar(p.clave);
     alMarcar(resultado, m, n);
     setPaso('botones');
   }
@@ -246,13 +264,14 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
       {!enLinea && <p className="ruta-tarde">Sin señal no se puede marcar la parada.</p>}
       {paso === 'botones' && (hecha || p.visita ? (
         <div className="ruta-acciones">
-          {hecha && esEntrega && <button type="button" className="boton principal" onClick={() => alEntregar(p.clave)}>{p.expreso ? 'Sacar la foto de la guía' : 'Sacar la foto del remito'}</button>}
+          {hecha && !conFoto && <p className="ruta-sin-foto">Falta la foto del remito. Es obligatoria: sin ella, la parada no queda completa.</p>}
+          {hecha && <button type="button" className={conFoto ? 'boton chico' : 'boton principal'} onClick={() => alEntregar(p.clave)}>{conFoto ? 'Sacar otra foto' : p.expreso ? 'Sacar la foto de la guía' : 'Sacar la foto del remito'}</button>}
           {!hecha && <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}>{esEntrega ? 'Ahora sí: entregué' : 'Ahora sí: listo'}</button>}
           <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar(null)}>Deshacer</button>
         </div>
       ) : (
         <div className="ruta-acciones">
-          <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}>{p.expreso ? 'Dejé en el expreso: foto de la guía' : esEntrega ? 'Entregué: sacar foto del remito' : soloRetiros ? 'Retiré todo' : 'Listo'}</button>
+          <button type="button" className="boton principal" disabled={!enLinea} onClick={() => marcar('hecho')}>{p.expreso ? 'Dejé en el expreso: foto de la guía' : esEntrega ? 'Entregué: sacar foto del remito' : soloRetiros ? 'Retiré todo: sacar foto del remito' : 'Listo: sacar foto del remito'}</button>
           <button type="button" className="boton chico" disabled={!enLinea} onClick={() => setPaso('motivo')}>No se pudo</button>
           <button type="button" className="boton chico" disabled={!enLinea} onClick={() => marcar('salteada')}>Para después</button>
         </div>

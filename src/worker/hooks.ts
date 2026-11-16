@@ -1,6 +1,6 @@
 import { aplicarAnulados, aplicarPedidos, avisoDeFinnegans, type PedidoFin } from './pedidosfin';
 import { Hono } from 'hono';
-import { marcarParada, rutaDelChofer } from './cronograma';
+import { hoyBsAs, marcarParada, pedidosDeParada, rutaDelChofer } from './cronograma';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
@@ -15,7 +15,7 @@ import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
-import { corregirPdv, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
+import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -398,9 +398,17 @@ hooks.post('/chofer/api/remitos', async (c) => {
   if (!(archivo instanceof File)) throw new HttpError(400, 'Falta la foto del remito.');
   const s = (k: string) => (typeof form.get(k) === 'string' ? String(form.get(k)) : null);
   const tomada = s('tomada_el');
+  // La foto de una parada que no es una entrega (un retiro, un egreso, un encargo) es un remito interno: queda en los
+  // pedidos de esa parada, sin leerse (pedido de Rodrigo del 16/11/2026). El día es el de la foto (la app manda la de su
+  // recorrido de hoy; si se manda más tarde, sin señal, vale cuándo se sacó).
+  const parada = s('parada');
+  const fechaParada = esClaveRuta(parada) ? new Date((tomada && !Number.isNaN(Date.parse(tomada)) ? Date.parse(tomada) : Date.now()) - 3 * 3600_000).toISOString().slice(0, 10) : null;
+  const interno = esClaveRuta(parada) && !esClaveParada(parada);
+  const pedidos = interno ? await pedidosDeParada(c.env, ctx.user, fechaParada ?? hoyBsAs(), parada!).catch(() => [] as number[]) : [];
   const { id, nuevo } = await guardarRemito(c.env, ctx, {
     origen: 'chofer', bytes: await archivo.arrayBuffer(), mime: archivo.type || 'image/jpeg', nombre: archivo.name || 'remito.jpg',
-    clave: s('clave')?.slice(0, 80) || null, tokenId: ctx.tokenId ?? null, chofer: ctx.sourceDetail ?? null, parada: s('parada'),
+    clave: s('clave')?.slice(0, 80) || null, tokenId: ctx.tokenId ?? null, chofer: ctx.sourceDetail ?? null, parada,
+    tipo: interno ? 'interno' : 'entrega', pedidos, fechaParada,
     lat: s('lat') == null ? null : Number(s('lat')), lng: s('lng') == null ? null : Number(s('lng')),
     tomadaEl: tomada && !Number.isNaN(Date.parse(tomada)) ? new Date(tomada).toISOString() : null,
   });
@@ -412,7 +420,7 @@ hooks.post('/chofer/api/remitos', async (c) => {
       WHERE clave = ? AND token_id = ? AND estado = 'revisar' AND id != ?`).bind(new Date().toISOString(), reemplaza, ctx.tokenId ?? -1, id).run();
   }
   const ya = await remitoPorId(c.env.DB, id);
-  const r = nuevo || ya.estado === 'sin_leer' ? await leerRemito(c.env, id, { ctx }) : ya;
+  const r = (nuevo || ya.estado === 'sin_leer') && ya.tipo !== 'interno' ? await leerRemito(c.env, id, { ctx }) : ya;
   return c.json(paraChofer(r, (await itemsDe(c.env.DB, [id])).get(id) ?? [], await pedidoNombre(c.env.DB, r.record_id)), nuevo ? 201 : 200);
 });
 // El manifest de la app con el link del chofer adentro (?t=<token>): así, al guardarla en la pantalla de inicio, abre ya

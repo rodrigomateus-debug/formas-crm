@@ -52,6 +52,14 @@ export const ESTADO: Record<EstadoEnc, { nombre: string; clase: string }> = {
   pendiente: { nombre: 'Pendiente', clase: '' }, hecho: { nombre: 'Hecho', clase: 'ok' }, no_se_pudo: { nombre: 'No se pudo', clase: 'mal' }, cancelado: { nombre: 'Cancelado', clase: 'off' },
 };
 
+// El remito de traslado de los egresos de una parada del cronograma (lo que se le lleva al impresor ese día).
+export async function abrirRemitoEgreso(fecha: string, clave: string, toast: (m: string, e?: boolean) => void) {
+  const w = window.open('about:blank', '_blank');
+  try {
+    const r = await http<{ id: number }>('POST', '/cronograma/remito-traslado', { fecha, clave });
+    if (w) w.location.href = `/api/cronograma/remito-traslado/${r.id}#imprimir`; else window.location.href = `/api/cronograma/remito-traslado/${r.id}`;
+  } catch (e) { w?.close(); toast((e as Error).message, true); }
+}
 // El remito de traslado: se numera (la primera vez) y se abre para imprimir. La ventana se abre en el mismo clic, si no el
 // navegador la bloquea.
 export async function abrirRemito(id: number, toast: (m: string, e?: boolean) => void) {

@@ -125,6 +125,27 @@ guía se carga en la entrega por expreso (ver
 [CRONOGRAMA.md](CRONOGRAMA.md#choferes-expresos-y-de-dónde-sale)); queda un control «Guía del expreso» en el remito
 que dice dónde quedó o por qué no, y el remito la muestra con «Copiar» y, si el expreso tiene, «Ver el seguimiento».
 
+## Remitos internos y foto obligatoria en todas las paradas (pedido de Rodrigo del 16/11/2026)
+
+Los choferes sacan la foto del remito **en todas las paradas**, no solo en las entregas: en la app, «Listo», «Retiré
+todo» y «Entregué» abren la cámara en el mismo toque. Una parada hecha sin foto queda marcada en rojo («Falta la foto del
+remito») hasta que la saque, y arriba del recorrido dice cuántas faltan. En la Ruta del día del Cronograma cada parada
+dice «Foto del remito» o, si está hecha y no tiene, «Sin foto del remito».
+
+Hay dos tipos de remito (`remitos.tipo`, migración `0066_remitos_internos.sql`):
+
+- **De entrega**: la foto de una parada de entrega (o la que se sube con «+ Remito» en el pedido). Es el remito de Formas
+  al cliente: el que ven las vendedoras, se lee con Claude y cuenta para el estado de entrega, como hasta ahora.
+- **Interno**: la foto de un retiro, un egreso o un encargo (un remito de un proveedor, de un impresor o el de traslado de
+  Formas), o el que se sube con «+ Interno» en el pedido. Queda atado a **todos los pedidos de esa parada** (un retiro en
+  un impresor puede ser de varios PDV), no se lee, no cuenta para la entrega al cliente y **no lo ve Ventas** (ni en el
+  pedido ni el archivo). En la tarjeta «Entrega» del pedido aparece aparte, en «Remitos internos», con el día y el chofer.
+  Si en realidad era el remito firmado por el cliente, Logística lo pasa a «Es de entrega» y se lee
+  (`PATCH /api/remitos/:id/tipo`).
+
+De qué parada es cada foto: la app la manda con la clave de la parada desde la que se abrió la cámara y el día de la foto
+(`remitos.parada`, `remitos.fecha_parada`).
+
 ## La app del chofer (`web/chofer/`)
 
 Una página que se agrega a la pantalla de inicio del celular (PWA), servida por el Worker en `/hooks/chofer/` (esa ruta

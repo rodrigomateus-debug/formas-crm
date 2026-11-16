@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
-import { RutaHoy, entregasDeHoy } from './Ruta';
+import { RutaHoy, anotarFoto, entregasDeHoy } from './Ruta';
 import {
   LinkInvalido, Rechazo, corregirPdv, entrarConCodigo, nombreGuardado, pedirRemitos, pedirYo, token, tokenDeTexto, usarToken, type RemitoChofer,
 } from './api';
@@ -331,6 +331,8 @@ export default function App() {
     for (const f of fotos) {
       const conLugar = f.origen === 'camara' ? lugar : null;
       await envios.agregar({ clave: f.clave, blob: f.blob, tomada_el: f.tomada_el, lat: conLugar?.lat, lng: conLugar?.lng, reemplaza: f.reemplaza, parada: f.parada, lote });
+      // La parada ya tiene su foto (aunque salga cuando haya señal): no se la vuelve a pedir.
+      if (f.parada) anotarFoto(f.parada);
       sacarDeTanda(f.clave).catch(() => {}); // ya quedó en la cola de envíos
       URL.revokeObjectURL(f.url);
     }

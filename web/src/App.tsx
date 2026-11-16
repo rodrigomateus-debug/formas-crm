@@ -12,6 +12,7 @@ import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
 import RecorridosPage from './pages/Recorridos';
+import NotasProductosPage from './pages/NotasProductos';
 import ChoferesPage from './pages/Choferes';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
@@ -61,6 +62,8 @@ export default function App() {
         {/* Recorridos: todos cargan lo que el chofer tiene que llevar o retirar (recorridos.ts). */}
         <NavLink to="/recorridos" className="nav-link"><Icon name="route" />Recorridos</NavLink>
         {!ventas && <NavLink to="/cronograma" className="nav-link"><Icon name="calendar" />Cronograma</NavLink>}
+        {/* Notas de productos (notasproducto.ts): las ven todos; las escriben Producción y los administradores. */}
+        <NavLink to="/productos" className="nav-link"><Icon name="alert" />Notas de productos</NavLink>
         {/* Perfil Logística: el código de cada chofer para su app, a mano (los administradores, en Entregas → Choferes). */}
         {logistica && <NavLink to="/choferes" className="nav-link"><Icon name="volante" />Choferes</NavLink>}
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
@@ -89,6 +92,7 @@ export default function App() {
           {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
           <Route path="/recorridos" element={<RecorridosPage />} />
+          <Route path="/productos" element={<NotasProductosPage />} />
           {(logistica || meta.me.role === 'admin') && <Route path="/choferes" element={<ChoferesPage />} />}
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />

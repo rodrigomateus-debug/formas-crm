@@ -419,6 +419,50 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.deepEqual(escrito.filter((e) => e.body?.status).map((e) => [e.task, e.body.status]), [[G, 'en el impresor']]);
   hoy = (await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data;
   assert.equal(hoy.paradas.find((p) => p.clave === gorra.clave).visita, null);
+
+  // ---------- La foto del remito en un retiro (pedido de Rodrigo del 16/11/2026): remito interno ----------
+  // Queda en los pedidos de la parada, no se lee y no cuenta para la entrega al cliente; Ventas no lo ve.
+  assert.equal(hoy.paradas.find((p) => p.clave === gorra.clave).fotos, 0);
+  const claudeAntes = consultasClaude;
+  const fd = new FormData();
+  fd.append('archivo', new Blob([`\xff\xd8\xff\xe0 interno ${RUN}`], { type: 'image/jpeg' }), 'remito.jpg');
+  fd.append('parada', gorra.clave); fd.append('clave', `interno-${RUN}`); fd.append('tomada_el', new Date().toISOString());
+  const subida = await fetch(`${BASE}/hooks/chofer/api/remitos`, { method: 'POST', headers: { authorization: `Bearer ${ch.token}` }, body: fd });
+  assert.equal(subida.status, 201);
+  const sub = await subida.json();
+  assert.equal(sub.estado, 'ok');
+  assert.match(sub.mensaje, /pedidos de esa parada/);
+  assert.equal(consultasClaude, claudeAntes, 'un remito interno no se lee con Claude');
+  const pedidoGorra = gorra.movimientos.find((m) => m.npdv === PDV).record_id;
+  let rems = (await api('GET', `/records/order/${pedidoGorra}/remitos`)).data;
+  const interno = rems.remitos.find((r) => r.id === sub.id);
+  assert.deepEqual([interno.tipo, interno.fecha_parada, interno.parada], ['interno', HOY, gorra.clave]);
+  assert.equal(rems.entrega.remitos_ok, rems.remitos.filter((r) => r.tipo === 'entrega' && r.estado === 'ok' && !r.duplicado_de).length, 'no cuenta para la entrega');
+  // La ruta del día y la app del chofer saben que esa parada ya tiene su foto.
+  assert.equal((await api('GET', `/cronograma/ruta?fecha=${HOY}`)).data.paradas.find((p) => p.clave === gorra.clave).fotos, 1);
+  assert.equal((await (await chofer('/ruta', ch.token)).json()).recorridos[0].paradas.find((p) => p.clave === gorra.clave).fotos, 1);
+  // Ventas no lo ve (ni la lista ni el archivo).
+  await api('POST', '/users', { email: `vende.int.${RUN}@formas.ar`, name: `Vende Int ${RUN}`, profile: 'comercial', role: 'member' });
+  asUser = `vende.int.${RUN}@formas.ar`;
+  const deVentas = await api('GET', `/records/order/${pedidoGorra}/remitos`);
+  if (deVentas.status === 200) assert.ok(!deVentas.data.remitos.some((r) => r.tipo === 'interno'));
+  assert.equal((await api('GET', `/remitos/${sub.id}/archivo`)).status, 403);
+  asUser = null;
+  // Logística lo puede pasar a remito de entrega (se lee) y volverlo a interno.
+  assert.equal((await api('PATCH', `/remitos/${sub.id}/tipo`, { tipo: 'entrega' })).data.remito.tipo, 'entrega');
+  assert.equal((await api('PATCH', `/remitos/${sub.id}/tipo`, { tipo: 'interno' })).data.remito.tipo, 'interno');
+  assert.equal((await api('PATCH', `/remitos/${sub.id}/tipo`, { tipo: 'otro' })).status, 400);
+
+  // ---------- El remito de traslado de un egreso: lo que va al impresor ese día, una hoja A4 ----------
+  const rt = await api('POST', '/cronograma/remito-traslado', { fecha: '2026-11-17', clave: `e:${imprefas}` });
+  assert.equal(rt.status, 200, JSON.stringify(rt.data));
+  assert.equal((await api('POST', '/cronograma/remito-traslado', { fecha: '2026-11-17', clave: `e:${imprefas}` })).data.numero, rt.data.numero, 'el mismo número');
+  const html = (await api('GET', `/cronograma/remito-traslado/${rt.data.id}`)).data;
+  assert.match(html, new RegExp(`Termo ${RUN}`));
+  assert.match(html, new RegExp(String(rt.data.numero).padStart(9, '0')));
+  assert.equal(html.split('<main class="hoja">').length - 1, 1, 'una sola hoja por remito');
+  assert.equal((await api('POST', '/cronograma/remito-traslado', { fecha: '2026-11-17', clave: 'e:999999999' })).status, 404);
+  assert.equal((await api('POST', '/cronograma/remito-traslado', { fecha: '2026-11-17', clave: `e:${imprefas}` }, undefined)).status, 200);
 });
 
 test('cronograma: la libreta de direcciones se copia de la planilla y completa las paradas', async (t) => {

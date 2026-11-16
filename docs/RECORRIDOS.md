@@ -111,8 +111,9 @@ cambia un encargo para hoy o para un día que ya tiene el recorrido armado, se l
 El remito informal de la planilla («REMITO DE TRASLADO DE MERCADERÍA – No válido como factura»), con la marca de Formas:
 en el encargo o en la lista, «Remito de traslado». La primera vez se le da el número siguiente (sigue el de la planilla:
 el último usado fue el 0001-000098575; un administrador lo cambia en Destinos → Configuración, por ejemplo si la planilla
-se siguió usando unos días). Se abre listo para imprimir: **dos copias en una hoja A4**, una queda en el destino y la
-firmada (firma, aclaración y DNI) vuelve a Formas. Si el encargo solo retira, sale como «Constancia de retiro».
+se siguió usando unos días). Se abre listo para imprimir: **una hoja A4 por remito** (pedido de Rodrigo del 16/11/2026); se
+imprime dos veces, una copia queda en el destino y la firmada (firma, aclaración y DNI) vuelve a Formas. Los egresos del
+Cronograma tienen el mismo remito (ver [CRONOGRAMA.md](CRONOGRAMA.md)). Si el encargo solo retira, sale como «Constancia de retiro».
 
 ## El historial de la planilla
 

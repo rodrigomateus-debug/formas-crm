@@ -6,6 +6,7 @@ import { BotonArchivos } from './Bocetos';
 import { DireccionesEntrega } from './Direcciones';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
+import { ChoferesPanel } from './Choferes';
 
 // Remitos de entrega (src/worker/remitos.ts): la tarjeta de la ficha del pedido (qué se entregó, qué falta y los
 // remitos, vengan de ClickUp, del CRM o de la app del chofer) y la bandeja de Logística (lo que hay que revisar y los
@@ -29,6 +30,9 @@ export interface Remito {
   // en «Revisados»: a qué producto del pedido va cada renglón (pedido: de cuál, en un remito de varios pedidos)
   pares?: Array<{ position: number; pedido?: number; i: number; name: string; cantidad: number }>;
   pedidos?: Array<{ id: number; nombre: string }>;   // los pedidos del remito: el principal primero y, si es de varios, los otros
+  // 'entrega': el remito de Formas al cliente; 'interno': el de un retiro, un egreso o un encargo (proveedor, impresor,
+  // traslado), para Producción y Logística, que no cuenta para la entrega (pedido de Rodrigo del 16/11/2026).
+  tipo?: 'entrega' | 'interno'; parada?: string | null; fecha_parada?: string | null; tomada_el?: string | null;
 }
 interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
 // Un renglón de los remitos (clave: cuál es, para asignarlo a mano a productos del pedido).
@@ -49,9 +53,10 @@ const ESTADO: Record<Remito['estado'], [string, string]> = {
 const titulo = (r: Remito) => r.numero ?? (r.origen === 'clickup' && r.nombre ? r.nombre : 'Remito sin número leído');
 const origenDe = (r: Remito) => (r.origen === 'clickup' ? 'De ClickUp' : r.origen === 'chofer' ? `Chofer${r.chofer ? `: ${r.chofer}` : ''}` : 'Subido en el CRM');
 
-async function subirRemito(orderId: number, f: File) {
+async function subirRemito(orderId: number, f: File, tipo: 'entrega' | 'interno' = 'entrega') {
   const fd = new FormData();
   fd.append('archivo', await achicarImagen(f));
+  fd.append('tipo', tipo);
   const res = await fetch(`/api/records/order/${orderId}/remitos`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
   const data = await res.json().catch(() => ({})) as { error?: string };
   if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
@@ -69,14 +74,16 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
   const [asignar, setAsignar] = useState<string | null>(null);   // la clave del renglón que se asigna a productos del pedido
   const d = res.data;
   const e = d?.entrega;
-  const remitos = d?.remitos ?? [];
+  // Los de entrega (al cliente) y los internos (retiros, egresos, encargos: Producción y Logística), aparte.
+  const remitos = (d?.remitos ?? []).filter((r) => r.tipo !== 'interno'), internos = (d?.remitos ?? []).filter((r) => r.tipo === 'interno');
   const recargar = () => { res.reload(); onChange?.(); };
-  const subir = async (files: File[]) => {
+  const subir = async (files: File[], tipo: 'entrega' | 'interno' = 'entrega') => {
     setSubiendo(files.length);
     for (const f of files) {
       try {
-        const { remito: r } = await subirRemito(record.id, f);
-        toast(r.estado === 'ok' ? `Remito leído${r.numero ? ` (${r.numero})` : ''}: cuenta para la entrega.`
+        const { remito: r } = await subirRemito(record.id, f, tipo);
+        toast(tipo === 'interno' ? 'Remito interno guardado en el pedido (no cuenta para la entrega al cliente).'
+          : r.estado === 'ok' ? `Remito leído${r.numero ? ` (${r.numero})` : ''}: cuenta para la entrega.`
           : r.estado === 'duplicado' ? 'Ese remito ya estaba en el pedido.'
           : r.estado === 'sin_leer' ? `Remito guardado. ${r.motivo ?? 'Se lee en unos minutos.'}`
           : `Remito guardado, para revisar: ${r.motivo ?? 'no se pudo confirmar.'}`, r.estado === 'revisar');
@@ -108,7 +115,8 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       <div className="panel-head">
         <h3>Entrega</h3>
         {e?.estado && <EstadoEntrega value={e.estado} />}
-        {puedeEditar && <BotonArchivos onArchivos={subir} title="Subir la foto o el PDF del remito firmado">{subiendo ? 'Leyendo…' : '+ Remito'}</BotonArchivos>}
+        {puedeEditar && <BotonArchivos onArchivos={subir} title="Subir la foto o el PDF del remito firmado por el cliente">{subiendo ? 'Leyendo…' : '+ Remito'}</BotonArchivos>}
+        {puedeEditar && <BotonArchivos onArchivos={(f) => subir(f, 'interno')} title="Subir un remito interno: de un proveedor, de un impresor o de traslado (no cuenta para la entrega al cliente)">+ Interno</BotonArchivos>}
       </div>
       {/* La dirección (o las direcciones) de entrega, con qué va a cada una (Direcciones.tsx). */}
       <DireccionesEntrega orderId={record.id} onChange={onChange} />
@@ -188,6 +196,9 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       {remitos.length > 0 && <div className="remitos-sub small muted">Remitos ({remitos.length})</div>}
       {remitos.map((r) => <RemitoFila key={r.id} r={r} orderId={record.id} onCambio={recargar} soloVer={!puedeEditar} />)}
       {!remitos.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay remitos. Llegan solos de ClickUp y de la app del chofer, o subí la foto acá.'}</div>}
+      {/* Los internos no los ve Ventas (el servidor no se los manda). */}
+      {internos.length > 0 && <div className="remitos-sub small muted">Remitos internos ({internos.length}) · retiros, egresos y encargos, para Producción y Logística</div>}
+      {internos.map((r) => <RemitoInterno key={r.id} r={r} orderId={record.id} puede={!!d?.puede_finalizar} onCambio={recargar} />)}
       {d && !d.lector && remitos.some((r) => r.estado === 'sin_leer') && <div className="panel-body small muted">Los remitos se leen cuando esté conectada la API de Claude (Configuración → Integraciones).</div>}
       {finalizar && e && <FinalizarModal orderId={record.id} faltan={faltan} onClose={() => setFinalizar(false)} onDone={() => { setFinalizar(false); recargar(); }} />}
       {asignar && e && <AsignarModal orderId={record.id} entrega={e} clave={asignar} onClose={() => setAsignar(null)} onDone={() => { setAsignar(null); recargar(); }} />}
@@ -303,6 +314,28 @@ function GuiaExpreso({ g }: { g: NonNullable<Remito['guia']> }) {
   );
 }
 
+// Un remito interno en el pedido: la foto (de qué día y de qué chofer) y, si es de varios PDV, los otros pedidos. No se lee.
+// Si en realidad es el remito de entrega al cliente, Logística lo pasa a «de entrega» y se lee.
+function RemitoInterno({ r, orderId, puede, onCambio }: { r: Remito; orderId: number; puede: boolean; onCambio: () => void }) {
+  const toast = useToast();
+  const otros = (r.pedidos ?? []).filter((p) => p.id !== orderId);
+  const pasar = async () => {
+    try { await http('PATCH', `/remitos/${r.id}/tipo`, { tipo: 'entrega' }); toast('Pasó a remito de entrega: se lee y cuenta para la entrega.'); onCambio(); }
+    catch (err) { toast((err as Error).message, true); }
+  };
+  return (
+    <div className="remito-fila interno">
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <span className="tag">Interno</span>
+        <b className="grow">{r.fecha_parada ? `Foto del ${fmtDate(r.fecha_parada)}` : fmtDate(r.tomada_el ?? r.created_at, true)}</b>
+        <a className="btn sm" href={`/api/remitos/${r.id}/archivo`} target="_blank" rel="noreferrer">Ver</a>
+        {puede && <button className="btn sm ghost" onClick={pasar} title="Es el remito firmado por el cliente: que cuente para la entrega">Es de entrega</button>}
+      </div>
+      <div className="small muted">{origenDe(r)}{otros.length ? ` · también de ${otros.map((p) => p.nombre).join(', ')}` : ''}</div>
+    </div>
+  );
+}
+
 function RemitoFila({ r, orderId, onCambio, soloVer }: { r: Remito; orderId?: number; onCambio: () => void; soloVer?: boolean }) {
   const toast = useToast();
   const [ocupado, setOcupado] = useState(false);
@@ -365,7 +398,8 @@ function RemitoFila({ r, orderId, onCambio, soloVer }: { r: Remito; orderId?: nu
 export default function RemitosPage() {
   const { meta } = useMeta();
   const [tab, setTab] = useState<'revisar' | 'revisados' | 'choferes'>('revisar');
-  const puede = meta.me.role === 'admin' || meta.me.profile === 'logistica';
+  // Los choferes: el perfil Logística los tiene en la barra lateral (Choferes.tsx); los administradores, acá.
+  const puede = meta.me.role === 'admin';
   return (
     <div className="content">
       <div className="page-head"><h1>Entregas</h1></div>
@@ -374,7 +408,7 @@ export default function RemitosPage() {
         <button role="tab" aria-selected={tab === 'revisados'} className={`tab${tab === 'revisados' ? ' on' : ''}`} onClick={() => setTab('revisados')}>Revisados</button>
         {puede && <button role="tab" aria-selected={tab === 'choferes'} className={`tab${tab === 'choferes' ? ' on' : ''}`} onClick={() => setTab('choferes')}>Choferes</button>}
       </div>
-      {tab === 'revisar' ? <Bandeja /> : tab === 'revisados' ? <Revisados /> : <Choferes />}
+      {tab === 'revisar' ? <Bandeja /> : tab === 'revisados' ? <Revisados /> : <div style={{ marginTop: 12 }}><ChoferesPanel /></div>}
     </div>
   );
 }
@@ -612,61 +646,3 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
   );
 }
 
-interface Chofer { id: number; name: string; created_at: string; last_used_at: string | null; revoked: number; user_name: string; remitos: number; ultimo: string | null }
-function Choferes() {
-  const toast = useToast();
-  const res = useAsync(() => http<Chofer[]>('GET', '/choferes'), []);
-  const [nombre, setNombre] = useState('');
-  // El acceso de un chofer: su código (lo escribe una vez en la app) y su link (entra directo).
-  const [nuevo, setNuevo] = useState<{ nombre: string; link: string; codigo: string; app: string } | null>(null);
-  const crear = async () => {
-    try { const r = await http<{ link: string; codigo: string; app: string }>('POST', '/choferes', { name: nombre }); setNuevo({ nombre, link: r.link, codigo: r.codigo, app: r.app }); setNombre(''); res.reload(); }
-    catch (err) { toast((err as Error).message, true); }
-  };
-  const revocar = async (c: Chofer) => {
-    if (!confirm(`¿Dar de baja el acceso de ${c.name}? Su código y su link dejan de andar: no puede ver su recorrido ni mandar remitos.`)) return;
-    try { await http('DELETE', `/choferes/${c.id}`); res.reload(); } catch (err) { toast((err as Error).message, true); }
-  };
-  const copiar = async (t: string, que = 'Link') => { try { await navigator.clipboard.writeText(t); toast(`${que} copiado`); } catch { toast('No se pudo copiar: seleccionalo y copialo a mano.', true); } };
-  // El código y el link de un chofer ya creado, para volver a pasárselos si los perdió.
-  const verLink = async (c: Chofer) => {
-    try { const r = await http<{ link: string; codigo: string; app: string }>('GET', `/choferes/${c.id}/link`); setNuevo({ nombre: c.name, link: r.link, codigo: r.codigo, app: r.app }); }
-    catch (err) { toast((err as Error).message, true); }
-  };
-  return (
-    <div className="stack" style={{ gap: 12, marginTop: 12 }}>
-      <p className="small muted" style={{ margin: 0 }}>Cada chofer tiene su acceso a la app de remitos y de su recorrido: un <b>código de 8 números</b> que escribe una sola vez en la app (después queda guardado en el celular), o su link, que entra directo. Solo sirve para eso. Si lo pierde, «Ver código» te lo muestra de nuevo; si cambia de celular o quedó en manos de otro, dalo de baja y creá uno nuevo.</p>
-      <form className="row" style={{ gap: 6 }} onSubmit={(ev) => { ev.preventDefault(); crear(); }}>
-        <input className="input" placeholder="Nombre del chofer" value={nombre} onChange={(ev) => setNombre(ev.target.value)} style={{ maxWidth: 280 }} />
-        <button className="btn primary" disabled={nombre.trim().length < 2}>Crear acceso</button>
-      </form>
-      {nuevo && (
-        <div className="panel panel-body stack" style={{ gap: 8 }}>
-          <b>Acceso de {nuevo.nombre}</b>
-          <div className="codigo-chofer num" aria-label={`Código ${nuevo.codigo.split('').join(' ')}`}>{nuevo.codigo.slice(0, 4)} {nuevo.codigo.slice(4)}</div>
-          <span className="small muted">Que abra <b>{nuevo.app.replace(/^https?:\/\//, '')}</b> en el celular y escriba este código. Es una sola vez: queda guardado (conviene agregar la app a la pantalla de inicio). O mandale el link, que entra directo.</span>
-          <input className="input" readOnly value={nuevo.link} onFocus={(ev) => ev.target.select()} aria-label="Link" />
-          <div className="row wrap" style={{ gap: 6 }}>
-            <button className="btn sm" onClick={() => copiar(nuevo.codigo, 'Código')}>Copiar código</button>
-            <button className="btn sm" onClick={() => copiar(nuevo.link)}>Copiar link</button>
-            <a className="btn sm wa-link" href={`https://wa.me/?text=${encodeURIComponent(`Para la app de remitos de Formas abrí este link: ${nuevo.link}\nO entrá a ${nuevo.app} y escribí tu código: ${nuevo.codigo.slice(0, 4)} ${nuevo.codigo.slice(4)}`)}`} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Mandar por WhatsApp</a>
-            <button className="btn sm ghost" onClick={() => setNuevo(null)}>Cerrar</button>
-          </div>
-        </div>
-      )}
-      <div className="panel">
-        {(res.data ?? []).map((c) => (
-          <div key={c.id} className={`assoc-item${c.revoked ? ' muted' : ''}`}>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div>{c.name}{c.revoked ? ' (dado de baja)' : ''}</div>
-              <div className="small muted">{c.remitos} remitos{c.ultimo ? ` · el último ${fmtDate(c.ultimo, true)}` : ''} · creado por {c.user_name}</div>
-            </div>
-            {!c.revoked && <button className="btn sm" onClick={() => verLink(c)}>Ver código</button>}
-            {!c.revoked && <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>}
-          </div>
-        ))}
-        {!res.data?.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay choferes.'}</div>}
-      </div>
-    </div>
-  );
-}

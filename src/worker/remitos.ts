@@ -49,10 +49,15 @@ export interface RemitoRow {
   duplicado_de: number | null; intentos: number; leido_at: string | null; revisado_por: number | null; revisado_at: string | null;
   pdv_chofer: string | null; pide_pdv: number; created_at: string; updated_at: string;
   parada?: string | null;   // la parada del recorrido de donde es la foto (la cámara se abrió desde ahí, o la eligió el chofer)
+  // 'entrega': el remito de Formas al cliente (lo ven las vendedoras y cuenta para la entrega); 'interno': el de un retiro,
+  // un egreso o un encargo (proveedor, impresor, traslado), para Producción y Logística (pedido de Rodrigo del 16/11/2026).
+  tipo?: TipoRemito;
+  fecha_parada?: string | null;   // el día del recorrido de esa parada
 }
+export type TipoRemito = 'entrega' | 'interno';
 const SIN_DATA = `id, record_id, origen, file_id, nombre, mime, size, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, estado, motivo,
   repetir, numero, pdv, cuit, cliente, fecha, recibido_por, recibido_el, firmado, reservas, notas, lectura, controles, candidatos, duplicado_de,
-  intentos, leido_at, revisado_por, revisado_at, pdv_chofer, pide_pdv, parada, created_at, updated_at`;
+  intentos, leido_at, revisado_por, revisado_at, pdv_chofer, pide_pdv, parada, tipo, fecha_parada, created_at, updated_at`;
 
 // ---------- Datos que se controlan solos ----------
 
@@ -110,9 +115,14 @@ export interface NuevoRemito {
   recordId?: number | null; origen: Origen; bytes: ArrayBuffer; mime: string; nombre: string;
   clave?: string | null; tokenId?: number | null; chofer?: string | null; lat?: number | null; lng?: number | null; tomadaEl?: string | null;
   parada?: string | null;
+  // Un remito interno (la foto de un retiro, un egreso o un encargo, o uno que se subió como interno): no se lee y queda
+  // atado a estos pedidos (el primero es el principal).
+  tipo?: TipoRemito; pedidos?: number[]; fechaParada?: string | null;
 }
 // La clave de una parada de entrega del recorrido: p:<tarea del PDV>, o p:<tarea>:2 si el pedido va a varias direcciones.
 export const esClaveParada = (s: unknown): s is string => typeof s === 'string' && /^p:[\w-]{1,60}(:\d{1,2})?$/.test(s);
+// Cualquier parada del recorrido: también las de un proveedor o impresor (e:, o:) y las de los encargos (l:, d:, x:).
+export const esClaveRuta = (s: unknown): s is string => typeof s === 'string' && /^[a-z]:.{1,200}$/.test(s);
 // El PDV y el pedido de una parada de entrega.
 async function deParada(db: D1Database, clave: string | null | undefined) {
   if (!esClaveParada(clave)) return null;
@@ -143,10 +153,16 @@ export async function guardarRemito(env: Env, ctx: Ctx, n: NuevoRemito): Promise
     const rec = await getRow(db, n.recordId);
     if (rec.object_type !== 'order') throw new HttpError(400, 'Los remitos van en un pedido.');
   }
-  const r = await db.prepare(`INSERT INTO remitos (record_id, origen, nombre, mime, size, data, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, parada)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(n.recordId ?? null, n.origen, n.nombre.slice(0, 200) || 'remito', mime, n.bytes.byteLength,
+  // Un remito interno no se lee ni se revisa: queda guardado («ok») en los pedidos de su parada.
+  const interno = n.tipo === 'interno';
+  const pedidos = interno ? [...new Set([n.recordId, ...(n.pedidos ?? [])].filter((x): x is number => !!x))] : [];
+  const r = await db.prepare(`INSERT INTO remitos (record_id, origen, nombre, mime, size, data, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, parada,
+      tipo, fecha_parada, estado, motivo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(interno ? pedidos[0] ?? null : n.recordId ?? null, n.origen, n.nombre.slice(0, 200) || 'remito', mime, n.bytes.byteLength,
     n.bytes, hash, n.clave ?? null, ctx.user.id, n.tokenId ?? null, n.chofer ?? null, num(n.lat), num(n.lng), n.tomadaEl ?? null,
-    esClaveParada(n.parada) ? n.parada : null).first<{ id: number }>();
+    esClaveRuta(n.parada) ? n.parada : null, interno ? 'interno' : 'entrega', n.fechaParada ?? null, interno ? 'ok' : 'sin_leer',
+    interno ? 'Remito interno: queda en los pedidos de la parada, para Producción y Logística.' : null).first<{ id: number }>();
+  if (pedidos.length > 1) await db.batch(pedidos.slice(1).map((p) => db.prepare('INSERT OR IGNORE INTO remito_pedidos (remito_id, record_id, user_id) VALUES (?, ?, ?)').bind(r!.id, p, ctx.user.id)));
   return { id: r!.id, nuevo: true };
 }
 const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -736,7 +752,8 @@ export interface Entrega {
 const qty = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
 // Los remitos de un pedido: aquellos donde es el principal y los de varios pedidos donde está entre los otros.
-const DEL_PEDIDO = '(r.record_id = ?1 OR r.id IN (SELECT remito_id FROM remito_pedidos WHERE record_id = ?1))';
+// Los remitos de entrega de un pedido (los internos no cuentan para lo que se le entregó al cliente).
+const DEL_PEDIDO = "((r.record_id = ?1 OR r.id IN (SELECT remito_id FROM remito_pedidos WHERE record_id = ?1)) AND r.tipo = 'entrega')";
 
 export async function calcularEntrega(db: D1Database, orderId: number): Promise<Entrega> {
   const row = await getRow(db, orderId, 'order');
@@ -1024,6 +1041,26 @@ export async function revisarRemito(env: Env, ctx: Ctx, id: number, body: { acci
 
 // ---------- Para las pantallas ----------
 
+// Logística corrige el tipo de un remito: uno interno que en realidad es la entrega al cliente se lee y cuenta para la
+// entrega; uno de entrega que es interno deja de contar. La entrega de sus pedidos se recalcula.
+export async function cambiarTipoRemito(env: Env, ctx: Ctx, id: number, tipo: unknown) {
+  if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador.');
+  if (tipo !== 'entrega' && tipo !== 'interno') throw new HttpError(400, 'El tipo es «entrega» o «interno».');
+  const db = env.DB;
+  const r = await remitoPorId(db, id);
+  if ((r.tipo ?? 'entrega') === tipo) return remitoPorId(db, id);
+  const pedidos = [...new Set([r.record_id, ...(await otrosPedidosDe(db, id))].filter((x): x is number => !!x))];
+  if (tipo === 'interno') {
+    await db.prepare("UPDATE remitos SET tipo = 'interno', estado = 'ok', motivo = 'Remito interno: para Producción y Logística.', pide_pdv = 0, revisado_por = ?, revisado_at = ?, updated_at = ? WHERE id = ?")
+      .bind(ctx.user.id, now(), now(), id).run();
+  } else {
+    await db.prepare("UPDATE remitos SET tipo = 'entrega', estado = 'sin_leer', motivo = NULL, intentos = 0, updated_at = ? WHERE id = ?").bind(now(), id).run();
+    if (env.ANTHROPIC_API_KEY) await leerRemito(env, id, { ctx }).catch((e) => console.error('remito', id, (e as Error).message));
+  }
+  for (const p of pedidos) await recalcularEntrega(env, p, { ctx });
+  return remitoPorId(db, id);
+}
+
 export function remitoPublico(r: RemitoRow, items: Array<{ code: string | null; description: string | null; quantity: number | null }> = []) {
   const parse = <T>(s: string, d: T): T => { try { return JSON.parse(s) as T; } catch { return d; } };
   return {
@@ -1034,6 +1071,7 @@ export function remitoPublico(r: RemitoRow, items: Array<{ code: string | null; 
     otros_remitos_en_foto: !!parse<Partial<Lectura>>(r.lectura, {}).otros_remitos_en_foto, dudas: parse<Partial<Lectura>>(r.lectura, {}).dudas ?? [],
     leido_at: r.leido_at, revisado_por: r.revisado_por, revisado_at: r.revisado_at, created_at: r.created_at, tomada_el: r.tomada_el, items,
     pdv_chofer: r.pdv_chofer, guia: parse<Partial<Lectura>>(r.lectura, {}).guia_expreso ?? null,
+    tipo: r.tipo ?? 'entrega', parada: r.parada ?? null, fecha_parada: r.fecha_parada ?? null,
   };
 }
 export async function itemsDe(db: D1Database, ids: number[]) {
@@ -1124,7 +1162,8 @@ export function paraChofer(r: RemitoRow, items: Array<{ description: string | nu
   const cargada = guia && (JSON.parse(r.controles || '[]') as Control[]).some((c) => c.dato === 'Guía del expreso' && c.ok);
   const deGuia = guia ? `Guía de ${nombreGuia(guia)}: ${cargada ? 'quedó cargada para seguir el envío.' : r.pide_pdv ? '¿de qué entrega es?' : 'Logística la carga en la entrega.'} ` : '';
   // Si no se sabe de qué entrega es, la app lo pregunta (título y paradas para tocar): el mensaje solo dice qué guía es.
-  const mensaje = guia && r.pide_pdv && r.estado === 'revisar' ? `Es la guía de ${nombreGuia(guia)}.` : deGuia + (r.estado === 'ok' ? `Quedó en el pedido${r.pdv ? ` del PDV ${r.pdv}` : ''}. No tenés que hacer nada más.`
+  const mensaje = r.tipo === 'interno' && r.estado === 'ok' ? 'Quedó guardado con los pedidos de esa parada. No tenés que hacer nada más.'
+    : guia && r.pide_pdv && r.estado === 'revisar' ? `Es la guía de ${nombreGuia(guia)}.` : deGuia + (r.estado === 'ok' ? `Quedó en el pedido${r.pdv ? ` del PDV ${r.pdv}` : ''}. No tenés que hacer nada más.`
     : r.estado === 'duplicado' ? `Ese remito ya estaba mandado${r.pdv ? ` (PDV ${r.pdv})` : ''}. No hace falta mandarlo de nuevo.`
     : r.estado === 'descartado' ? `Logística lo descartó${r.motivo ? `: ${r.motivo}` : '.'}`
     : r.estado === 'revisar' ? (r.repetir ? (JSON.parse(r.lectura || '{}').motivo_repetir || 'No se lee bien. Sacá otra foto: el remito entero, de frente y sin sombra.')

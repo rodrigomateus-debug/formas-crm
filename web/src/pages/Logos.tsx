@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { http, useAsync, useMeta, useToast, fmtDate, Icon, type ObjectType, cabecerasVerComo } from '../lib';
-import { Modal } from '../components';
+import { Modal, teclasAlSalir } from '../components';
 import { BotonArchivos, SoltarBocetos, VistaPdf } from './Bocetos';
 
 // Logos del cliente (pedido de Rodrigo del 13/11/2026): el original «en curvas» (AI, EPS, CDR, SVG, PDF…) se guarda una vez
@@ -145,6 +145,7 @@ export function LogoVisor({ logo, onClose, onCambio, puedeEditar }: { logo: Logo
         <div className="boceto-datos">
           <label className="field">Nombre
             <input className="input sm" defaultValue={x.etiqueta ?? ''} placeholder="Ej. Color, Negativo, Isotipo" disabled={!puedeEditar}
+              title="Se guarda al salir del campo o con Enter; Esc deshace" onKeyDown={teclasAlSalir(x.etiqueta ?? '')}
               onBlur={(e) => e.target.value !== (x.etiqueta ?? '') && cambiar({ etiqueta: e.target.value }, 'Nombre guardado')} />
           </label>
           <div className="field">Curvas <span><EstadoCurvas curvas={x.curvas} /></span></div>

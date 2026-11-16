@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, esVentas, useToast, userName, Icon, type CrmRecord, cabecerasVerComo } from '../lib';
-import { EstadoEntrega, Modal } from '../components';
+import { EstadoEntrega, Modal, alEsc } from '../components';
 import { BotonArchivos } from './Bocetos';
 import { DireccionesEntrega } from './Direcciones';
 import { Select } from '../Select';
@@ -590,7 +590,7 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
         )}
         {varios ? (
           // Remito de varios pedidos: cuáles son, a cuál va cada renglón y confirmar en todos.
-          <div className="varios-pedidos">
+          <div className="varios-pedidos" onKeyDown={alEsc(() => { setVarios(null); setSumar(false); })}>
             <div className="small"><b>Pedidos de este remito</b></div>
             {varios.map((p, k) => (
               <div key={p.id} className="row small varios-pedido">
@@ -603,16 +603,16 @@ function RevisionCard({ r, onCambio, revisado }: { r: Remito; onCambio: () => vo
                   onElegir={(o) => { setVarios((v) => [...(v ?? []), { id: o.id, nombre: o.name }]); setSumar(false); }} />
               : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setSumar(true)}>+ Sumar otro pedido</button>}
             {varios.length > 0 && r.items.length > 0 && <ParesProductos r={r} pedidos={varios} pares={pares} onChange={setPares} />}
-            <div className="row wrap" style={{ gap: 6 }}>
+            <div className="acciones">
+              <button className="btn sm ghost" disabled={ocupado} onClick={() => { setVarios(null); setSumar(false); }}>Cancelar</button>
               <button className="btn sm primary" disabled={ocupado || !varios.length} onClick={confirmarVarios}>
                 {varios.length > 1 ? `Confirmar en los ${varios.length} pedidos` : varios.length ? `Es de «${varios[0].nombre}»` : 'Elegí los pedidos'}</button>
-              <button className="btn sm ghost" disabled={ocupado} onClick={() => { setVarios(null); setSumar(false); }}>Cancelar</button>
             </div>
           </div>
         ) : (
           <>
             {destino && productosNoCierran && r.items.length > 0 && (elegir
-              ? <ParesProductos r={r} pedidos={[{ id: destino, nombre: candidatos.find((c) => c.id === destino)?.nombre ?? 'el pedido' }]} pares={pares} onChange={setPares} />
+              ? <div onKeyDown={alEsc(() => setElegir(false))}><ParesProductos r={r} pedidos={[{ id: destino, nombre: candidatos.find((c) => c.id === destino)?.nombre ?? 'el pedido' }]} pares={pares} onChange={setPares} /></div>
               : <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setElegir(true)}>Cambiar a qué producto va cada uno</button>)}
             <div className="row wrap" style={{ gap: 6 }}>
               {candidatos.map((c) => {

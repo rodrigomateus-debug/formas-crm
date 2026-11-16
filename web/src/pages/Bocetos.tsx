@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { http, useAsync, useToast, fmtDate, Icon, type ObjectType, cabecerasVerComo } from '../lib';
-import { Modal } from '../components';
+import { Modal, teclasAlSalir } from '../components';
 import { Select } from '../Select';
 import { LogoProducto, useLogos, type LogosRes } from './Logos';
 
@@ -348,7 +348,8 @@ export function BocetoVisor({ b, productos, esPedido, onClose, onCambio, logos, 
                   <option value="">Sin producto</option>
                   {productos.map((p) => <option key={p.key} value={p.key}>{p.nombre}</option>)}
                 </Select>
-              : <input className="input sm" defaultValue={x.producto_nombre ?? ''} onBlur={(e) => e.target.value !== (x.producto_nombre ?? '') && cambiar({ producto: e.target.value, producto_nombre: e.target.value }, 'Producto cambiado')} />}
+              : <input className="input sm" defaultValue={x.producto_nombre ?? ''} title="Se guarda al salir del campo o con Enter; Esc deshace"
+                onKeyDown={teclasAlSalir(x.producto_nombre ?? '')} onBlur={(e) => e.target.value !== (x.producto_nombre ?? '') && cambiar({ producto: e.target.value, producto_nombre: e.target.value }, 'Producto cambiado')} />}
           </label>
           <label className="field">Tipo
             <Select className="input sm" value={x.tipo} onChange={(e) => cambiar({ tipo: e.target.value as Boceto['tipo'] }, 'Tipo cambiado')}>

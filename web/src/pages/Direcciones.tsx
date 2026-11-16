@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { http, qs, useAsync, useDebounced, useMeta, useToast, Icon } from '../lib';
-import { Modal } from '../components';
+import { Modal, alEsc } from '../components';
 
 // Direcciones de entrega del pedido (src/worker/direcciones.ts), arriba de la tarjeta «Entrega».
 // Por defecto, una dirección y todo va ahí. Con varias, cuánto de cada producto lleva cada una; lo repartido se descuenta
@@ -67,7 +67,7 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
             )}
           </div>}
           {puede && elegirRetira && (
-            <div className="retira-lista" role="group" aria-label="¿En cuál de las direcciones de Formas lo retira?">
+            <div className="retira-lista" role="group" aria-label="¿En cuál de las direcciones de Formas lo retira?" onKeyDown={alEsc(() => setElegirRetira(false))}>
               {d.bases.map((b) => (
                 <button key={b.id} type="button" className="retira-item" disabled={guardando} onClick={() => retirar(b)}>
                   <Icon name="company" size={14} />

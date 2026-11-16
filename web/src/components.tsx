@@ -102,7 +102,60 @@ export function WhatsAppLink({ phone, children }: { phone: unknown; children?: R
   );
 }
 
-// Valor del negocio con el lápiz al lado (vista previa y ficha): se cambia ahí mismo, con Enter o Guardar.
+// Esc cancela un formulario o una lista que se abrió dentro de la página (se pone en su onKeyDown). Si un desplegable de
+// adentro está abierto, Esc lo cierra primero a él (lo marca con preventDefault). No llega a un cuadro (Modal) de atrás.
+export const alEsc = (cancelar: () => void) => (e: React.KeyboardEvent) => {
+  if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); cancelar(); }
+};
+// Campo que guarda al salir de él (sin ✓ ni ✕): Enter guarda (sale del campo) y Esc vuelve al valor de antes, sin guardar.
+export const teclasAlSalir = (antes: string) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+  if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.currentTarget.value = antes; e.currentTarget.blur(); }
+};
+// Lo mismo cuando el foco no queda adentro (por ejemplo, mientras se arrastra un marcador en el mapa).
+export function useEsc(activo: boolean, cancelar: () => void) {
+  const cb = useRef(cancelar);
+  cb.current = cancelar;
+  useEffect(() => {
+    if (!activo) return;
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); cb.current(); } };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [activo]);
+}
+
+// Edición en el lugar (ficha y vista previa): el dato se cambia por su campo en el mismo renglón, con ✓ y ✕ al lado, sin
+// una fila de botones abajo que empuje todo. Enter guarda (en un texto largo, Ctrl+Enter, porque Enter es otra línea) y Esc
+// cancela. Si no se cambió nada, un clic afuera también lo cierra; con cambios queda abierto hasta ✓ o ✕, para no perderlos.
+export function EditarEnLinea({ children, onGuardar, onCancelar, guardando, sucio, multilinea, sinConfirmar, className = '', confirmar = 'Guardar' }: {
+  children: ReactNode; onGuardar: () => void; onCancelar: () => void; guardando?: boolean; sucio?: boolean;
+  multilinea?: boolean; sinConfirmar?: boolean; className?: string; confirmar?: string;
+}) {
+  const ref = useRef<HTMLFormElement>(null);
+  const cancelar = useRef(onCancelar);
+  cancelar.current = onCancelar;
+  useEffect(() => {
+    if (sucio) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) cancelar.current(); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [sucio]);
+  return (
+    <form ref={ref} className={`en-linea${multilinea ? ' multi' : ''} ${className}`} onClick={(e) => e.stopPropagation()}
+      onSubmit={(e) => { e.preventDefault(); if (!guardando) onGuardar(); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); onCancelar(); }
+        else if (multilinea && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!guardando) onGuardar(); }
+      }}>
+      <div className="en-linea-campo">{children}</div>
+      {!sinConfirmar && <button type="submit" className="btn sm icon primary" disabled={guardando} aria-label={confirmar}
+        title={`${confirmar} (${multilinea ? 'Ctrl+Enter' : 'Enter'})`}><Icon name="check" size={15} /></button>}
+      <button type="button" className="btn sm icon ghost" disabled={guardando} aria-label="Cancelar" title="Cancelar (Esc)" onClick={onCancelar}><Icon name="x" size={15} /></button>
+    </form>
+  );
+}
+
+// Valor del negocio con el lápiz al lado (vista previa y ficha): se cambia ahí mismo, con el signo de la moneda en el campo.
 export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved: () => void }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -110,10 +163,11 @@ export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved:
   const [v, setV] = useState('');
   const [saving, setSaving] = useState(false);
   const shown = fmtMoney(record.props.amount, record.props.deal_currency_code);
+  const antes = record.props.amount == null ? '' : String(record.props.amount);
   if (edit) {
     return (
-      <form className="valor-edit" onClick={(e) => e.stopPropagation()} onSubmit={async (e) => {
-        e.preventDefault();
+      <EditarEnLinea className="valor-edit" guardando={saving} sucio={v !== antes} onCancelar={() => setEdit(false)} onGuardar={async () => {
+        if (v === antes) { setEdit(false); return; }
         setSaving(true);
         try {
           const r = await http<CrmRecord>('PATCH', `/records/deal/${record.id}`, { props: { amount: v === '' ? null : Number(v) } });
@@ -124,12 +178,10 @@ export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved:
           onSaved();
         } catch (err) { toast((err as Error).message, true); } finally { setSaving(false); }
       }}>
-        <input className="input sm num" type="number" min="0" step="any" autoFocus value={v} aria-label="Valor del negocio" placeholder="Valor"
-          onFocus={(e) => e.target.select()}
-          onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setEdit(false); } }} />
-        <button className="btn sm primary" disabled={saving}>Guardar</button>
-        <button type="button" className="btn sm" onClick={() => setEdit(false)}>Cancelar</button>
-      </form>
+        <span className="input-afijo"><span>{record.props.deal_currency_code === 'USD' ? 'US$' : '$'}</span>
+          <input className="input sm num" type="number" min="0" step="any" autoFocus value={v} aria-label="Valor del negocio" placeholder="0"
+            onFocus={(e) => e.target.select()} onChange={(e) => setV(e.target.value)} /></span>
+      </EditarEnLinea>
     );
   }
   return (
@@ -205,8 +257,8 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 }
 
 // Campo de edición según el tipo de propiedad.
-export function PropertyInput({ prop, value, onChange, autoFocus, type }: {
-  prop: Property; value: any; onChange: (v: any) => void; autoFocus?: boolean; type: ObjectType;
+export function PropertyInput({ prop, value, onChange, autoFocus, type, onCerrar }: {
+  prop: Property; value: any; onChange: (v: any) => void; autoFocus?: boolean; type: ObjectType; onCerrar?: () => void;
 }) {
   const { meta } = useMeta();
   const v = value ?? '';
@@ -220,7 +272,7 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type }: {
   switch (prop.type) {
     case 'owner':
       return (
-        <Select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus}>
+        <Select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus} onCerrar={onCerrar}>
           <option value="">Sin asignar</option>
           {meta.users.filter((u) => u.active || u.id === Number(v)).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
@@ -228,7 +280,7 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type }: {
     case 'enum':
     case 'bool':
       return (
-        <Select className="input" value={v} onChange={(e) => onChange(e.target.value || null)} autoFocus={autoFocus}>
+        <Select className="input" value={v} onChange={(e) => onChange(e.target.value || null)} autoFocus={autoFocus} onCerrar={onCerrar}>
           <option value="">—</option>
           {(prop.type === 'bool' && !prop.options.length ? [{ value: 'true', label: 'Sí' }, { value: 'false', label: 'No' }] : prop.options)
             .map((o) => <option key={o.value} value={o.value}>{type === 'order' && prop.name === 'hs_pipeline_stage' ? <><EtapaIcono value={o.value} />{o.label}</> : o.label}</option>)}

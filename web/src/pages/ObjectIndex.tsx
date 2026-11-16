@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips, vuelveALaLista,
-  type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEquipo, type UnidadKey,
+  type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEmpresa, origenUnidad, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
@@ -526,7 +526,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                   {columns.map((col) => (col === '__company'
                     ? <td key={col}>{r.company ? <Link to={recordUrl('company', r.company.id)}>{r.company.name}</Link> : <span className="muted">—</span>}</td>
                     : col === '__tags' ? <td key={col}><TagChips meta={meta} ids={r.tags} small />{!r.tags?.length && <span className="muted">—</span>}</td>
-                    : col === '__unidad' ? <td key={col}><Unidades keys={unidadesDe(meta, type, r.props)} /></td>
+                    : col === '__unidad' ? <UnidadCell key={col} type={type} record={r} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
               ))}
@@ -560,23 +560,34 @@ function Unidades({ keys }: { keys: UnidadKey[] }) {
   return keys.length ? <span className="unidades">{keys.map((k) => <UnidadBadge key={k} k={k} />)}</span> : <span className="muted">—</span>;
 }
 
+// Columna «Unidad de negocio»: en las empresas se edita en la celda (el campo «Unidades de negocio», a mano) y muestra la
+// que corresponde (a mano, por sus compras o por el propietario); en los contactos, la de su empresa (la manda el servidor).
+function UnidadCell({ type, record, onSaved }: { type: ObjectType; record: CrmRecord; onSaved: (r: CrmRecord) => void }) {
+  const { meta } = useMeta();
+  const u = type === 'company' ? unidadDeEmpresa(meta, record.props)
+    : type === 'contact' && record.unidad ? record.unidad : { keys: unidadesDe(meta, type, record.props), origen: null };
+  const shown = <Unidades keys={u.keys} />;
+  if (type === 'company') return <EditCell type={type} record={record} col="unidades_de_negocio" onSaved={onSaved} display={shown} tip={origenUnidad(u)} />;
+  return <td title={origenUnidad(u) || undefined}>{shown}</td>;
+}
+
 // Edición en la celda, como en HubSpot: el lápiz (o doble clic) abre el campo. Los desplegables guardan al elegir;
 // el resto con Guardar o Enter. Quien es de solo lectura no ve el lápiz (y el servidor tampoco lo deja).
-function EditCell({ type, record, col, onSaved }: { type: ObjectType; record: CrmRecord; col: string; onSaved: (r: CrmRecord) => void }) {
+function EditCell({ type, record, col, onSaved, display, tip }: { type: ObjectType; record: CrmRecord; col: string; onSaved: (r: CrmRecord) => void; display?: React.ReactNode; tip?: string }) {
   const { meta } = useMeta();
   const toast = useToast();
   const prop = propOf(meta, type, col);
   const [at, setAt] = useState<DOMRect | null>(null);
   const [val, setVal] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
-  const shown = type === 'order' && col === 'hs_pipeline_stage' && record.props[col] ? <EtapaPedido value={record.props[col]} label={formatValue(meta, type, col, record.props[col])} />
+  const shown = display !== undefined ? display : type === 'order' && col === 'hs_pipeline_stage' && record.props[col] ? <EtapaPedido value={record.props[col]} label={formatValue(meta, type, col, record.props[col])} />
     : col === 'unidad_de_negocio' && unidadesDe(meta, 'order', record.props).length ? <Unidades keys={unidadesDe(meta, 'order', record.props)} />
     : prop?.type === 'owner' && record.props[col] ? <UserChip id={record.props[col]} />
     : prop?.type === 'phone' && record.props[col] ? <WhatsAppLink phone={record.props[col]} />
     : formatValue(meta, type, col, record.props[col], record.props) || <span className="muted">—</span>;
   // Montos abreviados en la celda; la cifra exacta, al pasar el mouse.
   const exact = prop?.type === 'currency' && record.props[col] != null && record.props[col] !== ''
-    ? fmtMoneyExact(record.props[col], col.endsWith('_usd') ? 'USD' : record.props.deal_currency_code ?? record.props.hs_currency_code) : undefined;
+    ? fmtMoneyExact(record.props[col], col.endsWith('_usd') ? 'USD' : record.props.deal_currency_code ?? record.props.hs_currency_code) : tip || undefined;
   if (col === 'estado_cliente' && record.props[col]) return <td><EstadoCliente value={String(record.props[col])} /></td>;
   if (col === 'estado_entrega' && record.props[col]) return <td title={record.props.falta_entregar ? `Falta: ${record.props.falta_entregar}` : undefined}><EstadoEntrega value={record.props[col]} /></td>;
   // Números y montos alineados a la derecha, como en la tabla del Design System.

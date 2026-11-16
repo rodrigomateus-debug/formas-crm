@@ -1,5 +1,6 @@
 // Filtro por unidad de negocio (Formas Shop, Corporate, NoEstres) en todas las vistas: negocios por el equipo de su
-// pipeline, pedidos por su unidad de ClickUp, contactos, empresas y tareas por el equipo de su propietario.
+// pipeline, pedidos por su unidad de ClickUp, empresas por la suya (a mano, por sus compras o por el propietario),
+// contactos por la de su empresa y tareas por el equipo de su propietario.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -32,9 +33,9 @@ test('filtro por unidad de negocio en negocios, pedidos, contactos, empresas y t
   const ords = ids(await api('GET', `/records/order?groups=${groups(['noestres'], [{ prop: 'hs_order_name', op: 'contains', value: RUN }])}`));
   assert.ok(ords.includes(oNe.id) && !ords.includes(oSh.id));
 
-  // Contactos y empresas: por el equipo del propietario.
-  const cShop = (await api('POST', '/records/contact', { props: { firstname: `Ana ${RUN}`, email: `ana.${RUN}@x.com`, owner_id: shop.id } })).data;
-  const cCorp = (await api('POST', '/records/contact', { props: { firstname: `Beto ${RUN}`, email: `beto.${RUN}@x.com`, owner_id: corp.id } })).data;
+  // Contactos sin empresa (mail personal: no se les crea una) y empresas sin unidad a mano ni compras: por el equipo del propietario.
+  const cShop = (await api('POST', '/records/contact', { props: { firstname: `Ana ${RUN}`, email: `ana.${RUN}@gmail.com`, owner_id: shop.id } })).data;
+  const cCorp = (await api('POST', '/records/contact', { props: { firstname: `Beto ${RUN}`, email: `beto.${RUN}@gmail.com`, owner_id: corp.id } })).data;
   const cons = ids(await api('GET', `/records/contact?groups=${groups(['shop'], [{ prop: 'firstname', op: 'contains', value: RUN }])}`));
   assert.ok(cons.includes(cShop.id) && !cons.includes(cCorp.id));
   assert.ok(ids(await api('GET', `/records/company?groups=${groups(['corporate'], mismo)}`)).includes(emp.id));
@@ -49,4 +50,42 @@ test('filtro por unidad de negocio en negocios, pedidos, contactos, empresas y t
   // Inicio: los negocios abiertos de una unidad.
   const dash = (await api('GET', '/dashboard?owner=all&unidades=noestres')).data;
   assert.ok(dash.open.every((x) => ['687889576', '746355608'].includes(x.pipeline_id)), 'solo pipelines de NoEstres');
+});
+
+test('unidad de la empresa: a mano, por sus compras o por el propietario; los contactos heredan la de su empresa', async () => {
+  const R = `${RUN}u`;
+  // Alguien de dos equipos (como Rodrigo): sus empresas sin más datos son de las dos unidades.
+  const dos = (await api('POST', '/users', { email: `dos.${R}@formas.ar`, name: `Dos ${R}`, team_id: 57132078, extra_teams: [57393663] })).data;
+  const nueva = async (name, props = {}) => (await api('POST', '/records/company', { props: { name: `${name} ${R}`, owner_id: dos.id, ...props } })).data;
+  const porDueno = await nueva('PorDueno');
+  const aMano = await nueva('AMano', { unidades_de_negocio: 'corporate' });
+  const porCompras = await nueva('PorCompras');
+  // unidad_finnegans es de solo lectura: la carga el script de clientes (acá, por su hook).
+  const tok = (await api('POST', '/tokens', { name: `Unidades ${R}`, source: 'api' })).data.token;
+  const ap = await fetch(`${CRM}/hooks/clientes/aplicar`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+    body: JSON.stringify({ updates: [{ id: porCompras.id, props: { unidad_finnegans: 'Corporate' } }], resumen: {} }) });
+  assert.equal(ap.status, 200, await ap.text());
+  const deUnidad = async (u) => ids(await api('GET', `/records/company?groups=${groups([u], [{ prop: 'name', op: 'contains', value: R }])}`));
+  const corp = await deUnidad('corporate');
+  const shop = await deUnidad('shop');
+  assert.ok(corp.includes(aMano.id) && !shop.includes(aMano.id), 'a mano manda sobre el propietario');
+  assert.ok(corp.includes(porCompras.id) && !shop.includes(porCompras.id), 'sus compras mandan sobre el propietario');
+  assert.ok(shop.includes(porDueno.id) && (await deUnidad('noestres')).includes(porDueno.id) && !corp.includes(porDueno.id), 'sin datos, la del propietario');
+  // A mano gana también sobre las compras, y se edita (y se borra) como cualquier campo.
+  await api('PATCH', `/records/company/${porCompras.id}`, { props: { unidades_de_negocio: 'noestres;shop' } });
+  assert.ok((await deUnidad('noestres')).includes(porCompras.id) && !(await deUnidad('corporate')).includes(porCompras.id));
+  await api('PATCH', `/records/company/${porCompras.id}`, { props: { unidades_de_negocio: '' } });
+  assert.ok((await deUnidad('corporate')).includes(porCompras.id), 'vacío vuelve a la de sus compras');
+
+  // Contactos: la de su empresa principal (aunque su propietario sea de otro equipo); sin empresa, la de su propietario.
+  const shopUser = (await api('POST', '/users', { email: `shop2.${R}@formas.ar`, name: `Shop2 ${R}`, team_id: 57132078 })).data;
+  const conEmp = (await api('POST', '/records/contact', { props: { firstname: `ConEmp ${R}`, email: `conemp.${R}@gmail.com`, owner_id: shopUser.id }, associations: [aMano.id] })).data;
+  const sinEmp = (await api('POST', '/records/contact', { props: { firstname: `SinEmp ${R}`, email: `sinemp.${R}@gmail.com`, owner_id: shopUser.id } })).data;
+  const contactos = async (u) => ids(await api('GET', `/records/contact?groups=${groups([u], [{ prop: 'firstname', op: 'contains', value: R }])}`));
+  assert.ok((await contactos('corporate')).includes(conEmp.id) && !(await contactos('shop')).includes(conEmp.id), 'hereda la de su empresa');
+  assert.ok((await contactos('shop')).includes(sinEmp.id), 'sin empresa, la del propietario');
+  // La lista trae la unidad de cada contacto para la columna.
+  const lista = (await api('GET', `/records/contact?q=${encodeURIComponent(R)}`)).data.results;
+  assert.deepEqual(lista.find((x) => x.id === conEmp.id).unidad, { keys: ['corporate'], origen: 'manual', empresa: true });
+  assert.deepEqual(lista.find((x) => x.id === sinEmp.id).unidad, { keys: ['shop'], origen: 'propietario', empresa: false });
 });

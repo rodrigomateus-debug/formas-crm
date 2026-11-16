@@ -7,7 +7,7 @@ import { requireRole, canWrite, esSuperadmin, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
   archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
-  type CrmRecord, type Filter, type RecordRow, type SearchParams, UNIDADES } from './records';
+  type CrmRecord, type Filter, type RecordRow, type SearchParams, UNIDADES, unidadesDeContactos } from './records';
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
@@ -184,7 +184,12 @@ api.get('/records/:type', async (c) => {
   const found = await searchRecords(c.env.DB, c.get('ctx'), type, parseSearch(c.req.query()));
   // Etiquetas de color de cada registro (si el objeto tiene).
   const tagMap = await tagsFor(c.env.DB, c.get('ctx'), type, found.results.map((r) => r.id));
-  const res = { ...found, results: found.results.map((r) => (tagMap.size ? { ...r, tags: tagMap.get(r.id) ?? [] } : r)) };
+  let res = { ...found, results: found.results.map((r) => (tagMap.size ? { ...r, tags: tagMap.get(r.id) ?? [] } : r)) };
+  // Unidad de negocio de los contactos: la de su empresa principal (la de las empresas se calcula con sus propios datos).
+  if (type === 'contact' && res.results.length) {
+    const unidades = await unidadesDeContactos(c.env.DB, res.results);
+    res = { ...res, results: res.results.map((r) => ({ ...r, unidad: unidades.get(r.id) })) };
+  }
   // Columna "Empresa asociada" de las listas: la principal de cada registro, en una sola consulta.
   if (c.req.query('with') === 'company' && res.results.length) {
     const { results } = await c.env.DB.prepare(

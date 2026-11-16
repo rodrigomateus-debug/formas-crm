@@ -183,6 +183,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['owner_id', 'Propietario', 'owner', 'Información de la empresa', [], { ...CORE, ...FORM }],
     ['lifecyclestage', 'Etapa del ciclo de vida', 'enum', 'Información de la empresa', LIFECYCLE, { ...CORE, ...FORM }],
     ['tipo_de_relacion', 'Tipo de relación', 'enum', 'Información de la empresa', RELACION, CORE],
+    ['unidades_de_negocio', 'Unidades de negocio', 'multienum', 'Información de la empresa', [['shop', 'Formas Shop'], ['corporate', 'Corporate'], ['noestres', 'NoEstres']], { ...CORE, description: 'A mano. Si queda vacío, se usa la unidad de sus compras en Finnegans y, si no compró, la del equipo del propietario. Sus contactos la heredan.' }],
     ['hs_lead_status', 'Estado del lead', 'enum', 'Información de la empresa', LEAD_STATUS.slice(0, 8), CORE],
     ['type', 'Tipo', 'enum', 'Información de la empresa', [['PROSPECT', 'Prospecto'], ['PARTNER', 'Socio'], ['RESELLER', 'Revendedor'], ['VENDOR', 'Proveedor'], ['OTHER', 'Otro']], CORE],
     ['industry', 'Industria', 'enum', 'Información de la empresa', INDUSTRIAS, { ...CORE, ...FORM }],
@@ -334,7 +335,7 @@ export const COMPUTED: Record<string, PropDef[]> = {
     ['saldo_pendiente', 'Saldo pendiente', 'currency', 'Compras', [], { ...RO, description: 'Lo que debe hoy en cuenta corriente, con IVA (Finnegans).' }],
     ['saldo_vencido', 'Saldo vencido', 'currency', 'Compras', [], { ...RO, description: 'La parte del saldo que ya venció, con IVA.' }],
     ['vendedora_finnegans', 'Vendedora en Finnegans', 'string', 'Compras', [], { ...RO, description: 'Quién le vendió más en los últimos 12 meses (o en su última compra).' }],
-    ['unidad_finnegans', 'Unidad de negocio', 'string', 'Compras', [], { ...RO, description: 'Corporate, Formas Shop o NoEstres, según sus pedidos.' }],
+    ['unidad_finnegans', 'Unidad de negocio de sus compras', 'string', 'Compras', [], { ...RO, description: 'Corporate, Formas Shop o NoEstres, según sus pedidos.' }],
     ['source', 'Origen del registro', 'string', 'Actividad', [], RO],
   ],
   deal: [

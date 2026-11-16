@@ -137,7 +137,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-ink); w
 .nav-link svg { width: 18px; height: 18px; flex: none; }
 .nav-link .count { margin-left: auto; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, .55); }
 .nav-link.active .count { color: #fff; }
-.nav-group { flex: none; padding: 14px 10px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255, 255, 255, .45); }
+.nav-group { flex: none; margin-top: 8px; border-top: 1px solid var(--ui-line-on-navy); padding: 14px 10px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255, 255, 255, .45); }
 [data-theme="contrast"] .nav-group, [data-theme="contrast"] .nav-link .count { color: #fff; }
 .sidebar .nav-bottom { margin-top: auto; padding: 12px 0 8px; display: flex; flex-direction: column; gap: 2px; flex: none; }
 .sidebar .me-wrap { margin: 0 -10px; padding: 10px; border-top: 1px solid var(--ui-line-on-navy); position: relative; flex: none; }

@@ -573,7 +573,8 @@ export async function tagsFor(db: D1Database, ctx: Ctx, type: ObjectType, ids: n
 }
 
 // Unidades de negocio (Formas Shop, Corporate, NoEstres): el negocio, por el equipo de su pipeline; el pedido, por la unidad
-// que trae ClickUp; contactos, empresas y tareas, por el equipo de su propietario (el principal o uno de los extra).
+// que trae ClickUp; la empresa, por la suya (unidadEmpresaSql); el contacto, por la de su empresa; las tareas, por el equipo
+// de su propietario (el principal o uno de los extra).
 export const UNIDADES: Record<string, { team: number; pedido: string[] }> = {
   shop: { team: 57132078, pedido: ['FORMAS SHOP'] },
   corporate: { team: 58079782, pedido: ['CORPORATE'] },
@@ -599,7 +600,85 @@ function unidadSql(type: ObjectType, keys: string[], binds: unknown[]) {
     binds.push(...vals);
     return `UPPER(COALESCE(json_extract(r.props, '$.unidad_de_negocio'), '')) IN (${vals.map(() => '?').join(', ')})`;
   }
+  if (type === 'company') return `COALESCE(${unidadEmpresaSql(keys, binds, 'r')}, 0)`;
+  if (type === 'contact') {
+    // La de su empresa principal; sin empresa (o si la empresa no tiene ni unidad ni propietario), la de su propietario.
+    const emp = unidadEmpresaSql(keys, binds, 'x');
+    const own = ownersOfUnitsSql(keys, binds);
+    return `COALESCE((SELECT ${emp} FROM records x WHERE x.id = ${EMPRESA_PRINCIPAL_SQL}), ${own}, 0)`;
+  }
   return ownersOfUnitsSql(keys, binds);
+}
+
+// Unidad de la empresa (pedido de Rodrigo del 16/11/2026), en este orden: la que se carga a mano («Unidades de negocio»,
+// unidades_de_negocio, varias separadas por «;»); si no tiene, la de sus compras en Finnegans (unidad_finnegans, la del
+// script de clientes); si tampoco, la del equipo de su propietario. Los contactos heredan la de su empresa principal.
+// La misma cuenta en SQL (filtro) y en JS (unidadDeEmpresa, para la columna de los contactos).
+export const UNIDAD_FINNEGANS: Record<string, string> = { 'formas shop': 'shop', corporate: 'corporate', noestres: 'noestres' };
+export const EMPRESA_PRINCIPAL_SQL = `(SELECT a.to_id FROM associations a JOIN records y ON y.id = a.to_id AND y.archived = 0
+  WHERE a.from_id = r.id AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at LIMIT 1)`;
+
+// 1 o 0 si la empresa (alias x) es de alguna de esas unidades; NULL si no tiene unidad a mano, ni compras, ni propietario.
+function unidadEmpresaSql(keys: string[], binds: unknown[], x: string) {
+  const manual = `COALESCE(json_extract(${x}.props, '$.unidades_de_negocio'), '')`;
+  const finn = `LOWER(COALESCE(json_extract(${x}.props, '$.unidad_finnegans'), ''))`;
+  const todas = Object.keys(UNIDAD_FINNEGANS);
+  const quiere = todas.filter((f) => keys.includes(UNIDAD_FINNEGANS[f]));
+  binds.push(...keys.map((k) => `%;${k};%`));
+  const aMano = keys.map(() => `(';' || ${manual} || ';') LIKE ?`).join(' OR ');
+  binds.push(...todas);
+  const porCompras = `${finn} IN (${todas.map(() => '?').join(', ')})`;
+  binds.push(...quiere);
+  const deCompras = quiere.length ? `${finn} IN (${quiere.map(() => '?').join(', ')})` : '0';
+  const porDueno = ownersOfUnitsSql(keys, binds, `${x}.owner_id`);
+  return `(CASE WHEN ${manual} != '' THEN (${aMano}) WHEN ${porCompras} THEN ${deCompras} ELSE ${porDueno} END)`;
+}
+
+export type UnidadOrigen = 'manual' | 'compras' | 'propietario';
+export interface UnidadCalculada { keys: string[]; origen: UnidadOrigen | null }
+export type EquiposDe = (owner: number | null | undefined) => number[];
+
+// La unidad de una empresa con sus datos; origen null si no tiene de dónde sacarla (sin unidad, compras ni propietario).
+export function unidadDeEmpresa(props: Record<string, unknown>, owner: number | null | undefined, equipos: EquiposDe): UnidadCalculada {
+  const manual = String(props.unidades_de_negocio ?? '').split(';').map((k) => k.trim()).filter((k) => UNIDADES[k]);
+  if (String(props.unidades_de_negocio ?? '').trim()) return { keys: manual, origen: 'manual' };
+  const finn = UNIDAD_FINNEGANS[String(props.unidad_finnegans ?? '').trim().toLowerCase()];
+  if (finn) return { keys: [finn], origen: 'compras' };
+  if (owner == null) return { keys: [], origen: null };
+  const teams = equipos(owner);
+  return { keys: Object.keys(UNIDADES).filter((k) => teams.includes(UNIDADES[k].team)), origen: 'propietario' };
+}
+
+// La columna «Unidad de negocio» de los contactos: la de su empresa principal (o la de su propietario si no tiene).
+export async function unidadesDeContactos(db: D1Database, rows: Array<{ id: number; props: Record<string, unknown> }>) {
+  const out = new Map<number, UnidadCalculada & { empresa: boolean }>();
+  if (!rows.length) return out;
+  const [emp, users] = await db.batch([
+    db.prepare(`SELECT r.id, x.props, x.owner_id FROM records r JOIN records x ON x.id = ${EMPRESA_PRINCIPAL_SQL}
+      WHERE r.id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(rows.map((r) => r.id))),
+    db.prepare('SELECT id, team_id, extra_teams FROM users'),
+  ]);
+  const teams = new Map<number, number[]>();
+  for (const u of users.results as Array<{ id: number; team_id: number | null; extra_teams: string | null }>) {
+    let extra: number[] = [];
+    try { extra = JSON.parse(u.extra_teams ?? '[]').map(Number); } catch { /* sin equipos extra */ }
+    teams.set(u.id, [u.team_id, ...extra].filter((t): t is number => t != null));
+  }
+  const equipos: EquiposDe = (o) => (o == null ? [] : teams.get(Number(o)) ?? []);
+  const deEmpresa = new Map<number, UnidadCalculada>();
+  for (const e of emp.results as Array<{ id: number; props: string; owner_id: number | null }>) {
+    let props: Record<string, unknown> = {};
+    try { props = JSON.parse(e.props ?? '{}'); } catch { /* sin datos */ }
+    deEmpresa.set(e.id, unidadDeEmpresa(props, e.owner_id, equipos));
+  }
+  for (const r of rows) {
+    const e = deEmpresa.get(r.id);
+    if (e?.origen) { out.set(r.id, { ...e, empresa: true }); continue; }
+    const owner = r.props.owner_id == null || r.props.owner_id === '' ? null : Number(r.props.owner_id);
+    const ks = Object.keys(UNIDADES).filter((k) => equipos(owner).includes(UNIDADES[k].team));
+    out.set(r.id, { keys: ks, origen: owner == null ? null : 'propietario', empresa: false });
+  }
+  return out;
 }
 
 async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, binds: unknown[]): Promise<string> {

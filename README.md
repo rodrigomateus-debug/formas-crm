@@ -15,6 +15,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Recorridos (reemplaza la planilla «Recorridos» de Logística: cualquiera le pide al recorrido de un día que lleve o retire algo, con una sola base de destinos, «ya van mañana a ese lugar» y el remito de traslado): [docs/RECORRIDOS.md](docs/RECORRIDOS.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
 - Perfiles y qué ve cada uno (el perfil Ventas ve lo suyo): [docs/PERFILES.md](docs/PERFILES.md).
+- Unidad de negocio de empresas (a mano, por sus compras o por el propietario) y contactos (la de su empresa): [docs/UNIDADES.md](docs/UNIDADES.md).
 
 ## Cómo está hecho
 

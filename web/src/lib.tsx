@@ -40,7 +40,8 @@ export interface Meta {
   superadmin?: boolean; real_user?: { id: number; name: string; email: string; photo_url: string | null };
   me: User & { deal_pipelines?: string[] }; properties: Property[]; pipelines: Pipeline[]; users: User[]; teams: Array<{ id: number; name: string }>; tags: Tag[]; key_props?: Partial<Record<ObjectType, string[]>>;
   orden_vistas?: Partial<Record<ObjectType, Array<number | string>>> }
-export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean; tags?: number[] }
+// unidad: la unidad de negocio de un contacto (la de su empresa), que manda el servidor en las listas.
+export interface CrmRecord { id: number; type: ObjectType; name: string; props: Record<string, any>; created_at: string; updated_at: string; archived: boolean; tags?: number[]; unidad?: UnidadCalculada }
 export interface Activity {
   id: number; type: 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp'; occurred_at: string; owner_id: number | null; subject: string; body: string;
   direction: string | null; status: string | null; outcome: string | null; due_at: string | null; completed_at: string | null; priority: string | null;
@@ -473,8 +474,10 @@ export function TagChips({ meta, ids, small }: { meta: Meta; ids?: number[]; sma
   );
 }
 
-// Unidades de negocio: el negocio, por el equipo de su pipeline; el pedido, por la unidad de ClickUp; contactos, empresas y
-// tareas, por el equipo de su propietario. Cada una con su ícono y su color (filtro rápido, columna y etiquetas).
+// Unidades de negocio: el negocio, por el equipo de su pipeline; el pedido, por la unidad de ClickUp; la empresa, la que se
+// le carga a mano, si no la de sus compras en Finnegans y si no la del equipo del propietario; el contacto, la de su empresa
+// (la calcula el servidor: CrmRecord.unidad); las tareas, por el equipo de su propietario. Cada una con su ícono y su color
+// (filtro rápido, columna y etiquetas). La misma cuenta que unidadEmpresaSql de src/worker/records.ts.
 export const UNIDADES = [
   // El color de cada una está en styles.css (.unidad.u-shop, .u-corporate, .u-noestres), con su versión oscura y de alto contraste.
   { key: 'shop', label: 'Formas Shop', team: 57132078, icon: 'bag' },
@@ -490,9 +493,30 @@ export function teamsOf(u: User | undefined): number[] {
   try { extra = JSON.parse(u.extra_teams ?? '[]').map(Number); } catch { /* sin equipos extra */ }
   return [u.team_id, ...extra].filter((t): t is number => t != null);
 }
+const FINNEGANS_UNIDAD: Record<string, UnidadKey> = { 'formas shop': 'shop', corporate: 'corporate', noestres: 'noestres' };
+const delPropietario = (meta: Meta, owner: unknown): UnidadKey[] => {
+  const u = owner == null || owner === '' ? undefined : meta.users.find((x) => x.id === Number(owner));
+  return [...new Set(teamsOf(u).map(unidadDeEquipo).filter((k): k is UnidadKey => !!k))];
+};
+export type UnidadOrigen = 'manual' | 'compras' | 'propietario';
+export interface UnidadCalculada { keys: UnidadKey[]; origen: UnidadOrigen | null; empresa?: boolean }
+export function unidadDeEmpresa(meta: Meta, props: Record<string, any>): UnidadCalculada {
+  const manual = String(props.unidades_de_negocio ?? '');
+  if (manual.trim()) return { keys: manual.split(';').map((k) => k.trim()).filter((k): k is UnidadKey => UNIDADES.some((u) => u.key === k)), origen: 'manual' };
+  const finn = FINNEGANS_UNIDAD[String(props.unidad_finnegans ?? '').trim().toLowerCase()];
+  if (finn) return { keys: [finn], origen: 'compras' };
+  if (props.owner_id == null || props.owner_id === '') return { keys: [], origen: null };
+  return { keys: delPropietario(meta, props.owner_id), origen: 'propietario' };
+}
+// De dónde sale, para el globito de la columna.
+export function origenUnidad(u: UnidadCalculada) {
+  const de = u.origen === 'manual' ? 'cargada a mano' : u.origen === 'compras' ? 'según sus compras en Finnegans' : u.origen === 'propietario' ? 'según el equipo del propietario' : '';
+  if (u.empresa) return de ? `De su empresa (${de})` : 'De su empresa';
+  return de ? `Unidad ${de}` : '';
+}
 export function unidadesDe(meta: Meta, type: ObjectType | 'task', props: Record<string, any>): UnidadKey[] {
   if (type === 'deal') { const k = unidadDeEquipo(meta.pipelines.find((p) => p.id === props.pipeline)?.team_id); return k ? [k] : []; }
   if (type === 'order') { const k = PEDIDO_UNIDAD[String(props.unidad_de_negocio ?? '').toUpperCase()]; return k ? [k] : []; }
-  const owner = meta.users.find((u) => u.id === Number(props.owner_id));
-  return [...new Set(teamsOf(owner).map(unidadDeEquipo).filter((k): k is UnidadKey => !!k))];
+  if (type === 'company') return unidadDeEmpresa(meta, props).keys;
+  return delPropietario(meta, props.owner_id);
 }

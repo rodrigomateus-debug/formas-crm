@@ -347,6 +347,9 @@ h2 { font-size: 15px; line-height: 1.3; font-weight: 600; color: var(--tinta-2);
 .ruta-quien strong { font-size: 16px; overflow-wrap: anywhere; }
 .ruta-quien span { font-size: 14px; color: var(--tinta-2); overflow-wrap: anywhere; }
 .ruta-hora { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* La hora fijada por Logística, abajo de la llegada. */
+.ruta-hora { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
+.ruta-hora small { font-size: 11px; font-weight: 700; color: var(--tinta-acento); white-space: nowrap; margin-top: 2px; }
 .ruta-detalle { padding: 0 16px 16px 64px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; font-size: 15px; }
 .ruta-detalle ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ruta-detalle li.hecho { text-decoration: line-through; opacity: .7; }

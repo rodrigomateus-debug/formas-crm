@@ -147,7 +147,7 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
                         <span className="ruta-quien"><strong>{p.nombre}</strong>{p.expreso && <span>Expreso: dejar para {p.expreso.cliente}{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</span>}<span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span>
                           {estado === 'fallo' && <em>{MOTIVOS.find((m) => m[0] === p.visita!.motivo)?.[1] ?? 'No se pudo'}{p.visita!.nota ? `: ${p.visita!.nota}` : ''}</em>}
                           {estado === 'salteada' && <em>La dejaste para después</em>}</span>
-                        <span className="ruta-hora">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</span>
+                        <span className="ruta-hora">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}{p.pactada && <small>{p.pactada}</small>}</span>
                       </button>
                       {/* Cómo llegar, sin abrir la parada: con la app que eligió; la primera vez, pregunta cuál. */}
                       {destinoDe(p) && (ir
@@ -233,7 +233,8 @@ function Detalle({ p, tarde, hecha, enLinea, app, alElegirApp, alMarcar, alEntre
         <p key={`x${e.id}`} className={e.urgente ? 'ruta-tarde' : ''}>{[e.urgente ? 'Urgente: tiene que ser hoy' : '', e.contacto ? `Preguntá por ${e.contacto}` : '', e.horario ? `Horario: ${e.horario}` : '',
           e.llevar.length || e.retirar.length ? e.notas ?? '' : '', e.quien ? `(lo pidió ${e.quien.split(' ')[0]})` : ''].filter(Boolean).join(' · ')}</p>
       ))}
-      {p.horario ? <p className={tarde ? 'ruta-tarde' : ''}>Reciben de {hhmm(p.horario[0])} a {hhmm(p.horario[1])}{tarde ? ': vas justo' : ''}</p> : p.lugar?.horario ? <p>Horario: {p.lugar.horario}</p> : null}
+      {p.pactada ? <p className="ruta-tarde">Hora fijada: {p.pactada.charAt(0).toLowerCase() + p.pactada.slice(1)}{tarde ? '. Vas justo' : ''}</p>
+        : p.horario ? <p className={tarde ? 'ruta-tarde' : ''}>Reciben de {hhmm(p.horario[0])} a {hhmm(p.horario[1])}{tarde ? ': vas justo' : ''}</p> : p.lugar?.horario ? <p>Horario: {p.lugar.horario}</p> : null}
       {(p.lugar?.contacto || p.lugar?.telefono) && <p>Preguntá por {[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</p>}
       {p.lugar?.observaciones && <p>{p.lugar.observaciones}</p>}
       {destinoDe(p) && (

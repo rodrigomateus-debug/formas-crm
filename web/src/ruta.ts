@@ -4,7 +4,9 @@
 // no, la distancia en línea recta por 1,35 a 38 km/h.
 
 export interface Punto { lat: number; lng: number }
-export interface ParadaRuta { clave: string; lat: number | null; lng: number | null; horario: [number, number] | null; movimientos: unknown[] }
+// `estricto`: el horario es una hora fijada a mano en la ruta del día («a las 12:00»): llegar tarde ahí pesa mucho más
+// que a un horario de recepción, así el orden más corto la cumple.
+export interface ParadaRuta { clave: string; lat: number | null; lng: number | null; horario: [number, number] | null; movimientos: unknown[]; encargos?: unknown[]; estricto?: boolean }
 export interface Tramo { km: number; min: number; nivel: 'fluido' | 'moderado' | 'pesado'; estimado: boolean; sinUbicar: boolean }
 export interface Llegada { clave: string; llega: number; espera: number; tarde: number; servicio: number; tramo: Tramo }
 export interface Simulacion { paradas: Llegada[]; vuelta: Tramo; fin: number; km: number; tarde: number; sinUbicar: number; costo: number }
@@ -33,7 +35,7 @@ export const claveOrden = (base: Punto | null, orden: ParadaRuta[], destino: Des
 // Sin `destino`, vuelve a donde salió.
 export function simular(base: Punto | null, orden: ParadaRuta[], salida: number, reales?: TramosReales | null, destino: Destino = base): Simulacion {
   const usar = reales && reales.clave === claveOrden(base, orden, destino) ? reales.tramos : null;
-  let t = salida, prev: Punto | null = base, km = 0, tarde = 0, sinUbicar = 0;
+  let t = salida, prev: Punto | null = base, km = 0, tarde = 0, sinUbicar = 0, tardeFija = 0;
   const tramo = (a: Punto | null, b: Punto | null, i: number): Tramo => {
     const f = factorTransito(t);
     if (!a || !b) return { km: 0, min: 0, nivel: nivelDe(f), estimado: true, sinUbicar: true };
@@ -53,7 +55,8 @@ export function simular(base: Punto | null, orden: ParadaRuta[], salida: number,
     if (p.horario && t < p.horario[0]) { espera = p.horario[0] - t; t = p.horario[0]; }
     const late = p.horario && llega > p.horario[1] ? llega - p.horario[1] : 0;
     tarde += late;
-    const servicio = servicioDe(p.movimientos.length);
+    if (p.estricto) tardeFija += late;
+    const servicio = servicioDe(p.movimientos.length + (p.encargos?.length ?? 0));
     paradas.push({ clave: p.clave, llega, espera, tarde: late, servicio, tramo: tr });
     t += servicio;
     if (aca) prev = aca;
@@ -62,11 +65,13 @@ export function simular(base: Punto | null, orden: ParadaRuta[], salida: number,
   const vuelta = destino === 'ultima' ? { km: 0, min: 0, nivel: nivelDe(factorTransito(t)), estimado: false, sinUbicar: false } : tramo(prev, destino, orden.length);
   km += vuelta.km;
   const fin = t + vuelta.min;
-  return { paradas, vuelta, fin, km, tarde, sinUbicar, costo: fin - salida + tarde * 6 };
+  // Lo que cuesta cada orden: el tiempo en la calle, más llegar tarde (a una hora fijada, mucho más).
+  return { paradas, vuelta, fin, km, tarde, sinUbicar, costo: fin - salida + tarde * 6 + tardeFija * 40 };
 }
 
 // El orden más corto: primero el vecino más cercano y después se prueba mover y dar vuelta tramos mientras mejore. Tiene
-// en cuenta el horario de cada lugar (llegar tarde cuesta). Las paradas sin ubicar quedan al final, como estaban.
+// en cuenta el horario de cada lugar (llegar tarde cuesta) y las horas fijadas a mano (cuesta mucho más). Las paradas sin
+// ubicar quedan al final, como estaban.
 export function optimizar(base: Punto | null, paradas: ParadaRuta[], salida: number, destino: Destino = base): ParadaRuta[] {
   const con = paradas.filter((p) => p.lat != null && p.lng != null), sin = paradas.filter((p) => p.lat == null || p.lng == null);
   if (con.length < 2) return [...con, ...sin];
@@ -96,6 +101,14 @@ export function optimizar(base: Punto | null, paradas: ParadaRuta[], salida: num
   }
   return [...o, ...sin];
 }
+
+// Una hora fijada a mano: el horario en el que hay que llegar. «A las 12:00» es de 11:45 a 12:15.
+export type ModoHora = 'a_las' | 'antes' | 'desde';
+export interface Pactada { modo: ModoHora; min: number }
+export const TOLERANCIA = 15;
+export const ventanaPactada = (p: Pactada): [number, number] =>
+  p.modo === 'antes' ? [0, p.min] : p.modo === 'desde' ? [p.min, 24 * 60 - 1] : [Math.max(0, p.min - TOLERANCIA), Math.min(24 * 60 - 1, p.min + TOLERANCIA)];
+export const textoPactada = (p: Pactada) => `${p.modo === 'antes' ? 'Antes de las' : p.modo === 'desde' ? 'Desde las' : 'A las'} ${hhmm(p.min)}`;
 
 export const hhmm = (m: number) => { const x = Math.round(m); return `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
 export const duracion = (m: number) => { const x = Math.round(m); return x < 60 ? `${x} min` : `${Math.floor(x / 60)} h ${String(x % 60).padStart(2, '0')}`; };

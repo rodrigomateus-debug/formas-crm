@@ -25,6 +25,7 @@ export interface Mov {
   expreso?: { nombre: string; guia: string | null } | null;
   chofer?: string | null;     // quién hace la parada ese día (el chofer o el expreso de su recorrido); no viene en los ingresos
   retira_en?: string | null;  // lo retira el cliente en Formas: no es parada de nadie
+  hora?: string | null;       // la hora fijada a mano en su parada, en la ruta del día («A las 12:00»)
 }
 interface Nota { id: number; fecha: string; texto: string; hecho: number }
 interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -426,6 +427,7 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
             : <span className="cr-tag exp" title="No va directo al cliente: se lleva al expreso">{texto}</span>;
         })()}
         {t.retira_en && <span className="cr-tag" title="Lo retira el cliente: no es parada de ningún recorrido">Retira en {t.retira_en}</span>}
+        {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
       {prods.length > 0 && (
@@ -479,8 +481,9 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, onAbrir, onChofer, 
         </div>
       )}
       {!lineas.length && e.notas && <div className="cr-t-item">{e.notas}</div>}
-      {(e.urgente || e.estado === 'no_se_pudo' || e.horario) && (
+      {(e.urgente || e.estado === 'no_se_pudo' || e.horario || e.hora) && (
         <div className="cr-t-tags">
+          {e.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{e.hora}</span>}
           {e.urgente && <span className="cr-tag late">Urgente</span>}
           {e.estado === 'no_se_pudo' && <span className="cr-tag riesgo"><Icon name="alert" size={11} />{ESTADO_ENC.no_se_pudo.nombre}{e.motivo ? `: ${e.motivo}` : ''}</span>}
           {e.horario && <span className="cr-tag">{e.horario}</span>}

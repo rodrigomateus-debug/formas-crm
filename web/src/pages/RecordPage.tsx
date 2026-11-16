@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
@@ -7,7 +7,7 @@ import { Avatar, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, Es
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
-import { Select } from '../Select';
+import { Select, useFloating } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
@@ -195,7 +195,6 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
       onChange();
     } catch (e) { toast((e as Error).message, true); throw e; }
   };
-  const quick = (t: Activity['type']) => window.dispatchEvent(new CustomEvent('crm:compose', { detail: t }));
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record.props.pipeline)?.config.key_props : undefined;
   // El «Link a Darwin» no se repite como texto: está el botón «Chat en Darwin» (sigue en la lista completa, por si hay que corregirlo).
   const keyProps = ((pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
@@ -217,12 +216,22 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
                 {produccion && <QuienProduce {...produccion} />}
               </div>
             )}
-            <TagChips meta={meta} ids={record.tags} /></div></div>
-        <div className="rec-actions">
-          {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
-            <button key={t} className="act-btn" onClick={() => quick(t)}><span className="ic"><Icon name={t} /></span>{ACTIVITY_LABEL[t]}</button>
-          ))}
-        </div>
+            <TagChips meta={meta} ids={record.tags} /></div>
+          <RecordMenu items={[
+            { label: 'Combinar con otro…', icon: 'merge', onClick: () => setMerge(true) },
+            ...(type === 'deal' && meta.me.role !== 'viewer' ? [{
+              label: 'Clonar', icon: 'plus', title: 'Crea una copia con los mismos datos y asociaciones, en la primera etapa', onClick: async () => {
+                try { const r = await http<CrmRecord>('POST', `/records/deal/${record.id}/clone`); toast('Negocio clonado'); navigate(recordUrl('deal', r.id)); }
+                catch (e) { toast((e as Error).message, true); }
+              },
+            }] : []),
+            ...(['admin', 'manager'].includes(meta.me.role) && !record.archived ? [{
+              label: 'Borrar', icon: 'trash', danger: true, onClick: async () => {
+                if (!confirm(`¿Borrar «${record.name}»? Se puede restaurar.`)) return;
+                await http('DELETE', `/records/${type}/${record.id}`); toast('Borrado'); navigate(`/${OBJECTS[type].path}`);
+              },
+            }] : []),
+          ]} /></div>
         <div className="row wrap">
           {type === 'contact' && whatsappUrl(record.props.mobilephone || record.props.phone) && <a className="btn sm wa-link" href={whatsappUrl(record.props.mobilephone || record.props.phone)} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
@@ -232,19 +241,6 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
             <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas Hub para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
               href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} de Formas Hub). Usá la herramienta preparar_reunion del conector Formas Hub y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
               target="_blank" rel="noreferrer">Preparar reunión con Claude</a>
-          )}
-          <button className="btn sm ghost" onClick={() => setMerge(true)}><Icon name="merge" size={14} />Combinar</button>
-          {type === 'deal' && meta.me.role !== 'viewer' && (
-            <button className="btn sm ghost" title="Crea una copia con los mismos datos y asociaciones, en la primera etapa" onClick={async () => {
-              try { const r = await http<CrmRecord>('POST', `/records/deal/${record.id}/clone`); toast('Negocio clonado'); navigate(recordUrl('deal', r.id)); }
-              catch (e) { toast((e as Error).message, true); }
-            }}>Clonar</button>
-          )}
-          {['admin', 'manager'].includes(meta.me.role) && !record.archived && (
-            <button className="btn sm ghost danger" onClick={async () => {
-              if (!confirm(`¿Borrar «${record.name}»? Se puede restaurar.`)) return;
-              await http('DELETE', `/records/${type}/${record.id}`); toast('Borrado'); navigate(`/${OBJECTS[type].path}`);
-            }}><Icon name="trash" size={14} />Borrar</button>
           )}
         </div>
       </div>
@@ -317,6 +313,40 @@ function HistoryModal({ type, id, prop, onClose }: { type: ObjectType; id: numbe
   );
 }
 
+// Acciones poco frecuentes de la ficha (combinar, clonar, borrar) en un menú de tres puntitos al lado del nombre, para no
+// tocarlas sin querer.
+type MenuItem = { label: string; icon: string; title?: string; danger?: boolean; onClick: () => void };
+function RecordMenu({ items }: { items: MenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const { style } = useFloating(btn, pop, open, () => setOpen(false), 300);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', h);
+    document.addEventListener('keydown', k);
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
+  }, [open]);
+  if (!items.length) return null;
+  return (
+    <div className="rec-menu" ref={ref}>
+      <button ref={btn} className={`rec-menu-btn${open ? ' on' : ''}`} aria-label="Más acciones" aria-haspopup="menu" aria-expanded={open}
+        title="Más acciones" onClick={() => setOpen(!open)}><Icon name="dots" size={18} /></button>
+      {open && (
+        <div ref={pop} className="popover" role="menu" style={{ ...style, minWidth: 190 }}>
+          {items.map((it) => (
+            <div key={it.label} role="menuitem" className={`opt${it.danger ? ' danger-text' : ''}`} title={it.title}
+              onClick={() => { setOpen(false); it.onClick(); }}><Icon name={it.icon} size={15} />{it.label}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MergeModal({ type, record, onClose, onDone }: { type: ObjectType; record: CrmRecord; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [other, setOther] = useState<CrmRecord | null>(null);
@@ -356,19 +386,25 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
   };
   return (
     <>
-      <div className="row" style={{ marginBottom: 6 }}>
-        <span className="small muted">Pipeline</span>
-        <Select className="input sm" style={{ width: 240 }} value={pipe.id} onChange={async (e) => {
-          try { await http('PATCH', `/records/deal/${record.id}`, { props: { pipeline: e.target.value } }); onChange(); } catch (er) { toast((er as Error).message, true); }
-        }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</Select>
-        <span className="grow" />
-        {record.props.hs_v2_date_entered_current_stage && <span className="small muted">En esta etapa desde {fmtDate(record.props.hs_v2_date_entered_current_stage)}</span>}
+      {/* Con 10 o más etapas en la columna del medio los nombres no entraban (quedaban «Le», «Nu», «En»…): la etapa se
+          elige de una lista con el nombre completo y abajo queda una barra fina de avance (cada tramo, con su nombre al pasar). */}
+      <div className="stage-head">
+        <label className="stage-field"><span className="small muted">Pipeline</span>
+          <Select className="input sm" value={pipe.id} aria-label="Pipeline" onChange={async (e) => {
+            try { await http('PATCH', `/records/deal/${record.id}`, { props: { pipeline: e.target.value } }); onChange(); } catch (er) { toast((er as Error).message, true); }
+          }}>{meta.pipelines.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</Select></label>
+        <label className="stage-field"><span className="small muted">Etapa</span>
+          <Select className="input sm" value={cur?.id ?? ''} placeholder="Elegir etapa" aria-label="Etapa" onChange={(e) => {
+            const s = pipe.stages.find((x) => x.id === e.target.value);
+            if (s && s.id !== cur?.id) go(s);
+          }}>{pipe.stages.map((s, i) => <option key={s.id} value={s.id}>{`${i + 1}. ${s.label}`}</option>)}</Select></label>
+        {record.props.hs_v2_date_entered_current_stage && <span className="small muted stage-since">Desde {fmtDate(record.props.hs_v2_date_entered_current_stage)}</span>}
       </div>
-      <div className="stagebar">
+      <div className="stagebar" role="group" aria-label="Avance por etapas">
         {pipe.stages.map((s, i) => {
           const cls = s.id === cur?.id ? (s.is_closed ? (s.is_won ? 'won' : 'lost') : 'cur') : !s.is_closed && i < curIdx && !cur?.is_closed ? 'done' : '';
-          return <button key={s.id} className={cls} title={`${s.label} · ${Math.round(s.probability * 100)}%`}
-            onClick={() => s.id !== cur?.id && go(s)}>{s.label}</button>;
+          return <button key={s.id} className={cls} title={`${s.label} · ${Math.round(s.probability * 100)}%`} aria-label={s.label}
+            aria-current={s.id === cur?.id ? 'step' : undefined} onClick={() => s.id !== cur?.id && go(s)} />;
         })}
       </div>
       {ask && <StageProps deal={record} stage={ask.stage} missing={ask.missing} onClose={() => setAsk(null)} onSave={(extra) => { const a = ask; setAsk(null); go(a.stage, extra); }} />}

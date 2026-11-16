@@ -414,6 +414,7 @@ const paths: Record<string, string> = {
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
   upload: 'M12 21V9M7 14l5-5 5 5M4 3h16',
   menu: 'M4 6h16M4 12h16M4 18h16',
+  dots: 'M5 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2ZM12 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2ZM19 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z',
   history: 'M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2',
   merge: 'M6 3v6a6 6 0 0 0 6 6h6M18 15l-3-3M18 15l-3 3M6 21v-4',
   trash: 'M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3',

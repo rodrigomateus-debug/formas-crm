@@ -351,6 +351,10 @@ test('pedidos: cada producto con su estado simplificado, quién lo tiene en Prod
   const pel = p.articulos.find((a) => a.asignados.some((x) => x.id === SOLE.id));
   assert.ok(pel, 'cada producto con quien lo tiene');
   assert.equal(pel.etapa, '1237498996', '«listo para entergar» es Listo para entregar');
+  // La columna «Cobro y papeles»: factura, remito y bocetos de cada pedido, solo si se piden.
+  assert.deepEqual(r.data.adjuntos, {}, 'sin pedirlos, no van');
+  const conAdj = (await api('GET', `/pedidos/articulos?ids=${pdv.record_id}&adjuntos=1`)).data.adjuntos[pdv.record_id];
+  assert.ok(conAdj && typeof conAdj.facturas === 'number' && typeof conAdj.remitos === 'number', 'factura y remito del pedido');
 
   // La vendedora: de sus pedidos sí (no va por /produccion), de los demás nada; y en la ficha, quién lo tiene.
   const vera = (await api('POST', '/users', { email: `vera.prod.${RUN}@formas.ar`, name: `Vera Prod ${RUN}`, profile: 'comercial', role: 'member' })).data;

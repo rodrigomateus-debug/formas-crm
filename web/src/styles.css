@@ -1964,3 +1964,10 @@ table.grid tr.ped-art.entregado .ped-art-n { color: var(--ui-ink-2); }
 .card-prod .ped-prod-in { flex-wrap: wrap; row-gap: 4px; }
 .ped-hijos .prod-hijo-pie { flex-wrap: wrap; row-gap: 4px; }
 .ped-hijos .prod-hijo-pie .etapa { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* Lo entregado de cada producto según los remitos, en los pedidos con entregas a medias. */
+.ped-entregado { flex: none; font-size: 11.5px; font-weight: 600; padding: 0 7px; line-height: 20px; border-radius: var(--r-pill); white-space: nowrap;
+  background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.ped-entregado.ok { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+/* La columna «Cobro y papeles» de la lista: el saldo y los iconitos de factura, remito y bocetos de la tarjeta. */
+.ped-cobro { display: inline-flex; align-items: center; gap: 4px; }
+.ped-cobro .card-adj { margin-left: 2px; }

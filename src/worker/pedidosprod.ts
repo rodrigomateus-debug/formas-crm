@@ -2,6 +2,8 @@ import { generalStage, STAGE } from './clickup';
 import { CERRADOS, lista } from './produccion';
 import { fotosDeArticulos, fotosDeRenglones, fotosSql, type StpItem } from './productos';
 import { TIPO_SQL, tareasServicio } from './servicios';
+import { calcularEntrega } from './remitos';
+import { adjuntosSql, armarAdjuntos, type Adjuntos } from './productos';
 
 // Producción en la lista de Pedidos (pedido de Rodrigo del 17/11/2026): lo que ven las vendedoras, como la pantalla
 // Producción pero simplificado. Cada pedido con sus productos abajo (se abren y se cierran), cada uno con su foto, su
@@ -17,6 +19,8 @@ export interface ArticuloPedido {
   etapa: string | null;        // la etapa del pedido que le corresponde a ese producto solo (generalStage); null = sin arrancar
   produccion: boolean;         // si viene de Producción (ClickUp) o es un renglón del pedido sin PDV
   asignados: PersonaPedido[]; entrega_real: string | null;
+  // Lo entregado según los remitos (remitos.ts), solo en los pedidos con entregas parciales: cuánto de lo vendido.
+  entregado?: number; vendido?: number | null;
 }
 export interface ProduccionPedido {
   asignados: PersonaPedido[]; listos: number; total: number; entrega_real: string | null; articulos: ArticuloPedido[];
@@ -95,7 +99,44 @@ export async function produccionDePedidos(db: D1Database, ids: number[]): Promis
       if (articulos.length) out[rid] = { asignados: [], listos: 0, total: 0, entrega_real: null, articulos };
     }
   }
+  await entregasParciales(db, ids, out);
   return out;
+}
+
+// Lo entregado de cada producto según los remitos («80 de 150 entregadas»), para que la vendedora sepa qué falta llevar.
+// Solo en los pedidos con entregas a medias (Entregado parcial, o los remitos dicen que falta algo o hay diferencias):
+// en los demás, el estado del producto ya lo dice. Es la misma cuenta de la tarjeta «Entrega» del pedido
+// (calcularEntrega), que va por los renglones del pedido; cada artículo se cruza con su renglón por la tarea de ClickUp.
+const ENTREGA_A_MEDIAS = ['parcial', 'diferencias', 'cerrada_con_faltante'];
+async function entregasParciales(db: D1Database, ids: number[], out: Record<number, ProduccionPedido>) {
+  const { results } = await db.prepare(`SELECT id FROM records WHERE id IN (SELECT value FROM json_each(?1)) AND object_type = 'order'
+      AND (json_extract(props, '$.hs_pipeline_stage') = ?2 OR json_extract(props, '$.estado_entrega') IN (SELECT value FROM json_each(?3)))`)
+    .bind(JSON.stringify(ids.filter((id) => out[id])), STAGE.parcial, JSON.stringify(ENTREGA_A_MEDIAS)).all<{ id: number }>();
+  if (!results.length) return;
+  const renglones = (await db.prepare(`SELECT record_id, position, clickup_task FROM line_items WHERE record_id IN (SELECT value FROM json_each(?)) ORDER BY record_id, position`)
+    .bind(JSON.stringify(results.map((r) => r.id))).all<{ record_id: number; position: number; clickup_task: string | null }>()).results;
+  for (const { id } of results.slice(0, 40)) {
+    const e = await calcularEntrega(db, id).catch(() => null);
+    if (!e?.remitos_ok) continue;
+    const suyos = renglones.filter((r) => r.record_id === id);
+    // `lineas` va en el orden de los renglones del pedido: el i-ésimo es el renglón i.
+    const porArticulo = new Map<string, { entregado: number; vendido: number | null }>();
+    e.lineas.forEach((l, i) => {
+      const r = suyos[i];
+      if (!r) return;
+      const x = { entregado: l.entregado, vendido: l.vendido };
+      if (r.clickup_task) porArticulo.set(r.clickup_task, x);
+      porArticulo.set(`li-${r.position}`, x);
+    });
+    for (const a of out[id].articulos) { const x = porArticulo.get(a.id); if (x) Object.assign(a, x); }
+  }
+}
+
+// Factura, remito, bocetos y conversación de cada pedido: los mismos iconitos de la tarjeta del tablero (adjuntosSql).
+export async function adjuntosDePedidos(db: D1Database, ids: number[]): Promise<Record<number, Adjuntos>> {
+  if (!ids.length) return {};
+  const { results } = await adjuntosSql(db, 'SELECT value FROM json_each(?)', [JSON.stringify(ids)]).all();
+  return Object.fromEntries(armarAdjuntos(results));
 }
 
 // El nombre con que se vendió cada artículo (el del renglón del pedido atado a él: el que la vendedora cotizó), en lugar

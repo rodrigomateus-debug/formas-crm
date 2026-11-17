@@ -13,15 +13,30 @@ import { dia, Flecha, FotoProducto, hoyIso } from './Produccion';
 export interface ArticuloPedido {
   id: string; nombre: string; cantidad: number | null; foto: string | null; etapa: string | null; produccion: boolean;
   asignados: PersonaProduccion[]; entrega_real: string | null;
+  entregado?: number; vendido?: number | null;   // según los remitos, en los pedidos con entregas a medias
 }
 export interface ProduccionPedido { asignados: PersonaProduccion[]; listos: number; total: number; entrega_real: string | null; articulos: ArticuloPedido[] }
 
-const VACIO = { pedidos: {} as Record<number, ProduccionPedido> };
-// Los productos de los pedidos de la página o del tablero (una consulta). `version`: cambia cuando se recarga.
-export function useProduccionPedidos(ids: number[], activo: boolean, version: unknown) {
+// Factura, remito, bocetos y conversación de cada pedido (los iconitos de la tarjeta del tablero, PropBoard.tsx).
+export interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; mensajes?: number }
+const VACIO = { pedidos: {} as Record<number, ProduccionPedido>, adjuntos: {} as Record<number, AdjuntosPedido> };
+// Los productos de los pedidos de la página o del tablero (una consulta) y, en la lista, sus adjuntos. `version`: cambia
+// cuando se recarga.
+export function useProduccionPedidos(ids: number[], activo: boolean, version: unknown, adjuntos = false) {
   const key = ids.join(',');
-  const r = useAsync(() => (activo && ids.length ? http<typeof VACIO>('GET', `/pedidos/articulos?ids=${key}`) : Promise.resolve(VACIO)), [key, activo, version]);
-  return r.data?.pedidos ?? VACIO.pedidos;
+  const r = useAsync(() => (activo && ids.length ? http<typeof VACIO>('GET', `/pedidos/articulos?ids=${key}${adjuntos ? '&adjuntos=1' : ''}`) : Promise.resolve(VACIO)),
+    [key, activo, version, adjuntos]);
+  return r.data ?? VACIO;
+}
+
+// Lo entregado de un producto según los remitos, en los pedidos con entregas a medias: «80 de 150 entregadas» (qué falta
+// llevar) o, si ya se entregó todo, el tilde.
+function Entregado({ a }: { a: ArticuloPedido }) {
+  if (a.entregado == null || !a.vendido) return null;
+  if (a.entregado >= a.vendido) return <span className="ped-entregado ok" title="Según los remitos, se entregó todo">Entregadas ✓</span>;
+  const n = (x: number) => x.toLocaleString('es-AR');
+  return <span className="ped-entregado" title={`Según los remitos: se entregaron ${n(a.entregado)} de ${n(a.vendido)}; faltan ${n(a.vendido - a.entregado)}`}>
+    {a.entregado ? `${n(a.entregado)} de ${n(a.vendido)} entregadas` : 'Sin entregar'}</span>;
 }
 
 // Abiertos o cerrados: todos (queda en este navegador; por defecto, abiertos) y cada pedido aparte mientras se está en la
@@ -123,13 +138,14 @@ export function Pendiente({ r }: { r: CrmRecord }) {
 
 // Quién lo tiene en Producción (foto y nombre) y cuántos productos están listos. Sin asignar no se dice: la vendedora no
 // puede hacer nada con eso.
-function Quien({ asignados, listos, total }: { asignados: PersonaProduccion[]; listos?: number; total?: number }) {
+// `soloFotos`: en el renglón del pedido, las fotos (los nombres al pasar el mouse), para que entren la entrega y el cobro.
+function Quien({ asignados, listos, total, soloFotos }: { asignados: PersonaProduccion[]; listos?: number; total?: number; soloFotos?: boolean }) {
   if (!asignados.length && !total) return null;
   const nombres = asignados.map((p) => p.nombre).join(', ');
   return (
     <span className="prod-quien" title={[nombres && `Lo tiene en Producción: ${nombres}`, total && `${listos ?? 0} de ${total} productos listos`].filter(Boolean).join('. ')}>
       {asignados.length > 0 && <span className="avatar-stack">{asignados.slice(0, 3).map((p) => <PersonaProd key={p.id} p={p} size="xs" />)}</span>}
-      {asignados.length > 0 && <span className="ellipsis">{asignados.map((p) => p.nombre.split(' ')[0]).join(', ')}</span>}
+      {asignados.length > 0 && (!soloFotos || asignados.length === 1) && <span className="ellipsis">{asignados.map((p) => p.nombre.split(' ')[0]).join(', ')}</span>}
       {!!total && <span className={`prod-avance${(listos ?? 0) >= total ? ' ok' : ''}`}>{listos ?? 0}/{total} listos</span>}
     </span>
   );
@@ -150,7 +166,7 @@ export function ResumenProduccion({ p, r, tarjeta }: { p?: ProduccionPedido; r: 
   return (
     <span className="ped-prod-in">
       <Pendiente r={r} />
-      {p && !cerrado && <Quien asignados={p.asignados} listos={p.listos} total={p.total} />}
+      {p && !cerrado && <Quien asignados={p.asignados} listos={p.listos} total={p.total} soloFotos />}
       <Entrega r={r} p={p} soloSiCambia={tarjeta} />
     </span>
   );
@@ -193,12 +209,13 @@ export function FilasProductos({ p, r, columns, sel, onAbrir }: { p: ProduccionP
               <span className="ped-art-n ellipsis" title={a.nombre}>{a.nombre}</span>
               {a.cantidad != null && <span className="muted small num ped-cant">{a.cantidad.toLocaleString('es-AR')} u.</span>}
               {!conEtapa && <EstadoArticulo a={a} />}
+              {!conEtapa && <Entregado a={a} />}
               {!conProd && <QuienArticulo a={a} p={p} r={r} />}
             </span>
           </td>
           {columns.map((col) => (
             <td key={col} className={col === '__produccion' ? 'ped-prod' : undefined}>
-              {col === 'hs_pipeline_stage' ? <EstadoArticulo a={a} /> : col === '__produccion' ? <QuienArticulo a={a} p={p} r={r} /> : null}
+              {col === 'hs_pipeline_stage' ? <span className="ped-prod-in"><EstadoArticulo a={a} /><Entregado a={a} /></span> : col === '__produccion' ? <QuienArticulo a={a} p={p} r={r} /> : null}
             </td>
           ))}
         </tr>
@@ -235,6 +252,7 @@ export function ProductosTarjeta({ p, r, abierto, onToggle }: { p?: ProduccionPe
                   <div className="prod-hijo-t" title={a.nombre}>{a.nombre}</div>
                   <div className="small muted ped-hijo-sub">
                     {a.cantidad != null && <span className="num">{a.cantidad.toLocaleString('es-AR')} u.</span>}
+                    <Entregado a={a} />
                     <EntregaArticulo a={a} p={p} r={r} />
                   </div>
                 </div>

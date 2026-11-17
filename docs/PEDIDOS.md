@@ -169,6 +169,16 @@ cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro
   productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. La lista y el tablero
   lo recuerdan cada uno en el navegador; por defecto, abiertos, salvo los entregados y anulados. Un clic en un producto
   abre la vista previa del pedido.
+- **Lo entregado de cada producto** según los remitos, en los pedidos con entregas a medias (Entregado parcial, o los
+  remitos dicen que falta algo o hay diferencias): «60 de 150 entregadas», «Sin entregar» o «Entregadas ✓», al lado del
+  estado. Es la misma cuenta de la tarjeta «Entrega» del pedido (`calcularEntrega` en `remitos.ts`), por el renglón del
+  pedido atado a cada artículo; se calcula para hasta 40 pedidos por consulta.
+- **Columna «Cobro y papeles»** en la lista: el saldo («Pagado», «Debe $ 1,5 M · parcial»; de Finnegans, sin IVA) y los
+  iconitos de factura, remito, bocetos y conversación de la tarjeta del tablero (`adjuntosSql`, con `&adjuntos=1`).
+- **Columnas por defecto del perfil Ventas**: Etapa del pedido, Producción, Cobro y papeles, Total y Fecha de creación
+  (sin «PDV Finnegans», que ya está en el nombre, ni «Unidad de negocio» ni «Propietario»). Las vendedoras que ya tenían
+  sus columnas pasan una sola vez a estas en «Todos» y «Míos» (sin las dos que sobran y con «Cobro y papeles»); lo que
+  cambien después queda. Los demás perfiles siguen con las de siempre y suman las nuevas desde «Columnas».
 - Un pedido sin PDV en ClickUp muestra sus productos (los renglones del pedido, sin servicios) sin estado.
 - Sale de la tabla `produccion` (la sincronización de ClickUp de cada 10 minutos), en una sola consulta para la página o
   el tablero: `GET /api/pedidos/articulos?ids=…` (hasta 500; `src/worker/pedidosprod.ts`, pantalla en

@@ -52,7 +52,8 @@ function OrderLine({ r }: { r: CrmRecord }) {
 // en rojo «· total» si no pagó nada; en ámbar «· parcial» si ya pagó algo (el anticipo), con cuánto al pasar el mouse
 // (aviso de Rodrigo del 13/11/2026); en verde, con un tilde, si está todo pago. Sin dato de Finnegans (o anulado), no se
 // muestra: no saber no es lo mismo que estar pago.
-function Saldo({ r }: { r: CrmRecord }) {
+// `corto`: en la lista de pedidos, «Debe $ 1,5 M» en lugar de «Saldo pendiente $ 1,5 M».
+export function Saldo({ r, corto }: { r: CrmRecord; corto?: boolean }) {
   const p = r.props;
   const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
   const saldo = num(p.saldo_pendiente_de_pago_mxn);
@@ -66,7 +67,7 @@ function Saldo({ r }: { r: CrmRecord }) {
     : `Saldo pendiente en Finnegans: ${fmtMoneyExact(saldo, 'ARS')} sin IVA.${detalle}`;
   return (
     <div className={`saldo debe${c?.parcial ? ' parcial' : ''}`} title={title}>
-      Saldo pendiente <span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
+      {corto ? 'Debe' : 'Saldo pendiente'} <span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
     </div>
   );
 }
@@ -91,7 +92,7 @@ function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
 // Abajo de la tarjeta de pedido: si tiene factura, remito y bocetos (cuántos de sus productos tienen), con un iconito
 // cada uno que se pinta cuando está.
 interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; mensajes?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
-function Adjuntos({ r }: { r: CrmRecord }) {
+export function Adjuntos({ r }: { r: CrmRecord }) {
   const a = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos;
   if (!a) return null;
   const n = (k: number, uno: string, varios: string) => `${k} ${k === 1 ? uno : varios}`;
@@ -206,7 +207,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const acciones = useRef<Acciones>({});
   // Pedidos: los productos de cada tarjeta (una consulta para todo el tablero) y si se ven, como en el tablero de Producción.
   const esPedidos = type === 'order';
-  const prods = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data);
+  const prods = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data).pedidos;
   const productos = useProductosAbiertos('crm.pedidos.tablero.productos');
   acciones.current = { onOpen, onSelect, setDragId, productos: productos.alternar };
   const [over, setOver] = useState<string | null>(null);

@@ -32,7 +32,7 @@ import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProduct
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
-import { produccionDePedidos } from './pedidosprod';
+import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarDestinos, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
@@ -997,7 +997,10 @@ api.get('/records/order/:id/products', async (c) => {
 api.get('/pedidos/articulos', async (c) => {
   const ids = [...new Set(String(c.req.query('ids') ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 500);
   const visibles = await idsVisibles(c.env.DB, c.get('ctx').user, ids);
-  return c.json({ pedidos: await produccionDePedidos(c.env.DB, ids.filter((id) => visibles.has(id))) });
+  const suyos = ids.filter((id) => visibles.has(id));
+  // También factura, remito, bocetos y conversación de cada uno, para la columna «Cobro y papeles» de la lista.
+  const [pedidos, adjuntos] = await Promise.all([produccionDePedidos(c.env.DB, suyos), c.req.query('adjuntos') === '1' ? adjuntosDePedidos(c.env.DB, suyos) : {}]);
+  return c.json({ pedidos, adjuntos });
 });
 
 // La razón social con que se factura un pedido (razones.ts): la del pedido o la del pedido de un negocio, y las de una empresa.

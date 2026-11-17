@@ -7,6 +7,7 @@ import {
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
 import Board from './Board';
+import { Adjuntos, Saldo } from './PropBoard';
 import PropBoard, { urlTableroProp } from './PropBoard';
 import ImportModal from './Import';
 import { RecordPreview } from './RecordPage';
@@ -25,6 +26,12 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
   order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
 };
+// Pedidos para el perfil Ventas (pedido de Rodrigo del 17/11/2026): su pantallazo. Sin «PDV Finnegans» (el número ya está
+// en el nombre), «Unidad de negocio» ni «Propietario» (vende en su unidad y ve lo suyo); con «Cobro y papeles».
+const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__cobro', 'hs_total_price', 'createdate'];
+// El perfil de quien mira (lo pone IndexFor al dibujarse): las columnas por defecto de Pedidos dependen de él.
+const perfil = { ventas: false };
+const columnasPorDefecto = (t: ObjectType) => (t === 'order' && perfil.ventas ? PEDIDOS_VENTAS : DEFAULT_COLUMNS[t]);
 
 // `owner` es de las vistas viejas (un solo propietario); ahora van `owners` (varios) y `dates` (filtros rápidos de fecha).
 interface ViewConfig {
@@ -75,9 +82,25 @@ const urlLista = (type: ObjectType, q: string, groups: Filter[][], c: ViewConfig
 function loadLocal(t: ObjectType): ViewConfig {
   try {
     const v = JSON.parse(localStorage.getItem(storeKey(t)) ?? '');
-    if (v && Array.isArray(v.columns)) return withOwners(t === 'order' ? conColumnaProduccion(v) : v);
+    if (v && Array.isArray(v.columns)) return withOwners(t === 'order' ? columnasVentas(conColumnaProduccion(v)) : v);
   } catch { /* sin vista guardada */ }
-  return { groups: [], columns: DEFAULT_COLUMNS[t], sort: 'hs_lastmodifieddate', dir: 'desc' };
+  return { groups: [], columns: columnasPorDefecto(t), sort: 'hs_lastmodifieddate', dir: 'desc' };
+}
+// Las vendedoras que ya tenían sus columnas de Pedidos pasan una sola vez a las de su pantallazo: sin «PDV Finnegans» ni
+// «Unidad de negocio», y con «Cobro y papeles» al lado de «Producción». Lo que cambien después queda.
+const VENTAS_PASADA = 'crm.view.order.ventas';
+function columnasVentas(v: ViewConfig): ViewConfig {
+  if (!perfil.ventas) return v;
+  try {
+    if (localStorage.getItem(VENTAS_PASADA)) return v;
+    localStorage.setItem(VENTAS_PASADA, '1');
+  } catch { return v; }
+  const columns = v.columns.filter((c) => !['pdv_finnegans', 'unidad_de_negocio'].includes(c));
+  if (!columns.includes('__cobro')) {
+    const i = columns.indexOf('__produccion');
+    columns.splice(i >= 0 ? i + 1 : columns.length, 0, '__cobro');
+  }
+  return { ...v, columns };
 }
 // La columna «Producción» de Pedidos (pedido de Rodrigo del 17/11/2026) llegó después de que cada uno armara sus columnas:
 // se suma una sola vez, al lado de la etapa, en «Todos» y «Míos» de este navegador. Si después la quitan, no vuelve.
@@ -116,6 +139,7 @@ export default function ObjectIndex() {
 
 function IndexFor({ type }: { type: ObjectType }) {
   const { meta } = useMeta();
+  perfil.ventas = esVentas(meta.me);
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type], `/views/${type}`);
@@ -363,6 +387,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
   };
   const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : col === '__unidad' ? 'Unidad de negocio' : col === '__produccion' ? 'Producción'
+    : col === '__cobro' ? 'Cobro y papeles'
     : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
@@ -372,7 +397,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
   // Pedidos: sus productos abajo y quién los tiene en Producción (PedidosProductos.tsx).
   const esPedidos = type === 'order' && mode === 'table';
-  const prod = useProduccionPedidos(esPedidos ? rows.map((r) => r.id) : [], esPedidos, list.data);
+  const { pedidos: prod, adjuntos } = useProduccionPedidos(esPedidos ? rows.map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
   const productos = useProductosAbiertos();
 
   const resize = useColumnResize(cfg.widths, (widths) => setCfg((c) => ({ ...c, widths })));
@@ -560,6 +585,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     : col === '__tags' ? <td key={col}><TagChips meta={meta} ids={r.tags} small />{!r.tags?.length && <span className="muted">—</span>}</td>
                     : col === '__unidad' ? <UnidadCell key={col} type={type} record={r} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />
                     : col === '__produccion' ? <CeldaProduccion key={col} p={p} r={r} />
+                    : col === '__cobro' ? <td key={col} className="ped-prod"><span className="ped-cobro"><Saldo r={r} corto />{adjuntos[r.id] && <Adjuntos r={{ ...r, adjuntos: adjuntos[r.id] } as CrmRecord} />}</span></td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
                 {abierto && p && <FilasProductos p={p} r={r} columns={columns} sel={preview?.id === r.id} onAbrir={() => setPreview(r.id)} />}
@@ -740,13 +766,13 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
     ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
     ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
     ...(type !== 'order' ? [{ name: '__unidad', label: 'Unidad de negocio' }] : []),
-    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (quién lo tiene y fecha real)' }] : []),
+    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (quién lo tiene y la entrega)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }] : []),
     ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
   ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };
   return (
     <Modal title="Editar columnas" onClose={onClose} footer={<>
-      <button className="btn" onClick={() => setSel(DEFAULT_COLUMNS[type])}>Restablecer</button>
+      <button className="btn" onClick={() => setSel(columnasPorDefecto(type))}>Restablecer</button>
       <button className="btn primary" onClick={() => onApply(sel)}>Aplicar</button>
     </>}>
       <div className="grid-2">

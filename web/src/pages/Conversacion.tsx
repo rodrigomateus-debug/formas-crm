@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue, propOf, fmtDate, fmtRelative, userOf, type Meta, type ObjectType, type User, cabecerasVerComo } from '../lib';
+import { http, qs, useMeta, useToast, Icon, OBJECTS, achicarImagen, formatValue, propOf, fmtDate, fmtRelative, userOf, type Meta, type ObjectType, type User, cabecerasVerComo, Cargando } from '../lib';
 import { Avatar, EstadoClickup, UserAvatar } from '../components';
 import { RecordPreview } from './RecordPage';
 import { VistaPdf } from './Bocetos';
@@ -862,7 +862,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
       </header>
       <div className={`conv-lista${filtro === 'todo' ? ' con-riel' : ''}`} ref={lista} onScroll={alScroll}>
         {error && <div className="empty plain">{error}</div>}
-        {!cargado && !error && <div className="muted small conv-vacio">Cargando…</div>}
+        {!cargado && !error && <div className="conv-vacio"><Cargando /></div>}
         {cargado && !visibles.length && (
           <div className="conv-vacio">
             <Icon name="chat" size={28} />
@@ -980,7 +980,7 @@ export default function ConversacionesPage() {
       <p className="muted small" style={{ marginTop: 0 }}>{solo
         ? 'Lo que todavía no leíste en los pedidos y negocios que seguís. Al abrir una conversación queda leída; si querés retomarla después, marcala como no leída.'
         : 'El historial de las conversaciones que seguís: donde escribiste, te mencionaron, sos el propietario o lo tenés en producción.'}</p>
-      {!lista && <div className="muted">Cargando…</div>}
+      {!lista && <Cargando />}
       {lista && !convs.length && (solo
         ? <div className="panel bandeja-vacia"><span className="bandeja-ok"><Icon name="check" size={22} /></span><b>Estás al día</b>
             <span className="muted small">No tenés mensajes sin leer.</span><button className="btn sm" onClick={() => setPestana('todas')}>Ver todas las conversaciones</button></div>

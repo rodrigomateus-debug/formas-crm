@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from 'r
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips, vuelveALaLista,
+  http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, Cargando, defaultPipeline, TagChips, vuelveALaLista,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEmpresa, origenUnidad, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -608,6 +608,7 @@ function IndexFor({ type }: { type: ObjectType }) {
               })}
             </tbody>
           </table>
+          {!list.data && list.loading && <Cargando />}
           {!list.loading && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
           {list.error && <div className="empty plain">{list.error}</div>}
         </div>

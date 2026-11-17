@@ -623,8 +623,8 @@ api.get('/tasks', async (c) => {
 
 // Datos extra de las tarjetas del tablero, en tres consultas para todas: el contacto y la empresa asociados
 // (los principales primero) y la próxima actividad (tarea abierta o reunión por venir), como en HubSpot.
-// El contacto lleva su celular (o su teléfono) para el botón de WhatsApp de la tarjeta.
-type CardInfo = { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } };
+// El contacto lleva su celular (o su teléfono) para el botón de WhatsApp de la tarjeta; la empresa, su dominio para el logo.
+type CardInfo = { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string; domain?: string | null }; next?: { type: string; subject: string; at: string } };
 async function cardInfo(db: D1Database, ids: number[]) {
   const info = new Map<number, CardInfo>(ids.map((id) => [id, {}]));
   if (!ids.length) return info;
@@ -633,7 +633,7 @@ async function cardInfo(db: D1Database, ids: number[]) {
     db.prepare(`SELECT a.from_id, r.id, r.name, COALESCE(NULLIF(json_extract(r.props, '$.mobilephone'), ''), r.phone) AS phone
       FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'contact' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
-    db.prepare(`SELECT a.from_id, r.id, r.name FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
+    db.prepare(`SELECT a.from_id, r.id, r.name, NULLIF(json_extract(r.props, '$.domain'), '') AS domain FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
     db.prepare(`SELECT l.record_id, a.type, a.subject, COALESCE(a.due_at, a.occurred_at) AS at FROM activity_links l JOIN activities a ON a.id = l.activity_id
       WHERE l.record_id IN (SELECT value FROM json_each(?)) AND a.archived = 0
@@ -641,7 +641,7 @@ async function cardInfo(db: D1Database, ids: number[]) {
       ORDER BY at`).bind(list, now()),
   ]);
   for (const r of contacts.results as Array<{ from_id: number; id: number; name: string; phone: string | null }>) { const i = info.get(r.from_id); if (i && !i.contact) i.contact = { id: r.id, name: r.name, phone: r.phone }; }
-  for (const r of companies.results as Array<{ from_id: number; id: number; name: string }>) { const i = info.get(r.from_id); if (i && !i.company) i.company = { id: r.id, name: r.name }; }
+  for (const r of companies.results as Array<{ from_id: number; id: number; name: string; domain: string | null }>) { const i = info.get(r.from_id); if (i && !i.company) i.company = { id: r.id, name: r.name, domain: r.domain }; }
   for (const r of next.results as Array<{ record_id: number; type: string; subject: string; at: string }>) { const i = info.get(r.record_id); if (i && !i.next) i.next = { type: r.type, subject: r.subject, at: r.at }; }
   return info;
 }

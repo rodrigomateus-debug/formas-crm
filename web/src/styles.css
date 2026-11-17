@@ -2025,3 +2025,33 @@ table.grid tr.ped-art.entregado .ped-art-n { color: var(--ui-ink-2); }
 .oc-link { font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--accent-ink); text-decoration: none; }
 a.oc-link:hover { text-decoration: underline; }
 span.oc-link { color: var(--ui-ink-2); }
+
+/* ---------- Cargando: el isotipo de Formas animado (Cargando en lib.tsx) ---------- */
+.formas-loader { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 40px 20px; color: var(--ui-ink-2); font-size: 13px; }
+.formas-loader svg { width: 56px; height: 56px; overflow: visible; }
+.formas-loader .fondo { fill: #000085; transform-box: fill-box; transform-origin: center; animation: fl-latido 2.4s var(--ease, ease-in-out) infinite; }
+.formas-loader .halo { fill: #000085; opacity: 0; transform-box: fill-box; transform-origin: center; animation: fl-halo 2.4s ease-out infinite; }
+.formas-loader .cinta { fill: #fff; fill-opacity: 0; stroke: #fff; stroke-width: 14; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: fl-trazo 2.4s ease-in-out infinite; }
+.formas-loader .t { letter-spacing: .01em; animation: fl-texto 2.4s ease-in-out infinite; }
+.formas-loader.chico { flex-direction: row; justify-content: flex-start; gap: 8px; padding: 0; font-size: inherit; }
+.formas-loader.chico svg { width: 18px; height: 18px; }
+.formas-loader.chico .cinta { stroke-width: 22; }
+.formas-loader.pantalla { min-height: 100vh; min-height: 100dvh; padding: 0; gap: 18px; background: var(--ui-canvas); }
+.formas-loader.pantalla svg { width: 72px; height: 72px; }
+[data-theme="dark"] .formas-loader .fondo, [data-theme="dark"] .formas-loader .halo { fill: #1a1aa8; }
+@keyframes fl-trazo {
+  0% { stroke-dashoffset: 1; fill-opacity: 0; }
+  45% { stroke-dashoffset: 0; fill-opacity: 0; }
+  60%, 80% { stroke-dashoffset: 0; fill-opacity: 1; }
+  100% { stroke-dashoffset: -1; fill-opacity: 0; }
+}
+@keyframes fl-latido { 0%, 100% { transform: scale(.94); } 60% { transform: scale(1); } }
+@keyframes fl-halo { 0%, 50% { transform: scale(1); opacity: 0; } 60% { opacity: .18; } 100% { transform: scale(1.35); opacity: 0; } }
+@keyframes fl-texto { 0%, 100% { opacity: .55; } 60% { opacity: 1; } }
+/* Movimiento reducido: el logo quieto y completo (si no, la regla general lo dejaría en el último cuadro, invisible). */
+@media (prefers-reduced-motion: reduce) {
+  .formas-loader .fondo, .formas-loader .halo, .formas-loader .cinta, .formas-loader .t { animation: none; }
+  .formas-loader .cinta { stroke-dashoffset: 0; fill-opacity: 1; }
+}
+.board > .formas-loader { flex: 1; align-self: center; }
+.card .meta .logo-empresa { width: 13px; height: 13px; flex: none; border-radius: 3px; object-fit: contain; }

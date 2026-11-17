@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { http, useAsync, useToast, Icon, fmtDate } from '../lib';
+import { http, useAsync, useToast, Icon, fmtDate, Cargando } from '../lib';
 
 // Choferes (pedido de Rodrigo del 16/11/2026): el acceso de cada chofer a su app (remitos y recorrido del día), a mano en
 // la barra lateral del perfil Logística (los administradores lo tienen en Entregas → Choferes). Crear el código es un
@@ -92,7 +92,7 @@ export function ChoferesPanel() {
             </div>
           );
         })}
-        {!activos.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay choferes con código.'}</div>}
+        {!activos.length && <div className="panel-body muted small">{res.loading ? <Cargando chico /> : 'Todavía no hay choferes con código.'}</div>}
       </div>
       {bajas.length > 0 && (
         <details className="ch-bajas">

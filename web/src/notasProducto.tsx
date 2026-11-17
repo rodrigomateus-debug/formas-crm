@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
-import { http, cabecerasVerComo, useToast, Icon, recordUrl, fmtDate, fmtRelative } from './lib';
+import { http, cabecerasVerComo, useToast, Icon, recordUrl, fmtDate, fmtRelative, Cargando } from './lib';
 import { Modal, UserAvatar, alEsc } from './components';
 import { Select } from './Select';
 
@@ -112,7 +112,7 @@ export function FichaProducto({ sku, nombre, foto, recordId, taskId, nueva, onCl
           </div>
         </div>
         {error && <div className="tag bad">{error}</div>}
-        {!f && !error && <div className="muted small">Cargando…</div>}
+        {!f && !error && <div className="muted small"><Cargando chico /></div>}
         {f?.puede_escribir && <NuevaNota ficha={f} nombre={titulo} recordId={recordId} taskId={taskId} autoFocus={nueva} onGuardada={cambio} />}
         {f && (
           <div className="stack" style={{ gap: 8 }}>

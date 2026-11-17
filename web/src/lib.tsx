@@ -143,7 +143,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => { reload(); }, [reload]);
   if (error) return <div className="empty">No se pudo abrir el CRM: {error}</div>;
-  if (!meta) return <div className="empty">Cargando…</div>;
+  if (!meta) return <Cargando pantalla texto="Abriendo Formas Hub…" />;
   return <MetaCtx.Provider value={{ meta, reload }}>{children}</MetaCtx.Provider>;
 }
 
@@ -460,6 +460,23 @@ export function Icon({ name, size }: { name: keyof typeof paths | string; size?:
       width={size} height={size} aria-hidden="true">
       <path d={paths[name] ?? paths.note} />
     </svg>
+  );
+}
+
+// ---------- Cargando: el isotipo de Formas animado ----------
+// La cinta del logo se dibuja por el contorno, se rellena y se borra, en loop, mientras el círculo «respira».
+// «chico» va dentro de un renglón o panel; «pantalla» ocupa toda la ventana (la primera carga del CRM).
+const CINTA = 'M595.71,272.9c-21.44-30.93-47.87-48.56-76.44-50.98-30.49-2.56-62.21,11.97-91.74,42.09-32.04,32.68-54.15,72.92-74.21,113.41-1.31,2.64-5.04,2.63-6.35,0-19.71-39.86-41.64-79.25-72.76-111.79-30.79-32.2-64.09-47.13-96.27-43.3-31.6,3.8-59.71,25.57-81.3,62.95-19.14,33.15-23.2,63.88-12.07,91.33,18.28,45.06,72.87,68.93,115.46,81.01,48.52,13.77,99.38,20.76,149.93,20.76,22.91,0,45.76-1.44,68.28-4.32,59.23-7.6,137.99-25.25,176.82-66.17,35.1-37,35.33-84.94.64-134.99ZM284.99,406.59c-27.92-3.87-56.29-9.12-82.88-18.35-33.03-11.47-51.1-23.78-55.26-37.61-3.33-11.08,1.9-25.73,15.54-43.55,8.97-11.71,17.27-17.96,24.67-18.59.44-.04.89-.05,1.35-.05,7.97,0,18.02,5.73,30.66,17.46,28.16,26.14,48.88,62.27,66.92,99.32.34.69-.24,1.49-1,1.39ZM553.14,350.63c-4.15,13.84-22.23,26.14-55.26,37.61-26.59,9.23-54.96,14.48-82.88,18.35-.76.11-1.34-.69-1-1.39,18.04-37.05,38.76-73.18,66.92-99.32,12.64-11.73,22.7-17.46,30.66-17.46.46,0,.91.02,1.35.05,7.4.63,15.7,6.89,24.67,18.59,13.64,17.82,18.87,32.47,15.54,43.55Z';
+export function Cargando({ texto = 'Cargando…', chico, pantalla }: { texto?: string; chico?: boolean; pantalla?: boolean }) {
+  return (
+    <div className={`formas-loader${chico ? ' chico' : ''}${pantalla ? ' pantalla' : ''}`} role="status" aria-live="polite">
+      <svg viewBox="0 0 700 700" aria-hidden="true">
+        <circle className="halo" cx="350" cy="350" r="350" />
+        <circle className="fondo" cx="350" cy="350" r="350" />
+        <path className="cinta" d={CINTA} pathLength={1} />
+      </svg>
+      {texto && <span className="t">{texto}</span>}
+    </div>
   );
 }
 

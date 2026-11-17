@@ -52,7 +52,7 @@ export async function sincronizarOrdenesCompra(env: Env, opts: { dias?: number; 
   const db = env.DB;
   const b = opts.budget ?? Budget.of(env);
   const antes = await db.prepare("SELECT value FROM settings WHERE key = 'ordenes_compra_sync'").first<{ value: string }>();
-  const dias = Math.min(Math.max(opts.dias ?? (antes ? 30 : 120), 1), 180);
+  const dias = Math.min(Math.max(opts.dias ?? (antes ? 7 : 120), 1), 180);
   const token = await finnegansToken(env, b);
   if (!token) return { error: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
   const filas = (await fin<FilaAnalisis[]>(env, token, 'reports/ANALISISORDENESCOMPRA', {
@@ -78,26 +78,46 @@ export async function sincronizarOrdenesCompra(env: Env, opts: { dias?: number; 
     s.add(codigo);
     o.porPedido.set(pedido, s);
   }
-  // Las OC de hoy y ayer con renglones sin pedido: el informe puede no tenerlo todavía; el detalle sí.
+  // Las OC de hoy y ayer con renglones sin pedido: el informe puede no tenerlo todavía; el detalle sí. Lo que dijo el
+  // detalle queda guardado y se reusa en cada corrida; se vuelve a pedir solo si no trajo ningún pedido, a las 3 horas,
+  // hasta 3 veces. Como mucho 4 detalles por corrida (Finnegans cobra por consulta).
+  const sinPedido = [...ocs.values()].filter((x) => x.sinPedido && !x.anulada && (x.fecha ?? '') >= hoyBA(1));
+  const guardados = new Map(sinPedido.length ? (await db.prepare('SELECT ie, pedidos, leido_at, intentos FROM ordenes_compra_detalles WHERE ie IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(sinPedido.map((o) => o.ie))).all<{ ie: string; pedidos: string; leido_at: string; intentos: number }>()).results.map((r) => [r.ie, r]) : []);
+  const sumar = (o: Oc, pedidos: Record<string, string[]>) => {
+    for (const [pedido, codigos] of Object.entries(pedidos)) {
+      const s = o.porPedido.get(pedido) ?? new Set<string>();
+      for (const c of codigos) s.add(c);
+      o.porPedido.set(pedido, s);
+    }
+  };
   let detalles = 0;
-  for (const o of [...ocs.values()].filter((x) => x.sinPedido && !x.anulada && (x.fecha ?? '') >= hoyBA(1)).slice(0, 25)) {
-    if (b.left() < 3) break;
+  const hace3h = new Date(Date.now() - 3 * 3600_000).toISOString();
+  const leidos: D1PreparedStatement[] = [];
+  for (const o of sinPedido) {
+    const g = guardados.get(o.ie);
+    const previo = g ? (JSON.parse(g.pedidos) as Record<string, string[]>) : null;
+    if (previo) sumar(o, previo);
+    const releer = !g || (!Object.keys(previo ?? {}).length && g.leido_at < hace3h && g.intentos < 3);
+    if (!releer || detalles >= 4 || b.left() < 3) continue;
     let det: DetalleOc | null = null;
     try { det = await fin<DetalleOc>(env, token, `ordenCompra/${encodeURIComponent(o.ie)}`, {}, b); } catch (e) { if (e instanceof OutOfBudget) break; continue; }
     detalles++;
+    const pedidos: Record<string, string[]> = {};
     for (const it of det?.Items ?? []) {
       const codigo = String(it.ProductoCodigo ?? '').trim().toUpperCase();
       if (!codigo) continue;
       for (const d of (it.DimensionDistribucion ?? []).filter((x) => x.dimensionCodigo === 'PEDVTA')) {
         for (const di of d.distribucionItems ?? []) {
           const pedido = clavePedido(di.codigo);
-          if (!pedido) continue;
-          const s = o.porPedido.get(pedido) ?? new Set<string>();
-          s.add(codigo);
-          o.porPedido.set(pedido, s);
+          if (pedido && !(pedidos[pedido] ??= []).includes(codigo)) pedidos[pedido].push(codigo);
         }
       }
     }
+    sumar(o, pedidos);
+    leidos.push(db.prepare(`INSERT INTO ordenes_compra_detalles (ie, pedidos, leido_at, intentos) VALUES (?, ?, ?, 1)
+      ON CONFLICT(ie) DO UPDATE SET pedidos = excluded.pedidos, leido_at = excluded.leido_at, intentos = ordenes_compra_detalles.intentos + 1`)
+      .bind(o.ie, JSON.stringify(pedidos), new Date().toISOString()));
   }
   // Los pedidos del CRM, por su número de Finnegans.
   const { results } = await db.prepare(`SELECT id, json_extract(props, '$.pedido_finnegans') AS pedido FROM records
@@ -125,7 +145,9 @@ export async function sincronizarOrdenesCompra(env: Env, opts: { dias?: number; 
       SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'),
         json_extract(value, '$[5]'), json_extract(value, '$[6]'), json_extract(value, '$[7]') FROM json_each(?)`).bind(JSON.stringify(filasOc.slice(i, i + 500))));
   }
-  const estado = { at, dias, filas: Array.isArray(filas) ? filas.length : 0, ocs: ocs.size, anuladas: [...ocs.values()].filter((o) => o.anulada).length,
+  // Los detalles guardados de más de una semana ya no sirven (el informe ya tiene el pedido).
+  stmts.push(...leidos, db.prepare('DELETE FROM ordenes_compra_detalles WHERE leido_at < ?').bind(new Date(Date.now() - 7 * 86_400_000).toISOString()));
+  const estado = { at, dias, consultas: b.used, filas: Array.isArray(filas) ? filas.length : 0, ocs: ocs.size, anuladas: [...ocs.values()].filter((o) => o.anulada).length,
     sin_pedido: [...ocs.values()].filter((o) => !o.porPedido.size).length, cruzadas, detalles };
   stmts.push(db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ordenes_compra_sync', ?)").bind(JSON.stringify(estado)));
   await db.batch(stmts);

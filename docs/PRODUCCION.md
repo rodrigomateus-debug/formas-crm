@@ -111,22 +111,26 @@ proveedor de cada producto («OC 4321»); un clic la abre en Finnegans GO.
   (categoría «Orden de Compra», subtipo `OC`, id 71) no son documentos destino del pedido de venta; cada renglón lleva el
   pedido en la dimensión `PEDVTA`. Un renglón puede repartirse entre varios pedidos y una OC puede juntar pedidos
   distintos.
-- **Cómo se leen:** la tarea de cada hora (`scripts/pedidos-productos.mjs` → `POST /hooks/ordenes-compra/sincronizar`)
-  pide una vez el informe `reports/ANALISISORDENESCOMPRA` de los últimos 30 días (la primera vez, 120) con
-  `Empresa=EMPRE01` y `dimension=PEDVTA`: un renglón por producto y por pedido, con el número interno de la OC
-  (`DOCNROINT`, «OC - 11394»), la transacción, el proveedor, el código del producto y el pedido (`DIMENSIONVALOR`, por
-  nombre: «PEDVTASTP - 31546»). Las filas sin código son IVA y conceptos; las OC anuladas no van. Las OC de ese rango se
-  reemplazan cada vez; las más viejas quedan como estaban. Tabla `ordenes_compra` (migraciones `0072` y `0074`).
+- **Cómo se leen:** el cron del Hub (`src/worker/index.ts`, a los :30) pide una vez el informe
+  `reports/ANALISISORDENESCOMPRA` con `Empresa=EMPRE01` y `dimension=PEDVTA`: un renglón por producto y por pedido, con el
+  número interno de la OC (`DOCNROINT`, «OC - 11394»), la transacción, el proveedor, el código del producto y el pedido
+  (`DIMENSIONVALOR`, por nombre: «PEDVTASTP - 31546»). Las filas sin código son IVA y conceptos; las OC anuladas no van.
+  Las OC de ese rango se reemplazan cada vez; las más viejas quedan como estaban. Tabla `ordenes_compra` (migraciones
+  `0072` y `0074`). También a mano: `POST /hooks/ordenes-compra/sincronizar?dias=…` (token de administrador).
+- **Cuándo y cuánto consulta** (Finnegans cobra por consulta): una vez por hora de lunes a viernes de 9 a 20 (cuando se
+  cargan OC) con los últimos 7 días, y de noche (3:30) los últimos 60; la primera vez, 120. Una consulta por corrida, más
+  algún detalle de las OC del día (ver abajo): unas 13 por día hábil. Comparte el tope de consultas de la corrida con las
+  facturas. La tarea de GitHub de cada hora (`scripts/pedidos-productos.mjs`) ya no consulta Finnegans por las OC: solo
+  imprime cuántas hay y cómo salió la última lectura (`GET /hooks/ordenes-compra/estado`), con cuántas consultas usó.
 - **Las OC del día:** el informe a veces todavía no tiene el pedido de una OC recién creada («Sin dimensión valor»). Para
-  las de hoy y ayer con renglones sin pedido se lee el detalle (`ordenCompra/<id>`, la dimensión `PEDVTA` de cada renglón),
-  hasta 25 por corrida.
+  las de hoy y ayer con renglones sin pedido se lee el detalle (`ordenCompra/<id>`, la dimensión `PEDVTA` de cada
+  renglón), como mucho 4 por corrida. Lo que dijo queda guardado (`ordenes_compra_detalles`, migración `0075`) y se reusa
+  en cada corrida; se vuelve a pedir solo si no trajo ningún pedido, a las 3 horas, hasta 3 veces.
 - **De qué producto:** cada OC queda en el pedido (cruzado por su número: «PEDVTASTP - 00031577» y «PEDVTASTP - 31577»
   son el mismo) con los códigos de sus renglones de ese pedido; el artículo se cruza por su SKU (el «Código:» de ClickUp o
   el del renglón atado). Una OC de un pedido que no se pudo atar a ningún artículo se ve en la fila del PDV.
 - **El link:** el visor de documentos de Finnegans GO con `pk` = la transacción de la OC y `docId=71` (confirmado con una
   OC real).
-- **Cuánto consulta:** una por corrida (unos 2 MB para 30 días), más una por cada OC del día que salió sin pedido. La
-  tarea imprime solo cantidades (el repo es público): cuántas OC, cuántas atadas a pedidos del CRM, sin pedido y anuladas.
 - Prueba en `test/produccion.test.mjs`.
 
 ## El estado del PDV sale de sus artículos

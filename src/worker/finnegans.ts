@@ -131,11 +131,11 @@ export async function finnegansState(db: D1Database): Promise<FinnegansState> {
 // - `barrido`: además, recorrer de a tandas los pedidos abiertos de los últimos 4 meses, por si al informe se le escapó
 //   alguna. Antes se hacía cada media hora (40 consultas por corrida, unas 58.000 por mes); ahora una hora por noche y
 //   cuando se toca «Sincronizar» en Configuración.
-export async function syncFacturas(env: Env, opts: { barrido?: boolean } = {}) {
+export async function syncFacturas(env: Env, opts: { barrido?: boolean; budget?: Budget } = {}) {
   const db = env.DB;
   const state = await finnegansState(db);
   const out: FinnegansState = { ...state, at: new Date().toISOString(), revisados: 0, facturas: 0, error: null };
-  const b = Budget.of(env);
+  const b = opts.budget ?? Budget.of(env);
   try {
     const pendientes = (await db.prepare(`SELECT DISTINCT p.record_id AS id, r.props FROM facturas_pendientes p JOIN records r ON r.id = p.record_id AND r.archived = 0
       WHERE p.intentos < 5 ORDER BY p.created_at LIMIT ?`).bind(POR_CORRIDA).all<{ id: number; props: string }>()).results;

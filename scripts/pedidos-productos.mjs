@@ -36,18 +36,14 @@ async function tandas(path, minutos, campo, pausa = 0) {
 
 const p = await tandas('/hooks/productos/pendientes?limit=25', 20, 'leidos');
 console.log(`Productos: ${p.leidos ?? 0} pedidos leídos en ${p.vueltas} tandas; quedan ${p.quedan ?? '?'}.`);
-// Las órdenes de compra de Finnegans (ordenescompra.ts): una lectura del informe de los últimos 30 días (la primera vez,
-// 120). Solo cantidades.
+// Las órdenes de compra de Finnegans (ordenescompra.ts): las lee el propio Hub (su cron, una vez por hora en horario de
+// trabajo). Acá solo se informa cómo salió la última lectura, sin consultar Finnegans. Solo cantidades.
 try {
-  const res = await fetch(`${base}/hooks/ordenes-compra/sincronizar`, { method: 'POST', headers: { authorization: `Bearer ${process.env.CRM_TOKEN}` }, redirect: 'manual' });
-  const o = res.ok ? await res.json() : null;
-  if (!o) console.log(`Órdenes de compra: HTTP ${res.status}`);
-  else if (o.error) console.log(`Órdenes de compra: ${o.error}`);
-  else {
-    console.log(`Órdenes de compra: ${o.ocs} OC de los últimos ${o.dias} días (${o.filas} renglones), ${o.cruzadas} atadas a pedidos del CRM; ${o.sin_pedido} sin pedido, ${o.anuladas} anuladas, ${o.detalles} detalles leídos.`);
-    const e = await (await fetch(`${base}/hooks/ordenes-compra/estado`, { headers: { authorization: `Bearer ${process.env.CRM_TOKEN}` }, redirect: 'manual' })).json();
-    console.log(`En el CRM: ${e.total} OC en ${e.pedidos} pedidos.`);
-  }
+  const res = await fetch(`${base}/hooks/ordenes-compra/estado`, { headers: { authorization: `Bearer ${process.env.CRM_TOKEN}` }, redirect: 'manual' });
+  const e = res.ok ? await res.json() : null;
+  const u = e?.ultima;
+  if (!e) console.log(`Órdenes de compra: HTTP ${res.status}`);
+  else console.log(`Órdenes de compra: ${e.total} OC en ${e.pedidos} pedidos del CRM.${u ? ` Última lectura ${u.at}: ${u.ocs} OC de ${u.dias} días, ${u.cruzadas} atadas, ${u.consultas ?? '?'} consultas a Finnegans.` : ''}`);
 } catch (e) { console.log(`Órdenes de compra: ${e.message}`); }
 // Cada tanda usa hasta ~45 consultas a ClickUp, que deja 100 por minuto (y la sincronización también usa): una cada 30 s.
 const r = await tandas('/hooks/pedidos/remitos/pendientes?limit=20', 8, 'revisados', 30_000);

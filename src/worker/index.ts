@@ -15,6 +15,7 @@ import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
+import { sincronizarOrdenesCompra } from './ordenescompra';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
 import { leerPendientes } from './remitos';
@@ -118,8 +119,19 @@ export default {
       else {
         // Facturas: siempre las que avisó el informe de cada hora; el barrido de todos los pedidos, solo de 3 a 4 de la mañana
         // (Finnegans cobra por cantidad de consultas).
-        const barrido = new Date(event.scheduledTime).getUTCHours() === 6;
-        await safe(() => (turno === 0 || turno === 3 ? syncFacturas(env, { barrido }) : syncClickup(env)));
+        const hora = new Date(event.scheduledTime).getUTCHours();
+        const barrido = hora === 6;
+        if (turno === 3) {
+          // A los :30, primero las órdenes de compra (ordenescompra.ts: una consulta al informe, más algún detalle de las OC del
+          // día) y después las facturas, con el mismo tope de consultas. Las OC, una vez por hora en horario de trabajo (lunes a
+          // viernes de 9 a 20, cuando se cargan) con los últimos 7 días, y de noche (3:30) los últimos 60.
+          const dia = new Date(event.scheduledTime).getUTCDay();
+          const b = Budget.of(env);
+          if (dia >= 1 && dia <= 5 && hora >= 12 && hora <= 23) await safe(() => sincronizarOrdenesCompra(env, { budget: b }));
+          else if (barrido) await safe(() => sincronizarOrdenesCompra(env, { dias: 60, budget: b }));
+          await safe(() => syncFacturas(env, { barrido, budget: b }));
+        }
+        else await safe(() => (turno === 0 ? syncFacturas(env, { barrido }) : syncClickup(env)));
         if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día
       }
     })());

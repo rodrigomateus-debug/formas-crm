@@ -388,9 +388,13 @@ test('pedidos: cada producto con su estado simplificado, quién lo tiene en Prod
   const enProduccion = pdvDe(await vista(), PDV);
   const ocDe = (n) => enProduccion.articulos.find((a) => a.nombre.startsWith(n))?.oc?.map((o) => o.numero) ?? [];
   assert.deepEqual([ocDe('Necessaire'), ocDe('Set pinturas'), ocDe('Pelota')], [['OC 4321'], ['OC 4330'], []], 'en Producción, cada artículo con la suya');
+  // La corrida siguiente no vuelve a pedir el detalle de la OC de hoy (Finnegans cobra por consulta): usa lo guardado.
+  const otra = await (await hook('sincronizar?dias=30', 'POST')).json();
+  assert.deepEqual([otra.detalles, otra.consultas], [0, 2], 'el token y el informe, nada más');
+  assert.deepEqual(pdvDe(await vista(), PDV).articulos.find((a) => a.nombre.startsWith('Set pinturas'))?.oc?.map((o) => o.numero), ['OC 4330'], 'la OC de hoy sigue');
   // Lo que imprime la tarea de cada hora (repo público): solo cantidades.
   const est = await (await hook('estado')).json();
-  assert.ok(est.total >= 2 && est.pedidos >= 1 && est.ultima?.ocs === 3, 'cuenta las OC y la última lectura');
+  assert.ok(est.total >= 2 && est.pedidos >= 1 && est.ultima?.ocs === 3 && est.ultima?.consultas === 2, 'cuenta las OC y la última lectura');
   // La columna «Cobro y papeles»: factura, remito y bocetos de cada pedido, solo si se piden.
   assert.deepEqual(r.data.adjuntos, {}, 'sin pedirlos, no van');
   const conAdj = (await api('GET', `/pedidos/articulos?ids=${pdv.record_id}&adjuntos=1`)).data.adjuntos[pdv.record_id];

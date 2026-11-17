@@ -1,5 +1,5 @@
 // Referidos (referidos.ts): lo que manda el pedido de referidos del Workspace (/hooks/referidos), la carga desde la ficha
-// del cliente (/api/referidos), la pantalla Referidos, la tarjeta de la ficha y la tarea de agradecer al ganar.
+// del cliente (/api/referidos), la tarjeta de la ficha y la tarea de agradecer al ganar.
 // Contra un `wrangler dev` corriendo, como el resto.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -111,19 +111,18 @@ test('la ficha del cliente: a quién recomendó, y «Nos recomendó a…» desde
   assert.equal((await api('POST', '/referidos', { referidor_id: s.ref.negocio.id, nombre: 'X', contacto: 'x@y.com' })).status, 400, 'recomienda una empresa o un contacto');
 });
 
-test('la pantalla Referidos: los nuevos y los de antes (HubSpot), con el resumen', async () => {
+test('los referidos de antes (HubSpot) salen en la ficha de su negocio, con quien los recomendó', async () => {
   const viejo = await api('POST', '/records/deal', { props: { dealname: `Pedro ${RUN} - Referido de Viejo Cliente SA`, pipeline: 'default', dealstage: '1000604528',
     tipo_de_origen: 'Referido', description: `Referido de Viejo Cliente ${RUN} (PDV 30001). Lo cargó jorgelina@formas.ar desde el Workspace el 20/10/2026.` } });
   assert.equal(viejo.status, 201, JSON.stringify(viejo.data));
-  const l = (await api('GET', '/referidos')).data;
-  const nuevo = l.referidos.find((x) => x.negocio?.id === s.ref.negocio.id);
-  assert.equal(nuevo?.origen, 'tablero');
-  assert.equal(nuevo?.referidor.empresa?.name, `Distribuidora Andina ${RUN}`);
-  const antes = l.referidos.find((x) => x.negocio?.id === viejo.data.id);
+  const f = (await api('GET', `/records/deal/${viejo.data.id}/referidos`)).data;
+  const antes = f.lo_recomendo[0];
   assert.equal(antes?.origen, 'antes');
   assert.equal(antes?.referidor.nombre, `Viejo Cliente ${RUN}`, 'quien lo recomendó, leído del negocio');
   assert.deepEqual(antes?.pdvs, ['30001']);
-  assert.ok(l.resumen.total >= 4 && l.resumen.abiertos >= 4);
+  const nuevo = (await api('GET', `/records/deal/${s.ref.negocio.id}/referidos`)).data.lo_recomendo[0];
+  assert.equal(nuevo?.origen, 'tablero');
+  assert.equal(nuevo?.referidor.empresa?.name, `Distribuidora Andina ${RUN}`);
 });
 
 test('al ganar el negocio del referido, la tarea de agradecerle a quien lo recomendó (una sola vez)', async () => {
@@ -138,6 +137,6 @@ test('al ganar el negocio del referido, la tarea de agradecerle a quien lo recom
   await api('PATCH', `/records/deal/${id}`, { props: { dealstage: 'closedwon' } });
   const tl2 = (await api('GET', `/records/company/${s.empresa}/timeline?rollup=0`)).data;
   assert.equal(tl2.activities.filter((a) => a.type === 'task' && a.subject.startsWith('Agradecerle a DISTRIBUIDORA')).length, 1, 'no se repite');
-  const l = (await api('GET', '/referidos')).data;
-  assert.ok(l.resumen.ganados >= 1 && l.resumen.monto_ganado >= 350000);
+  const f = (await api('GET', `/records/company/${s.empresa}/referidos`)).data;
+  assert.ok(f.recomendo.some((x) => x.negocio?.id === id && x.negocio.ganado), 'en la ficha del cliente, ganado');
 });

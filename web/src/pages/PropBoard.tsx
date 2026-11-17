@@ -5,7 +5,7 @@ import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAva
 import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 import { ChatChip } from './Conversacion';
-import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
+import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useEsperaCorta, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
 
 // amount: suma del monto de la columna (en pedidos, el total sin IVA); sin_monto: cuántas tarjetas no lo tienen.
 interface Column { value: string; label: string; total: number; amount: number; sin_monto: number; records: CrmRecord[] }
@@ -210,10 +210,12 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const esPedidos = type === 'order';
   const prodsRes = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data);
   const prods = prodsRes.pedidos;
-  // La primera vez, las tarjetas de Pedidos aparecen junto con sus productos (si no, se estiran un instante después). Lo que
-  // se mueve o se carga de más después ya no espera: sigue lo que se veía.
+  // La primera vez, las tarjetas de Pedidos aparecen junto con sus productos (si no, se estiran un instante después), salvo
+  // que tarden demasiado. Lo que se mueve o se carga de más después ya no espera: sigue lo que se veía.
   const yaListo = useRef(false);
-  if ((cols.length || board.data?.columns.length === 0) && prodsRes.listo) yaListo.current = true;
+  const hayTablero = !!cols.length || board.data?.columns.length === 0;
+  const tardan = useEsperaCorta(esPedidos && hayTablero && !yaListo.current && !prodsRes.listo);
+  if (hayTablero && (prodsRes.listo || tardan)) yaListo.current = true;
   const esperaProductos = esPedidos && !yaListo.current;
   const productosDeAca = useProductosAbiertos(PREF_PRODUCTOS.board);
   const productos = productosDeLaVista ?? productosDeAca;
@@ -344,8 +346,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
             values={cardProps ?? []} onChange={(v) => onCardProps(v.slice(0, 5))} />
         </div>
         {tools}
-        {board.loading && <span className="muted small">Actualizando…</span>}
-        <span className="board-sum"><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero
+        {/* Hasta que llega el tablero, sin «0 en el tablero» (ocupa su lugar igual, para que la barra no salte). */}
+        <span className="board-sum" style={board.data ? undefined : { visibility: 'hidden' }}><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero
           {activos != null && <><span className="sep">·</span><b className="num" title="Ni entregados ni anulados">{activos.toLocaleString('es-AR')}</b> {activos === 1 ? 'activo' : 'activos'}</>}
           {/* Arriba, el total de los activos (lo que está en curso); el de cada etapa va abajo de su columna. */}
           {conMonto && montoActivos != null && <><span className="sep">·</span>Total activos sin IVA <b className="num" title={fmtMoneyExact(montoActivos, 'ARS')}>{fmtMoney(montoActivos, 'ARS') || '$ 0'}</b></>}</span>

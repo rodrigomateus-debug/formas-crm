@@ -16,7 +16,7 @@ import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
-import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
+import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useEsperaCorta, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -162,7 +162,19 @@ function IndexFor({ type }: { type: ObjectType }) {
   perfil.ventas = esVentas(meta.me);
   const toast = useToast();
   const [params, setParams] = useSearchParams();
-  const views = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type], `/views/${type}`);
+  // Las vistas guardadas quedan también en este navegador (de cada usuario): al entrar se abre enseguida la primera pestaña
+  // como es, aunque sea una vista guardada. Si no, arrancaba como «Todos» (otras pestañas, otros filtros, otra carga) y
+  // cambiaba cuando llegaban las vistas: la pantalla «titilaba».
+  const vistasKey = `crm.vistas.${meta.me.id}.${type}`;
+  const [vistasAca] = useState<SavedView[] | undefined>(() => {
+    try { const v = JSON.parse(localStorage.getItem(vistasKey) ?? 'null'); return Array.isArray(v) ? v : undefined; } catch { return undefined; }
+  });
+  const viewsRes = useAsync(() => http<SavedView[]>('GET', `/views/${type}`), [type], `/views/${type}`);
+  useEffect(() => {
+    if (!viewsRes.data || viewsRes.loading) return;
+    try { localStorage.setItem(vistasKey, JSON.stringify(viewsRes.data)); } catch { /* sin almacenamiento */ }
+  }, [viewsRes.data, viewsRes.loading, vistasKey]);
+  const views = { ...viewsRes, data: viewsRes.data ?? vistasAca };
   // Orden de las pestañas: el de cada usuario (viene en /meta) o, recién arrastradas, el nuevo.
   const [ordenGuardado, setOrdenGuardado] = useState<string[] | null>(() => ordenNuevo.get(type) ?? meta.orden_vistas?.[type]?.map(String) ?? null);
   const pestanas = useMemo(() => ordenPestanas(ordenGuardado, views.data, type), [ordenGuardado, views.data, type]);
@@ -338,8 +350,11 @@ function IndexFor({ type }: { type: ObjectType }) {
 
   type ListRes = { results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number };
   const listUrl = urlLista(type, dq, groups, cfg, pageSize, page * pageSize);
-  const list = useAsync(() => (mode === 'board' ? Promise.resolve(undefined as unknown as ListRes) : http<ListRes>('GET', listUrl)),
-    [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), mode], mode === 'board' ? undefined : listUrl);
+  // Mientras no se sabe cómo es la vista que se abre (la primera vez, sin sus datos en el navegador), no se trae nada.
+  const sinVista = cfgDe === '';
+  const sinLista = mode === 'board' || sinVista;
+  const list = useAsync(() => (sinLista ? Promise.resolve(undefined as unknown as ListRes) : http<ListRes>('GET', listUrl)),
+    [type, dq, JSON.stringify(groups), cfg.sort, cfg.dir, page, pageSize, cfg.columns.includes('__company'), sinLista], sinLista ? undefined : listUrl);
 
   const [, startTransition] = useTransition();
   // Al tocar una pestaña se marca enseguida; el resto (filtros, link, tablero o tabla) va después, sin trabar la pantalla.
@@ -449,10 +464,12 @@ function IndexFor({ type }: { type: ObjectType }) {
   const esPedidos = type === 'order' && mode === 'table';
   const prodRes = useProduccionPedidos(esPedidos ? (list.data?.results ?? []).map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
   // La página de Pedidos se muestra junto con sus productos: si no, aparecía sin ellos y un instante después se estiraba
-  // (la pantalla «titilaba» al entrar, al cambiar de página o de pestaña). Mientras llegan, queda lo de antes, atenuado.
+  // (la pantalla «titilaba» al entrar, al cambiar de página o de pestaña). Mientras llegan, queda lo de antes, atenuado;
+  // si tardan demasiado, se muestra sin ellos.
+  const tardan = useEsperaCorta(!!list.data && !prodRes.listo);
   const mostrada = useRef<{ data?: ListRes; prod: typeof prodRes.pedidos; adjuntos: typeof prodRes.adjuntos }>({ prod: {}, adjuntos: {} });
-  if (list.data && prodRes.listo) mostrada.current = { data: list.data, prod: prodRes.pedidos, adjuntos: prodRes.adjuntos };
-  const esperaProductos = !!list.data && !prodRes.listo;
+  if (list.data && (prodRes.listo || tardan)) mostrada.current = { data: list.data, prod: prodRes.pedidos, adjuntos: prodRes.adjuntos };
+  const esperaProductos = !!list.data && !prodRes.listo && !tardan;
   const { prod, adjuntos } = mostrada.current;
   const rows = (mostrada.current.data?.results ?? []).map((r) => (patched[r.id] ? { ...r, ...patched[r.id] } : r));
   const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
@@ -551,7 +568,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       {/* Las vistas (Todos, Míos, guardadas) y los filtros valen para la tabla y para el tablero, como en HubSpot.
           Cada uno ordena sus pestañas arrastrándolas (el orden queda en su usuario) y la primera es la que se abre al entrar. */}
       <div className="tabs">
-        {visibles.map((k, i) => {
+        {!sinVista && visibles.map((k, i) => {
           const v = vistaDe(k);
           if (!v) return (
             <div key={k} className={`tab-wrap${activeView === k ? ' on' : ''}${claseArrastre(k)}`} {...arrastre(k)}>
@@ -571,7 +588,8 @@ function IndexFor({ type }: { type: ObjectType }) {
             </div>
           );
         })}
-        <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>
+        {/* Sin las vistas todavía: el renglón queda (no salta lo de abajo), vacío hasta que llegan. */}
+        {sinVista ? <span className="tab" aria-hidden="true">&nbsp;</span> : <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>}
       </div>
 
       {selected.size > 0 && (
@@ -580,7 +598,7 @@ function IndexFor({ type }: { type: ObjectType }) {
           onSelectAll={() => setSelAll(true)} onClear={() => setSelected(new Set())}
           onDone={() => { setSelected(new Set()); list.reload(); setBoardKey((k) => k + 1); }} />
       )}
-      {mode === 'board' && type === 'deal' ? <Board vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
+      {sinVista ? <Cargando /> : mode === 'board' && type === 'deal' ? <Board vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
         : mode === 'board' ? <PropBoard productos={type === 'order' ? productos : undefined} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
           cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}

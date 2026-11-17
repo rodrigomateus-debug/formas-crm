@@ -38,6 +38,18 @@ export function useProduccionPedidos(ids: number[], activo: boolean, version: un
   return { ...(r.data ?? VACIO), listo: !url || r.fresh };
 }
 
+// Esperar los productos, pero no más de un rato: si tardan, se muestra lo que hay y los productos llegan después (mejor
+// eso que la pantalla quieta en «Cargando…»). Devuelve true cuando ya se esperó demasiado.
+export function useEsperaCorta(esperando: boolean, ms = 600) {
+  const [harto, setHarto] = useState(false);
+  useEffect(() => {
+    if (!esperando) { setHarto(false); return; }
+    const t = window.setTimeout(() => setHarto(true), ms);
+    return () => window.clearTimeout(t);
+  }, [esperando, ms]);
+  return esperando && harto;
+}
+
 // Lo entregado de un producto según los remitos, en los pedidos con entregas a medias: «80 de 150 entregadas» (qué falta
 // llevar) o, si ya se entregó todo, el tilde.
 function Entregado({ a }: { a: ArticuloPedido }) {

@@ -30,12 +30,14 @@ interface Articulo {
   proveedor_sku?: string | null;   // el SKU, si el proveedor lo puso el CRM por el SKU (completarProveedores)
   sku?: string | null;             // el SKU, si puede llevar notas de producto (no los genéricos)
   notas?: ResumenNotas | null;     // las notas de Producción de ese SKU (notasProducto.tsx)
+  costo_logo?: CostoLogo | null;   // lo que se tomó para el logo en la cotización del STP, por unidad (costoslogo.ts)
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: Articulo[];
 }
+interface CostoLogo { logo: number; setup: number; cantidad: number | null; fuente: 'costos' | 'pedido' }
 interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null; produccion?: number }
 interface Opcion { campo: 'proveedor' | 'impresor'; option_id: string; nombre: string; color: string | null; orden: number; company_id: number | null; empresa: string | null }
 interface Estado { status: string; color: string; type: string }
@@ -647,7 +649,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
     <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
-      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span><AvisoLogo estado={a.logo} /><Notas a={a} p={p} v={v} /></div></td>
+      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span><AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} /><Notas a={a} p={p} v={v} /></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
@@ -671,6 +673,20 @@ const AVISOS_LOGO: Record<string, string> = {
   textos: 'El logo tiene textos sin pasar a curvas',
   no_vectorial: 'El logo no es vectorial (es una imagen)',
 };
+// Lo que se tomó para el logo en la cotización (pedido de Rodrigo del 17/11/2026): costo del logo + setup prorrateado, por
+// unidad; al pasar el mouse, el detalle y el total por la cantidad. En $0, la cotización no tomó nada para el logo.
+const pesos = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 });
+function CostoLogoChip({ c, cantidad }: { c?: CostoLogo | null; cantidad: number | null }) {
+  if (!c) return null;
+  const u = c.logo + c.setup;
+  const cant = cantidad ?? c.cantidad;
+  const de = c.fuente === 'costos' ? 'modo costos del STP' : 'pedido del STP';
+  const title = u > 0
+    ? `Tomado para el logo en la cotización: logo ${pesos.format(c.logo)} + setup prorrateado ${pesos.format(c.setup)} = ${pesos.format(u)} por unidad${cant ? ` · ${pesos.format(u * cant)} por ${cant.toLocaleString('es-AR')} u.` : ''} (${de}).`
+    : `La cotización no tomó costo de logo ni setup para este producto (${de}).`;
+  return <span className={`prod-costo-logo${u > 0 ? '' : ' cero'}`} title={title} aria-label={title}>Logo {pesos.format(u)}/u</span>;
+}
+
 function AvisoLogo({ estado }: { estado?: string | null }) {
   const t = estado ? AVISOS_LOGO[estado] : null;
   if (!t) return null;
@@ -803,7 +819,7 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
       <div className="row" style={{ gap: 8, minWidth: 0, alignItems: 'flex-start' }}>
         <FotoProducto url={a.foto} nombre={a.nombre} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}<AvisoLogo estado={a.logo} /><Notas a={a} p={p} v={v} /></div>
+          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}<AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} /><Notas a={a} p={p} v={v} /></div>
           <div className="small muted ellipsis prod-card-provs">
             {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>]
               .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}

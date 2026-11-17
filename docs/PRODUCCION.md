@@ -43,6 +43,27 @@ artículos abiertos a las mismas personas (no los entregados, anulados ni servic
 aparte. Se escribe en ClickUp en el momento; si ClickUp no acepta algún artículo, el PDV queda reasignado y se avisa
 cuántos artículos quedaron como estaban (`reasignarArticulos` en `produccion.ts`).
 
+**Costo del logo** (pedido de Rodrigo del 17/11/2026). Al lado del nombre de cada artículo (lista y tablero), «Logo $X/u»:
+lo que se tomó para el logo en la cotización del STP, por unidad (costo del logo + setup prorrateado). Al pasar el mouse,
+el detalle y el total por la cantidad. «Logo $0/u» (apagado) es que la cotización no tomó nada para el logo; sin la
+pastilla, el producto no está en una cotización del STP (pedidos cargados directo en Finnegans) o todavía no se cruzó.
+
+- Sale de dos exports del STP, cada hora con las fotos (`scripts/stp-costos-logo.mjs` en
+  `.github/workflows/pedidos-totales.yml`): `cotizaciones_modo_costos` (LOGOS y SETUP que cargó la vendedora, desde
+  septiembre de 2026) y, si el producto no está ahí con COSTO TOTAL, `pedidos_sku_formas` (COSTO EXTRA y SETUP
+  PRORRATEADO). Es la misma regla del costo teórico del tablero de Formas (`formas-tablero`, `claude/comisiones.py`).
+  Los pedidos cancelados no van. El setup ya viene prorrateado por unidad en el STP.
+- Se cruza por el PDV de Finnegans del pedido y el SKU del artículo. Si el SKU se repite en el pedido (los genéricos
+  `_GE_`, o el mismo producto con dos logos), el de la misma cantidad y, si no, el que más se parece por el nombre.
+- Si el setup se cobró aparte como servicio («Setup Logo» en Finnegans) y no en la cotización, no está acá: se ve en los
+  productos del pedido como servicio.
+
+| Qué | Dónde |
+|---|---|
+| Tabla `stp_costos_logo` | `migrations/0071_costos_logo.sql` |
+| Guardar y cruzar con los artículos | `src/worker/costoslogo.ts` (`POST /hooks/productos/costos-logo`, token de administrador) |
+| Prueba de punta a punta | `test/produccion.test.mjs` |
+
 **Entrega pactada y entrega real** (pedido de Rodrigo del 13/11/2026). La pactada es la del comercial: la fecha de
 entrega del pedido de venta en Finnegans. Es del PDV entero y puede cambiar después de creado: cada vez que el CRM relee
 el pedido de Finnegans (al menos una vez por día mientras está activo), si la fecha es otra la actualiza en «Fecha de

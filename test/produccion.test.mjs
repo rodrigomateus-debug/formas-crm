@@ -355,3 +355,35 @@ test('producción: el proveedor que falta sale del SKU y se escribe en ClickUp',
   assert.equal(estado.arts[moch.task_id].proveedor, null);
   assert.equal(despues.proveedor_sku, null);
 });
+
+test('producción: cada artículo con lo que se tomó para el logo en la cotización del STP', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const tok = (await api('POST', '/tokens', { name: `Costos logo ${RUN}`, source: 'api' })).data.token;
+  const hook = async (body, auth = true) => {
+    const res = await fetch(`${BASE}/hooks/productos/costos-logo`, { method: 'POST', body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${tok}` } : {}) } });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  assert.equal((await hook({ filas: [] }, false)).status, 401, 'sin token no');
+  assert.equal((await hook({ nada: 1 })).status, 400);
+  // El Necessaire con logo y setup (del modo costos); la Pelota, dos veces el mismo SKU: va la de su cantidad (600).
+  const r = await hook({ filas: [
+    [`PEDVTASTP - ${PDV}`, `NEC_${RUN}`, 'Necessaire', 600, 350.5, 49.5, 'costos'],
+    [`PEDVTASTP - ${PDV}`, 'PEL_1', 'Pelota chica', 100, 999, 0, 'pedido'],
+    [`PEDVTASTP - ${PDV}`, 'PEL_1', 'Pelota', 600, 0, 0, 'pedido'],
+  ] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.recibidos, 3);
+  const pdv = pdvDe(await vista(), PDV);
+  const nec = pdv.articulos.find((a) => a.nombre.startsWith('Necessaire'));
+  assert.deepEqual(nec.costo_logo, { logo: 350.5, setup: 49.5, cantidad: 600, fuente: 'costos' });
+  const pelota = pdv.articulos.find((a) => a.nombre.startsWith('Pelota'));
+  assert.deepEqual(pelota.costo_logo, { logo: 0, setup: 0, cantidad: 600, fuente: 'pedido' }, 'el de la misma cantidad');
+  assert.equal(pdv.articulos.find((a) => a.nombre.startsWith('Set pinturas')).costo_logo, null, 'sin cotización, nada');
+  // Un envío nuevo del pedido reemplaza el anterior.
+  await hook({ filas: [[`PEDVTASTP - ${PDV}`, `NEC_${RUN}`, 'Necessaire', 600, 100, 0, 'pedido']] });
+  const otra = pdvDe(await vista(), PDV);
+  assert.deepEqual(otra.articulos.find((a) => a.nombre.startsWith('Necessaire')).costo_logo, { logo: 100, setup: 0, cantidad: 600, fuente: 'pedido' });
+  assert.equal(otra.articulos.find((a) => a.nombre.startsWith('Pelota')).costo_logo, null);
+});

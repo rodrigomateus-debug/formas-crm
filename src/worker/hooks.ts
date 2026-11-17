@@ -14,6 +14,7 @@ import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from '
 import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
+import { aplicarCostosLogo } from './costoslogo';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
 
@@ -483,6 +484,13 @@ hooks.get('/productos/imagenes', async (c) => {
   const de = (k: string) => { const r = results.find((x) => x.key === k); return r ? JSON.parse(r.value) : null; };
   const filas = de('imagenes_stp'), productos = de('imagenes_stp_productos');
   return c.json(filas || productos ? { ...filas, productos } : null);
+});
+
+// Costo del logo de cada producto, de las cotizaciones del STP (scripts/stp-costos-logo.mjs):
+// {filas: [["PEDVTASTP - 31277", "SKU", "Nombre", 100, 1500, 200, "costos"], …]} (ver aplicarCostosLogo en costoslogo.ts).
+hooks.post('/productos/costos-logo', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await aplicarCostosLogo(c.env, await c.req.json()));
 });
 
 // Bocetos en Drive: dónde se guardan (lo mismo que Configuración → Integraciones) y probar el acceso.

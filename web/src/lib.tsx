@@ -19,7 +19,7 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 // photo_url: la foto de su cuenta de Google (la trae el CRM, src/worker/fotos.ts); sin foto, se ven sus iniciales.
-export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
+export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
@@ -174,15 +174,24 @@ export function defaultPipeline(meta: Meta) {
     ?? meta.pipelines.find((p) => p.id === meta.me.deal_pipelines?.[0])
     ?? meta.pipelines[0];
 }
-// Quién ve un pipeline (misma regla que el servidor): sin equipos, todos; si no, sus equipos y los administradores.
+// Quién ve un pipeline (misma regla que el servidor): los administradores, todos; quien tiene pipelines elegidos en
+// Configuración → Usuarios, esos; si no, sin equipos en el pipeline, todos, y con equipos, los de esos equipos.
 export function userTeams(u: User) {
   let extra: number[] = [];
   try { extra = JSON.parse(u.extra_teams ?? '[]'); } catch { /* sin equipos extra */ }
   return new Set([u.team_id, ...extra].filter((t): t is number => t != null).map(Number));
 }
+// Los pipelines elegidos para el usuario en Configuración → Usuarios (null: según sus equipos).
+export function pipelinesDe(u: Pick<User, 'pipelines'>): string[] | null {
+  if (!u.pipelines) return null;
+  try { const v = JSON.parse(u.pipelines); return Array.isArray(v) ? v.map(String) : null; } catch { return null; }
+}
 export function canSeePipeline(u: User, p: Pipeline) {
+  if (u.role === 'admin') return true;
+  const elegidos = pipelinesDe(u);
+  if (elegidos) return elegidos.includes(p.id);
   const teams = p.config.visible_teams ?? [];
-  if (u.role === 'admin' || !teams.length) return true;
+  if (!teams.length) return true;
   const mine = userTeams(u);
   return teams.some((t) => mine.has(Number(t)));
 }
@@ -417,6 +426,9 @@ const paths: Record<string, string> = {
   filter: 'M3 5h18l-7 8v6l-4 2v-8z',
   columns: 'M4 4h6v16H4zM14 4h6v16h-6z',
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
+  refresh: 'M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4',
+  undo: 'M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
+  copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
   upload: 'M12 21V9M7 14l5-5 5 5M4 3h16',
   menu: 'M4 6h16M4 12h16M4 18h16',
   dots: 'M5 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2ZM12 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2ZM19 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z',

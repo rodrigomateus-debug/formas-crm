@@ -577,7 +577,8 @@ export function FilterRow({ type, f, onChange, onRemove }: { type: ObjectType; f
   );
 }
 
-export function MultiPick({ options, values, onChange, small }: { options: { value: string; label: string }[]; values: string[]; onChange: (v: string[]) => void; small?: boolean }) {
+// `resumen`: lo que se lee en el botón en lugar de la lista de lo elegido (por ejemplo, «Todos»).
+export function MultiPick({ options, values, onChange, small, resumen }: { options: { value: string; label: string }[]; values: string[]; onChange: (v: string[]) => void; small?: boolean; resumen?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -585,10 +586,11 @@ export function MultiPick({ options, values, onChange, small }: { options: { val
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
-  const label = values.length ? values.map((v) => options.find((o) => o.value === v)?.label ?? v).join(', ') : 'Elegir…';
+  const lista = values.map((v) => options.find((o) => o.value === v)?.label ?? v).join(', ');
+  const label = resumen ?? (values.length ? lista : 'Elegir…');
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} title={values.length ? label : undefined}><span className="select-value">{label}</span></button>
+      <button type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} title={values.length ? lista : undefined}><span className="select-value">{label}</span></button>
       {open && (
         <div className="popover" style={{ top: 38, left: 0 }}>
           {options.map((o) => (

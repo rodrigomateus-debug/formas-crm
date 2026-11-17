@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { http, useMeta, useToast, Icon } from './lib';
 import { Modal } from './components';
 import { Select, useFloating } from './Select';
@@ -11,15 +12,17 @@ export interface VistaGuardada<C = unknown> { id: number; name: string; shared: 
 // Con quién se comparte una vista: solo yo, todos, o un equipo (Corporate, Formas Shop, NOESTRES).
 export const shareBody = (v: string) => (v === 'all' ? { shared: true, team_id: null } : v === 'me' ? { shared: false, team_id: null } : { shared: false, team_id: Number(v) });
 export const shareOf = (v: VistaGuardada) => (v.shared ? 'all' : v.team_id ? String(v.team_id) : 'me');
-export function ShareSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function ShareSelect({ value, onChange, compacto }: { value: string; onChange: (v: string) => void; compacto?: boolean }) {
   const { meta } = useMeta();
+  const opciones = <>
+    <option value="me">{compacto ? 'La ve: solo yo' : 'Solo yo'}</option>
+    <option value="all">{compacto ? 'La ve: todo el equipo' : 'Todo el equipo'}</option>
+    {meta.teams.map((t) => <option key={t.id} value={t.id}>{compacto ? 'La ve: equipo ' : 'Equipo '}{t.name}</option>)}
+  </>;
+  if (compacto) return <Select className="input sm" style={{ width: 190 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Quién la ve">{opciones}</Select>;
   return (
     <label className="field">Quién la ve
-      <Select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="me">Solo yo</option>
-        <option value="all">Todo el equipo</option>
-        {meta.teams.map((t) => <option key={t.id} value={t.id}>Equipo {t.name}</option>)}
-      </Select>
+      <Select className="input" value={value} onChange={(e) => onChange(e.target.value)}>{opciones}</Select>
     </label>
   );
 }
@@ -82,23 +85,77 @@ export function ViewMenu({ type, view, onChanged, onDeleted, onMover, puedeIzq, 
   );
 }
 
-export function SaveView({ type, config, onClose, onSaved, ayuda }: { type: string; config: unknown; onClose: () => void; onSaved: (id: number) => void; ayuda?: string }) {
-  const [name, setName] = useState('');
-  const [share, setShare] = useState('me');
+// ---------- La barra de abajo de las vistas (como la de HubSpot) ----------
+// Siempre a la vista al pie de la pantalla, sin ventanas que se abran: cuántos hay, el paginado de la tabla, actualizar,
+// exportar (a quien puede), descartar los cambios, duplicar la vista con otro nombre y guardar (pedido de Rodrigo del
+// 17/11/2026). Duplicar y guardar una vista nueva piden el nombre ahí mismo, en la barra. Se dibuja en el hueco que
+// App deja al pie (#barra-vista), así queda abajo de todo y el resto de la página ocupa lo que sobra.
+export type CrearVista = '' | 'nueva' | 'duplicar';
+export function BarraVista<C>({ tipo, total, centro, abierta, cambiada, filtrosCambiados, puedeGuardar, onDescartar, onGuardar, actual, onCreada,
+  crear, setCrear, onRecargar, onExportar, ayudaGuardar }: {
+  tipo: string; total?: ReactNode; centro?: ReactNode; abierta?: VistaGuardada; cambiada: boolean; filtrosCambiados: boolean; puedeGuardar: boolean;
+  onDescartar: () => void; onGuardar: () => void; actual: C; onCreada: (id: number) => void;
+  crear: CrearVista; setCrear: (c: CrearVista) => void; onRecargar?: () => void; onExportar?: () => void; ayudaGuardar?: string;
+}) {
   const toast = useToast();
-  return (
-    <Modal title="Guardar vista" onClose={onClose} footer={<>
-      <button className="btn" onClick={onClose}>Cancelar</button>
-      <button className="btn primary" disabled={!name.trim()} onClick={async () => {
-        try { const v = await http<{ id: number }>('POST', `/views/${type}`, { name, ...shareBody(share), config }); toast('Vista guardada'); onSaved(v.id); }
-        catch (e) { toast((e as Error).message, true); }
-      }}>Guardar</button>
-    </>}>
-      <label className="field">Nombre<input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej.: Corporate sin actividad 30 días" /></label>
-      <ShareSelect value={share} onChange={setShare} />
-      <p className="muted small" style={{ margin: 0 }}>{ayuda ?? `Guarda filtros, propietario, columnas, orden, búsqueda y si se ve en tabla o tablero${type === 'deal' ? ', con el pipeline' : ''}.`}</p>
-    </Modal>
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSlot(document.getElementById('barra-vista')); }, []);
+  const [nombre, setNombre] = useState('');
+  const [share, setShare] = useState('me');
+  const [yendo, setYendo] = useState(false);
+  // Al abrir el nombre: vacío para una vista nueva; para duplicar, el de la vista con «(copia)» y compartida igual.
+  useEffect(() => {
+    if (!crear) return;
+    setNombre(crear === 'duplicar' && abierta ? `${abierta.name} (copia)` : '');
+    setShare(crear === 'duplicar' && abierta ? shareOf(abierta) : 'me');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [crear]);
+  const hayCambios = cambiada || filtrosCambiados;
+  const crearla = async () => {
+    if (!nombre.trim() || yendo) return;
+    setYendo(true);
+    try {
+      const v = await http<{ id: number }>('POST', `/views/${tipo}`, { name: nombre.trim(), ...shareBody(share), config: actual });
+      toast(crear === 'duplicar' ? `Vista duplicada como «${nombre.trim()}»` : `Vista «${nombre.trim()}» guardada`);
+      setCrear('');
+      onCreada(v.id);
+    } catch (e) { toast((e as Error).message, true); } finally { setYendo(false); }
+  };
+  const guardar = () => (cambiada ? onGuardar() : setCrear('nueva'));
+  const barra = (
+    <div className={`barra-vista${hayCambios ? ' con-cambios' : ''}`} role="region" aria-label="Vista: guardar, duplicar y exportar">
+      {total != null && <span className="bv-total">{total}</span>}
+      {crear ? (
+        <form className="bv-crear" onSubmit={(e) => { e.preventDefault(); crearla(); }} onKeyDown={(e) => { if (e.key === 'Escape') setCrear(''); }}>
+          <span className="bv-crear-t">{crear === 'duplicar' && abierta ? <>Duplicar <b>{abierta.name}</b> como</> : 'Nueva vista'}</span>
+          <input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} aria-label="Nombre de la vista"
+            placeholder="Nombre, ej.: Corporate sin actividad 30 días"
+            title={ayudaGuardar ?? `Guarda filtros, propietario, columnas, orden, búsqueda y si se ve en tabla o tablero${tipo === 'deal' ? ', con el pipeline' : ''}.`} />
+          <ShareSelect value={share} onChange={setShare} compacto />
+          <button type="button" className="btn sm ghost" onClick={() => setCrear('')}>Cancelar</button>
+          <button type="submit" className="btn sm primary" disabled={!nombre.trim() || yendo}>{crear === 'duplicar' ? 'Duplicar' : 'Crear vista'}</button>
+        </form>
+      ) : <>
+        {centro && <div className="bv-centro">{centro}</div>}
+        <span className="bv-estado" aria-live="polite">{cambiada && abierta ? <>Cambios sin guardar en <b>{abierta.name}</b></> : filtrosCambiados ? 'Filtros sin guardar' : ''}</span>
+        <div className="bv-acciones">
+          {onRecargar && <button type="button" className="btn sm icon" title="Actualizar" aria-label="Actualizar" onClick={onRecargar}><Icon name="refresh" size={15} /></button>}
+          {onExportar && <button type="button" className="btn sm" onClick={onExportar} title="Descarga lo que ves (con estos filtros y columnas) en un CSV"><Icon name="download" size={15} />Exportar</button>}
+          <div className="btn-group bv-grupo" role="group" aria-label="Guardar la vista">
+            <button type="button" className="btn sm icon" disabled={!hayCambios} onClick={onDescartar}
+              title={hayCambios ? 'Descartar los cambios (vuelve a como estaba guardada)' : 'No hay cambios para descartar'} aria-label="Descartar los cambios"><Icon name="undo" size={15} /></button>
+            <button type="button" className="btn sm icon" onClick={() => setCrear(abierta ? 'duplicar' : 'nueva')}
+              title={abierta ? `Duplicar «${abierta.name}» con otro nombre (con lo que ves ahora)` : 'Guardar lo que ves como una vista nueva'} aria-label="Duplicar la vista"><Icon name="copy" size={15} /></button>
+            <button type="button" className={`btn sm${hayCambios ? ' primary' : ''}`} onClick={guardar}
+              disabled={!hayCambios || (cambiada && !puedeGuardar)}
+              title={!hayCambios ? 'No hay cambios para guardar' : cambiada && !puedeGuardar ? 'Solo quien creó la vista (o un administrador) la puede cambiar: duplicala para guardar tus cambios' : cambiada ? `Guardar los cambios en «${abierta?.name}»` : 'Guardar estos filtros como una vista nueva'}>
+              Guardar</button>
+          </div>
+        </div>
+      </>}
+    </div>
   );
+  return slot ? createPortal(barra, slot) : null;
 }
 
 // ---------- Pestañas de vistas (Producción; la lista de Pedidos y los demás objetos tienen las suyas en ObjectIndex) ----------
@@ -134,17 +191,17 @@ export function useOrdenPestanas(tipo: string, vistas: VistaGuardada[] | undefin
 
 const AYUDA_ORDEN = 'Arrastrala para cambiar el orden: la primera es la que se abre al entrar.';
 
-// La fila de pestañas, «+ Agregar vista» y, con cambios sin guardar, la barra de abajo (Descartar, Guardar, Guardar como
-// nueva), igual que en Pedidos. Quien la usa dice qué hay ahora (`actual`), cómo comparar dos configuraciones y si en
+// La fila de pestañas, «+ Agregar vista» y la barra de abajo (BarraVista), igual que en Pedidos. Quien la usa dice qué hay ahora (`actual`), cómo comparar dos configuraciones y si en
 // «Todos» o «Míos» se cambiaron los filtros.
-export function PestanasVistas<C>({ tipo, vistas, pestanas, guardarOrden, activa, onElegir, recargar, actual, igual, filtrosCambiados, ayudaGuardar }: {
+export function PestanasVistas<C>({ tipo, vistas, pestanas, guardarOrden, activa, onElegir, recargar, actual, igual, filtrosCambiados, ayudaGuardar, total, onActualizar }: {
   tipo: string; vistas: Array<VistaGuardada<C>> | undefined; pestanas: string[]; guardarOrden: (ids: string[]) => void;
   activa: string; onElegir: (key: string) => void; recargar: () => void;
   actual: C; igual: (a: C, b: C) => boolean; filtrosCambiados: boolean; ayudaGuardar?: string;
+  total?: ReactNode; onActualizar?: () => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const [guardando, setGuardando] = useState(false);
+  const [crear, setCrear] = useState<CrearVista>('');
   const [recien, setRecien] = useState<Record<number, C>>({});
   const [arrastrando, setArrastrando] = useState<string | null>(null);
   const [marca, setMarca] = useState<{ k: string; lado: 'antes' | 'despues' } | null>(null);
@@ -202,22 +259,11 @@ export function PestanasVistas<C>({ tipo, vistas, pestanas, guardarOrden, activa
             </div>
           );
         })}
-        <button className="tab add" onClick={() => setGuardando(true)}>+ Agregar vista</button>
+        <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>
       </div>
-      {(cambiada || (esFija(activa) && filtrosCambiados)) && (
-        <div className="save-bar" role="region" aria-label="Cambios sin guardar en la vista">
-          <span className="grow">{cambiada ? <>Cambiaste la vista <b>{abierta!.name}</b></> : 'Cambiaste los filtros'}</span>
-          <button className="btn sm ghost" onClick={() => onElegir(activa)}>Descartar</button>
-          {cambiada ? <>
-            <button className="btn sm" onClick={() => setGuardando(true)}>Guardar como nueva</button>
-            {puedeGuardar
-              ? <button className="btn sm primary" onClick={guardar}>Guardar</button>
-              : <button className="btn sm primary" disabled title="Solo quien creó la vista (o un administrador) la puede cambiar">Guardar</button>}
-          </> : <button className="btn sm primary" onClick={() => setGuardando(true)}>Guardar como vista nueva</button>}
-        </div>
-      )}
-      {guardando && <SaveView type={tipo} config={actual} ayuda={ayudaGuardar}
-        onClose={() => setGuardando(false)} onSaved={(id) => { setGuardando(false); recargar(); onElegir(String(id)); }} />}
+      <BarraVista tipo={tipo} total={total} abierta={abierta} cambiada={cambiada} filtrosCambiados={esFija(activa) && filtrosCambiados} puedeGuardar={puedeGuardar}
+        onDescartar={() => onElegir(activa)} onGuardar={guardar} actual={actual} onCreada={(id) => { recargar(); onElegir(String(id)); }}
+        crear={crear} setCrear={setCrear} onRecargar={onActualizar} ayudaGuardar={ayudaGuardar} />
     </>
   );
 }

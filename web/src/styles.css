@@ -274,13 +274,18 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .view-menu-btn { width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); background: none;
   color: var(--ui-ink-3); cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
 .view-menu-btn:hover, .view-menu-btn.on { background: var(--ui-surface-sunken); color: var(--accent-ink); }
-.save-bar { position: fixed; bottom: 20px; left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2); transform: translateX(-50%); z-index: 44;
-  display: flex; gap: 8px; align-items: center; min-width: min(520px, calc(100vw - var(--sidebar-w) - 32px)); max-width: calc(100vw - var(--sidebar-w) - 32px);
-  background: var(--ui-surface); border-radius: var(--r-panel); box-shadow: var(--shadow-pop); padding: 10px 12px 10px 16px; font-size: 13px;
-  animation: save-bar-in var(--dur-slow) var(--ease-out); }
-.save-bar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-body:has(.save-bar) .toast { bottom: 88px; }
-@keyframes save-bar-in { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
+.barra-vista { flex: none; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px var(--gutter); background: var(--ui-surface);
+  border-top: 1px solid var(--ui-line); font-size: 13px; }
+.barra-vista .bv-total { flex: none; padding: 4px 12px; border-radius: 999px; background: var(--ui-surface-sunken); font-weight: 600; white-space: nowrap; }
+.barra-vista .bv-centro .pager { padding: 0; }
+.barra-vista .bv-estado { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink-2); }
+.barra-vista.con-cambios .bv-estado { color: var(--accent-ink); }
+.barra-vista .bv-acciones { flex: none; display: flex; align-items: center; gap: 8px; }
+.barra-vista .bv-grupo { flex-wrap: nowrap; }
+.barra-vista .bv-crear { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.barra-vista .bv-crear-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink-2); }
+.barra-vista .bv-crear .input:not(select) { width: 280px; min-width: 120px; flex: 0 1 auto; }
+body:has(.barra-vista) .toast { bottom: 76px; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
 .avatar.lg { width: 48px; height: 48px; font-size: 17px; }
 .avatar.sm { width: 20px; height: 20px; font-size: 8px; }
@@ -663,9 +668,12 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
   .record .left { border-right: 0; }
   .content { padding: 16px var(--gutter) 40px; }
   h1 { font-size: 22px; }
-  .save-bar { left: 50%; min-width: 0; max-width: calc(100vw - 32px); width: calc(100vw - 32px); flex-wrap: wrap; }
-  .save-bar > span { flex-basis: 100%; white-space: normal; }
-  body:has(.save-bar) .toast { bottom: 140px; }
+  .barra-vista { flex-wrap: wrap; padding: 8px 16px; gap: 8px; }
+  .barra-vista .bv-estado:empty { display: none; }
+  .barra-vista .bv-centro { order: 9; flex-basis: 100%; }
+  .barra-vista .bv-crear { flex-wrap: wrap; justify-content: flex-start; }
+  .barra-vista .bv-crear .input:not(select) { width: 100%; }
+  body:has(.barra-vista) .toast { bottom: 120px; }
   .grid-2 { grid-template-columns: 1fr; }
   .filter-row { grid-template-columns: 1fr 1fr; }
 }
@@ -736,7 +744,6 @@ table.grid th .col-menu:hover { background: var(--ui-line); color: var(--accent-
   .content.list-fixed { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 6px; }
   .content.list-fixed > * { flex: none; }
   .content.list-fixed > .table-wrap { flex: 1 1 auto; min-height: 200px; }
-  .content.list-fixed > .pager { padding-bottom: 4px; }
 }
 /* Barras de desplazamiento visibles en la tabla (en Mac se esconden si no se fuerzan). */
 .table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }

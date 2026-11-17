@@ -63,12 +63,20 @@ export function useFillHeight() {
   const ref = useRef<HTMLDivElement>(null);
   const [h, setH] = useState<number>();
   useLayoutEffect(() => {
-    const calc = () => { const el = ref.current; if (el) setH(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 12))); };
+    // Hasta la barra de las vistas al pie (#barra-vista, en App), si la hay; si no, hasta el final de la ventana.
+    const pie = document.getElementById('barra-vista');
+    const calc = () => {
+      const el = ref.current;
+      if (!el) return;
+      const hasta = pie && pie.offsetHeight ? pie.getBoundingClientRect().top : window.innerHeight;
+      setH(Math.max(360, Math.floor(hasta - el.getBoundingClientRect().top - 12)));
+    };
     calc();
     window.addEventListener('resize', calc);
     const ro = new ResizeObserver(calc);
     const prev = ref.current?.previousElementSibling;
     if (prev) ro.observe(prev);
+    if (pie) ro.observe(pie);
     return () => { window.removeEventListener('resize', calc); ro.disconnect(); };
   }, []);
   return [ref, h ? { height: h } : undefined] as const;

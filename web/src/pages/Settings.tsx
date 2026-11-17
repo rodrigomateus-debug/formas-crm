@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon, verComo } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, pipelinesDe, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon, verComo } from '../lib';
 import { Avatar, FilterRow, Modal, teclasAlSalir, MultiPick, UserChip, describeFilter, filterableProps, opsFor, userOption } from '../components';
 import { Select } from '../Select';
 
@@ -74,7 +74,7 @@ function Users() {
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       {fotos.data?.error && <p className="small danger-text" style={{ marginTop: 0 }}>Fotos de Google: {fotos.data.error}</p>}
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort">Pipelines que ve</th><th className="nosort" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos por mail</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
+        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort" title="Los pipelines de negocios que le aparecen. Si tiene más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.">Pipelines que ve</th><th className="nosort" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos por mail</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
             <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
@@ -87,7 +87,16 @@ function Users() {
                   : u.superadmin ? <span className="tag">Superadmin</span> : null}</span>
               : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
             <td style={{ minWidth: 190, maxWidth: 240, overflow: 'visible' }}>{teamsPick(teamsOf(u).map(String), (v) => patch(u.id, { teams: v.map(Number) }))}</td>
-            <td className="small" style={{ maxWidth: 150, whiteSpace: 'normal' }}>{pipelinesSummary(u)}</td>
+            <td className="small" style={{ minWidth: 190, maxWidth: 240, whiteSpace: 'normal', overflow: 'visible' }}>{u.role === 'admin'
+              ? <span className="muted">{pipelinesSummary(u)}</span>
+              : <div className="stack" style={{ gap: 2, maxWidth: 240 }}>
+                <MultiPick small options={meta.pipelines.map((p) => ({ value: p.id, label: p.label }))} values={meta.pipelines.filter((p) => canSeePipeline(u, p)).map((p) => p.id)}
+                  resumen={pipelinesSummary(u) === 'Todos' ? 'Todos' : pipelinesSummary(u) === 'Ninguno' ? 'Ninguno' : undefined}
+                  onChange={(v) => patch(u.id, { pipelines: v })} />
+                {pipelinesDe(u)
+                  ? <button type="button" className="cr-link" title="Volver a la regla de cada pipeline (los equipos que lo ven)" onClick={() => patch(u.id, { pipelines: null })}>Elegidos a mano · volver a «según equipos»</button>
+                  : <span className="muted">Según sus equipos</span>}
+              </div>}</td>
             <td><input type="checkbox" checked={!!u.avisos_mail} onChange={(e) => patch(u.id, { avisos_mail: e.target.checked })} aria-label={`Avisos por mail para ${u.name}`} /></td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
             <td style={{ whiteSpace: 'nowrap' }}>{meta.superadmin && u.active && u.id !== meta.me.id && <button className="btn sm ghost icon" title={`Ver el CRM como ${u.name} (solo para mirar)`}
@@ -98,6 +107,7 @@ function Users() {
       </table></div>
       <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial (ventas) ve sus contactos, empresas, negocios y pedidos, lo que no tiene propietario (para tomarlo) y lo asociado a lo suyo, con sus tareas y conversaciones; ve el saldo y la deuda del cliente y los remitos de sus pedidos (para ver y descargar), pero no Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta listas. Producción ve los pedidos, Producción, Entregas y el Cronograma; no ve negocios ni las listas de contactos y empresas (solo abre el cliente y los contactos de un pedido y los proveedores). Logística por ahora ve todo.
         Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.
+        Pipelines que ve: por defecto, según sus equipos (lo que dice cada pipeline en Pipelines); al marcarlos acá quedan elegidos a mano para esa persona. Si ve más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.
         Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito, o su menú abajo a la izquierda), solo para mirar, y dar o sacar este permiso.
         Avisos por mail: el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega. Arranca apagado; solo les llega a los que lo tienen prendido.</p>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
@@ -115,7 +125,7 @@ function Users() {
   );
 }
 
-type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
+type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
   superadmin: number; principal: boolean };
 type Uso = { registros: Record<ObjectType, number>; tareas_abiertas: number; tokens: number; choferes: number };
 

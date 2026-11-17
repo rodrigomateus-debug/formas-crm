@@ -261,7 +261,7 @@ export default function ProduccionPage() {
       </div>
       <PestanasVistas tipo="produccion" vistas={vistas.data} pestanas={pestanas} guardarOrden={guardarOrden} activa={activa} onElegir={elegir}
         recargar={vistas.reload} actual={actual} igual={(a, b) => normConfig(a) === normConfig({ ...b, unidades: b.unidades?.length ? b.unidades : base ?? [] })}
-        filtrosCambiados={filtrosCambiados} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, los filtros por columna, si se ven los entregados y si se ve en lista o tablero." />
+        filtrosCambiados={filtrosCambiados} total={v ? `${filtrados.length} PDV · ${articulos} artículos` : undefined} onActualizar={cargar} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, los filtros por columna, si se ven los entregados y si se ve en lista o tablero." />
       {/* La barra de filtros, igual en todos los módulos: buscar, filtros, «Filtros» y, a la derecha, lo que es de la vista. */}
       <div className="toolbar">
         <div className="search"><Icon name="search" />

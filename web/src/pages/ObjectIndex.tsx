@@ -15,7 +15,7 @@ import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, U
 import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
-import { SaveView, ViewMenu } from '../vistas';
+import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
 import { CeldaOc, CeldaProduccion, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
@@ -189,9 +189,9 @@ function IndexFor({ type }: { type: ObjectType }) {
     try { saved = localStorage.getItem(PIPE_KEY); } catch { /* sin preferencia guardada */ }
     const fromUrl = params.get('pipeline');
     const deLaVista = 'pipeline' in inicio ? inicio.pipeline : undefined;
-    return valid(fromUrl) ? fromUrl! : valid(deLaVista) ? deLaVista! : valid(saved) ? saved! : defaultPipeline(meta).id;
+    return valid(fromUrl) ? fromUrl! : valid(deLaVista) ? deLaVista! : valid(saved) ? saved! : (defaultPipeline(meta)?.id ?? '');
   });
-  const boardPipeline = pipelineSel === 'all' ? defaultPipeline(meta).id : pipelineSel;
+  const boardPipeline = pipelineSel === 'all' ? (defaultPipeline(meta)?.id ?? '') : pipelineSel;
   const setPipelineSel = (v: string) => {
     setPipelineSelRaw(v);
     try { localStorage.setItem(PIPE_KEY, v); } catch { /* ignorar */ }
@@ -231,7 +231,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const [preview, setPreviewState] = useState<{ id: number; compose?: Activity['type'] } | null>(null);
   const setPreview = (id: number | null, compose?: Activity['type']) => setPreviewState(id ? { id, compose } : null);
   const [boardKey, setBoardKey] = useState(0);
-  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'save' | 'import'>('');
+  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'import'>('');
   const vistaDe = (k: string) => views.data?.find((v) => String(v.id) === k);
   // Las que se pueden dibujar (las vistas guardadas aparecen cuando llegan).
   const visibles = pestanas.filter((k) => esFija(k) || vistaDe(k));
@@ -461,6 +461,20 @@ function IndexFor({ type }: { type: ObjectType }) {
     </div>
   );
 
+  // La barra de abajo (BarraVista): cuántos hay, el paginado de la tabla, y el nombre de la vista nueva o duplicada.
+  const [crear, setCrear] = useState<CrearVista>('');
+  const nTotal = mode === 'board' ? boardTotal ?? null : list.data?.total ?? null;
+  const pager = (
+    <div className="pager">
+      <span>Por página</span>
+      <Select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
+        {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
+      </Select>
+      <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>
+      <button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button>
+      <button className="btn sm" disabled={!list.data || (page + 1) * pageSize >= list.data.total} onClick={() => setPage(page + 1)}>Siguiente</button>
+    </div>
+  );
   const exportCsv = () => {
     const url = `/api/export/${type}${qs({ q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, columns: columns.filter((c) => !c.startsWith('__') || c === '__company').join(',') })}`;
     window.location.href = url;
@@ -485,9 +499,8 @@ function IndexFor({ type }: { type: ObjectType }) {
             <button type="button" className={mode === 'board' ? 'on' : ''} aria-pressed={mode === 'board'} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
           </div>
         )}
-        {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). */}
+        {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). Exportar está en la barra de abajo. */}
         {!esVentas(meta.me) && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
-        {!esVentas(meta.me) && <button className="btn" onClick={exportCsv}><Icon name="download" size={16} />Exportar</button>}
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
@@ -514,22 +527,8 @@ function IndexFor({ type }: { type: ObjectType }) {
             </div>
           );
         })}
-        <button className="tab add" onClick={() => setShow('save')}>+ Agregar vista</button>
+        <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>
       </div>
-
-      {/* Con cambios sin guardar aparece la barra abajo (como en HubSpot); al guardar o descartar, se va. */}
-      {(dirty || filtersChanged) && !selected.size && (
-        <div className="save-bar" role="region" aria-label="Cambios sin guardar en la vista">
-          <span className="grow">{dirty ? <>Cambiaste la vista <b>{activeSaved!.name}</b></> : 'Cambiaste los filtros'}</span>
-          <button className="btn sm ghost" onClick={() => applyView(activeView)}>Descartar</button>
-          {dirty ? <>
-            <button className="btn sm" onClick={() => setShow('save')}>Guardar como nueva</button>
-            {canSaveView
-              ? <button className="btn sm primary" onClick={saveView}>Guardar</button>
-              : <button className="btn sm primary" disabled title="Solo quien creó la vista (o un administrador) la puede cambiar">Guardar</button>}
-          </> : <button className="btn sm primary" onClick={() => setShow('save')}>Guardar como vista nueva</button>}
-        </div>
-      )}
 
       {selected.size > 0 && (
         <BulkBar type={type} sel={{ ids: selected, all: selAll }} total={mode === 'board' ? boardTotal : list.data?.total}
@@ -612,15 +611,6 @@ function IndexFor({ type }: { type: ObjectType }) {
           {!list.loading && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
           {list.error && <div className="empty plain">{list.error}</div>}
         </div>
-        <div className="pager">
-          <span>Por página</span>
-          <Select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
-            {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
-          </Select>
-          <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>
-          <button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button>
-          <button className="btn sm" disabled={!list.data || (page + 1) * pageSize >= list.data.total} onClick={() => setPage(page + 1)}>Siguiente</button>
-        </div>
       </>}
 
       {preview && <RecordPreview key={`${preview.id}-${preview.compose ?? ''}`} type={type} id={preview.id} compose={preview.compose} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
@@ -628,7 +618,13 @@ function IndexFor({ type }: { type: ObjectType }) {
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} addProp={filterProp} onClose={() => { setShow(''); setFilterProp(undefined); }} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); setFilterProp(undefined); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
-      {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }} />}
+      <BarraVista tipo={type} abierta={activeSaved} cambiada={dirty} filtrosCambiados={filtersChanged} puedeGuardar={canSaveView}
+        total={nTotal == null ? null : `${nTotal.toLocaleString('es-AR')} ${nTotal === 1 ? OBJECTS[type].single.toLowerCase() : OBJECTS[type].plural.toLowerCase()}`}
+        centro={mode === 'table' ? pager : undefined}
+        onDescartar={() => applyView(activeView)} onGuardar={saveView} actual={current}
+        onCreada={(id) => { views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }}
+        crear={crear} setCrear={setCrear} onRecargar={() => { list.reload(); setBoardKey((k) => k + 1); }}
+        onExportar={esVentas(meta.me) ? undefined : exportCsv} />
     </div>
   );
 }

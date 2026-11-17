@@ -119,7 +119,7 @@ api.get('/meta', async (c) => {
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
-    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -1826,7 +1826,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; pipelines?: string[] | null }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -1841,6 +1841,12 @@ api.patch('/users/:id', async (c) => {
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
     if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
+  }
+  // Pipelines que ve: la lista elegida (solo ids que existen) o null para volver a «según sus equipos».
+  if (b.pipelines !== undefined) {
+    const existen = new Set((await new Meta(c.env.DB).pipelines()).map((p) => p.id));
+    const ids = b.pipelines === null ? null : [...new Set(b.pipelines.map(String))].filter((id) => existen.has(id));
+    await c.env.DB.prepare('UPDATE users SET pipelines = ? WHERE id = ?').bind(ids ? JSON.stringify(ids) : null, cur.id).run();
   }
   const { team_id, extra_teams } = equiposDe(b, cur);
   await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ?, avisos_mail = ? WHERE id = ?')

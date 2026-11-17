@@ -893,6 +893,10 @@ table.grid tr:hover td.name .peek { background: var(--ui-surface); box-shadow: -
 .prod-logo-aviso { display: inline-flex; align-items: center; gap: 3px; flex: none; margin-left: 6px; padding: 1px 5px; border-radius: var(--r-pill); font-size: 11px;
   font-weight: 500; line-height: 16px; background: var(--ui-warning-soft); color: var(--ui-warning-ink); white-space: nowrap; }
 .prod-logo-aviso.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+/* Lo que se tomó para el logo en la cotización (CostoLogoChip en Produccion.tsx); en $0, apagado. */
+.prod-costo-logo { display: inline-flex; align-items: center; flex: none; margin-left: 6px; padding: 1px 6px; border-radius: var(--r-pill); font-size: 11px;
+  font-weight: 600; line-height: 16px; background: var(--accent-soft); color: var(--accent-ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.prod-costo-logo.cero { background: var(--ui-surface-sunken); color: var(--ui-ink-3); font-weight: 500; }
 /* Mientras sube un boceto: qué está haciendo (leyendo, subiendo con el %, guardando en Drive) y una barrita. */
 .boceto-progreso { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--r-control); background: var(--accent-soft); color: var(--accent-ink);
   font-size: 12px; font-weight: 500; animation: fade-in var(--dur) var(--ease-out); }

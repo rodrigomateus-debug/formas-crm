@@ -120,6 +120,8 @@ before(async () => {
       if (p === '/clickup/list/901326159292') return send({ statuses: [{ status: 'ingreso de pedido', color: 'var(--cu-status-red)', type: 'open' }, { status: 'pdv', color: '#a18072', type: 'unstarted' }, { status: 'en revision', color: '#0f9d9f', type: 'custom' },
         { status: 'en el impresor', color: '#ffc53d', type: 'custom' }, { status: 'listo para entergar', color: '#008844', type: 'custom' },
         { status: 'anulado', color: '#8d8d8d', type: 'done' }, { status: 'entregados', color: '#008844', type: 'closed' }] });
+      // La gente del espacio de ClickUp (para quien todavía no tiene nada asignado).
+      if (p === '/clickup/team') return send({ teams: [{ id: 1, members: [{ user: CECI }, { user: SOLE }] }] });
       if (p === '/clickup/list/901326159292/task') {
         const since = Number(url.searchParams.get('date_updated_gt') ?? 0);
         const tasks = PDVS().flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > since);
@@ -243,10 +245,19 @@ test('producción: editar desde el CRM escribe en ClickUp y cambia el pedido', a
   assert.equal(r.status, 200);
   assert.deepEqual(escrito[0].body, { value: OP_PROV[2].id });
   assert.equal((await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'proveedor', valor: 'no-existe' })).status, 400);
-  // Asignados: se suma Sole y se saca Ceci.
+  // Asignados: solo se suma a quien tiene perfil Producción. Sole todavía no tiene usuario en el CRM: no va.
+  r = await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'asignados', valor: [CECI.id, SOLE.id] });
+  assert.equal(r.status, 400);
+  assert.match(r.data.error, /perfil Producción/);
+  // Con su usuario de Producción (y la sincronización que la ata a su persona de ClickUp), sí: se suma Sole y se saca Ceci.
+  asUser = null;
+  await api('POST', '/users', { email: SOLE.email, name: `Sole ${RUN}`, profile: 'produccion' });
+  await sync();
+  assert.ok((await vista()).personas.find((x) => x.clickup_id === SOLE.id).produccion, 'Sole, de Producción');
+  asUser = CECI.email;
   escrito.length = 0;
   r = await api('PATCH', `/produccion/${nec.task_id}`, { campo: 'asignados', valor: [SOLE.id] });
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.deepEqual(escrito[0].body, { assignees: { add: [SOLE.id], rem: [CECI.id] } });
   assert.deepEqual(r.data.pdv.articulos.find((a) => a.task_id === nec.task_id).asignados, [SOLE.id]);
   // Lo que se cambió en el CRM no se pierde con la próxima sincronización (ClickUp ya lo tiene).
@@ -262,9 +273,27 @@ test('producción: editar desde el CRM escribe en ClickUp y cambia el pedido', a
   assert.deepEqual(enConv.map((i) => [i.antes, i.despues]), [['listo para entergar', 'en el impresor']], JSON.stringify(enConv));
   estado.arts[pelota.task_id] = { ...estado.arts[pelota.task_id], status: 'listo para entergar', updated: Date.now() + 1 };
   await sync();
-  // Corporate no se edita desde el CRM… hasta que el administrador lo habilita.
-  const corp = pdvDe(await vista('?unidades=CORPORATE'), PDV_C);
+  // Reasignar el PDV pasa también sus artículos abiertos (el anulado no) a las mismas personas.
   asUser = CECI.email;
+  const antesPdv = pdvDe(await vista(), PDV);
+  escrito.length = 0;
+  r = await api('PATCH', `/produccion/${antesPdv.task_id}`, { campo: 'asignados', valor: [CECI.id, SOLE.id] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(new Set(r.data.pdv.asignados), new Set([CECI.id, SOLE.id]));
+  for (const a of r.data.pdv.articulos) assert.deepEqual(new Set(a.asignados), new Set([CECI.id, SOLE.id]), a.nombre);
+  const anulada = Object.keys(estado.arts).find((k) => k.startsWith(antesPdv.task_id) && estado.arts[k].status === 'anulado');
+  assert.ok(!escrito.some((e) => e.task === anulada), 'el anulado no se toca');
+  assert.deepEqual(new Set(escrito.map((e) => e.task)), new Set([antesPdv.task_id, ...antesPdv.articulos.map((a) => a.task_id)]), 'el PDV y sus artículos abiertos, en ClickUp');
+  // Y después cada artículo se cambia aparte.
+  const pelotaId = antesPdv.articulos.find((a) => a.nombre.startsWith(`Pelota ${RUN}`)).task_id;
+  r = await api('PATCH', `/produccion/${pelotaId}`, { campo: 'asignados', valor: [SOLE.id] });
+  assert.deepEqual(r.data.pdv.articulos.find((a) => a.task_id === pelotaId).asignados, [SOLE.id]);
+  assert.deepEqual(new Set(r.data.pdv.asignados), new Set([CECI.id, SOLE.id]), 'el PDV queda como estaba');
+  // Corporate no se edita desde el CRM… hasta que el administrador lo habilita. Reasignar sí, en todas las unidades.
+  const corp = pdvDe(await vista('?unidades=CORPORATE'), PDV_C);
+  r = await api('PATCH', `/produccion/${corp.task_id}`, { campo: 'asignados', valor: [SOLE.id] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.pdv.articulos.filter((a) => a.estado !== 'anulado').map((a) => a.asignados), r.data.pdv.articulos.filter((a) => a.estado !== 'anulado').map(() => [SOLE.id]));
   r = await api('PATCH', `/produccion/${corp.articulos[0].task_id}`, { campo: 'estado', valor: 'en el impresor' });
   assert.equal(r.status, 409);
   assert.match(r.data.error, /ClickUp/);
@@ -325,4 +354,36 @@ test('producción: el proveedor que falta sale del SKU y se escribe en ClickUp',
   assert.equal(despues.proveedor, null);
   assert.equal(estado.arts[moch.task_id].proveedor, null);
   assert.equal(despues.proveedor_sku, null);
+});
+
+test('producción: cada artículo con lo que se tomó para el logo en la cotización del STP', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const tok = (await api('POST', '/tokens', { name: `Costos logo ${RUN}`, source: 'api' })).data.token;
+  const hook = async (body, auth = true) => {
+    const res = await fetch(`${BASE}/hooks/productos/costos-logo`, { method: 'POST', body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${tok}` } : {}) } });
+    return { status: res.status, data: await res.json().catch(() => null) };
+  };
+  assert.equal((await hook({ filas: [] }, false)).status, 401, 'sin token no');
+  assert.equal((await hook({ nada: 1 })).status, 400);
+  // El Necessaire con logo y setup (del modo costos); la Pelota, dos veces el mismo SKU: va la de su cantidad (600).
+  const r = await hook({ filas: [
+    [`PEDVTASTP - ${PDV}`, `NEC_${RUN}`, 'Necessaire', 600, 350.5, 49.5, 'costos'],
+    [`PEDVTASTP - ${PDV}`, 'PEL_1', 'Pelota chica', 100, 999, 0, 'pedido'],
+    [`PEDVTASTP - ${PDV}`, 'PEL_1', 'Pelota', 600, 0, 0, 'pedido'],
+  ] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.recibidos, 3);
+  const pdv = pdvDe(await vista(), PDV);
+  const nec = pdv.articulos.find((a) => a.nombre.startsWith('Necessaire'));
+  assert.deepEqual(nec.costo_logo, { logo: 350.5, setup: 49.5, cantidad: 600, fuente: 'costos' });
+  const pelota = pdv.articulos.find((a) => a.nombre.startsWith('Pelota'));
+  assert.deepEqual(pelota.costo_logo, { logo: 0, setup: 0, cantidad: 600, fuente: 'pedido' }, 'el de la misma cantidad');
+  assert.equal(pdv.articulos.find((a) => a.nombre.startsWith('Set pinturas')).costo_logo, null, 'sin cotización, nada');
+  // Un envío nuevo del pedido reemplaza el anterior.
+  await hook({ filas: [[`PEDVTASTP - ${PDV}`, `NEC_${RUN}`, 'Necessaire', 600, 100, 0, 'pedido']] });
+  const otra = pdvDe(await vista(), PDV);
+  assert.deepEqual(otra.articulos.find((a) => a.nombre.startsWith('Necessaire')).costo_logo, { logo: 100, setup: 0, cantidad: 600, fuente: 'pedido' });
+  assert.equal(otra.articulos.find((a) => a.nombre.startsWith('Pelota')).costo_logo, null);
 });

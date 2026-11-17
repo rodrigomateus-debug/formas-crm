@@ -30,13 +30,15 @@ interface Articulo {
   proveedor_sku?: string | null;   // el SKU, si el proveedor lo puso el CRM por el SKU (completarProveedores)
   sku?: string | null;             // el SKU, si puede llevar notas de producto (no los genéricos)
   notas?: ResumenNotas | null;     // las notas de Producción de ese SKU (notasProducto.tsx)
+  costo_logo?: CostoLogo | null;   // lo que se tomó para el logo en la cotización del STP, por unidad (costoslogo.ts)
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: Articulo[];
 }
-interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null }
+interface CostoLogo { logo: number; setup: number; cantidad: number | null; fuente: 'costos' | 'pedido' }
+interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null; produccion?: number }
 interface Opcion { campo: 'proveedor' | 'impresor'; option_id: string; nombre: string; color: string | null; orden: number; company_id: number | null; empresa: string | null }
 interface Estado { status: string; color: string; type: string }
 interface Vista { pdvs: Pdv[]; personas: Persona[]; opciones: Opcion[]; estados: Estado[]; config: { unidades: string[] }; unidades: string[]; puede_editar: boolean }
@@ -149,6 +151,8 @@ export default function ProduccionPage() {
     } catch (e) {
       setV(antes);
       toast((e as Error).message, true);
+      // Reasignar un PDV puede quedar a medias (el PDV sí, algún artículo no): se vuelve a leer lo que quedó.
+      if (campo === 'asignados') cargar();
     }
   };
 
@@ -326,6 +330,13 @@ export default function ProduccionPage() {
 // Lo editado, en la fila, antes de que conteste ClickUp.
 function aplicar(p: Pdv, taskId: string, campo: Campo, valor: unknown): Pdv {
   const v = campo === 'asignados' ? (valor as number[]) : valor === '' ? null : valor;
+  // Reasignar el PDV pasa también sus artículos abiertos a las mismas personas (como hace el servidor).
+  if (p.task_id === taskId && campo === 'asignados') {
+    const ids = v as number[];
+    const articulos = p.articulos.map((a) => (CERRADOS.includes(a.estado) ? a : { ...a, asignados: ids }));
+    const todos = new Set([...ids, ...articulos.filter((a) => CERRADOS.includes(a.estado)).flatMap((a) => a.asignados)]);
+    return { ...p, asignados: ids, articulos, asignados_todos: [...todos] };
+  }
   if (p.task_id === taskId) return { ...p, [campo]: v };
   return { ...p, articulos: p.articulos.map((a) => (a.task_id === taskId ? { ...a, [campo]: v } : a)) };
 }
@@ -379,7 +390,10 @@ const personaOpcion = (p: Persona, extra = '') => <><PersonaAvatar p={p} size="x
 
 // Quién lo tiene: las fotos una arriba de la otra y, si es una sola persona, su nombre. Con permiso, un clic abre la lista
 // para sumar o sacar gente (se escribe en ClickUp).
-function Asignados({ ids, personas, editable, onChange, label }: { ids: number[]; personas: Persona[]; editable: boolean; onChange?: (ids: number[]) => void; label: string }) {
+// La lista ofrece a quienes tienen perfil Producción (pedido de Rodrigo del 17/11/2026) y a los que ya están asignados,
+// para poder sacarlos. Si nadie de Producción tiene usuario de ClickUp, todos los de ClickUp, como antes. `nota`: lo que
+// pasa al elegir (en el PDV: «también a sus artículos abiertos»).
+function Asignados({ ids, personas, editable, onChange, label, nota }: { ids: number[]; personas: Persona[]; editable: boolean; onChange?: (ids: number[]) => void; label: string; nota?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -392,6 +406,8 @@ function Asignados({ ids, personas, editable, onChange, label }: { ids: number[]
   }, [open]);
   const quienes = ids.map((id) => personas.find((p) => p.clickup_id === id)).filter((p): p is Persona => !!p);
   const nombres = quienes.map((p) => p.nombre).join(', ');
+  const hayProduccion = personas.some((p) => p.produccion);
+  const elegibles = personas.filter((p) => !hayProduccion || p.produccion || ids.includes(p.clickup_id));
   const cara = (
     <span className="asignados">
       {quienes.length ? <span className="avatar-stack">{quienes.slice(0, 3).map((p) => <PersonaAvatar key={p.clickup_id} p={p} />)}</span> : <span className="muted small">Sin asignar</span>}
@@ -406,21 +422,23 @@ function Asignados({ ids, personas, editable, onChange, label }: { ids: number[]
         aria-label={`${label}: ${nombres || 'sin asignar'}. Cambiar`} title={nombres || 'Asignar'}>{cara}</button>
       {open && (
         <div className="popover" style={{ top: 34, left: 0, minWidth: 220 }}>
-          <div className="grp">Asignado en ClickUp</div>
-          {personas.map((p) => (
+          <div className="grp">Asignar a</div>
+          {nota && <div className="opt small muted" style={{ cursor: 'default' }}>{nota}</div>}
+          {elegibles.map((p) => (
             <label key={p.clickup_id} className="opt small">
               <input type="checkbox" checked={ids.includes(p.clickup_id)}
                 onChange={(e) => onChange?.(e.target.checked ? [...ids, p.clickup_id] : ids.filter((x) => x !== p.clickup_id))} />
               <PersonaAvatar p={p} size="xs" />{p.nombre}
             </label>
           ))}
-          {!personas.length && <div className="opt small muted">Todavía no apareció nadie asignado en ClickUp.</div>}
+          {!elegibles.length && <div className="opt small muted">Todavía no hay nadie con perfil Producción en ClickUp.</div>}
         </div>
       )}
     </div>
   );
 }
 const primerNombre = (n: string) => n.split(' ')[0];
+const NOTA_PDV = 'Pasa también a sus artículos abiertos.';
 // En la fila del PDV: los que tienen algún artículo pero no el PDV («+ Sole en artículos»).
 function OtrosEnArticulos({ p, personas }: { p: Pdv; personas: Persona[] }) {
   const otros = p.asignados_todos.filter((id) => !p.asignados.includes(id)).map((id) => personas.find((x) => x.clickup_id === id)).filter((x): x is Persona => !!x);
@@ -602,8 +620,8 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
           </div>
         </td>
         {/* Quién tiene el PDV (editable ahí mismo); si algún artículo lo tiene otra persona, se aclara al lado. */}
-        <td>{ed ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
-          <Asignados ids={p.asignados} personas={v.personas} editable label={`PDV ${p.npdv}`} onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} />
+        <td>{v.puede_editar ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+          <Asignados ids={p.asignados} personas={v.personas} editable label={`PDV ${p.npdv}`} nota={NOTA_PDV} onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} />
           <OtrosEnArticulos p={p} personas={v.personas} />
         </span> : <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />}</td>
         <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>
@@ -631,9 +649,9 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
     <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
-      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span><AvisoLogo estado={a.logo} /><Notas a={a} p={p} v={v} /></div></td>
+      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span><AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} /><Notas a={a} p={p} v={v} /></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
-      <td><Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={set('asignados')} label={a.nombre} /></td>
+      <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
       <td />
       <td><span className="prod-real"><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega real de ${a.nombre}`} alerta={atras(a.entrega_real)} /><Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={a.entrega_real} /></span></td>
@@ -655,6 +673,20 @@ const AVISOS_LOGO: Record<string, string> = {
   textos: 'El logo tiene textos sin pasar a curvas',
   no_vectorial: 'El logo no es vectorial (es una imagen)',
 };
+// Lo que se tomó para el logo en la cotización (pedido de Rodrigo del 17/11/2026): costo del logo + setup prorrateado, por
+// unidad; al pasar el mouse, el detalle y el total por la cantidad. En $0, la cotización no tomó nada para el logo.
+const pesos = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 });
+function CostoLogoChip({ c, cantidad }: { c?: CostoLogo | null; cantidad: number | null }) {
+  if (!c) return null;
+  const u = c.logo + c.setup;
+  const cant = cantidad ?? c.cantidad;
+  const de = c.fuente === 'costos' ? 'modo costos del STP' : 'pedido del STP';
+  const title = u > 0
+    ? `Tomado para el logo en la cotización: logo ${pesos.format(c.logo)} + setup prorrateado ${pesos.format(c.setup)} = ${pesos.format(u)} por unidad${cant ? ` · ${pesos.format(u * cant)} por ${cant.toLocaleString('es-AR')} u.` : ''} (${de}).`
+    : `La cotización no tomó costo de logo ni setup para este producto (${de}).`;
+  return <span className={`prod-costo-logo${u > 0 ? '' : ' cero'}`} title={title} aria-label={title}>Logo {pesos.format(u)}/u</span>;
+}
+
 function AvisoLogo({ estado }: { estado?: string | null }) {
   const t = estado ? AVISOS_LOGO[estado] : null;
   if (!t) return null;
@@ -760,7 +792,9 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
           <Vendedor p={p} />{p.entrega_prometida && `${p.owner_id || p.vendedor ? ' · ' : ''}Pactada ${dia(p.entrega_prometida.slice(0, 10))}`}
         </div>
         <div className="row" style={{ gap: 8, justifyContent: 'space-between', minWidth: 0 }}>
-          <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />
+          {/* En la tarjeta, todos los que tienen algo del PDV; elegir reasigna el PDV y sus artículos abiertos. */}
+          <Asignados ids={p.asignados_todos} personas={v.personas} editable={v.puede_editar} label={`PDV ${p.npdv}`} nota={NOTA_PDV}
+            onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} />
           {p.entrega_real && <span className={`small${atrasada ? ' fecha-alerta' : ' muted'}`} title="Entrega real, la de producción">Real {dia(p.entrega_real)}<Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={p.entrega_real} /></span>}
         </div>
       </div>
@@ -785,7 +819,7 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
       <div className="row" style={{ gap: 8, minWidth: 0, alignItems: 'flex-start' }}>
         <FotoProducto url={a.foto} nombre={a.nombre} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}<AvisoLogo estado={a.logo} /><Notas a={a} p={p} v={v} /></div>
+          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}<AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} /><Notas a={a} p={p} v={v} /></div>
           <div className="small muted ellipsis prod-card-provs">
             {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>]
               .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}
@@ -794,7 +828,7 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
       </div>
       <div className="row prod-hijo-pie">
         <EstadoCelda a={a} v={v} editable={ed} onChange={(s) => editar(p, a.task_id, 'estado', s)} />
-        <Asignados ids={a.asignados} personas={v.personas} editable={ed} onChange={(ids) => editar(p, a.task_id, 'asignados', ids)} label={a.nombre} />
+        <Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={(ids) => editar(p, a.task_id, 'asignados', ids)} label={a.nombre} />
       </div>
     </div>
   );

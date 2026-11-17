@@ -48,3 +48,10 @@ jobs:
           CRM_URL: ${{ vars.CRM_URL }}
           CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
           STPO_TOKEN: ${{ secrets.STPO_TOKEN }}
+      # Costo del logo de cada producto (lo que se tomó en la cotización), para Producción (scripts/stp-costos-logo.mjs).
+      - run: node scripts/stp-costos-logo.mjs
+        if: always()
+        env:
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+          STPO_TOKEN: ${{ secrets.STPO_TOKEN }}

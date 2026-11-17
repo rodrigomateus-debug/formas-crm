@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando
 } from '../lib';
-import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
+import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
@@ -733,7 +733,19 @@ function RazonSocialCard({ type, recordId, clave, onCambio }: { type: ObjectType
   );
 }
 
-interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[];
+// La orden de compra de Finnegans de cada producto (por su código, ordenescompra.ts): acceso directo a la OC en Finnegans
+// GO, o «Sin OC» si todavía no tiene ninguna (pedido de Rodrigo del 17/11/2026).
+function OcProducto({ ocs }: { ocs?: OcRef[] }) {
+  if (!ocs?.length) return <span className="oc-boton sin" title="Ninguna orden de compra de Finnegans tiene este producto para este pedido">Sin OC</span>;
+  return <>{ocs.map((o) => {
+    const title = [o.nombre, o.proveedor].filter(Boolean).join(' · ');
+    return o.url
+      ? <a key={o.nombre ?? o.numero} href={o.url} target="_blank" rel="noreferrer" className="btn ghost sm oc-boton" title={`${title} — abrir en Finnegans`}>{o.numero} ↗</a>
+      : <span key={o.nombre ?? o.numero} className="oc-boton" title={title}>{o.numero}</span>;
+  })}</>;
+}
+
+interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[]; oc?: OcRef[];
   tipo?: 'producto' | 'servicio';   // servicio: envío, setup, un adicional… no se produce, así que va sin logo, boceto ni estado
   clickup_task?: string | null;
   sku?: string | null; notas?: ResumenNotas | null }   // las notas de Producción del SKU (notasProducto.tsx); los genéricos no tienen
@@ -829,6 +841,7 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
               </div>
             )) : (
             <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+              <OcProducto ocs={it.oc} />
               <NotasDelProducto sku={it.sku} resumen={it.notas} nombre={it.name} foto={it.image_url} recordId={recordId} taskId={it.clickup_task} puedeAgregar={puedeNotas} />
               <BocetoChips lista={deProducto(it.code || it.name)} onAbrir={(b) => abrir(b)} />
               <LogoProducto type="order" recordId={recordId} producto={it.code || it.name} productoNombre={it.name} res={lg.data} onCambio={() => lg.reload()} />
@@ -1102,7 +1115,7 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
       {mode === 'pick' && (
         <div className="panel-body stack" onKeyDown={alEsc(() => setMode(''))}>
           <RecordPicker type={toType} exclude={[record.id, ...items.map((i) => i.id)]} onPick={add} />
-          <button className="btn sm" onClick={() => setMode('create')}>Crear {OBJECTS[toType].single.toLowerCase()} nuevo</button>
+          <button className="btn sm" onClick={() => setMode('create')}>Crear {OBJECTS[toType].single.toLowerCase()} {toType === 'company' ? 'nueva' : 'nuevo'}</button>
         </div>
       )}
       {mode === 'create' && <CreateRecord type={toType} associateWith={record} onClose={() => setMode('')} onCreated={() => onChange()} />}

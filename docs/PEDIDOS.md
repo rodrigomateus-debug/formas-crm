@@ -169,9 +169,16 @@ cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro
   otra fecha, «Nueva fecha mar 24/11 +4 d» (la pactada ya está en la tarjeta). Con los productos a la vista no van las
   miniaturas ni el resumen de ClickUp («2 en el impresor…»).
 - **Abrir y cerrar**: la flecha de cada pedido (en la tarjeta, «3 productos»), o «Colapsar productos» / «Expandir
-  productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. La lista y el tablero
-  lo recuerdan cada uno en el navegador; por defecto, abiertos, salvo los entregados y anulados. Un clic en un producto
-  abre la vista previa del pedido.
+  productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. Por defecto,
+  abiertos, salvo los entregados y anulados. Un clic en un producto abre la vista previa del pedido.
+- **Dónde queda «expandir o colapsar todos»** (pedido de Rodrigo del 17/11/2026): en una **vista guardada**, es parte de
+  la vista, como los filtros o las columnas. Al cambiarlo se prende «Guardar» («Cambios sin guardar en …»), «Descartar»
+  lo vuelve atrás y, una vez guardado, la vista lo recuerda en cualquier dispositivo (`productos` en la configuración de
+  la vista: `abiertos` o `cerrados`). En **«Todos» y «Míos»** queda en el navegador, como antes; la lista y el tablero,
+  cada uno por su lado. Una vista guardada antes de este cambio (sin el dato) sigue a lo del navegador hasta que se la
+  guarda. En una vista compartida por otro que no lo tiene guardado, también queda en el navegador. La flecha de cada
+  pedido suelto no se guarda: dura mientras se está en la pantalla. Está en `useProductosAbiertos`
+  (`PedidosProductos.tsx`), que la lista maneja desde `ObjectIndex.tsx`.
 - **Lo entregado de cada producto** según los remitos, en los pedidos con entregas a medias (Entregado parcial, o los
   remitos dicen que falta algo o hay diferencias): «60 de 150 entregadas», «Sin entregar» o «Entregadas ✓», al lado del
   estado. Es la misma cuenta de la tarjeta «Entrega» del pedido (`calcularEntrega` en `remitos.ts`), por el renglón del
@@ -207,8 +214,19 @@ el SKU, OC). Se ata solo cuando no hay dudas, de lo más seguro a lo menos (`art
 4. si queda un renglón y un artículo, esos.
 
 En cada paso se ata un renglón solo si tiene un único candidato y ese artículo no le sirve a otro renglón (dos con la misma
-cantidad, por ejemplo, no se atan por la cantidad). Los pedidos ya leídos se vuelven a atar en su próxima lectura (al
-abrirlos, cada 6 horas, y de fondo una vez por día los activos). Prueba en `test/produccion.test.mjs`.
+cantidad, por ejemplo, no se atan por la cantidad).
+
+Los renglones que quedaron sin atar no esperan la relectura de Finnegans (cada 6 horas): se vuelven a atar con lo que ya
+está guardado, los artículos que guardó Producción (tabla `produccion`) y las fichas, sin consultar Finnegans ni ClickUp
+(`reatarRenglones`; aviso de Rodrigo del 17/11/2026, «siguen con problema»). Pasa al abrir el pedido y, a los :30 de cada
+hora, con una tanda de pedidos que tengan renglones sin atar y artículos sin renglón (`reatarPendientes`, en el cron).
+
+### La OC de cada producto
+
+En «Productos» del pedido, cada producto (no los servicios) muestra su orden de compra de Finnegans como un botón
+(«OC 11582 ↗») que abre la OC en Finnegans GO, o «Sin OC» si ninguna OC del pedido tiene ese producto. Se busca por el
+código del producto entre los de las OC del pedido (`ordenes_compra`, `ocsDeCodigo`), así que no depende de que el
+renglón esté atado a su artículo de ClickUp. Pedido de Rodrigo del 17/11/2026. Prueba en `test/produccion.test.mjs`.
 
 ## Miniaturas de los productos en la tarjeta
 

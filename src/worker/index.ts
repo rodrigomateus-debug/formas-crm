@@ -16,6 +16,7 @@ import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup } from './clickup';
 import { syncFacturas } from './finnegans';
 import { sincronizarOrdenesCompra } from './ordenescompra';
+import { reatarPendientes } from './productos';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
 import { leerPendientes } from './remitos';
@@ -127,6 +128,8 @@ export default {
           // viernes de 9 a 20, cuando se cargan) con los últimos 7 días, y de noche (3:30) los últimos 60.
           const dia = new Date(event.scheduledTime).getUTCDay();
           const b = Budget.of(env);
+          // Antes, los productos de los pedidos que quedaron sin su artículo de ClickUp (solo la base de datos, productos.ts).
+          await safe(() => reatarPendientes(env.DB));
           if (dia >= 1 && dia <= 5 && hora >= 12 && hora <= 23) await safe(() => sincronizarOrdenesCompra(env, { budget: b }));
           else if (barrido) await safe(() => sincronizarOrdenesCompra(env, { dias: 60, budget: b }));
           await safe(() => syncFacturas(env, { barrido, budget: b }));

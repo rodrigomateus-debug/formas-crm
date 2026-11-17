@@ -8,6 +8,7 @@ import { clavePedido } from './totales';
 import { HttpError } from './env';
 import { estadosSinServicios, pedirRelectura, TIPO_SQL, tipoPorDefecto } from './servicios';
 import { admiteNotas, avisarNotasDelPedido, resumenNotas, skuDe } from './notasproducto';
+import { ocsDeCodigo, ocsDePedidos } from './ordenescompra';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -128,6 +129,41 @@ async function articulosDeRenglones(db: D1Database, renglones: Array<{ code?: st
   return out;
 }
 
+// Los renglones que quedaron sin su artículo de ClickUp se vuelven a atar con lo que ya está guardado (los artículos que
+// guardó Producción, tabla `produccion`, y las fichas), sin consultar Finnegans ni ClickUp. Aviso de Rodrigo del
+// 17/11/2026: los pedidos leídos antes de atar por la ficha seguían sin estado ni OC hasta la relectura de las 6 horas.
+// Va al abrir el pedido y, cada hora, con los pedidos que tengan renglones sin atar (reatarPendientes).
+export async function reatarRenglones(db: D1Database, recordId: number) {
+  const [lis, prod] = await db.batch([
+    db.prepare(`SELECT li.id, li.code, li.description, li.quantity, li.clickup_task FROM line_items li WHERE li.record_id = ? ORDER BY li.position`).bind(recordId),
+    db.prepare(`SELECT task_id, pdv_task, nombre, codigo, cantidad, estado FROM produccion WHERE es_pdv = 0 AND record_id = ?`).bind(recordId),
+  ]);
+  const renglones = lis.results as Array<{ id: number; code: string | null; description: string | null; quantity: number | null; clickup_task: string | null }>;
+  const sueltos = renglones.filter((r) => !r.clickup_task);
+  if (!sueltos.length) return 0;
+  const atadas = new Set(renglones.map((r) => r.clickup_task).filter(Boolean));
+  const filas = (prod.results as Array<{ task_id: string; pdv_task: string; nombre: string; codigo: string | null; cantidad: number | null; estado: string }>)
+    .filter((a) => !atadas.has(a.task_id));
+  if (!filas.length) return 0;
+  const arts: Articulo[] = filas.map((a) => ({ task_id: a.task_id, name: a.nombre, code: a.codigo, quantity: a.cantidad, status: a.estado }));
+  const asignados = await articulosDeRenglones(db, sueltos.map((r) => ({ code: r.code ?? undefined, desc: r.description ?? undefined, cantidad: r.quantity ?? undefined })), arts, filas[0].pdv_task);
+  const cambios = sueltos.flatMap((r, i) => (asignados[i] ? [db.prepare('UPDATE line_items SET clickup_task = ?, status = ? WHERE id = ? AND clickup_task IS NULL')
+    .bind(asignados[i]!.task_id, asignados[i]!.status || null, r.id)] : []));
+  if (cambios.length) await db.batch(cambios);
+  return cambios.length;
+}
+
+// Cada hora, una tanda de pedidos con renglones sin atar y artículos de Producción sin renglón (solo la base de datos).
+export async function reatarPendientes(db: D1Database, limit = 60) {
+  const { results } = await db.prepare(`SELECT DISTINCT li.record_id FROM line_items li
+      WHERE li.clickup_task IS NULL AND EXISTS (SELECT 1 FROM produccion pr WHERE pr.record_id = li.record_id AND pr.es_pdv = 0
+        AND pr.task_id NOT IN (SELECT x.clickup_task FROM line_items x WHERE x.record_id = li.record_id AND x.clickup_task IS NOT NULL))
+      ORDER BY RANDOM() LIMIT ?`).bind(limit).all<{ record_id: number }>();
+  let atados = 0;
+  for (const r of results) atados += await reatarRenglones(db, r.record_id).catch((e) => { console.error('productos: reatar', r.record_id, (e as Error).message); return 0; });
+  return { pedidos: results.length, atados };
+}
+
 // La ficha de cada producto (nombre, descripción y foto), si no se leyó en los últimos 30 días.
 async function fichas(env: Env, token: string, all: Array<string | null | undefined>, b: Budget) {
   const db = env.DB;
@@ -180,6 +216,8 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
       if (!error) await avisarNotasDelPedido(db, recordId).catch((e) => console.error('notas de producto: aviso', recordId, (e as Error).message));
     }
   }
+  // Los renglones sin su artículo de ClickUp, con lo que ya está guardado (sin consultas).
+  await reatarRenglones(db, recordId).catch((e) => console.error('productos: reatar', recordId, (e as Error).message));
   const clave = clavePedido(props.pedido_finnegans);
   const [renglones, cot] = await db.batch([
     db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
@@ -198,6 +236,8 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   const estados = results.some((r) => r.status) ? await estadosPec(db) : [];
   // Las notas de Producción de cada SKU (notasproducto.ts): qué pasó con este producto en otras ventas.
   const notas = await resumenNotas(db, results.map((r) => r.code));
+  // Las órdenes de compra de Finnegans de cada producto, por su código (ordenescompra.ts).
+  const ocs = (await ocsDePedidos(db, [recordId])).get(recordId);
   // Un servicio (envío, setup, un adicional) no se produce: va sin estado de producción ni asignados (servicios.ts).
   const items = results.map((r, i) => ({
     code: r.code, name: r.name ?? r.li_name ?? r.code ?? 'Producto', description: r.description ?? r.product_description, image_url: fotos[i], tipo: r.tipo,
@@ -205,6 +245,7 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     // El SKU, si puede llevar notas (los genéricos no), y el resumen de sus notas vigentes.
     sku: r.tipo !== 'servicio' && admiteNotas(r.code) ? skuDe(r.code) : null, notas: r.tipo !== 'servicio' ? notas.get(skuDe(r.code)) ?? null : null,
     asignados: (r.tipo !== 'servicio' && r.clickup_task && prod?.porTarea.get(r.clickup_task)) || [],
+    oc: r.tipo !== 'servicio' ? ocsDeCodigo(ocs, r.code) : [],
     status_color: estados.find((e) => e.status === String(r.status ?? '').toLowerCase().trim())?.color ?? null,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,

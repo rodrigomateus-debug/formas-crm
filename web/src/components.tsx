@@ -364,9 +364,10 @@ export function RecordPicker({ type, onPick, exclude = [], placeholder }: { type
       <div className="search"><Icon name="search" /><input className="input" autoFocus placeholder={placeholder ?? `Buscar ${OBJECTS[type].plural.toLowerCase()}…`} value={q} onChange={(e) => setQ(e.target.value)} /></div>
       <div className="stack" style={{ gap: 2 }}>
         {res.filter((r) => !exclude.includes(r.id)).map((r) => (
-          <button key={r.id} className="btn ghost" style={{ justifyContent: 'flex-start', height: 'auto', padding: '6px 8px' }} onClick={() => onPick(r)}>
+          // Los nombres largos se cortan con «…» dentro del ancho del panel (el nombre completo, al pasar el mouse).
+          <button key={r.id} className="btn ghost picker-opt" title={r.name} onClick={() => onPick(r)}>
             <Avatar name={r.name} type={type} domain={r.props.domain} email={r.props.email} />
-            <span className="stack" style={{ gap: 0, alignItems: 'flex-start', minWidth: 0 }}>
+            <span className="picker-txt">
               <span className="ellipsis">{r.name}</span>
               <span className="small muted ellipsis">{r.props.email || r.props.domain || r.props.amount || ''}</span>
             </span>

@@ -649,7 +649,9 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
     <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
-      <td className="prod-nombre"><div className="prod-art-t" title={a.nombre}><FotoProducto url={a.foto} nombre={a.nombre} /><span className="ellipsis">{a.nombre}</span><AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} /><Notas a={a} p={p} v={v} /></div></td>
+      <td className="prod-nombre"><div className="prod-art-t"><FotoProducto url={a.foto} nombre={a.nombre} />
+        {/* El nombre con todo el ancho y, abajo, los avisos (logo, costo del logo, notas): antes iban al lado y lo tapaban. */}
+        <div className="prod-art-txt"><span className="ellipsis" title={a.nombre}>{a.nombre}</span><ChipsArticulo a={a} p={p} v={v} /></div></div></td>
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
@@ -685,6 +687,14 @@ function CostoLogoChip({ c, cantidad }: { c?: CostoLogo | null; cantidad: number
     ? `Tomado para el logo en la cotización: logo ${pesos.format(c.logo)} + setup prorrateado ${pesos.format(c.setup)} = ${pesos.format(u)} por unidad${cant ? ` · ${pesos.format(u * cant)} por ${cant.toLocaleString('es-AR')} u.` : ''} (${de}).`
     : `La cotización no tomó costo de logo ni setup para este producto (${de}).`;
   return <span className={`prod-costo-logo${u > 0 ? '' : ' cero'}`} title={title} aria-label={title}>Logo {pesos.format(u)}/u</span>;
+}
+
+// Los avisos del artículo en su propio renglón, debajo del nombre (pedido de Rodrigo del 17/11/2026: al lado del nombre
+// lo dejaban en «L.»).
+// `notaAparte`: en la tarjeta del tablero, «+ Nota» (sin notas todavía, solo al pasar el mouse) va en la esquina del
+// producto, así no deja un renglón vacío.
+function ChipsArticulo({ a, p, v, notaAparte }: { a: Articulo; p: Pdv; v: Vista; notaAparte?: boolean }) {
+  return <div className="prod-art-chips"><AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} />{(!notaAparte || a.notas) && <Notas a={a} p={p} v={v} />}</div>;
 }
 
 function AvisoLogo({ estado }: { estado?: string | null }) {
@@ -819,7 +829,9 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
       <div className="row" style={{ gap: 8, minWidth: 0, alignItems: 'flex-start' }}>
         <FotoProducto url={a.foto} nombre={a.nombre} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}<AvisoLogo estado={a.logo} /><CostoLogoChip c={a.costo_logo} cantidad={a.cantidad} /><Notas a={a} p={p} v={v} /></div>
+          <div className="prod-hijo-t" title={a.nombre}>{a.nombre}</div>
+          <ChipsArticulo a={a} p={p} v={v} notaAparte />
+          {!a.notas && <span className="prod-hijo-nota"><Notas a={a} p={p} v={v} /></span>}
           <div className="small muted ellipsis prod-card-provs">
             {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>]
               .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}

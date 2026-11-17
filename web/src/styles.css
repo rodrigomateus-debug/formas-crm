@@ -1005,6 +1005,14 @@ table.prod-grid tr.prod-art:has(+ tr.prod-pdv) td.prod-nombre::before, table.pro
 table.prod-grid tr.prod-art td.prod-nombre::after { content: ''; position: absolute; left: 45px; top: 50%; width: 15px; border-top: 1.5px solid var(--ui-line-strong); }
 .prod-vacio { padding-left: 58px !important; }
 .prod-art-t svg { color: var(--ui-ink-3); flex: none; }
+/* Nombre arriba, con todo el ancho; los avisos (logo, costo del logo, notas) en un renglón abajo (ChipsArticulo). */
+.prod-art-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; line-height: 1.3; }
+.prod-art-chips { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.prod-art-chips:empty { display: none; }
+.prod-art-chips > * { margin-left: 0 !important; flex: none; }
+.prod-hijo-nota { position: absolute; top: 6px; right: 0; }
+.prod-hijo-nota:empty { display: none; }
+.prod-hijo-nota .nota-prod-mas { background: var(--ui-surface); }
 tr.prod-art.cerrado td { opacity: .6; }
 .prod-avance { font-size: 12px; font-weight: 600; color: var(--ui-ink-2); font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: var(--r-pill); background: var(--ui-surface); border: 1px solid var(--ui-line); line-height: 20px; }
 .prod-avance.ok { color: var(--ui-positive-ink); background: var(--ui-positive-soft); border-color: transparent; }

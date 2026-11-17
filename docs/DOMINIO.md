@@ -12,16 +12,21 @@ Cloudflare: un CNAME en GoDaddy apuntando a `*.workers.dev` no anda (Cloudflare 
 delegar solo un subdominio es de los planes Enterprise. formas.ar hoy tiene el DNS en GoDaddy (`ns41/ns42.domaincontrol.com`)
 y el mail en Google Workspace.
 
+Ojo: el dominio **no está registrado en GoDaddy sino en NIC Argentina** (los `.ar` se registran ahí; GoDaddy solo tiene
+el DNS). Por eso los servidores de nombres se cambian en nic.ar, no en GoDaddy.
+
 ## 1. Pasar el DNS de formas.ar a Cloudflare (Rodrigo, una vez)
 
-El dominio sigue registrado en GoDaddy; solo cambian los servidores de nombres.
+El dominio sigue registrado en NIC Argentina; solo cambian los servidores de nombres.
 
 1. Cloudflare (la misma cuenta del CRM) → *Add a domain* → `formas.ar` → plan **Free**. Cloudflare copia los registros.
 2. Revisar que estén todos, comparando con la lista de DNS de GoDaddy, sobre todo:
    - los 5 MX de Google: `aspmx.l.google.com` (1), `alt1`/`alt2.aspmx.l.google.com` (5), `alt3`/`alt4.aspmx.l.google.com` (10);
    - TXT de SPF (`v=spf1 include:_spf.google.com …`), DKIM (`google._domainkey`), DMARC (`_dmarc`) y verificaciones;
    - la página (`@`, `www`): dejarlos como estaban (si hay dudas, en «DNS only», nube gris).
-3. GoDaddy → formas.ar → DNS → *Nameservers* → *Change* → «I'll use my own nameservers» → los dos que da Cloudflare.
+3. nic.ar → ingresar con la clave fiscal del titular del dominio → *Mis dominios* → formas.ar → *Delegar* → borrar
+   `ns41`/`ns42.domaincontrol.com` y cargar los dos servidores que da Cloudflare (sin IP). NIC Argentina lo aplica
+   en minutos u horas. GoDaddy no se toca (sus registros dejan de usarse; conviene no borrarlos hasta ver que todo anda).
 4. Esperar a que Cloudflare marque formas.ar como **Active** (de minutos a unas horas).
 
 ## 2. Conectar hub.formas.ar (en el código, cuando formas.ar esté activo)

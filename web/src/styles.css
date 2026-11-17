@@ -293,6 +293,8 @@ body:has(.barra-vista) .toast { bottom: 76px; }
 /* Usuario con su foto de Google y su nombre (UserChip en components.tsx): propietario en tablas, fichas, tareas… */
 .user-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; vertical-align: middle; }
 .user-inline .avatar { margin-right: 4px; vertical-align: middle; }
+/* Quien pidió un encargo (Recorridos, Cronograma, ruta del día): la foto y el nombre no se separan en dos renglones. */
+.quien-pidio { white-space: nowrap; }
 .select-value .avatar, .select-text .avatar { margin-right: 8px; vertical-align: middle; }
 .avatar.company { border-radius: 8px; background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
 .avatar.deal { border-radius: 8px; background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
@@ -1570,6 +1572,9 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-tarjeta.hecho { opacity: .55; }
 
 .cr-t-rol { display: flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--k); margin-bottom: 2px; }
+/* quién pidió el encargo: debajo del destino, con su foto (arriba a la derecha va el círculo de «hecho») */
+.cr-t-pidio { margin-top: 2px; font-size: 11.5px; color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; }
+.cr-t-pidio:empty { display: none; }
 .cr-t-quien { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 12.5px; line-height: 1.3; padding-right: 48px; min-width: 0; }
 .cr-t-quien > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .cr-t-quien .avatar { flex: none; } .cr-t-quien .prov-logo { flex: none; margin-right: 0; }
@@ -1847,6 +1852,8 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .rc-tipo { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--k); background: var(--ui-surface); border-radius: var(--r-pill); padding: 1px 7px; }
 .rc-p-enc { display: block; text-align: left; border: 0; background: var(--ui-surface); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 11.5px; color: var(--ui-ink); cursor: pointer; }
 .rc-p-enc:hover { box-shadow: 0 0 0 1px var(--k-x); }
+.rc-p-pidio { display: block; margin-top: 3px; color: var(--ui-ink-2); }
+.rc-p-pidio:empty { display: none; }
 .rc-sumar { align-self: flex-start; font-size: 11px; }
 .rc-estado { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: var(--r-pill); padding: 1px 7px; margin-right: 6px;
   background: var(--ui-info-soft); color: var(--ui-info-ink); }

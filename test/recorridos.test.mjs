@@ -246,6 +246,8 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   assert.equal(pc.encargos[0].llevar[0].que, 'Muestras de termos');
   assert.equal(pc.encargos[0].desde, 'Oficina Matienzo', 'dice dónde buscar lo que lleva');
   assert.equal(pc.encargos[0].contacto, 'Juan 1155556666');
+  assert.equal(pc.encargos[0].quien, vera.name, 'quién lo pidió');
+  assert.ok('quien_foto' in pc.encargos[0] && pc.encargos[0].quien_foto === null, 'con su foto (la usuaria de prueba no tiene: null)');
   const marcar = async (cuerpo) => (await chofer('/ruta/parada', { method: 'POST', body: JSON.stringify({ clave: p1.clave, ...cuerpo }) })).status;
   assert.equal(await marcar({ resultado: 'no_se_pudo', motivo: 'cerrado', nota: 'Persiana baja' }), 200);
   let enc = (await api('GET', `/recorridos/encargos/${e1.id}`)).data;

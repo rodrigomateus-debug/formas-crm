@@ -25,6 +25,19 @@ export function anotarFoto(parada: string) {
   try { localStorage.setItem(CLAVE_FOTOS, JSON.stringify({ dia: hoy(), paradas: [...new Set([...fotosLocales(), parada])] })); } catch { /* sin almacenamiento */ }
   window.dispatchEvent(new Event('chofer-foto'));
 }
+// Quien pidió el encargo (pedido de Rodrigo del 17/11/2026): su foto de Google y su nombre de pila. Sin foto, o si no
+// carga (sin señal), van sus iniciales.
+function QuienPidio({ nombre, foto }: { nombre: string; foto?: string | null }) {
+  const [falla, setFalla] = useState(false);
+  const partes = nombre.trim().split(/\s+/).filter(Boolean);
+  return (
+    <span className="ruta-pidio">
+      {foto && !falla ? <img src={foto} alt="" referrerPolicy="no-referrer" onError={() => setFalla(true)} />
+        : <i aria-hidden="true">{partes.slice(0, 2).map((x) => x[0]?.toUpperCase()).join('')}</i>}
+      {partes[0]}
+    </span>
+  );
+}
 // Hecha: la marcó él, o están hechos sus artículos y sus encargos.
 const hechaP = (p: ParadaChofer) => p.visita?.resultado === 'hecho' || (p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho'));
 const CLAVE = 'chofer-ruta';
@@ -328,10 +341,13 @@ function PantallaParada({ p, n, total, llega, sinUbicar, tarde, hecha, conFoto, 
               ...(!e.llevar.length && !e.retirar.length && e.notas ? [<li key={`${e.id}n`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Hacer</strong><span>{e.notas}</span></li>] : []),
             ])}
           </ul>
-          {encs.map((e) => (e.urgente || e.horario || e.quien || (e.notas && (e.llevar.length || e.retirar.length))) && (
-            <p key={`x${e.id}`} className={e.urgente ? 'ruta-tarde' : 'parada-nota'}>{[e.urgente ? 'Urgente: tiene que ser hoy' : '', e.horario ? `Horario: ${e.horario}` : '',
-              e.llevar.length || e.retirar.length ? e.notas ?? '' : '', e.quien ? `Lo pidió ${e.quien.split(' ')[0]}` : ''].filter(Boolean).join(' · ')}</p>
-          ))}
+          {encs.map((e) => {
+            const partes = [e.urgente ? 'Urgente: tiene que ser hoy' : '', e.horario ? `Horario: ${e.horario}` : '', e.llevar.length || e.retirar.length ? e.notas ?? '' : ''].filter(Boolean);
+            return (partes.length > 0 || e.quien) && (
+              <p key={`x${e.id}`} className={e.urgente ? 'ruta-tarde' : 'parada-nota'}>{partes.join(' · ')}
+                {e.quien && <>{partes.length ? ' · ' : ''}Lo pidió <QuienPidio nombre={e.quien} foto={e.quien_foto} /></>}</p>
+            );
+          })}
         </section>
 
         {(contacto || p.lugar?.observaciones || encs.some((e) => e.contacto)) && (

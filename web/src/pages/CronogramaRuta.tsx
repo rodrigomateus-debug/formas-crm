@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
-import { alEsc, useEsc } from '../components';
+import { QuienPidio, alEsc, useEsc } from '../components';
 import { Select, useFloating } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
@@ -470,7 +470,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   <div className="cr-p-movs">
                     {(p.encargos ?? []).map((e) => (
                       <div key={`e${e.id}`} className={`cr-k-X${e.estado === 'hecho' ? ' ok' : ''}`}>
-                        <i /><span><b>Encargo</b><button type="button" className="cr-link" onClick={() => setEncargo(e.id)}>de {e.quien?.split(' ')[0] ?? 'alguien'}</button>
+                        <i /><span><b>Encargo</b><button type="button" className="cr-link" onClick={() => setEncargo(e.id)}>de {e.quien ? <QuienPidio id={e.user_id} name={e.quien} corto /> : 'alguien'}</button>
                           {e.urgente ? ' · urgente' : ''}{e.llevar.length ? ` · deja ${e.llevar.map(itemTexto).join(', ')}` : ''}{e.retirar.length ? ` · retira ${e.retirar.map(itemTexto).join(', ')}` : ''}
                           {!e.llevar.length && !e.retirar.length && e.notas ? ` · ${e.notas}` : ''}
                           {e.desde && e.desde !== datos.bases[0]?.id && e.llevar.length ? ` · está en ${datos.bases.find((b) => b.id === e.desde)?.nombre ?? e.desde}` : ''}

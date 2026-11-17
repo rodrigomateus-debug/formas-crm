@@ -58,6 +58,7 @@ export async function leerOrdenesCompra(env: Env, token: string, recordId: numbe
   const db = env.DB;
   const rows = await fin<Destino[]>(env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: pedidoIds(pedido)[0] }, b);
   const ocs = (rows ?? []).filter(esOc);
+  await anotarTipos(db, rows ?? []);
   const ya = new Map((await db.prepare('SELECT ie, codigos FROM ordenes_compra WHERE record_id = ?').bind(recordId).all<{ ie: string; codigos: string | null }>()).results.map((r) => [r.ie, r]));
   const at = new Date().toISOString();
   const stmts: D1PreparedStatement[] = [];
@@ -80,6 +81,29 @@ export async function leerOrdenesCompra(env: Env, token: string, recordId: numbe
   stmts.push(db.prepare('DELETE FROM ordenes_compra WHERE record_id = ? AND leido_at != ?').bind(recordId, at));
   await db.batch(stmts);
   return ocs.length;
+}
+
+// Los tipos de documento destino que se vieron (solo los códigos, «FPREMVTA», y si se toman como OC): para revisar que
+// las OC se reconozcan (`estadoOrdenesCompra`). Se escribe solo cuando aparece un tipo nuevo.
+async function anotarTipos(db: D1Database, rows: Destino[]) {
+  const vistos = [...new Set(rows.map((r) => String(r.TIPODOCUMENTO ?? '').trim()).filter(Boolean))];
+  if (!vistos.length) return;
+  const r = await db.prepare("SELECT value FROM settings WHERE key = 'finnegans_tipos_destino'").first<{ value: string }>();
+  const antes = new Set<string>(r ? lista(r.value).map(String) : []);
+  if (vistos.every((t) => antes.has(t)) || antes.size >= 60) return;
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('finnegans_tipos_destino', ?)").bind(JSON.stringify([...new Set([...antes, ...vistos])].slice(0, 60))).run();
+}
+// Cuántas OC hay leídas y qué tipos de documento se vieron (solo cantidades y códigos de tipo, sin datos de clientes ni
+// proveedores): lo imprime la tarea de cada hora (scripts/pedidos-productos.mjs), que corre en un repo público.
+export async function estadoOrdenesCompra(db: D1Database) {
+  const [n, t] = await db.batch([
+    db.prepare('SELECT COUNT(*) AS total, COUNT(codigos) AS con_detalle, SUM(codigos IS NOT NULL AND codigos != \'[]\') AS con_productos, COUNT(DISTINCT record_id) AS pedidos FROM ordenes_compra'),
+    db.prepare("SELECT value FROM settings WHERE key = 'finnegans_tipos_destino'"),
+  ]);
+  const c = (n.results[0] ?? {}) as { total: number; con_detalle: number; con_productos: number | null; pedidos: number };
+  const tipos = lista((t.results[0] as { value?: string } | undefined)?.value).map(String);
+  return { total: c.total ?? 0, con_detalle: c.con_detalle ?? 0, con_productos: c.con_productos ?? 0, pedidos: c.pedidos ?? 0,
+    tipos: tipos.map((x) => ({ tipo: x, es_oc: esOc({ TIPODOCUMENTO: x, DESTINONOMBRE: '' }) })) };
 }
 
 // Para la pantalla: las OC de cada pedido y, por código de producto, las de cada producto.

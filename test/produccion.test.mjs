@@ -373,6 +373,12 @@ test('pedidos: cada producto con su estado simplificado, quién lo tiene en Prod
   assert.deepEqual(p.ocs.map((o) => o.numero), ['OC 4321'], 'el pedido, con todas sus OC');
   const enProduccion = pdvDe(await vista(), PDV);
   assert.deepEqual(enProduccion.articulos.find((a) => a.nombre.startsWith('Necessaire')).oc?.map((o) => o.numero), ['OC 4321'], 'también en Producción');
+  // Lo que imprime la tarea de cada hora (repo público): solo cantidades y los códigos de tipo de documento.
+  const tok = (await api('POST', '/tokens', { name: `OC ${RUN}`, source: 'api' })).data.token;
+  const est = await (await fetch(`${BASE}/hooks/ordenes-compra/estado`, { headers: { authorization: `Bearer ${tok}` } })).json();
+  assert.ok(est.total >= 1 && est.con_productos >= 1, 'cuenta las OC leídas');
+  assert.ok(est.tipos.some((t) => t.tipo === 'FPOC' && t.es_oc) && est.tipos.some((t) => t.tipo === 'FPREMVTA' && !t.es_oc), 'los tipos vistos, y cuál es OC');
+  assert.equal((await fetch(`${BASE}/hooks/ordenes-compra/estado`)).status, 401, 'sin token, no');
   // La columna «Cobro y papeles»: factura, remito y bocetos de cada pedido, solo si se piden.
   assert.deepEqual(r.data.adjuntos, {}, 'sin pedirlos, no van');
   const conAdj = (await api('GET', `/pedidos/articulos?ids=${pdv.record_id}&adjuntos=1`)).data.adjuntos[pdv.record_id];

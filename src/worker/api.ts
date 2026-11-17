@@ -995,7 +995,7 @@ api.get('/records/order/:id/products', async (c) => {
 // página, sus productos con foto, estado simplificado, quién los tiene en Producción y la fecha real. También para el
 // perfil Ventas (de sus pedidos): no va por /produccion. Solo los pedidos que quien pide puede ver.
 api.get('/pedidos/articulos', async (c) => {
-  const ids = [...new Set(String(c.req.query('ids') ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 200);
+  const ids = [...new Set(String(c.req.query('ids') ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 500);
   const visibles = await idsVisibles(c.env.DB, c.get('ctx').user, ids);
   return c.json({ pedidos: await produccionDePedidos(c.env.DB, ids.filter((id) => visibles.has(id))) });
 });

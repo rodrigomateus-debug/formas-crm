@@ -39,7 +39,7 @@ export async function produccionDePedidos(db: D1Database, ids: number[]): Promis
       WHERE es_pdv = 0 AND pdv_task IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(pdvs.map((p) => p.task_id))).all<Fila>()).results : [];
   const pedidoDe = new Map(pdvs.map((p) => [p.task_id, p.record_id!]));
   const conPedido = arts.map((a) => ({ ...a, record_id: pedidoDe.get(a.pdv_task) ?? a.record_id }));
-  const [fotos, servicios] = await Promise.all([fotosDeArticulos(db, conPedido), tareasServicio(db, ids)]);
+  const [fotos, servicios, nombres] = await Promise.all([fotosDeArticulos(db, conPedido), tareasServicio(db, ids), nombresDeVenta(db, arts.map((a) => a.task_id))]);
 
   // La gente de ClickUp que aparece, con su usuario del CRM (foto y nombre).
   const gente = [...new Set([...pdvs, ...arts].flatMap((f) => lista(f.asignados).map(Number)))];
@@ -62,7 +62,7 @@ export async function produccionDePedidos(db: D1Database, ids: number[]): Promis
       total: (previo?.total ?? 0) + suyos.length,
       entrega_real: [previo?.entrega_real, pdv.entrega_real].filter((x): x is string => !!x).sort().pop() ?? null,
       articulos: [...(previo?.articulos ?? []), ...suyos.map((a) => ({
-        id: a.task_id, nombre: a.nombre, cantidad: a.cantidad, foto: fotos.get(a.task_id) ?? null, etapa: etapaArticulo(a.estado), produccion: true,
+        id: a.task_id, nombre: nombres.get(a.task_id) ?? a.nombre, cantidad: a.cantidad, foto: fotos.get(a.task_id) ?? null, etapa: etapaArticulo(a.estado), produccion: true,
         asignados: de(a.asignados), entrega_real: a.entrega_real,
       }))],
     };
@@ -94,6 +94,23 @@ export async function produccionDePedidos(db: D1Database, ids: number[]): Promis
       }));
       if (articulos.length) out[rid] = { asignados: [], listos: 0, total: 0, entrega_real: null, articulos };
     }
+  }
+  return out;
+}
+
+// El nombre con que se vendió cada artículo (el del renglón del pedido atado a él: el que la vendedora cotizó), en lugar
+// del de la subtarea de ClickUp, que Producción arma a su manera (a veces con el proveedor). Los SKU genéricos (`_GE_`)
+// llevan el nombre en la descripción del renglón, no en la ficha.
+async function nombresDeVenta(db: D1Database, tareas: string[]) {
+  const out = new Map<string, string>();
+  if (!tareas.length) return out;
+  const { results } = await db.prepare(`SELECT li.clickup_task AS task, li.code, li.description, li.name AS li_name, p.name FROM line_items li
+      LEFT JOIN products p ON p.code = li.code WHERE li.clickup_task IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(tareas))
+    .all<{ task: string; code: string | null; description: string | null; li_name: string | null; name: string | null }>();
+  for (const r of results) {
+    const generico = /_GE(_|$)/i.test(r.code ?? '');
+    const n = (generico ? r.description ?? r.li_name : r.name ?? r.li_name ?? r.description)?.trim();
+    if (n && !out.has(r.task)) out.set(r.task, n);
   }
   return out;
 }

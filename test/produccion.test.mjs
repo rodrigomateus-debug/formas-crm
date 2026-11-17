@@ -347,9 +347,10 @@ test('pedidos: cada producto con su estado simplificado, quién lo tiene en Prod
   assert.equal(nec.foto, FOTO_NEC, 'con la foto del producto');
   assert.ok(nec.entrega_real, 'con la fecha real que propuso Producción');
   assert.ok(p.asignados.some((x) => x.nombre === `Ceci ${RUN}` && x.user_id), 'quién lo tiene, con su usuario');
-  const pel = p.articulos.find((a) => a.nombre.startsWith('Pelota'));
+  assert.equal(nec.nombre, 'Necessaire', 'con el nombre con que se vendió (el del pedido), no el de la subtarea de ClickUp');
+  const pel = p.articulos.find((a) => a.asignados.some((x) => x.id === SOLE.id));
+  assert.ok(pel, 'cada producto con quien lo tiene');
   assert.equal(pel.etapa, '1237498996', '«listo para entergar» es Listo para entregar');
-  assert.ok(pel.asignados.some((x) => x.id === SOLE.id), 'cada producto con quien lo tiene');
 
   // La vendedora: de sus pedidos sí (no va por /produccion), de los demás nada; y en la ficha, quién lo tiene.
   const vera = (await api('POST', '/users', { email: `vera.prod.${RUN}@formas.ar`, name: `Vera Prod ${RUN}`, profile: 'comercial', role: 'member' })).data;

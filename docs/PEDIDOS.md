@@ -142,28 +142,38 @@ total del pedido no se puede saber y se muestra solo el saldo. Un pago que todav
 
 ## Los productos de cada pedido en la lista
 
-Pedido de Rodrigo del 17/11/2026: la lista de Pedidos (la que usan las vendedoras) se parece a Producción, pero
-simplificada. Cada pedido tiene sus productos abajo, con la misma línea que baja desde el pedido que en Producción:
+Pedido de Rodrigo del 17/11/2026: la lista y el tablero de Pedidos son el pantallazo de la vendedora. Se parecen a
+Producción, pero simplificados: lo que ella necesita para saber cómo vienen sus pedidos, qué le toca y qué decirle al
+cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro, quién no tiene nada asignado).
 
-- **Cada producto** con su foto (la misma de los productos del pedido), su nombre y cantidad, su **estado en palabras de
-  la vendedora** (la pastilla de la etapa del pedido que tendría si fuera el único producto: Esperando boceto o
-  confirmación, En producción, Listo para entregar, Entregado; «Sin arrancar» si Producción todavía no lo empezó), **quién
-  lo tiene en Producción** (foto y nombre) y la **fecha real** que propuso Producción («Real mié 24/11», con «+4 d» si
-  quedó después de la pactada y en rojo si ya pasó y no está listo). No se ven los servicios ni los anulados, ni el
-  detalle interno (proveedor, impresor, fechas de ingreso y retiro).
-- **El estado va en la columna «Etapa del pedido» y quién lo tiene en la columna «Producción»**; si alguna no está en la
-  tabla, va al lado del nombre del producto.
-- **Columna «Producción»** en el renglón del pedido: quién lo tiene (el PDV y sus productos abiertos), cuántos productos
-  están listos («1/3») y la fecha real del PDV (o, si no tiene, la más lejana de sus productos abiertos). Se suma sola
-  una vez, al lado de la etapa, en «Todos» y «Míos» de cada navegador; en las vistas guardadas se agrega desde
-  «Columnas». Si alguien la quita, no vuelve.
-- **Abrir y cerrar**: la flecha de cada pedido, o «Colapsar productos» / «Expandir productos» arriba a la derecha para
-  todos (queda en el navegador; por defecto, abiertos). Un clic en un producto abre la vista previa del pedido.
+- **Cada producto** con su foto, el nombre con que se vendió (el del renglón del pedido atado al artículo, el mismo de los
+  productos del pedido; si no está atado, el de ClickUp), la cantidad, su **estado en palabras de la vendedora** (la
+  pastilla de la etapa del pedido que tendría si fuera el único producto: Esperando boceto o confirmación, En producción,
+  Listo para entregar, Entregado; «Sin arrancar» si Producción todavía no lo empezó) y **quién lo tiene en Producción**
+  (foto y nombre; sin asignar no se dice). No se ven los servicios ni los anulados.
+- **La entrega**, como se la dice al cliente: «Pactada vie 20/11» (la de Finnegans) o, si Producción propuso otra,
+  «Pactada vie 20/11 → mar 24/11 +4 d». El «+4 d» en ámbar es para avisarle al cliente; en rojo, lo que ya pasó y no
+  está listo. La fecha de Producción del pedido es la más lejana entre la del PDV y la de sus productos que faltan. Un
+  producto muestra su fecha solo si es otra que la del pedido.
+- **Lo que le toca a ella**: en «$ Pendiente de Anticipo», «Te toca: el anticipo»; en «Pendiente Boceto Digital», «Te
+  toca: el boceto».
+- **Lista**: el estado de cada producto va en la columna «Etapa del pedido» y quién lo tiene en la columna
+  «Producción» (si alguna no está en la tabla, al lado del nombre). La columna «Producción» del pedido junta lo que le
+  toca, quién lo tiene, cuántos productos están listos («1/3 listos») y la entrega. Se suma sola una vez, al lado de la
+  etapa, en «Todos» y «Míos» de cada navegador; en las vistas guardadas se agrega desde «Columnas».
+- **Tablero**, como el de Producción: cada tarjeta con sus productos adentro (hasta 4 y «+ N productos más»), con su
+  estado y quién lo tiene; arriba, quién tiene el pedido, cuántos están listos, lo que le toca y, si Producción propuso
+  otra fecha, «Nueva fecha mar 24/11 +4 d» (la pactada ya está en la tarjeta). Con los productos a la vista no van las
+  miniaturas ni el resumen de ClickUp («2 en el impresor…»).
+- **Abrir y cerrar**: la flecha de cada pedido (en la tarjeta, «3 productos»), o «Colapsar productos» / «Expandir
+  productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. La lista y el tablero
+  lo recuerdan cada uno en el navegador; por defecto, abiertos, salvo los entregados y anulados. Un clic en un producto
+  abre la vista previa del pedido.
 - Un pedido sin PDV en ClickUp muestra sus productos (los renglones del pedido, sin servicios) sin estado.
-- Sale de la tabla `produccion` (la sincronización de ClickUp de cada 10 minutos), en una sola consulta para la página:
-  `GET /api/pedidos/articulos?ids=…` (`src/worker/pedidosprod.ts`, pantalla en `web/src/pages/PedidosProductos.tsx`).
-  Devuelve solo los pedidos que quien pregunta puede ver, así que la vendedora la usa para los suyos. Prueba en
-  `test/produccion.test.mjs`.
+- Sale de la tabla `produccion` (la sincronización de ClickUp de cada 10 minutos), en una sola consulta para la página o
+  el tablero: `GET /api/pedidos/articulos?ids=…` (hasta 500; `src/worker/pedidosprod.ts`, pantalla en
+  `web/src/pages/PedidosProductos.tsx`, usada en `ObjectIndex.tsx` y `PropBoard.tsx`). Devuelve solo los pedidos que quien
+  pregunta puede ver, así que la vendedora la usa para los suyos. Prueba en `test/produccion.test.mjs`.
 
 ## Miniaturas de los productos en la tarjeta
 

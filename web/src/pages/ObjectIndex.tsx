@@ -545,7 +545,7 @@ function IndexFor({ type }: { type: ObjectType }) {
             <tbody>
               {rows.map((r) => {
                 const p = esPedidos ? prod[r.id] : undefined;
-                const abierto = !!p?.articulos.length && productos.abierto(r.id);
+                const abierto = !!p?.articulos.length && productos.abierto(r);
                 return (
                 <Fragment key={r.id}>
                 <tr className={`${selected.has(r.id) ? 'sel' : ''}${abierto ? ' ped-con-arts' : ''}`}>

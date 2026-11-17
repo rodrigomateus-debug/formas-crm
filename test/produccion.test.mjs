@@ -99,6 +99,7 @@ const PDVS = () => [pdvTask(`pa${RUN}`, PDV, 'FORMAS SHOP', ARTS.shop), pdvTask(
   sinDescripcion(pdvTask(`pr${RUN}`, PDV_R, 'FORMAS SHOP', ARTS_R))];
 
 let server;
+let sinSubtareas = false;
 before(async () => {
   server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -156,6 +157,7 @@ before(async () => {
         return send([
           fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: `NEC_${RUN}`, DIMENSIONVALOR: `PEDVTASTP - ${PDV}` }),
           fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: 'PEL_1', DIMENSIONVALOR: 'PEDVTASTP - 99999' }),
+          fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: `MOC_R${RUN}`, DIMENSIONVALOR: `PEDVTASTP - ${PDV_R}` }),
           fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: null, DIMENSIONVALOR: 'Sin dimensión valor' }),
           fila({ TRANSACCIONID: 987660, IDENTIFICACIONEXTERNA: `OC - 4330 ${RUN}`, DOCNROINT: 'OC - 4330', FECHA: hoy, CODIGOPROD: 'SET_1', DIMENSIONVALOR: 'Sin dimensión valor' }),
           fila({ TRANSACCIONID: 987670, IDENTIFICACIONEXTERNA: `OC - 4340 ${RUN}`, DOCNROINT: 'OC - 4340', ESTADO: 'Anulada', CODIGOPROD: 'PEL_1', DIMENSIONVALOR: `PEDVTASTP - ${PDV}` }),
@@ -166,6 +168,8 @@ before(async () => {
         { dimensionCodigo: 'PEDVTA', distribucionItems: [{ codigo: `PEDVTASTP - ${PDV.padStart(8, '0')}`, porcentaje: 100 }] },
       ] }] });
       const t = PDVS().find((x) => x.id === tarea);
+      // Como si ClickUp no hubiera dado los artículos al leer el pedido (los pedidos leídos antes de atar por la ficha).
+      if (t && sinSubtareas && t.id === `pr${RUN}`) return send({ ...t, subtasks: [] });
       if (t) return send(t);
       return send({ err: 'no' }, 404);
     });
@@ -444,6 +448,25 @@ test('productos: los renglones de Finnegans sin descripción se atan a su artíc
   const tarea = (code) => prods.items.find((i) => i.code === code)?.clickup_task;
   assert.deepEqual([tarea(`GOR_R${RUN}`), tarea(`MOC_R${RUN}`)], [`pr${RUN}-a0`, `pr${RUN}-a1`], 'cada renglón con su artículo, por el nombre (no por el orden ni la cantidad)');
   assert.ok(prods.items.every((i) => i.status === 'en el impresor'), 'cada producto con su estado de producción');
+});
+
+// Aviso de Rodrigo del 17/11/2026 («siguen con problema»): los pedidos que se leyeron antes del arreglo quedaban sin atar
+// hasta la relectura de las 6 horas. Ahora los renglones sin artículo se atan con lo que guardó Producción, sin consultar
+// ClickUp. Y en «Productos» del pedido, cada producto con su OC (link a Finnegans) o «Sin OC».
+test('productos: los renglones sin atar se atan con lo guardado de Producción, y cada producto con su OC', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const pdv = pdvDe(await vista(), PDV_R);
+  sinSubtareas = true;
+  try {
+    const prods = (await api('GET', `/records/order/${pdv.record_id}/products?refresh=1`)).data;
+    const de = (code) => prods.items.find((i) => i.code === code);
+    assert.deepEqual([de(`GOR_R${RUN}`)?.clickup_task, de(`MOC_R${RUN}`)?.clickup_task], [`pr${RUN}-a0`, `pr${RUN}-a1`], 'atados aunque ClickUp no dio los artículos');
+    assert.equal(de(`GOR_R${RUN}`).status, 'en el impresor', 'con su estado de producción');
+    assert.deepEqual(de(`MOC_R${RUN}`).oc?.map((o) => o.numero), ['OC 4321'], 'la mochila con su OC');
+    assert.match(de(`MOC_R${RUN}`).oc[0].url, /pk=987654&docId=71/, 'con link a Finnegans GO');
+    assert.deepEqual(de(`GOR_R${RUN}`).oc, [], 'el gorro sin OC');
+  } finally { sinSubtareas = false; }
 });
 
 test('producción: el proveedor que falta sale del SKU y se escribe en ClickUp', async (t) => {

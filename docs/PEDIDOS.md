@@ -214,8 +214,19 @@ el SKU, OC). Se ata solo cuando no hay dudas, de lo más seguro a lo menos (`art
 4. si queda un renglón y un artículo, esos.
 
 En cada paso se ata un renglón solo si tiene un único candidato y ese artículo no le sirve a otro renglón (dos con la misma
-cantidad, por ejemplo, no se atan por la cantidad). Los pedidos ya leídos se vuelven a atar en su próxima lectura (al
-abrirlos, cada 6 horas, y de fondo una vez por día los activos). Prueba en `test/produccion.test.mjs`.
+cantidad, por ejemplo, no se atan por la cantidad).
+
+Los renglones que quedaron sin atar no esperan la relectura de Finnegans (cada 6 horas): se vuelven a atar con lo que ya
+está guardado, los artículos que guardó Producción (tabla `produccion`) y las fichas, sin consultar Finnegans ni ClickUp
+(`reatarRenglones`; aviso de Rodrigo del 17/11/2026, «siguen con problema»). Pasa al abrir el pedido y, a los :30 de cada
+hora, con una tanda de pedidos que tengan renglones sin atar y artículos sin renglón (`reatarPendientes`, en el cron).
+
+### La OC de cada producto
+
+En «Productos» del pedido, cada producto (no los servicios) muestra su orden de compra de Finnegans como un botón
+(«OC 11582 ↗») que abre la OC en Finnegans GO, o «Sin OC» si ninguna OC del pedido tiene ese producto. Se busca por el
+código del producto entre los de las OC del pedido (`ordenes_compra`, `ocsDeCodigo`), así que no depende de que el
+renglón esté atado a su artículo de ClickUp. Pedido de Rodrigo del 17/11/2026. Prueba en `test/produccion.test.mjs`.
 
 ## Miniaturas de los productos en la tarjeta
 

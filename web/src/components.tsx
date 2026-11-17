@@ -813,3 +813,20 @@ export function EstadoClickup({ estado, color }: { estado: string; color: string
     </span>
   );
 }
+
+// Órdenes de compra de Finnegans (ordenescompra.ts, pedido de Rodrigo del 17/11/2026): «OC 1234», cada una con link a la OC
+// en Finnegans GO. En Producción y en Pedidos, en cada producto y en el pedido.
+export interface OcRef { numero: string; nombre: string | null; url: string | null; proveedor: string | null }
+export function OcLinks({ ocs, vacio }: { ocs?: OcRef[] | null; vacio?: ReactNode }) {
+  if (!ocs?.length) return <>{vacio ?? null}</>;
+  return (
+    <span className="oc-links">
+      {ocs.map((o) => {
+        const title = [o.nombre, o.proveedor].filter(Boolean).join(' · ') + (o.url ? ' — abrir en Finnegans' : '');
+        return o.url
+          ? <a key={o.nombre ?? o.numero} href={o.url} target="_blank" rel="noreferrer" className="oc-link" title={title} onClick={(e) => e.stopPropagation()}>{o.numero}</a>
+          : <span key={o.nombre ?? o.numero} className="oc-link" title={title}>{o.numero}</span>;
+      })}
+    </span>
+  );
+}

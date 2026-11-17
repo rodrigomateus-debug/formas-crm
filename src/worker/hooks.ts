@@ -15,6 +15,7 @@ import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from '
 import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
+import { estadoOrdenesCompra } from './ordenescompra';
 import { aplicarCostosLogo } from './costoslogo';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
@@ -350,6 +351,12 @@ hooks.get('/pedidos/saldos', async (c) => {
 hooks.post('/productos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
+});
+
+// Órdenes de compra leídas de Finnegans (ordenescompra.ts): cuántas y qué tipos de documento se vieron. Solo cantidades.
+hooks.get('/ordenes-compra/estado', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await estadoOrdenesCompra(c.env.DB));
 });
 
 // Remitos de los pedidos entregados que todavía no tienen (los que suben a los artículos en ClickUp): una tanda por

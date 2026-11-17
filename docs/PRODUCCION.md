@@ -26,6 +26,7 @@ se edita desde ahí.
 | Cantidad | CANTIDAD | No |
 | Pactada | La fecha de entrega del pedido de venta en Finnegans (la que puso el comercial) | No: se cambia en Finnegans |
 | Real | ENTREGAS (FECHA REAL), la de producción | Sí, en el PDV y en cada artículo |
+| OC | La orden de compra al proveedor en Finnegans, con link a la OC en Finnegans GO (ver «Órdenes de compra») | No |
 | Proveedor | PROVEEDOR | Sí |
 | Impresor | IMPRESOR | Sí |
 | Ingreso prov. | INGRESO (PROVEEDOR): llega del proveedor | Sí |
@@ -100,6 +101,30 @@ fecha que tenía el PDV al crearse y el registro del Worker anota qué campos de
   no tiene pedido, el VENDEDOR de ClickUp.
 - Sin «Ver entregados» se muestran los PDV con algún artículo abierto, y en ellos los artículos que no están
   entregados ni anulados.
+
+## Órdenes de compra (OC)
+
+Pedido de Rodrigo del 17/11/2026: en Producción y en Pedidos, una columna **OC** con el número de la orden de compra al
+proveedor de cada producto («OC 4321»); un clic la abre en Finnegans GO.
+
+- **Cuáles:** las OC se generan en Finnegans desde el pedido de venta, así que están entre los documentos destino del
+  pedido (el informe `ApiGetDocumentosDestinoByIdentificacionExternaDeals`, el mismo de las facturas y los remitos). Se
+  toman los documentos cuyo tipo o nombre dice orden de compra (`esOc` en `src/worker/ordenescompra.ts`).
+- **De qué producto:** el detalle de cada OC (`ordenCompra/<id>`) trae sus renglones con el código del producto. Una OC
+  puede juntar varios pedidos del mismo proveedor; cada renglón lleva el pedido de venta en la dimensión, así que se toman
+  los renglones de este pedido. El artículo se cruza por su SKU (el «Código:» de ClickUp o el del renglón atado). Si el
+  detalle no se puede leer, la OC queda en el pedido (en la fila del PDV en Producción y en el renglón del pedido en
+  Pedidos) y no en un producto.
+- **Cuándo:** al leer los productos del pedido de Finnegans (al abrirlo, cada 6 horas, y de fondo una vez por día los
+  activos). Una consulta del informe y una por cada OC nueva; el detalle de cada OC se lee una sola vez. Tabla
+  `ordenes_compra` (migración `0072_ordenes_compra.sql`).
+- **El link:** el visor de documentos de Finnegans GO con la transacción de la OC (`pk`), con el formato de un link real
+  de una OC (`docId=71`, `appitemID=50255`). Si alguna OC abre otra cosa, se ajusta en `urlOc`.
+- **Revisar lo que trae Finnegans:** el tipo de documento de la OC y los campos del detalle no están documentados; se
+  dedujeron de cómo vienen las facturas y los remitos. Un administrador ve lo que devuelve Finnegans para un pedido en
+  `/api/integrations/finnegans/documentos?pedido=PEDVTASTP - 31577` (los documentos destino, cuáles se toman como OC, y el
+  detalle de la primera).
+- Prueba en `test/produccion.test.mjs`.
 
 ## El estado del PDV sale de sus artículos
 

@@ -3,6 +3,8 @@ import { CERRADOS, lista } from './produccion';
 import { fotosDeArticulos, fotosDeRenglones, fotosSql, type StpItem } from './productos';
 import { TIPO_SQL, tareasServicio } from './servicios';
 import { calcularEntrega } from './remitos';
+import { ocsDeCodigo, ocsDePedidos, sinCodigos, type OcRef } from './ordenescompra';
+import { skusDeArticulos } from './notasproducto';
 import { adjuntosSql, armarAdjuntos, type Adjuntos } from './productos';
 
 // Producción en la lista de Pedidos (pedido de Rodrigo del 17/11/2026): lo que ven las vendedoras, como la pantalla
@@ -21,29 +23,32 @@ export interface ArticuloPedido {
   asignados: PersonaPedido[]; entrega_real: string | null;
   // Lo entregado según los remitos (remitos.ts), solo en los pedidos con entregas parciales: cuánto de lo vendido.
   entregado?: number; vendido?: number | null;
+  oc: OcRef[];   // sus órdenes de compra de Finnegans (ordenescompra.ts)
 }
 export interface ProduccionPedido {
   asignados: PersonaPedido[]; listos: number; total: number; entrega_real: string | null; articulos: ArticuloPedido[];
+  ocs: OcRef[];   // todas las del pedido (también las que no se pudieron atar a un producto)
 }
 
 const ANULADOS = CERRADOS.slice(1);
 const LISTOS = ['listo para entergar', 'listo para entregar', 'entregados'];
 
 type Fila = { task_id: string; pdv_task: string; es_pdv: number; nombre: string; estado: string; cantidad: number | null; asignados: string;
-  entrega_real: string | null; orden: number; record_id: number | null };
+  entrega_real: string | null; orden: number; record_id: number | null; codigo: string | null };
 
 export async function produccionDePedidos(db: D1Database, ids: number[]): Promise<Record<number, ProduccionPedido>> {
   const out: Record<number, ProduccionPedido> = {};
   if (!ids.length) return out;
   const lista_ids = JSON.stringify(ids);
   // Los PDV de estos pedidos y sus artículos (el artículo puede no tener el pedido: vale el de su PDV).
-  const pdvs = (await db.prepare(`SELECT task_id, pdv_task, es_pdv, nombre, estado, cantidad, asignados, entrega_real, orden, record_id FROM produccion
+  const pdvs = (await db.prepare(`SELECT task_id, pdv_task, es_pdv, nombre, estado, cantidad, asignados, entrega_real, orden, record_id, codigo FROM produccion
       WHERE es_pdv = 1 AND record_id IN (SELECT value FROM json_each(?))`).bind(lista_ids).all<Fila>()).results;
-  const arts = pdvs.length ? (await db.prepare(`SELECT task_id, pdv_task, es_pdv, nombre, estado, cantidad, asignados, entrega_real, orden, record_id FROM produccion
+  const arts = pdvs.length ? (await db.prepare(`SELECT task_id, pdv_task, es_pdv, nombre, estado, cantidad, asignados, entrega_real, orden, record_id, codigo FROM produccion
       WHERE es_pdv = 0 AND pdv_task IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(pdvs.map((p) => p.task_id))).all<Fila>()).results : [];
   const pedidoDe = new Map(pdvs.map((p) => [p.task_id, p.record_id!]));
   const conPedido = arts.map((a) => ({ ...a, record_id: pedidoDe.get(a.pdv_task) ?? a.record_id }));
-  const [fotos, servicios, nombres] = await Promise.all([fotosDeArticulos(db, conPedido), tareasServicio(db, ids), nombresDeVenta(db, arts.map((a) => a.task_id))]);
+  const [fotos, servicios, nombres, skus, ocs] = await Promise.all([fotosDeArticulos(db, conPedido), tareasServicio(db, ids), nombresDeVenta(db, arts.map((a) => a.task_id)),
+    skusDeArticulos(db, arts), ocsDePedidos(db, ids)]);
 
   // La gente de ClickUp que aparece, con su usuario del CRM (foto y nombre).
   const gente = [...new Set([...pdvs, ...arts].flatMap((f) => lista(f.asignados).map(Number)))];
@@ -64,10 +69,11 @@ export async function produccionDePedidos(db: D1Database, ids: number[]): Promis
       asignados: [...new Map([...(previo?.asignados ?? []), ...todos.values()].map((p) => [p.id, p])).values()],
       listos: (previo?.listos ?? 0) + suyos.filter((a) => LISTOS.includes(a.estado)).length,
       total: (previo?.total ?? 0) + suyos.length,
+      ocs: sinCodigos(ocs.get(rid)),
       entrega_real: [previo?.entrega_real, pdv.entrega_real].filter((x): x is string => !!x).sort().pop() ?? null,
       articulos: [...(previo?.articulos ?? []), ...suyos.map((a) => ({
         id: a.task_id, nombre: nombres.get(a.task_id) ?? a.nombre, cantidad: a.cantidad, foto: fotos.get(a.task_id) ?? null, etapa: etapaArticulo(a.estado), produccion: true,
-        asignados: de(a.asignados), entrega_real: a.entrega_real,
+        asignados: de(a.asignados), entrega_real: a.entrega_real, oc: ocsDeCodigo(ocs.get(rid), skus.get(a.task_id)),
       }))],
     };
   }
@@ -94,9 +100,9 @@ export async function produccionDePedidos(db: D1Database, ids: number[]): Promis
       const { fotos: fl } = fotosDeRenglones(lineas, items);
       const articulos = lineas.map((l, i) => ({ l, foto: fl[i] })).filter(({ l }) => !servicio.has(`${rid}:${l.pos}`)).map(({ l, foto }) => ({
         id: `li-${l.pos}`, nombre: (l.name ?? l.li_name ?? l.description ?? l.code ?? 'Producto').trim(), cantidad: l.quantity, foto: foto ?? null,
-        etapa: null, produccion: false, asignados: [], entrega_real: null,
+        etapa: null, produccion: false, asignados: [], entrega_real: null, oc: ocsDeCodigo(ocs.get(rid), l.code),
       }));
-      if (articulos.length) out[rid] = { asignados: [], listos: 0, total: 0, entrega_real: null, articulos };
+      if (articulos.length) out[rid] = { asignados: [], listos: 0, total: 0, entrega_real: null, articulos, ocs: sinCodigos(ocs.get(rid)) };
     }
   }
   await entregasParciales(db, ids, out);

@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type
 import { Link, useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf, userOf } from '../lib';
 import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '../vistas';
-import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug } from '../components';
+import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug, OcLinks, type OcRef } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { cumple, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol } from './ProduccionFiltros';
@@ -31,11 +31,13 @@ interface Articulo {
   sku?: string | null;             // el SKU, si puede llevar notas de producto (no los genéricos)
   notas?: ResumenNotas | null;     // las notas de Producción de ese SKU (notasProducto.tsx)
   costo_logo?: CostoLogo | null;   // lo que se tomó para el logo en la cotización del STP, por unidad (costoslogo.ts)
+  oc?: OcRef[];                    // sus órdenes de compra de Finnegans, con link (ordenescompra.ts)
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: Articulo[];
+  ocs?: OcRef[];   // todas las órdenes de compra del pedido
 }
 interface CostoLogo { logo: number; setup: number; cantidad: number | null; fuente: 'costos' | 'pedido' }
 interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null; produccion?: number }
@@ -562,6 +564,7 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
             <th className="nosort numcol"><span className="th-f">Cantidad{fil('cantidad')}</span></th>
             <th className="nosort" title="La fecha de entrega que puso el comercial en el pedido de Finnegans">Pactada</th>
             <th className="nosort" title="La fecha de producción: ENTREGAS (FECHA REAL) en ClickUp"><span className="th-f">Real{fil('entrega_real')}</span></th>
+            <th className="nosort" title="La orden de compra al proveedor en Finnegans (clic para abrirla)">OC</th>
             <th className="nosort"><span className="th-f">Proveedor{fil('proveedor')}</span></th>
             <th className="nosort"><span className="th-f">Impresor{fil('impresor')}</span></th>
             <th className="nosort" title="Llega del proveedor"><span className="th-f">Ingreso prov.{fil('ingreso_proveedor')}</span></th>
@@ -627,6 +630,8 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>
         <td className="prod-pactada" title="Entrega pactada: la que puso el comercial en Finnegans">{pactada ? dia(pactada) : <span className="muted">—</span>}</td>
         <td><span className="prod-real"><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega real del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /><Corrida pactada={pactada} real={p.entrega_real} /></span></td>
+        {/* Las OC del pedido que no quedaron en ningún artículo (o todas, si el pedido no muestra artículos). */}
+        <td><OcLinks ocs={ocsSueltas(p)} /></td>
         <td colSpan={6} className="small muted">
           {!ed && !p.editable && <span>Se trabaja en ClickUp</span>}
         </td>
@@ -635,7 +640,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
       {abierto && p.articulos.map((a) => (
         <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={13} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={14} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
@@ -657,6 +662,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
       <td />
       <td><span className="prod-real"><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega real de ${a.nombre}`} alerta={atras(a.entrega_real)} /><Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={a.entrega_real} /></span></td>
+      <td><OcLinks ocs={a.oc} vacio={<span className="muted">—</span>} /></td>
       <td className="opcion-cell" title={a.proveedor_sku ? `Por el SKU ${a.proveedor_sku}` : undefined}><OpcionCelda v={v} campo="proveedor" valor={a.proveedor} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${a.nombre}`} /></td>
       <td className="opcion-cell"><OpcionCelda v={v} campo="impresor" valor={a.impresor} editable={ed} onChange={set('impresor')} opciones={imps} label={`Impresor de ${a.nombre}`} /></td>
       <td><FechaCelda valor={a.ingreso_proveedor} editable={ed} onChange={set('ingreso_proveedor')} label={`Ingreso del proveedor de ${a.nombre}`} /></td>
@@ -667,6 +673,9 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
     </tr>
   );
 }
+
+// Las OC del pedido que no están en ninguno de los artículos que se ven (las que no se pudieron atar a un producto).
+const ocsSueltas = (p: Pdv) => (p.ocs ?? []).filter((o) => !p.articulos.some((a) => a.oc?.some((x) => x.nombre === o.nombre)));
 
 // Si el logo del producto no está listo para producir (falta, tiene textos sin curvas o no es vectorial), un aviso al lado
 // del nombre; se resuelve en el pedido (Productos → Logo).
@@ -833,7 +842,8 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
           <ChipsArticulo a={a} p={p} v={v} notaAparte />
           {!a.notas && <span className="prod-hijo-nota"><Notas a={a} p={p} v={v} /></span>}
           <div className="small muted ellipsis prod-card-provs">
-            {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>]
+            {[a.cantidad != null && `${a.cantidad.toLocaleString('es-AR')} u.`, prov && <NombreProveedor>{prov.label}</NombreProveedor>, imp && <>imp. <NombreProveedor>{imp.label}</NombreProveedor></>,
+              !!a.oc?.length && <OcLinks ocs={a.oc} />]
               .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}
           </div>
         </div>

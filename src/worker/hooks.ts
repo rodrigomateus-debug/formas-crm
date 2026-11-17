@@ -15,7 +15,8 @@ import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from '
 import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
-import { estadoOrdenesCompra } from './ordenescompra';
+import { estadoOrdenesCompra, ordenesCompraPendientes } from './ordenescompra';
+import { Budget } from './budget';
 import { aplicarCostosLogo } from './costoslogo';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
@@ -351,6 +352,12 @@ hooks.get('/pedidos/saldos', async (c) => {
 hooks.post('/productos/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
+});
+
+// Las órdenes de compra de los pedidos en curso que no se leyeron en las últimas 6 horas: una tanda por llamada.
+hooks.post('/ordenes-compra/pendientes', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  return c.json(await ordenesCompraPendientes(c.env, Budget.of(c.env), Math.min(Math.max(Number(c.req.query('limit')) || 15, 1), 30)));
 });
 
 // Órdenes de compra leídas de Finnegans (ordenescompra.ts): cuántas y qué tipos de documento se vieron. Solo cantidades.

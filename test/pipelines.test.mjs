@@ -79,7 +79,7 @@ test('Corporate pide empresa; la toma del contacto si tiene una principal', asyn
   assert.equal(noCompany.status, 400);
   assert.match(noCompany.data.error, /empresa asociada/);
   const comp = await api('POST', '/records/company', { props: { name: `Corp ${RUN}`, domain: `corp-${RUN}.com.ar` } });
-  const contact = await api('POST', '/records/contact', { props: { firstname: 'Ceci', email: `ceci@corp-${RUN}.com.ar` } });
+  const contact = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Ceci', email: `ceci@corp-${RUN}.com.ar` } });
   const deal = await api('POST', '/records/deal', { props: { dealname: `Con contacto ${RUN}`, pipeline: '674405796' }, associations: [contact.data.id] });
   assert.equal(deal.status, 201, JSON.stringify(deal.data));
   const rec = await api('GET', `/records/deal/${deal.data.id}`);

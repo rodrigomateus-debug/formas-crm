@@ -16,7 +16,7 @@ const ultima = async (id) => (await api('GET', `/records/deal/${id}`)).data.reco
 const espera = () => new Promise((r) => setTimeout(r, 20));
 
 test('última actividad: alta, cambio de etapa y conversación; celular en la tarjeta', async () => {
-  const contacto = (await api('POST', '/records/contact', { props: { firstname: 'Wapp', lastname: RUN, mobilephone: '11 5555-0199' } })).data;
+  const contacto = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Wapp', lastname: RUN, mobilephone: '11 5555-0199' } })).data;
   const neg = await api('POST', '/records/deal', { props: { dealname: `Actividad ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled' }, associations: [contacto.id] });
   assert.equal(neg.status, 201, JSON.stringify(neg.data));
   const id = neg.data.id;

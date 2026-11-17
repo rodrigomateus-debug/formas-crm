@@ -156,7 +156,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['razon_social', 'Razón social', 'string', 'Facturación'],
     ['codigo_finnegans_nuevo', 'Código Finnegans', 'string', 'Facturación'],
     ['codigo_finnegans', 'Código Finnegans viejo', 'string', 'Facturación'],
-    ['origen_del_contacto', 'Canal de contacto', 'enum', 'Origen', CANAL],
+    ['origen_del_contacto', 'Canal de contacto', 'enum', 'Origen', CANAL, { ...FORM, required: true, description: 'Por dónde llegó. Obligatorio al cargar un contacto a mano; los que entran solos (Gmail, Darwin, LinkedIn) lo traen.' }],
     ['tipo_de_origen', 'Tipo de origen', 'enum', 'Origen', TIPO_ORIGEN],
     ['origen_de_la_conversacion', 'Origen de la conversación', 'enum', 'Origen', ['Darwin', ['Agente Humano', 'Humano directo']]],
     ['prospect_source', 'Plataforma de origen', 'string', 'Origen'],

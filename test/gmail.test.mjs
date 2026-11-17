@@ -54,7 +54,7 @@ after(() => server.close());
 test('registra mails con contactos, crea el contacto al enviar y no duplica', async (t) => {
   const status = await api('GET', '/gmail');
   if (!status.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba (ver encabezado)'); return; }
-  const contact = await api('POST', '/records/contact', { props: { firstname: 'Compras', email: client } });
+  const contact = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Compras', email: client } });
   await api('PUT', '/gmail', { enabled: true, users: [me] });
   const out = await api('POST', '/gmail/sync');
   const mine = out.find((o) => o.mailbox === me);

@@ -333,11 +333,13 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   const meta = new Meta(db);
   const { props } = await validateProps(meta, type, input, opts);
   if (type === 'order' && props.hs_pipeline_stage != null) checkOrderStage(ctx, opts, ORDER_CONFIRMED, props.hs_pipeline_stage, props.unidad_de_negocio);
-  for (const p of await meta.properties(type)) {
-    if (p.required && (props[p.name] == null || props[p.name] === '') && !(type === 'deal' && ['pipeline', 'dealstage'].includes(p.name))) {
-      throw new HttpError(400, `Falta "${p.label}".`);
-    }
-  }
+  // Obligatorias: las del sistema (nombre, pipeline, etapa…) siempre; las que se marcan en Configuración (como el «Canal de
+  // contacto» del contacto, migración 0070) solo al cargar a mano —pantalla y Claude—, más abajo: las entradas solas (Gmail,
+  // Darwin, LinkedIn, importación, tableros, strict: false) no siempre las traen y no se tienen que cortar.
+  const faltan = (await meta.properties(type)).filter((p) => p.required && (props[p.name] == null || props[p.name] === '')
+    && !(type === 'deal' && ['pipeline', 'dealstage'].includes(p.name)));
+  const delSistema = faltan.find((p) => p.system);
+  if (delSistema) throw new HttpError(400, `Falta "${delSistema.label}".`);
   if (type === 'deal') {
     await checkDealStage(meta, props);
     const stage = (await meta.stage(props.dealstage as string))!;
@@ -354,6 +356,8 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     const dup = await db.prepare("SELECT r.id, u.name AS duenio FROM records r LEFT JOIN users u ON u.id = r.owner_id WHERE r.object_type = 'company' AND r.domain = ? AND r.archived = 0").bind(normDomain(props.domain)).first<{ id: number; duenio: string | null }>();
     if (dup) throw new HttpError(409, `Ya existe una empresa con el dominio ${props.domain} (id ${dup.id}${dup.duenio ? `, de ${dup.duenio}` : ''}).`);
   }
+  // Después de los duplicados: si el contacto ya existe, se avisa eso y no que falta un dato.
+  if (opts.strict !== false && faltan.length) throw new HttpError(400, `Falta ${faltan.map((p) => `"${p.label}"`).join(', ')}.`);
   // Contacto o empresa de Formas (por el mail o el dominio): «Equipo Formas» solo, si no se eligió otro tipo (relacion.ts).
   if ((type === 'contact' || type === 'company') && (props.tipo_de_relacion == null || props.tipo_de_relacion === '')) {
     const auto = await relacionSola(db, type, props);

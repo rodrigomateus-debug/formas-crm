@@ -134,12 +134,19 @@ export default function ProduccionPage() {
     try {
       const d = await http<Vista>('GET', `/produccion${qs({ unidades: unidades?.join(','), cerrados: cerrados ? 1 : undefined })}`);
       setV(d); setError(null);
-      if (!unidades) { setUnidades(d.unidades); setBase(d.unidades); }
+      if (!unidades) { porDefecto.current = d.unidades.join(','); setUnidades(d.unidades); setBase(d.unidades); }
     } catch (e) { setError((e as Error).message); }
     setCargando(false);
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { cargar(); }, [unidades?.join(','), cerrados]);
+  // Las unidades por defecto llegan con la primera carga: no se vuelve a traer lo mismo (entraba dos veces seguidas y la
+  // lista se redibujaba entera, como si se trabara).
+  const porDefecto = useRef<string | null>(null);
+  useEffect(() => {
+    if (unidades && unidades.join(',') === porDefecto.current) { porDefecto.current = null; return; }
+    porDefecto.current = null;
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unidades?.join(','), cerrados]);
   // Se cargó o cambió una nota de producto: el aviso de los artículos con ese SKU se actualiza.
   useCambioNotas(() => { cargar(); });
 

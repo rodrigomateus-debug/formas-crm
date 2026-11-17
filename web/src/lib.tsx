@@ -367,9 +367,10 @@ function recordar(key: string, data: unknown) {
 }
 
 // Trae algo para tenerlo en la memoria antes de que se lo pida (las otras pestañas de la lista). Sin errores a la vista.
-export function precargar(path: string) {
-  if (memoria.has(path)) return Promise.resolve();
-  return http('GET', path).then((d) => recordar(path, d), () => undefined);
+// Devuelve lo traído (o lo que ya estaba), por si hace falta traer algo más que depende de eso.
+export function precargar<T = unknown>(path: string): Promise<T | undefined> {
+  if (memoria.has(path)) return Promise.resolve(memoria.get(path) as T);
+  return http<T>('GET', path).then((d) => { recordar(path, d); return d; }, () => undefined);
 }
 
 // Datos de un pedido al servidor. Con `key` (la dirección del pedido) usa la memoria: si ya se vio, lo muestra enseguida

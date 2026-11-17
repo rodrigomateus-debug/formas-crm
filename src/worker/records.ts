@@ -1,5 +1,6 @@
 import { avisarAsignacion } from './avisos';
 import { controlAlGanar } from './facturar';
+import { agradecerReferido } from './referidos';
 import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
@@ -450,6 +451,8 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     await stageAutomation(db, ctx, id, st, c.owner_id, c.name);
     await emitDealEvent(db, st.is_won ? ['deal.stage_changed', 'deal.won'] : ['deal.stage_changed'], id);
     if (st.is_won) await controlAlGanar(db, ctx, id, c.owner_id).catch((e) => console.error('datos para facturar', id, (e as Error).message));
+    // El negocio era de un referido: la vendedora le agradece al cliente que lo recomendó (referidos.ts).
+    if (st.is_won) await agradecerReferido(db, ctx, id, c.owner_id).catch((e) => console.error('agradecer referido', id, (e as Error).message));
   }
   return getRow(db, id);
 }

@@ -14,6 +14,7 @@ import CronogramaPage from './pages/Cronograma';
 import RecorridosPage from './pages/Recorridos';
 import NotasProductosPage from './pages/NotasProductos';
 import ChoferesPage from './pages/Choferes';
+import ReferidosPage from './pages/Referidos';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
@@ -67,6 +68,8 @@ export default function App() {
         {!produccion && <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>}
         {!produccion && <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>}
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
+        {/* Referidos (referidos.ts): quién nos recomendó a quién. Sin la parte comercial, no va. */}
+        {!produccion && <NavLink to="/referidos" className="nav-link"><Icon name="referido" />Referidos</NavLink>}
         {/* Operaciones, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas (y Choferes en Logística), y las
             Notas de productos. Perfil Ventas: Recorridos y las Notas de productos. */}
         <div className="nav-group">Operaciones</div>
@@ -106,6 +109,7 @@ export default function App() {
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
           <Route path="/recorridos" element={<RecorridosPage />} />
           <Route path="/productos" element={<NotasProductosPage />} />
+          {!produccion && <Route path="/referidos" element={<ReferidosPage />} />}
           {(logistica || meta.me.role === 'admin') && <Route path="/choferes" element={<ChoferesPage />} />}
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />

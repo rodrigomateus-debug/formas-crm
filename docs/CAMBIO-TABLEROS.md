@@ -31,8 +31,8 @@ headers={"Authorization": "Bearer " + _token.tok, "Content-Type": "application/j
 
 - `shop.py` abre `http.client.HTTPSConnection("api.hubapi.com")` en 8 lugares (líneas 408, 1526, 1700, 1765, 1799,
   1841, 1872 y 6689). Reemplazar el literal por una constante `HS_HOST = os.environ.get("HUBSPOT_HOST", "api.hubapi.com")`.
-- `worker.js:92` (referidos) y `nc_api.js:221` hacen `fetch("https://api.hubapi.com" + …)`: usar `env.HUBSPOT_BASE`
-  con el mismo valor por defecto.
+- Los referidos ya van al CRM (17/11/2026): `worker.js` llama a `/hooks/referidos` con `CRM_TOKEN` ([REFERIDOS.md](REFERIDOS.md)).
+- `nc_api.js:221` hace `fetch("https://api.hubapi.com" + …)`: usar `env.HUBSPOT_BASE` con el mismo valor por defecto.
 - Los links a fichas (`app.hubspot.com/contacts/47666798/record/0-1|0-2|0-3/<id>`, 17 lugares) siguen valiendo con
   solo cambiar el host: el CRM redirige esa ruta a la ficha.
 - Las pruebas (`test_worker.mjs`, `test_nc_api.mjs`) comparan contra `https://api.hubapi.com`; con el valor por
@@ -50,6 +50,6 @@ headers={"Authorization": "Bearer " + _token.tok, "Content-Type": "application/j
 | `POST /crm/v4/associations/{a}/{b}/batch/read` | ✅ Con la empresa principal marcada (typeId 5 en negocios, 1 en contactos). |
 | `GET /crm/v3/pipelines/deals`, `GET /crm/v3/owners` (también archivados) | ✅ Owners con el id de HubSpot. |
 | `POST /oauth/v2/private-apps/get/access-token-info` | ✅ Devuelve los alcances que chequea `shop.py`. |
-| `POST /crm/v3/objects/contacts` y `deals` con `associations` (referidos) | ✅ |
+| `POST /crm/v3/objects/contacts` y `deals` con `associations` | ✅ (los referidos del tablero ya no la usan: van por `/hooks/referidos`) |
 | Búsqueda con más de 10.000 resultados | El CRM no corta en 10.000 (HubSpot sí). |
 | `query_crm_data` del conector de Claude (prospeccion.js) | Usar las herramientas `search_records` y `report` del MCP del CRM. |

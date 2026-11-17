@@ -104,7 +104,7 @@ Estado: ✅ hecho y probado · 🔧 hecho, falta configurar o conectar · ⏳ pe
 | Formularios web (ruleta de eventos, descarga de catálogos) | 🔧 | `/hooks/form/<nombre>`; falta cambiar el formulario de la web |
 | Registro automático de mails de la bandeja | 🔧 | Gmail cada 10 min; falta la delegación de la cuenta de servicio |
 | Tableros que leen HubSpot (formas-tablero, formas-shop-tablero) | 🔧 | API compatible en la misma ruta; ver `docs/CAMBIO-TABLEROS.md` |
-| Referidos del tablero que crean contacto y negocio | 🔧 | La misma API compatible (`POST /crm/v3/objects/contacts` y `deals`) |
+| Referidos del tablero que crean contacto y negocio | ✅ | `/hooks/referidos` (17/11/2026): contacto, negocio en Lead, nota en las dos puntas, tarea y agradecimiento al ganar; pantalla Referidos ([REFERIDOS.md](REFERIDOS.md)). Falta cargar `CRM_TOKEN` en el tablero |
 | Migración de todo lo histórico | 🔧 | `scripts/migrate-hubspot.mjs` probado contra un HubSpot simulado; falta correrlo con el token real |
 
 ### Usuarios y permisos

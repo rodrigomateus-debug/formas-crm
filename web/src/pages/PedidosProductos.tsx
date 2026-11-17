@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { http, useAsync, useMeta, formatValue, type CrmRecord } from '../lib';
-import { EtapaPedido, PersonaProd, type PersonaProduccion } from '../components';
+import { EtapaPedido, OcLinks, PersonaProd, type OcRef, type PersonaProduccion } from '../components';
 import { dia, Flecha, FotoProducto, hoyIso } from './Produccion';
 
 // Producción en la lista y el tablero de Pedidos (pedido de Rodrigo del 17/11/2026): el pantallazo de la vendedora, como
@@ -14,8 +14,14 @@ export interface ArticuloPedido {
   id: string; nombre: string; cantidad: number | null; foto: string | null; etapa: string | null; produccion: boolean;
   asignados: PersonaProduccion[]; entrega_real: string | null;
   entregado?: number; vendido?: number | null;   // según los remitos, en los pedidos con entregas a medias
+  oc?: OcRef[];   // sus órdenes de compra de Finnegans, con link (ordenescompra.ts)
 }
-export interface ProduccionPedido { asignados: PersonaProduccion[]; listos: number; total: number; entrega_real: string | null; articulos: ArticuloPedido[] }
+export interface ProduccionPedido { asignados: PersonaProduccion[]; listos: number; total: number; entrega_real: string | null; articulos: ArticuloPedido[]; ocs?: OcRef[] }
+
+// La columna «OC» del pedido: todas sus órdenes de compra de Finnegans, cada una con link.
+export function CeldaOc({ p }: { p?: ProduccionPedido }) {
+  return <td className="ped-prod"><OcLinks ocs={p?.ocs} vacio={<span className="muted">—</span>} /></td>;
+}
 
 // Factura, remito, bocetos y conversación de cada pedido (los iconitos de la tarjeta del tablero, PropBoard.tsx).
 export interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; mensajes?: number }
@@ -211,11 +217,13 @@ export function FilasProductos({ p, r, columns, sel, onAbrir }: { p: ProduccionP
               {!conEtapa && <EstadoArticulo a={a} />}
               {!conEtapa && <Entregado a={a} />}
               {!conProd && <QuienArticulo a={a} p={p} r={r} />}
+              {!columns.includes('__oc') && <OcLinks ocs={a.oc} />}
             </span>
           </td>
           {columns.map((col) => (
-            <td key={col} className={col === '__produccion' ? 'ped-prod' : undefined}>
-              {col === 'hs_pipeline_stage' ? <span className="ped-prod-in"><EstadoArticulo a={a} /><Entregado a={a} /></span> : col === '__produccion' ? <QuienArticulo a={a} p={p} r={r} /> : null}
+            <td key={col} className={col === '__produccion' || col === '__oc' ? 'ped-prod' : undefined}>
+              {col === 'hs_pipeline_stage' ? <span className="ped-prod-in"><EstadoArticulo a={a} /><Entregado a={a} /></span> : col === '__produccion' ? <QuienArticulo a={a} p={p} r={r} />
+                : col === '__oc' ? <OcLinks ocs={a.oc} /> : null}
             </td>
           ))}
         </tr>
@@ -254,6 +262,7 @@ export function ProductosTarjeta({ p, r, abierto, onToggle }: { p?: ProduccionPe
                     {a.cantidad != null && <span className="num">{a.cantidad.toLocaleString('es-AR')} u.</span>}
                     <Entregado a={a} />
                     <EntregaArticulo a={a} p={p} r={r} />
+                    <OcLinks ocs={a.oc} />
                   </div>
                 </div>
               </div>

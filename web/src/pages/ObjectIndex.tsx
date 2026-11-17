@@ -16,7 +16,7 @@ import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { SaveView, ViewMenu } from '../vistas';
-import { CeldaProduccion, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
+import { CeldaOc, CeldaProduccion, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -24,11 +24,11 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', '__unidad', 'lifecyclestage', 'notes_last_updated', 'createdate'],
   company: ['domain', 'owner_id', '__unidad', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
-  order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
 };
 // Pedidos para el perfil Ventas (pedido de Rodrigo del 17/11/2026): su pantallazo. Sin «PDV Finnegans» (el número ya está
 // en el nombre), «Unidad de negocio» ni «Propietario» (vende en su unidad y ve lo suyo); con «Cobro y papeles».
-const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__cobro', 'hs_total_price', 'createdate'];
+const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__oc', '__cobro', 'hs_total_price', 'createdate'];
 // El perfil de quien mira (lo pone IndexFor al dibujarse): las columnas por defecto de Pedidos dependen de él.
 const perfil = { ventas: false };
 const columnasPorDefecto = (t: ObjectType) => (t === 'order' && perfil.ventas ? PEDIDOS_VENTAS : DEFAULT_COLUMNS[t]);
@@ -82,9 +82,22 @@ const urlLista = (type: ObjectType, q: string, groups: Filter[][], c: ViewConfig
 function loadLocal(t: ObjectType): ViewConfig {
   try {
     const v = JSON.parse(localStorage.getItem(storeKey(t)) ?? '');
-    if (v && Array.isArray(v.columns)) return withOwners(t === 'order' ? columnasVentas(conColumnaProduccion(v)) : v);
+    if (v && Array.isArray(v.columns)) return withOwners(t === 'order' ? conColumnaOc(columnasVentas(conColumnaProduccion(v))) : v);
   } catch { /* sin vista guardada */ }
   return { groups: [], columns: columnasPorDefecto(t), sort: 'hs_lastmodifieddate', dir: 'desc' };
+}
+// La columna «OC» de Pedidos (pedido de Rodrigo del 17/11/2026): se suma una sola vez, después de «Producción», en
+// «Todos» y «Míos» de este navegador. Si después la quitan, no vuelve.
+const OC_SUMADA = 'crm.view.order.oc';
+function conColumnaOc(v: ViewConfig): ViewConfig {
+  try {
+    if (localStorage.getItem(OC_SUMADA) || v.columns.includes('__oc')) return v;
+    localStorage.setItem(OC_SUMADA, '1');
+  } catch { return v; }
+  const columns = [...v.columns];
+  const i = Math.max(columns.indexOf('__produccion'), columns.indexOf('hs_pipeline_stage'));
+  columns.splice(i >= 0 ? i + 1 : columns.length, 0, '__oc');
+  return { ...v, columns };
 }
 // Las vendedoras que ya tenían sus columnas de Pedidos pasan una sola vez a las de su pantallazo: sin «PDV Finnegans» ni
 // «Unidad de negocio», y con «Cobro y papeles» al lado de «Producción». Lo que cambien después queda.
@@ -387,7 +400,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
   };
   const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : col === '__unidad' ? 'Unidad de negocio' : col === '__produccion' ? 'Producción'
-    : col === '__cobro' ? 'Cobro y papeles'
+    : col === '__cobro' ? 'Cobro y papeles' : col === '__oc' ? 'OC'
     : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
@@ -585,6 +598,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     : col === '__tags' ? <td key={col}><TagChips meta={meta} ids={r.tags} small />{!r.tags?.length && <span className="muted">—</span>}</td>
                     : col === '__unidad' ? <UnidadCell key={col} type={type} record={r} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />
                     : col === '__produccion' ? <CeldaProduccion key={col} p={p} r={r} />
+                    : col === '__oc' ? <CeldaOc key={col} p={p} />
                     : col === '__cobro' ? <td key={col} className="ped-prod"><span className="ped-cobro"><Saldo r={r} corto />{adjuntos[r.id] && <Adjuntos r={{ ...r, adjuntos: adjuntos[r.id] } as CrmRecord} />}</span></td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
@@ -766,7 +780,7 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
     ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
     ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
     ...(type !== 'order' ? [{ name: '__unidad', label: 'Unidad de negocio' }] : []),
-    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (quién lo tiene y la entrega)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }] : []),
+    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (quién lo tiene y la entrega)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }, { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
     ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
   ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };

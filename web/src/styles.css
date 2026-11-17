@@ -1979,3 +1979,8 @@ table.grid tr.ped-art.entregado .ped-art-n { color: var(--ui-ink-2); }
 /* La columna «Cobro y papeles» de la lista: el saldo y los iconitos de factura, remito y bocetos de la tarjeta. */
 .ped-cobro { display: inline-flex; align-items: center; gap: 4px; }
 .ped-cobro .card-adj { margin-left: 2px; }
+/* Órdenes de compra de Finnegans: «OC 1234» con link a la OC (components.tsx, OcLinks). */
+.oc-links { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; min-width: 0; }
+.oc-link { font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--accent-ink); text-decoration: none; }
+a.oc-link:hover { text-decoration: underline; }
+span.oc-link { color: var(--ui-ink-2); }

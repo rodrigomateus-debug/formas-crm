@@ -24,7 +24,7 @@ export async function finnegansToken(env: Env, b?: Budget) {
   return (await res.text()).trim().replace(/^"|"$/g, '');
 }
 
-async function fin<T>(env: Env, token: string, path: string, params: Record<string, string> = {}, b?: Budget): Promise<T | null> {
+export async function fin<T>(env: Env, token: string, path: string, params: Record<string, string> = {}, b?: Budget): Promise<T | null> {
   b?.take();
   const url = new URL(`${API(env)}/${path}`);
   for (const [k, v] of Object.entries({ ...params, ACCESS_TOKEN: token })) url.searchParams.set(k, v);
@@ -95,7 +95,7 @@ export async function finnegansPedido(env: Env, token: string, pedido: string, b
   return { cliente: p.Cliente, cuit: c?.IdentificacionTributariaNumero ?? null, razon: c?.RazonSocial ?? null };
 }
 
-interface Destino {
+export interface Destino {
   DESTINONOMBRE: string; DESTINOIDENTIFICACIONEXTERNA: string; DESTINOTRANSACCIONID: number; TIPODOCUMENTO: string;
   CATEGORIATIPODOCUMENTO: number; DESTINOIMPORTETOTAL: number; OBTUVOCAE: string; DESTINOFECHA: string;
 }

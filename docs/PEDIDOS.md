@@ -179,6 +179,9 @@ cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro
   (sin «PDV Finnegans», que ya está en el nombre, ni «Unidad de negocio» ni «Propietario»). Las vendedoras que ya tenían
   sus columnas pasan una sola vez a estas en «Todos» y «Míos» (sin las dos que sobran y con «Cobro y papeles»); lo que
   cambien después queda. Los demás perfiles siguen con las de siempre y suman las nuevas desde «Columnas».
+- **Columna «OC»**: en el pedido, todas sus órdenes de compra a proveedores de Finnegans; en cada producto, la suya.
+  Un clic abre la OC en Finnegans GO. Se suma sola una vez, después de «Producción», en «Todos» y «Míos». Cómo se leen:
+  [PRODUCCION.md](PRODUCCION.md#órdenes-de-compra-oc).
 - Un pedido sin PDV en ClickUp muestra sus productos (los renglones del pedido, sin servicios) sin estado.
 - Sale de la tabla `produccion` (la sincronización de ClickUp de cada 10 minutos), en una sola consulta para la página o
   el tablero: `GET /api/pedidos/articulos?ids=…` (hasta 500; `src/worker/pedidosprod.ts`, pantalla en

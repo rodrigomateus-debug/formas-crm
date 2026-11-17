@@ -8,6 +8,7 @@ import { fotosDeArticulos } from './productos';
 import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
 import { admiteNotas, resumenNotas, skusDeArticulos, type ResumenNotas } from './notasproducto';
 import { costosLogoDeArticulos, type CostoLogo } from './costoslogo';
+import { ocsDeCodigo, ocsDePedidos, sinCodigos, type OcRef } from './ordenescompra';
 
 // Producción en el CRM (pedido de Rodrigo del 12/11/2026). Producción (Ceci y Sole) trabaja en ClickUp con la vista «Estado
 // PDV CECI»: cada PDV con sus artículos abiertos abajo, y en cada artículo su estado, proveedor, impresor y las fechas de
@@ -465,11 +466,13 @@ export interface ArticuloVista {
   sku?: string | null;             // el SKU del artículo, si puede llevar notas de producto (no los genéricos)
   notas?: ResumenNotas | null;     // las notas vigentes de ese SKU (notasproducto.ts)
   costo_logo?: CostoLogo | null;   // lo que se tomó para el logo en la cotización del STP, por unidad (costoslogo.ts)
+  oc?: OcRef[];                    // sus órdenes de compra de Finnegans (ordenescompra.ts)
 }
 export interface PdvVista extends ArticuloVista {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: ArticuloVista[];
+  ocs?: OcRef[];   // todas las órdenes de compra del pedido (también las que no se pudieron atar a un producto)
 }
 
 export const lista = (s: string | null | undefined) => { try { const v = JSON.parse(s ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -489,7 +492,7 @@ export function etapaPdv(pdvEstado: string, estados: string[], etapaPedido: stri
 
 function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }, arts: FilaDb[], editables: string[], verCerrados: boolean,
   fotos: Map<string, string>, logos: Map<string, string> = new Map(), servicios: Set<string> = new Set(), notas: NotasArt = { skus: new Map(), resumen: new Map() },
-  costos: Map<string, CostoLogo> = new Map()): PdvVista {
+  costos: Map<string, CostoLogo> = new Map(), ocs: Awaited<ReturnType<typeof ocsDePedidos>> = new Map()): PdvVista {
   // Los artículos que son un servicio (envío, setup, un adicional: servicios.ts) no se producen: no se listan, no cuentan
   // y no pesan en el estado del PDV.
   arts = arts.filter((a) => !servicios.has(a.task_id));
@@ -505,7 +508,8 @@ function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; 
     articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), foto: fotos.get(a.task_id) ?? null,
       // El aviso del logo, solo mientras falta producirlo (ya listo, entregado o anulado no importa).
       logo: LISTOS.includes(a.estado) || CERRADOS.includes(a.estado) ? null : logos.get(a.task_id) ?? null, ...notasDe(notas, a.task_id),
-      costo_logo: costos.get(a.task_id) ?? null })),
+      costo_logo: costos.get(a.task_id) ?? null, oc: ocsDeCodigo(ocs.get(p.record_id ?? -1), notas.skus.get(a.task_id)) })),
+    ocs: sinCodigos(ocs.get(p.record_id ?? -1)),
   };
 }
 
@@ -545,14 +549,14 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
   const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? pedidoDe.get(a.pdv_task) ?? null }));
   const [fotos, logos, servicios, notas] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido), tareasServicio(db, pdvs.map((p) => p.record_id)),
     notasDeArticulos(db, arts)]);
-  const costos = await costosDe(db, conPedido, notas);
+  const [costos, ocs] = await Promise.all([costosDe(db, conPedido, notas), ocsDePedidos(db, pdvs.map((p) => p.record_id))]);
   // Un PDV al que solo le queda abierto un servicio (o que es todo servicios) no tiene nada para producir: no se ve.
   const conTrabajo = (p: FilaDb) => {
     const suyos = dePdv.get(p.task_id) ?? [];
     if (q.cerrados || !suyos.some((a) => servicios.has(a.task_id))) return true;
     return suyos.some((a) => !servicios.has(a.task_id) && !CERRADOS.includes(a.estado));
   };
-  const out = pdvs.filter(conTrabajo).map((p) => armarPdv(p, dePdv.get(p.task_id) ?? [], cfg.unidades, !!q.cerrados, fotos, logos, servicios, notas, costos))
+  const out = pdvs.filter(conTrabajo).map((p) => armarPdv(p, dePdv.get(p.task_id) ?? [], cfg.unidades, !!q.cerrados, fotos, logos, servicios, notas, costos, ocs))
     .sort((a, b) => (a.entrega_real ?? a.entrega_prometida ?? '9999').localeCompare(b.entrega_real ?? b.entrega_prometida ?? '9999') || Number(a.npdv) - Number(b.npdv));
   return { pdvs: out, ...(await referencias(db)), config: cfg, unidades, puede_editar: puedeEditarProduccion(user) };
 }
@@ -588,7 +592,7 @@ async function pdvVista(db: D1Database, pdvTask: string) {
   const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? p.record_id }));
   const [fotos, logos, servicios, notas] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido), tareasServicio(db, [p.record_id]),
     notasDeArticulos(db, arts)]);
-  return armarPdv(p, arts, cfg.unidades, false, fotos, logos, servicios, notas, await costosDe(db, conPedido, notas));
+  return armarPdv(p, arts, cfg.unidades, false, fotos, logos, servicios, notas, await costosDe(db, conPedido, notas), await ocsDePedidos(db, [p.record_id]));
 }
 
 // ---------- Editar: se escribe en ClickUp y después en el CRM ----------

@@ -8,6 +8,7 @@ import { clavePedido } from './totales';
 import { HttpError } from './env';
 import { estadosSinServicios, pedirRelectura, TIPO_SQL, tipoPorDefecto } from './servicios';
 import { admiteNotas, avisarNotasDelPedido, resumenNotas, skuDe } from './notasproducto';
+import { leerOrdenesCompra } from './ordenescompra';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -41,6 +42,13 @@ async function refresh(env: Env, recordId: number, pedido: string | null, taskId
   const token = await finnegansToken(env, b);
   const p = token && pedido ? await finnegansPedidoVenta(env, token, pedido, b) : null;
   if (p) await entregaPactada(env, recordId, p).catch((e) => console.error('productos: entrega pactada', recordId, (e as Error).message));
+  // Las órdenes de compra a proveedores que salieron de este pedido (ordenescompra.ts).
+  if (token && pedido) {
+    try { await leerOrdenesCompra(env, token, recordId, pedido, b); } catch (e) {
+      if (e instanceof OutOfBudget) throw e;
+      console.error('productos: órdenes de compra', recordId, (e as Error).message);
+    }
+  }
   const items = p?.Items ?? [];
   if (!items.length && taskId && env.CLICKUP_TOKEN) {
     const arts = await articulosDelPdv(env, taskId, b);

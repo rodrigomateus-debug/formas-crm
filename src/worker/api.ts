@@ -27,7 +27,8 @@ import { marcarNotificaciones, notificaciones } from './notificaciones';
 import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
-import { finnegansState, syncFacturas } from './finnegans';
+import { fin, finnegansState, finnegansToken, pedidoIds, syncFacturas, type Destino } from './finnegans';
+import { esOc, numeroOc, urlOc } from './ordenescompra';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
@@ -1579,6 +1580,20 @@ api.post('/integrations/clickup/sync', async (c) => {
   const b = await c.req.json<{ full?: boolean }>().catch(() => ({} as { full?: boolean }));
   return c.json(await syncClickup(c.env, { full: !!b.full }));
 });
+// Lo que devuelve Finnegans de un pedido de venta: sus documentos destino (facturas, remitos, órdenes de compra) y el
+// detalle de la primera OC, para revisar cómo vienen (ordenescompra.ts). Solo lectura, administrador.
+api.get('/integrations/finnegans/documentos', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const pedido = String(c.req.query('pedido') ?? '').trim();
+  if (!pedido) throw new HttpError(400, 'Falta ?pedido=PEDVTASTP - 31577');
+  const token = await finnegansToken(c.env);
+  if (!token) throw new HttpError(503, 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.');
+  const documentos = (await fin<Destino[]>(c.env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: pedidoIds(pedido)[0] })) ?? [];
+  const oc = documentos.find(esOc);
+  const detalle = oc ? await fin<unknown>(c.env, token, `ordenCompra/${encodeURIComponent(oc.DESTINOIDENTIFICACIONEXTERNA)}`).catch((e) => ({ error: (e as Error).message })) : null;
+  return c.json({ pedido: pedidoIds(pedido), documentos: documentos.map((d) => ({ ...d, es_oc: esOc(d) })), oc: oc ? { ...oc, numero: numeroOc(oc.DESTINONOMBRE), url: urlOc(oc.DESTINOTRANSACCIONID) } : null, detalle_oc: detalle });
+});
+
 api.post('/integrations/finnegans/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   // El botón recorre también los pedidos abiertos; {barrido: false} lee solo los que tienen una factura nueva avisada.

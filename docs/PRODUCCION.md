@@ -22,7 +22,7 @@ se edita desde ahí.
 | Columna | Campo de ClickUp | Se edita |
 |---|---|---|
 | Estado | Estado de la tarea (los de la lista PEC, con su color) | Sí (en el tablero, también arrastrando la tarjeta) |
-| Asignado | Asignados de la tarea (con la foto de su usuario del CRM, o la de ClickUp) | Sí, en el artículo y en el PDV |
+| Asignado | Asignados de la tarea (con la foto de su usuario del CRM, o la de ClickUp) | Sí, en el artículo y en el PDV, en todas las unidades (ver «Reasignar») |
 | Cantidad | CANTIDAD | No |
 | Pactada | La fecha de entrega del pedido de venta en Finnegans (la que puso el comercial) | No: se cambia en Finnegans |
 | Real | ENTREGAS (FECHA REAL), la de producción | Sí, en el PDV y en cada artículo |
@@ -32,6 +32,16 @@ se edita desde ahí.
 | Retiro prov. | RETIROS (PROVEEDOR): se retira del proveedor | Sí |
 | Egreso imp. | EGRESO (IMPRESOR): va al impresor | Sí |
 | Retiro imp. | RETIRO (IMPRESOR): se retira del impresor | Sí |
+
+**Reasignar** (pedido de Rodrigo del 17/11/2026). Cualquiera de Producción (o un administrador) reasigna cualquier PDV,
+también los de otra persona y los de las unidades que se siguen trabajando en ClickUp (el resto de los campos de esas
+unidades no). La lista ofrece a quienes tienen perfil **Producción** en el CRM y usuario en ClickUp (Ceci, Sole y quien
+entre después: la gente del espacio de ClickUp se lee una vez por día, así aparece aunque todavía no tenga nada asignado),
+más los que ya están asignados para poder sacarlos. Sumar a alguien sin perfil Producción rebota. Reasignar el **PDV**
+(en la fila de la lista o en la tarjeta del tablero, que muestra a todos los que tienen algo del PDV) pasa también sus
+artículos abiertos a las mismas personas (no los entregados, anulados ni servicios); después cada artículo se cambia
+aparte. Se escribe en ClickUp en el momento; si ClickUp no acepta algún artículo, el PDV queda reasignado y se avisa
+cuántos artículos quedaron como estaban (`reasignarArticulos` en `produccion.ts`).
 
 **Entrega pactada y entrega real** (pedido de Rodrigo del 13/11/2026). La pactada es la del comercial: la fecha de
 entrega del pedido de venta en Finnegans. Es del PDV entero y puede cambiar después de creado: cada vez que el CRM relee

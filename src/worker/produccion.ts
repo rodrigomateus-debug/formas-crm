@@ -1,7 +1,7 @@
 import { logosDeArticulos } from './logos';
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
-import { Budget } from './budget';
+import { Budget, OutOfBudget } from './budget';
 import { createRecord, updateRecord } from './records';
 import { API, cu, generalStage, leerArticulo, LIST, norm, STAGE, upsertPdv, usuarioPorNombre, type CuTask } from './clickup';
 import { fotosDeArticulos } from './productos';
@@ -438,6 +438,17 @@ export async function leerEstados(env: Env, b: Budget) {
   const l = await cu<{ statuses?: Array<{ status: string; color: string; type: string; orderindex?: number }> }>(env, `/list/${LIST}`, {}, b);
   const estados = (l.statuses ?? []).map((s) => ({ status: s.status.toLowerCase(), color: colorCu(s.color, s.status), type: s.type }));
   await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('clickup_estados', ?)").bind(JSON.stringify({ at: Date.now(), estados: estados.length ? estados : ESTADOS_PEC })).run();
+  // La gente del espacio de ClickUp (una consulta): así quien entra a Producción se puede asignar aunque todavía no
+  // tenga nada asignado en ClickUp.
+  if (b.left() < 25) return;
+  try {
+    const t = await cu<{ teams?: Array<{ members?: Array<{ user?: NonNullable<CuTask['assignees']>[number] }> }> }>(env, '/team', {}, b);
+    const gente = (t.teams ?? []).flatMap((x) => x.members ?? []).map((m) => m.user).filter((u): u is NonNullable<typeof u> => !!u);
+    await guardarPersonas(db, [{ assignees: gente } as CuTask]);
+  } catch (e) {
+    if (e instanceof OutOfBudget) throw e;
+    console.error('produccion: gente de ClickUp', (e as Error).message);
+  }
 }
 
 // ---------- La vista de Producción ----------
@@ -539,11 +550,21 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
   return { pdvs: out, ...(await referencias(db)), config: cfg, unidades, puede_editar: puedeEditarProduccion(user) };
 }
 
+// A quién se le asigna en Producción (pedido de Rodrigo del 17/11/2026): a las usuarias con perfil Producción que
+// tienen usuario en ClickUp (Ceci, Sole y quien entre después). Sobre `u`, el usuario del CRM de la persona de ClickUp.
+const ES_PRODUCCION_SQL = "u.id IS NOT NULL AND u.active = 1 AND u.profile = 'produccion' AND u.role != 'viewer'";
+async function personasProduccion(db: D1Database) {
+  const { results } = await db.prepare(`SELECT cp.clickup_id FROM clickup_personas cp JOIN users u ON u.id = cp.user_id AND u.deleted_at IS NULL WHERE ${ES_PRODUCCION_SQL}`)
+    .all<{ clickup_id: number }>();
+  return new Set(results.map((r) => r.clickup_id));
+}
+
 // Lo que necesita la pantalla para mostrar las filas: la gente de ClickUp, las opciones de los desplegables (con su
 // empresa) y los estados.
 export async function referencias(db: D1Database) {
   const [personas, opciones] = await db.batch([
-    db.prepare(`SELECT cp.clickup_id, COALESCE(u.name, cp.nombre) AS nombre, cp.user_id, COALESCE(u.photo_url, cp.foto) AS foto, cp.iniciales, cp.color
+    db.prepare(`SELECT cp.clickup_id, COALESCE(u.name, cp.nombre) AS nombre, cp.user_id, COALESCE(u.photo_url, cp.foto) AS foto, cp.iniciales, cp.color,
+        CASE WHEN ${ES_PRODUCCION_SQL} THEN 1 ELSE 0 END AS produccion
       FROM clickup_personas cp LEFT JOIN users u ON u.id = cp.user_id AND u.deleted_at IS NULL ORDER BY nombre`),
     db.prepare(`SELECT o.campo, o.option_id, o.nombre, o.color, o.orden, o.company_id, r.name AS empresa
       FROM produccion_opciones o LEFT JOIN records r ON r.id = o.company_id AND r.archived = 0 ORDER BY o.campo, o.orden`),
@@ -587,7 +608,8 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   if (!fila) throw new HttpError(404, 'No está esa tarea de producción (puede que la hayan borrado en ClickUp).');
   const pdv = fila.es_pdv ? fila : await db.prepare('SELECT * FROM produccion WHERE task_id = ?').bind(fila.pdv_task).first<FilaDb>();
   const cfg = await produccionConfig(db);
-  if (!opts.libre && !cfg.unidades.includes(pdv?.unidad ?? fila.unidad ?? '')) {
+  // Reasignar se puede en todas las unidades (pedido de Rodrigo del 17/11/2026); el resto, solo en las que se editan acá.
+  if (!opts.libre && campo !== 'asignados' && !cfg.unidades.includes(pdv?.unidad ?? fila.unidad ?? '')) {
     throw new HttpError(409, `Los PDV de ${pdv?.unidad ?? fila.unidad ?? 'esta unidad'} todavía se trabajan en ClickUp. Desde el CRM se editan: ${cfg.unidades.join(', ') || 'ninguna unidad'}.`);
   }
   const c = campo as Editable;
@@ -600,15 +622,24 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
     await escribir(env, 'PUT', path, { status: v });
     local = { estado: v };
   } else if (c === 'asignados') {
-    const nuevos = (Array.isArray(valor) ? valor : []).map(Number).filter(Number.isFinite);
+    const nuevos = [...new Set((Array.isArray(valor) ? valor : []).map(Number).filter(Number.isFinite))];
     const conocidos = new Set((await db.prepare('SELECT clickup_id FROM clickup_personas').all<{ clickup_id: number }>()).results.map((p) => p.clickup_id));
     const raro = nuevos.find((n) => !conocidos.has(n));
     if (raro != null) throw new HttpError(400, 'Esa persona no está en ClickUp.');
     const antes = lista(fila.asignados).map(Number);
+    // Se suma solo a quien tiene perfil Producción (los que ya estaban se pueden dejar o sacar). Si todavía no hay nadie
+    // de Producción con usuario de ClickUp, vale cualquiera de ClickUp, como antes.
+    const prod = await personasProduccion(db);
+    if (prod.size && nuevos.some((n) => !antes.includes(n) && !prod.has(n))) {
+      throw new HttpError(400, 'Los pedidos se asignan a quienes tienen perfil Producción.');
+    }
     const add = nuevos.filter((n) => !antes.includes(n));
     const rem = antes.filter((n) => !nuevos.includes(n));
     if (add.length || rem.length) await escribir(env, 'PUT', path, { assignees: { add, rem } });
     local = { asignados: JSON.stringify(nuevos) };
+    // Reasignar el PDV pasa también sus artículos abiertos a las mismas personas (sin los servicios, que no se producen).
+    // Cada artículo se puede cambiar aparte después.
+    if (fila.es_pdv) await reasignarArticulos(env, fila, nuevos);
   } else if ((FECHAS as readonly string[]).includes(c)) {
     const v = valor == null ? '' : String(valor).slice(0, 10);
     if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new HttpError(400, 'La fecha tiene que ser AAAA-MM-DD.');
@@ -645,6 +676,30 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
     await refrescarPdv(env, ctx, fila.pdv_task).catch((e) => console.error('produccion: refrescar', fila.pdv_task, (e as Error).message));
   }
   return pdvVista(db, fila.pdv_task);
+}
+
+// Los artículos abiertos del PDV, a las mismas personas que el PDV. Se escriben en ClickUp de a varios a la vez; los que
+// ClickUp acepta quedan cambiados y, si alguno no, se avisa cuántos quedaron como estaban.
+async function reasignarArticulos(env: Env, pdv: FilaDb, nuevos: number[]) {
+  const db = env.DB;
+  const arts = (await db.prepare('SELECT task_id, estado, asignados FROM produccion WHERE es_pdv = 0 AND pdv_task = ?').bind(pdv.task_id)
+    .all<{ task_id: string; estado: string; asignados: string }>()).results;
+  const servicios = await tareasServicio(db, [pdv.record_id]);
+  const cambiar = arts.filter((a) => !CERRADOS.includes(a.estado) && !servicios.has(a.task_id)).map((a) => {
+    const antes = lista(a.asignados).map(Number);
+    return { task_id: a.task_id, add: nuevos.filter((n) => !antes.includes(n)), rem: antes.filter((n) => !nuevos.includes(n)) };
+  }).filter((a) => a.add.length || a.rem.length);
+  const res = await Promise.allSettled(cambiar.map((a) => escribir(env, 'PUT', `/task/${encodeURIComponent(a.task_id)}`, { assignees: { add: a.add, rem: a.rem } })));
+  const ok = cambiar.filter((_, i) => res[i].status === 'fulfilled');
+  if (ok.length) {
+    await db.batch(ok.map((a) => db.prepare('UPDATE produccion SET asignados = ?, leido_at = ? WHERE task_id = ?').bind(JSON.stringify(nuevos), now(), a.task_id)));
+  }
+  const fallaron = cambiar.length - ok.length;
+  if (fallaron) {
+    // El PDV ya quedó reasignado: se guarda antes de avisar.
+    await db.prepare('UPDATE produccion SET asignados = ?, leido_at = ? WHERE task_id = ?').bind(JSON.stringify(nuevos), now(), pdv.task_id).run();
+    throw new HttpError(502, `El PDV quedó reasignado, pero ClickUp no aceptó el cambio en ${fallaron === 1 ? '1 artículo' : `${fallaron} artículos`}. Probá de nuevo o cambialos uno por uno.`);
+  }
 }
 
 export async function refrescarPdv(env: Env, ctx: Ctx, pdvTask: string) {

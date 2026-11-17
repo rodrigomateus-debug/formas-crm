@@ -11,7 +11,6 @@ import { Select, useFloating } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
-import { EstadoNegocio, QuienRecomendo, type ReferidoVista } from './Referidos';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
@@ -953,6 +952,27 @@ function FacturarCard({ record }: { record: CrmRecord }) {
       </div>
     </div>
   );
+}
+
+// Un referido como lo devuelve /records/:type/:id/referidos (referidos.ts).
+interface ReferidoVista {
+  id: number | null; fecha: string; origen: string; cargado_por: string | null; nota: string | null; pdvs: string[];
+  referidor: { nombre: string; empresa: { id: number; name: string } | null; contacto: { id: number; name: string } | null };
+  contacto: { id: number; name: string } | null; empresa: { id: number; name: string } | null;
+  negocio: { id: number; name: string; etapa: string | null; abierto: boolean; ganado: boolean; monto: number | null } | null;
+  owner_id: number | null;
+}
+function EstadoNegocio({ n }: { n: ReferidoVista['negocio'] }) {
+  if (!n) return <span className="tag">Sin negocio</span>;
+  return <span className={`tag ${n.ganado ? 'ok' : n.abierto ? 'info' : 'bad'}`}>{n.ganado ? 'Ganado' : n.abierto ? n.etapa ?? 'En curso' : 'Perdido'}</span>;
+}
+
+function QuienRecomendo({ r }: { r: ReferidoVista }) {
+  const { empresa, contacto, nombre } = r.referidor;
+  const pdv = r.pdvs.length ? <span className="small muted"> · PDV {r.pdvs.join(', ')}</span> : null;
+  if (empresa) return <><Link to={recordUrl('company', empresa.id)}>{empresa.name}</Link>{contacto && <span className="small muted"> · <Link to={recordUrl('contact', contacto.id)}>{contacto.name}</Link></span>}{pdv}</>;
+  if (contacto) return <><Link to={recordUrl('contact', contacto.id)}>{contacto.name}</Link>{pdv}</>;
+  return nombre ? <><span>{nombre}</span>{pdv}</> : <span className="muted">Sin dato</span>;
 }
 
 // Referidos (referidos.ts): en un cliente, a quién nos recomendó y «Nos recomendó a…» para cargarlo; en el contacto o el

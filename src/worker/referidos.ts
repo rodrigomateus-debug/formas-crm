@@ -15,7 +15,7 @@ import { visiblePipelineIds } from './pipelines';
 //   - un negocio nuevo en Formas Shop (Inbound), etapa «Lead», con «Tipo de origen» y «Medio de origen» en Referido;
 //   - una nota en el cliente que lo recomendó y en el referido: quién recomendó a quién;
 //   - una tarea para la vendedora: contactarlo el día hábil siguiente;
-//   - la fila en `referidos` que une las dos puntas (la ficha de cada uno lo muestra y la pantalla Referidos las junta).
+//   - la fila en `referidos` que une las dos puntas: la ficha de cada uno lo muestra (tarjeta «Referidos»).
 // Cuando el negocio del referido se gana, la vendedora recibe la tarea de agradecerle al cliente que lo recomendó.
 
 export const PIPELINE_SHOP = 'default';      // Formas Shop (Inbound)
@@ -222,7 +222,7 @@ export async function agradecerReferido(db: D1Database, ctx: Ctx, dealId: number
   return t.id;
 }
 
-// ---------- Lectura: la pantalla Referidos y la tarjeta de la ficha ----------
+// ---------- Lectura: la tarjeta «Referidos» de la ficha ----------
 
 export interface ReferidoVista {
   id: number | null; fecha: string; origen: string; cargado_por: string | null; nota: string | null; pdvs: string[];
@@ -281,7 +281,7 @@ export async function listarReferidos(db: D1Database, user: User, f: { owner?: n
   const out = results.map(vista);
 
   // Los negocios referidos de antes (cargados en HubSpot por el tablero o a mano, con origen «Referido»), que no tienen
-  // fila propia: salen en la lista general y en la ficha de su negocio, con quien los recomendó si se puede leer del texto.
+  // fila propia: salen en la ficha de su negocio y de su contacto, con quien los recomendó si se puede leer del texto.
   if (!f.recomendo && (!f.de || !out.length)) {
     const w: string[] = [`d.object_type = 'deal' AND d.archived = 0`,
       `(json_extract(d.props, '$.tipo_de_origen') = '${TIPO_REFERIDO}' OR json_extract(d.props, '$.origen_del_negocio') = '${MEDIO_REFERIDO}')`,
@@ -310,13 +310,5 @@ export async function listarReferidos(db: D1Database, user: User, f: { owner?: n
     }
     out.sort((a, b) => b.fecha.localeCompare(a.fecha));
   }
-  const ganados = out.filter((x) => x.negocio?.ganado);
-  return {
-    referidos: out,
-    resumen: {
-      total: out.length, abiertos: out.filter((x) => x.negocio?.abierto).length, ganados: ganados.length,
-      perdidos: out.filter((x) => x.negocio && !x.negocio.abierto && !x.negocio.ganado).length,
-      monto_ganado: ganados.reduce((s, x) => s + (Number(x.negocio?.monto) || 0), 0),
-    },
-  };
+  return { referidos: out };
 }

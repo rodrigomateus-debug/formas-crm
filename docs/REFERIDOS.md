@@ -22,14 +22,13 @@ Con eso el Hub crea:
 4. Una **tarea** para la vendedora: contactarlo el próximo día hábil a las 10.
 5. Cuando el negocio se **gana**, otra tarea: agradecerle al cliente que lo recomendó.
 
-Dónde se ve:
+Dónde se ve, en la tarjeta **Referidos** de la ficha (no hay una pantalla aparte: pedido de Rodrigo del 17/11/2026):
 
-- **Referidos** (menú, en CRM): todos, con quién los recomendó, la etapa del negocio, la ejecutiva y desde dónde se
-  cargaron; arriba, cuántos hay, cuántos siguen en curso, cuántos se ganaron y cuánto se ganó con ellos. Se filtra por
-  ejecutiva, estado o texto. El perfil Ventas ve los suyos.
-- La **ficha del cliente**: a quién nos recomendó. La **ficha del referido** (contacto o negocio): quién lo recomendó.
+- en el **cliente** (empresa o contacto): a quién nos recomendó y cómo va cada negocio;
+- en el **referido** (contacto o negocio): quién lo recomendó.
 - Los referidos de antes (cargados en HubSpot desde el tablero entre el 15/10 y el 17/11/2026, o a mano con origen
-  Referido) salen también, como «Antes (HubSpot)», con quien los recomendó si se puede leer del negocio.
+  Referido) salen en la ficha de su negocio y de su contacto, con quien los recomendó si se puede leer del negocio.
+- Para listarlos todos alcanza con filtrar Negocios por «Tipo de origen» = Referido.
 
 ## Cómo está hecho (`src/worker/referidos.ts`)
 
@@ -44,7 +43,7 @@ Dónde se ve:
   (`ya_estaba: true`). Sin teléfono ni mail, o sin nombre ni empresa, contesta 400. Queda en el registro de entradas.
 - **`POST /api/referidos`** (la ficha): `{ referidor_id, nombre, empresa, contacto, nota }`. A nombre de la vendedora
   que lo carga; si lo carga un administrador, de quien tiene al cliente.
-- **`GET /api/referidos?owner=`** (la pantalla) y **`GET /api/records/:type/:id/referidos`** (la tarjeta de la ficha).
+- **`GET /api/records/:type/:id/referidos`** (la tarjeta de la ficha).
 - Al ganarse el negocio (`records.ts`, junto a los datos para facturar), `agradecerReferido` deja la tarea una sola vez.
 - Prueba: `test/referidos.test.mjs`.
 

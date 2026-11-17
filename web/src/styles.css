@@ -2073,3 +2073,7 @@ span.oc-link { color: var(--ui-ink-2); }
    y los nombres largos cortados con «…». */
 .btn.picker-opt { width: 100%; min-width: 0; height: auto; padding: 6px 8px; justify-content: flex-start; text-align: left; line-height: 1.35; }
 .picker-opt .picker-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 1px; }
+/* La OC de cada producto en «Productos» del pedido: acceso directo a Finnegans, o «Sin OC». */
+.oc-boton { white-space: nowrap; font-variant-numeric: tabular-nums; }
+span.oc-boton { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; font-size: 12px; color: var(--ui-ink-2); }
+span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }

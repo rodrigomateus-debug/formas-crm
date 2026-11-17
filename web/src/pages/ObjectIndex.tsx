@@ -16,7 +16,7 @@ import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
-import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, urlArticulos, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
+import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -40,6 +40,7 @@ interface ViewConfig {
   pipeline?: string; mode?: 'table' | 'board'; boardProp?: string; cardProps?: string[];
   vacias?: boolean;   // tablero: colapsar las columnas vacías (se abren solas cuando reciben algo)
   widths?: Record<string, number>;   // ancho de cada columna (se arrastra el borde del encabezado)
+  productos?: 'abiertos' | 'cerrados';   // pedidos: los productos de cada pedido a la vista o no (sin dato, lo de este navegador)
 }
 const withOwners = (v: ViewConfig): ViewConfig => (v.owner && !v.owners ? { ...v, owners: [v.owner], owner: undefined } : v);
 interface SavedView { id: number; name: string; shared: number; team_id: number | null; user_id: number; config: ViewConfig }
@@ -135,7 +136,7 @@ function conColumnaProduccion(v: ViewConfig): ViewConfig {
   return { ...v, columns };
 }
 // «Todos» o «Míos» recién abiertas: sus columnas y orden, sin filtros (Míos, con el propietario «yo»).
-const limpia = (t: ObjectType, k: string): ViewConfig => ({ ...loadLocal(t), q: undefined, ...SIN_FILTROS, owners: k === 'mine' ? ['me'] : [] });
+const limpia = (t: ObjectType, k: string): ViewConfig => ({ ...loadLocal(t), q: undefined, ...SIN_FILTROS, owners: k === 'mine' ? ['me'] : [], productos: undefined });
 // Una vista guardada; lo que no tenga guardado (anchos, por ejemplo) sale de «Todos».
 const deVista = (t: ObjectType, v: SavedView): ViewConfig => withOwners({ ...loadLocal(t), q: undefined, ...SIN_FILTROS, ...v.config });
 
@@ -309,7 +310,17 @@ function IndexFor({ type }: { type: ObjectType }) {
   // Con «Todos los pipelines» la tabla muestra de qué pipeline es cada negocio.
   // Pedidos con los productos abiertos (PedidosProductos.tsx): cada dato de un producto va en su columna (etapa, responsable
   // y OC), así que esas columnas se ven siempre, aunque la vista guardada no las tenga (pedido de Rodrigo del 17/11/2026).
-  const productos = useProductosAbiertos();
+  // Expandir o colapsar los productos es parte de la vista guardada (pedido de Rodrigo del 17/11/2026): al cambiarlo se
+  // prende «Guardar» y la vista lo recuerda en cualquier dispositivo. En «Todos» y «Míos», y en una vista de otro que no
+  // lo tiene guardado, queda en este navegador, como siempre. La lista y el tablero lo recuerdan cada uno por su lado.
+  const [prodAca, setProdAca] = useState(() => ({ table: productosCerradosAca(PREF_PRODUCTOS.table), board: productosCerradosAca(PREF_PRODUCTOS.board) }));
+  const todosProductos = (abrir: boolean) => {
+    const guardada = activeSaved && cfgDe === activeView ? justSaved[activeSaved.id] ?? activeSaved.config : null;
+    if (guardada && (canSaveView || guardada.productos)) { setCfg((c) => ({ ...c, productos: abrir ? 'abiertos' : 'cerrados' })); return; }
+    recordarProductosAca(PREF_PRODUCTOS[mode], !abrir);
+    setProdAca((p) => ({ ...p, [mode]: !abrir }));
+  };
+  const productos = useProductosAbiertos(PREF_PRODUCTOS.table, { cerrados: cfg.productos ? cfg.productos === 'cerrados' : prodAca[mode], todos: todosProductos });
   const columns = useMemo(() => {
     const base = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
     if (type !== 'order' || mode !== 'table' || productos.cerrados) return base;
@@ -357,6 +368,8 @@ function IndexFor({ type }: { type: ObjectType }) {
     ...(cfg.relacion ? { relacion: cfg.relacion } : {}),
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(cfg.vacias ? { vacias: true } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
     ...(cfg.widths && Object.keys(cfg.widths).length ? { widths: cfg.widths } : {}),
+    // Pedidos: se guarda lo que se ve (así una vista nueva armada desde «Todos» también lo recuerda).
+    ...(type === 'order' ? { productos: productos.cerrados ? 'cerrados' as const : 'abiertos' as const } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   // Lo recién guardado vale enseguida (la barra se va al guardar, sin esperar a que se recarguen las vistas).
@@ -365,6 +378,8 @@ function IndexFor({ type }: { type: ObjectType }) {
     c.q ?? '', c.groups ?? [], c.columns ?? base.columns, c.sort ?? base.sort, c.dir ?? base.dir, [...(c.owners ?? [])].sort(), c.dates ?? {}, [...(c.tags ?? [])].sort(), [...(c.unidades ?? [])].sort(), c.mode ?? base.mode,
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '', c.widths ?? {},
     [...relacionDe(type, c.relacion)].sort(), !!c.vacias,
+    // Pedidos: los productos a la vista o no. La vista que no lo tiene guardado sigue a este navegador.
+    type === 'order' ? c.productos ?? (prodAca[(c.mode ?? base.mode) === 'board' ? 'board' : 'table'] ? 'cerrados' : 'abiertos') : '',
   ]);
   const dirty = !!activeSaved && cfgDe === activeView && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
@@ -567,7 +582,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       )}
       {mode === 'board' && type === 'deal' ? <Board vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
-        : mode === 'board' ? <PropBoard vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
+        : mode === 'board' ? <PropBoard productos={type === 'order' ? productos : undefined} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
           cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
           tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>

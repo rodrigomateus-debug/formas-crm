@@ -169,9 +169,16 @@ cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro
   otra fecha, «Nueva fecha mar 24/11 +4 d» (la pactada ya está en la tarjeta). Con los productos a la vista no van las
   miniaturas ni el resumen de ClickUp («2 en el impresor…»).
 - **Abrir y cerrar**: la flecha de cada pedido (en la tarjeta, «3 productos»), o «Colapsar productos» / «Expandir
-  productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. La lista y el tablero
-  lo recuerdan cada uno en el navegador; por defecto, abiertos, salvo los entregados y anulados. Un clic en un producto
-  abre la vista previa del pedido.
+  productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. Por defecto,
+  abiertos, salvo los entregados y anulados. Un clic en un producto abre la vista previa del pedido.
+- **Dónde queda «expandir o colapsar todos»** (pedido de Rodrigo del 17/11/2026): en una **vista guardada**, es parte de
+  la vista, como los filtros o las columnas. Al cambiarlo se prende «Guardar» («Cambios sin guardar en …»), «Descartar»
+  lo vuelve atrás y, una vez guardado, la vista lo recuerda en cualquier dispositivo (`productos` en la configuración de
+  la vista: `abiertos` o `cerrados`). En **«Todos» y «Míos»** queda en el navegador, como antes; la lista y el tablero,
+  cada uno por su lado. Una vista guardada antes de este cambio (sin el dato) sigue a lo del navegador hasta que se la
+  guarda. En una vista compartida por otro que no lo tiene guardado, también queda en el navegador. La flecha de cada
+  pedido suelto no se guarda: dura mientras se está en la pantalla. Está en `useProductosAbiertos`
+  (`PedidosProductos.tsx`), que la lista maneja desde `ObjectIndex.tsx`.
 - **Lo entregado de cada producto** según los remitos, en los pedidos con entregas a medias (Entregado parcial, o los
   remitos dicen que falta algo o hay diferencias): «60 de 150 entregadas», «Sin entregar» o «Entregadas ✓», al lado del
   estado. Es la misma cuenta de la tarjeta «Entrega» del pedido (`calcularEntrega` en `remitos.ts`), por el renglón del

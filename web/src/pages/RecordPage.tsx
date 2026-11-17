@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
+  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
 } from '../lib';
 import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
@@ -11,6 +11,7 @@ import { Select, useFloating } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
+import { EstadoNegocio, QuienRecomendo, type ReferidoVista } from './Referidos';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
@@ -51,6 +52,7 @@ export default function RecordPage() {
         </section>
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
+          {(type === 'company' || type === 'contact' || type === 'deal') && <ReferidosCard type={type} record={record} onChange={refresh} />}
           {type === 'company' && <LogosCard companyId={record.id} />}
           {!ventas && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
           {type === 'deal' && <FacturarCard record={record} />}
@@ -949,6 +951,69 @@ function FacturarCard({ record }: { record: CrmRecord }) {
         {avisos.map((a) => <div key={a} className="fact-row warn">! {a}</div>)}
         {listo.map((l) => <div key={l} className="fact-row ok">✓ {l}</div>)}
       </div>
+    </div>
+  );
+}
+
+// Referidos (referidos.ts): en un cliente, a quién nos recomendó y «Nos recomendó a…» para cargarlo; en el contacto o el
+// negocio de un referido, quién lo recomendó.
+function ReferidosCard({ type, record, onChange }: { type: ObjectType; record: CrmRecord; onChange: () => void }) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const res = useAsync(() => http<{ recomendo: ReferidoVista[]; lo_recomendo: ReferidoVista[] }>('GET', `/records/${type}/${record.id}/referidos`), [type, record.id]);
+  const [form, setForm] = useState<{ nombre: string; empresa: string; contacto: string; nota: string } | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  const relacion = String(record.props.tipo_de_relacion ?? '');
+  if (esOperaciones(meta.me) || !res.data) return null;
+  const { recomendo, lo_recomendo: lo } = res.data;
+  const cliente = type !== 'deal' && relacion !== 'proveedor' && relacion !== 'equipo';
+  if (!lo.length && !(cliente)) return null;
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form) return;
+    setGuardando(true);
+    try {
+      const r = await http<{ contacto: { name: string } | null }>('POST', '/referidos', { referidor_id: record.id, ...form });
+      toast(`Listo: ${r.contacto?.name ?? 'el referido'} quedó con su negocio en Lead y la tarea de contactarlo.`);
+      setForm(null); res.reload(); onChange();
+    } catch (err) { toast((err as Error).message, true); } finally { setGuardando(false); }
+  };
+  const campo = (k: 'nombre' | 'empresa' | 'contacto' | 'nota', label: string, extra: Record<string, unknown> = {}) => (
+    <label className="stack" style={{ gap: 2 }}><span className="small muted">{label}</span>
+      <input className="input" value={form![k]} onChange={(e) => setForm({ ...form!, [k]: e.target.value })} {...extra} /></label>
+  );
+  return (
+    <div className="panel assoc-card">
+      <div className="panel-head"><h3>Referidos {recomendo.length > 0 && <span className="muted small">({recomendo.length})</span>}</h3>
+        {cliente && !form && <button className="btn sm" onClick={() => setForm({ nombre: '', empresa: '', contacto: '', nota: '' })}>+ Nos recomendó a…</button>}</div>
+      {lo.map((r) => (
+        <div key={`lo-${r.id ?? r.negocio?.id}`} className="panel-body small">
+          <span className="muted">Lo recomendó </span><QuienRecomendo r={r} />{type !== 'deal' && r.negocio && <> · <Link to={recordUrl('deal', r.negocio.id)}>negocio</Link> <EstadoNegocio n={r.negocio} /></>}
+        </div>
+      ))}
+      {form && (
+        <form className="panel-body stack" onSubmit={guardar} onKeyDown={alEsc(() => setForm(null))}>
+          {campo('nombre', 'Nombre', { maxLength: 100, autoFocus: true })}
+          {campo('empresa', 'Empresa', { maxLength: 100 })}
+          {campo('contacto', 'Teléfono o mail', { maxLength: 160, required: true, placeholder: '11 5555 1234 o nombre@empresa.com' })}
+          {campo('nota', 'Nota (opcional)', { maxLength: 600, placeholder: 'Qué necesita, de dónde lo conoce…' })}
+          <div className="small muted">Creamos el contacto, un negocio en Lead a tu nombre y la tarea de contactarlo mañana.</div>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn primary sm" type="submit" disabled={guardando || !(form.nombre.trim() || form.empresa.trim()) || !form.contacto.trim()}>{guardando ? 'Guardando…' : 'Guardar referido'}</button>
+            <button className="btn sm ghost" type="button" onClick={() => setForm(null)}>Cancelar</button>
+          </div>
+        </form>
+      )}
+      {recomendo.map((r) => (
+        <div key={`r-${r.id ?? r.negocio?.id}`} className="assoc-item">
+          <div className="grow" style={{ minWidth: 0 }}>
+            {r.contacto ? <Link to={recordUrl('contact', r.contacto.id)} className="ellipsis" style={{ display: 'block' }}>{r.contacto.name}</Link> : <span>{r.negocio?.name}</span>}
+            <div className="small muted ellipsis">{[r.empresa?.name, fmtDate(r.fecha)].filter(Boolean).join(' · ')}</div>
+          </div>
+          {r.negocio ? <Link to={recordUrl('deal', r.negocio.id)} title={r.negocio.name}><EstadoNegocio n={r.negocio} /></Link> : <EstadoNegocio n={null} />}
+        </div>
+      ))}
+      {cliente && !recomendo.length && !form && <div className="panel-body muted small">Si te pasa un contacto, cargalo acá: queda quién lo recomendó, el negocio en Lead y la tarea de contactarlo.</div>}
     </div>
   );
 }

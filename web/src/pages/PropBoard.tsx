@@ -5,7 +5,7 @@ import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAva
 import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 import { ChatChip } from './Conversacion';
-import { hayResumen, ProductosTarjeta, ResumenProduccion, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido } from './PedidosProductos';
+import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
 
 // amount: suma del monto de la columna (en pedidos, el total sin IVA); sin_monto: cuántas tarjetas no lo tienen.
 interface Column { value: string; label: string; total: number; amount: number; sin_monto: number; records: CrmRecord[] }
@@ -186,8 +186,9 @@ export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecy
 
 // Tablero de empresas, contactos o pedidos agrupado por una propiedad (etapa del ciclo de vida, etapa del pedido…).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias }: {
+export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias, productos: productosDeLaVista }: {
   vacias?: boolean; onVacias?: (v: boolean) => void;
+  productos?: ProductosAbiertos;   // pedidos: si los productos se ven lo decide la vista (ObjectIndex); sin esto, este navegador
   type: ObjectType; prop?: string; onProp: (p: string) => void; cardProps?: string[]; onCardProps: (p: string[]) => void; q: string; groups?: Filter[][];
   sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
@@ -208,7 +209,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   // Pedidos: los productos de cada tarjeta (una consulta para todo el tablero) y si se ven, como en el tablero de Producción.
   const esPedidos = type === 'order';
   const prods = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data).pedidos;
-  const productos = useProductosAbiertos('crm.pedidos.tablero.productos');
+  const productosDeAca = useProductosAbiertos(PREF_PRODUCTOS.board);
+  const productos = productosDeLaVista ?? productosDeAca;
   acciones.current = { onOpen, onSelect, setDragId, productos: productos.alternar };
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { http, useAsync, useMeta, formatValue, type CrmRecord } from '../lib';
 import { EtapaPedido, OcLinks, PersonaProd, type OcRef, type PersonaProduccion } from '../components';
 import { dia, Flecha, FotoProducto, hoyIso } from './Produccion';
@@ -45,22 +45,33 @@ function Entregado({ a }: { a: ArticuloPedido }) {
     {a.entregado ? `${n(a.entregado)} de ${n(a.vendido)} entregadas` : 'Sin entregar'}</span>;
 }
 
-// Abiertos o cerrados: todos (queda en este navegador; por defecto, abiertos) y cada pedido aparte mientras se está en la
-// pantalla, como en Producción. Los entregados y anulados arrancan cerrados: lo que importa es lo que está en curso. La
-// lista y el tablero lo recuerdan cada uno por su lado.
-export function useProductosAbiertos(pref = 'crm.pedidos.productos') {
-  const [cerrados, setCerrados] = useState(() => { try { return localStorage.getItem(pref) === 'cerrados'; } catch { return false; } });
+// Abiertos o cerrados: todos (por defecto, abiertos) y cada pedido aparte mientras se está en la pantalla, como en
+// Producción. Los entregados y anulados arrancan cerrados: lo que importa es lo que está en curso. La lista y el tablero
+// lo recuerdan cada uno por su lado (`PREF_PRODUCTOS`).
+// Dónde queda «todos»: en una vista guardada de Pedidos, en la vista (pedido de Rodrigo del 17/11/2026: al expandir o
+// colapsar se prende «Guardar» y la vista lo recuerda en cualquier dispositivo); ahí la lista lo maneja con `control`
+// (ObjectIndex.tsx). Sin `control` («Todos», «Míos» y donde no hay vistas), en este navegador.
+export const PREF_PRODUCTOS = { table: 'crm.pedidos.productos', board: 'crm.pedidos.tablero.productos' } as const;
+export const productosCerradosAca = (pref: string) => { try { return localStorage.getItem(pref) === 'cerrados'; } catch { return false; } };
+export const recordarProductosAca = (pref: string, cerrados: boolean) => { try { localStorage.setItem(pref, cerrados ? 'cerrados' : 'abiertos'); } catch { /* sin almacenamiento */ } };
+export function useProductosAbiertos(pref: string = PREF_PRODUCTOS.table, control?: { cerrados: boolean; todos: (abrir: boolean) => void }) {
+  const [propios, setPropios] = useState(() => productosCerradosAca(pref));
   const [excepciones, setExcepciones] = useState<Set<number>>(new Set());
+  const cerrados = control ? control.cerrados : propios;
+  // Al cambiar todos (con el botón, o porque se abrió otra vista), cada pedido vuelve a seguir a los demás.
+  useEffect(() => { setExcepciones((s) => (s.size ? new Set() : s)); }, [cerrados]);
   return {
     cerrados,
     abierto: (r: CrmRecord) => (cerrados || CERRADOS.includes(r.props.hs_pipeline_stage)) === excepciones.has(r.id),
     alternar: (id: number) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }),
     todos: (abrir: boolean) => {
-      setCerrados(!abrir); setExcepciones(new Set());
-      try { localStorage.setItem(pref, abrir ? 'abiertos' : 'cerrados'); } catch { /* sin almacenamiento */ }
+      setExcepciones(new Set());
+      if (control) { control.todos(abrir); return; }
+      setPropios(!abrir); recordarProductosAca(pref, !abrir);
     },
   };
 }
+export type ProductosAbiertos = ReturnType<typeof useProductosAbiertos>;
 
 // La flecha del renglón del pedido (o su lugar, para que los nombres queden alineados).
 export function FlechaPedido({ p, abierto, onToggle, nombre }: { p?: ProduccionPedido; abierto: boolean; onToggle: () => void; nombre: string }) {

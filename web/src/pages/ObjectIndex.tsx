@@ -542,7 +542,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                 title={`${v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}. ${AYUDA_ORDEN}`}>
                 {v.config.mode === 'board' && <Icon name="board" size={13} />}{v.name}
               </button>
-              {activeView === k && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView(visibles.find((x) => x !== k) ?? 'all'); }}
+              {activeView === k && <ViewMenu type={type} view={v} onRenombrar={() => setCrear('renombrar')} onDeleted={() => { views.reload(); applyView(visibles.find((x) => x !== k) ?? 'all'); }}
                 onMover={(d) => moverPestana(k, d)} puedeIzq={i > 0} puedeDer={i < visibles.length - 1}
                 primera={i === 0} onPrimera={() => { guardarOrden([k, ...pestanas.filter((x) => x !== k)]); toast(`«${v.name}» quedó primera: se abre al entrar`); }} />}
             </div>
@@ -646,7 +646,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         onDescartar={() => applyView(activeView)} onGuardar={saveView} actual={current}
         onCreada={(id) => { views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }}
         crear={crear} setCrear={setCrear} onRecargar={() => { list.reload(); setBoardKey((k) => k + 1); }}
-        onExportar={esVentas(meta.me) ? undefined : exportCsv} />
+        onExportar={esVentas(meta.me) ? undefined : exportCsv} onRenombrada={() => views.reload()} />
     </div>
   );
 }

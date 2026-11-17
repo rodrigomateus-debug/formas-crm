@@ -181,7 +181,6 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
         <SortPick type="deal" sort={sort} dir={dir} onSort={onSort} />
         <BotonVacias value={vacias} onChange={onVacias} />
         {tools}
-        {board.loading && <span className="muted small">Actualizando…</span>}
         <span className="board-sum">
           <b className="num">{sum.n.toLocaleString('es-AR')}</b> {sum.n === 1 ? 'negocio' : 'negocios'}
           <span className="sep">·</span>Total <b className="num">{fmtMoney(sum.amount) || '$ 0'}</b>

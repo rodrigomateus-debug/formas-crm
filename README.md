@@ -16,6 +16,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
 - Perfiles y qué ve cada uno (el perfil Ventas ve lo suyo): [docs/PERFILES.md](docs/PERFILES.md).
 - Unidad de negocio de empresas (a mano, por sus compras o por el propietario) y contactos (la de su empresa): [docs/UNIDADES.md](docs/UNIDADES.md).
+- Referidos (quién nos recomendó a quién: desde el Workspace de Formas Shop o la ficha del cliente, con negocio en Lead, nota, tarea y el agradecimiento al ganar): [docs/REFERIDOS.md](docs/REFERIDOS.md).
 
 ## Cómo está hecho
 
@@ -149,7 +150,7 @@ persona. Con token de administrador: `GET /hooks/avisos` (configuración y estad
 Cuando un pedido pasa a «Entregado» (ClickUp), la vendedora tiene una tarea para los 3 días de recibido: preguntar cómo
 le fue, pedir un referido si le fue bien y, a los 10 días, la reseña de Google (`src/worker/postentrega.ts`, la misma regla
 que «PARA HACER URGENTE» del tablero). Varios pedidos del mismo cliente en la misma semana van en una sola tarea. No va para
-clientes internos ni para lo que carga la tienda con vendedor «STP».
+clientes internos ni para lo que carga la tienda con vendedor «STP». El referido que consiga se carga desde la ficha del cliente («+ Nos recomendó a…», [docs/REFERIDOS.md](docs/REFERIDOS.md)).
 
 ## Unidades de negocio
 

@@ -5,6 +5,7 @@ import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
+import { cargarReferido, usuarioPorMail } from './referidos';
 import { emailDomain, normDomain, normLinkedin, normPhone, splitName } from './records';
 import { clickupStatus, limpiarRemitos, remitosPendientes, syncClickup } from './clickup';
 import { finnegansState } from './finnegans';
@@ -195,6 +196,33 @@ hooks.post('/linkedin', (c) => run(c.env, c.req.raw, 'linkedin', async (raw, ctx
     activity: message ? { type: 'note', subject: 'Mensaje de LinkedIn', body: String(message) } : undefined,
   };
 }));
+
+// Referidos del Workspace de Formas Shop (pedido de Rodrigo del 17/11/2026, en lugar de HubSpot): el pedido de referidos
+// post-entrega del tablero manda cada referido con teléfono o mail. Entra con un token de integración (Configuración →
+// Integraciones, guardado como CRM_TOKEN en Pages). Cuerpo:
+//   { clave, owner_email, cargado_por, nota, referido: { nombre, empresa, contacto }, referidor: { nombre, pdvs } }
+// `clave` hace que reintentar no duplique: si ya está, devuelve lo que se creó la primera vez. Ver referidos.ts.
+hooks.post('/referidos', async (c) => {
+  let body: Record<string, any> = {};
+  try {
+    if (!/^Bearer fcrm_/.test(c.req.header('authorization') ?? '')) throw new HttpError(401, 'Falta el token de integración (Authorization: Bearer fcrm_…).');
+    const auth = await authenticate(c.env, c.req.raw);
+    const ctx: Ctx = { ...auth, source: auth.source === 'crm' ? 'tablero' : auth.source, sourceDetail: 'Pedido de referidos' };
+    if (ctx.user.role === 'viewer') throw new HttpError(403, 'El token es de un usuario de solo lectura.');
+    body = await c.req.json();
+    const owner = await usuarioPorMail(c.env.DB, body.owner_email);
+    const result = await cargarReferido(c.env.DB, ctx, {
+      clave: body.clave, referido: body.referido ?? {}, referidor: body.referidor ?? {}, nota: body.nota,
+      owner_id: owner?.id ?? null, cargado_por: body.cargado_por, origen: 'tablero',
+    });
+    await log(c.env, 'referidos', body, result, true);
+    return c.json({ ok: true, ...result });
+  } catch (e) {
+    const status = e instanceof HttpError ? e.status : 500;
+    await log(c.env, 'referidos', body, { error: (e as Error).message }, false).catch(() => {});
+    return c.json({ ok: false, error: (e as Error).message }, status as 400);
+  }
+});
 
 // Formularios web (catálogo, ruleta de eventos, contacto). Público: sin token, con trampa anti-bots
 // (campo `_gotcha` vacío) y configuración por formulario en settings (clave `form:<slug>`).

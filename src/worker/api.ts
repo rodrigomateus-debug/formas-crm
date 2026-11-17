@@ -20,6 +20,7 @@ import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orde
 import { cambiarTipo, pedirRelectura } from './servicios';
 import { numeroPdv, vincularNegocio } from './vinculos';
 import { pedidosDuplicados } from './pedidosfin';
+import { cargarReferido, listarReferidos, pipelineDe } from './referidos';
 import { asignarRazon, razonesAEmpresa, razonSocialDe, resolverEmpresa } from './razones';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
 import { marcarNotificaciones, notificaciones } from './notificaciones';
@@ -1204,6 +1205,41 @@ api.delete('/choferes/:id', async (c) => {
 
 // El registro existe y quien pide lo puede ver: pipelines por equipo y, en el perfil Ventas, que sea suyo, sin propietario
 // o asociado a lo suyo (alcance.ts).
+// Referidos (referidos.ts): la pantalla Referidos, la tarjeta de la ficha y la carga desde la ficha del cliente.
+api.get('/referidos', async (c) => {
+  const owner = Number(c.req.query('owner')) || undefined;
+  return c.json(await listarReferidos(c.env.DB, c.get('ctx').user, { owner }));
+});
+
+api.get('/records/:type/:id/referidos', async (c) => {
+  const type = assertType(c.req.param('type'));
+  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const user = c.get('ctx').user;
+  if (esOperaciones(user)) return c.json({ recomendo: [], lo_recomendo: [] });
+  const recomendo = type === 'company' || type === 'contact' ? (await listarReferidos(c.env.DB, user, { recomendo: rec.id })).referidos : [];
+  const loRecomendo = (await listarReferidos(c.env.DB, user, { de: rec.id })).referidos;
+  return c.json({ recomendo, lo_recomendo: loRecomendo });
+});
+
+// Desde la ficha de un cliente (empresa o contacto): «Nos recomendó a…». Queda a nombre de quien lo carga si es vendedora;
+// si lo carga un administrador, de quien tiene al cliente (o de quien carga, si no tiene a nadie).
+api.post('/referidos', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  if (esOperaciones(ctx.user)) throw new HttpError(403, 'Los referidos no están en tu perfil.');
+  const b = await c.req.json<{ referidor_id?: number; nombre?: string; empresa?: string; contacto?: string; nota?: string }>();
+  const ref = await registroVisible(c, Number(b.referidor_id));
+  if (ref.object_type !== 'company' && ref.object_type !== 'contact') throw new HttpError(400, 'Quien recomienda tiene que ser una empresa o un contacto.');
+  const owner = esVentas(ctx.user) ? ctx.user.id : (ref.owner_id ?? ctx.user.id);
+  const duenio = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(owner).first<User>();
+  const r = await cargarReferido(c.env.DB, ctx, {
+    referido: { nombre: b.nombre, empresa: b.empresa, contacto: b.contacto }, nota: b.nota, owner_id: owner,
+    referidor: ref.object_type === 'company' ? { empresa_id: ref.id, nombre: ref.name } : { contacto_id: ref.id, nombre: ref.name },
+    cargado_por: ctx.user.name, origen: 'crm', pipeline: await pipelineDe(c.env.DB, duenio ?? ctx.user),
+  });
+  return c.json(r, 201);
+});
+
 async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
   const rec = await getRow(c.env.DB, id);
   await assertVisible(c.env.DB, new Meta(c.env.DB), c.get('ctx').user, rec);

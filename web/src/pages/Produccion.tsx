@@ -80,7 +80,7 @@ function guardarPref(p: object) { try { localStorage.setItem(PREF, JSON.stringif
 
 // «mié 18/11»: el día de la semana ayuda a ver qué es de esta semana (en ClickUp se ve «miércoles»).
 const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
-function dia(v: string | null) {
+export function dia(v: string | null) {
   if (!v) return '';
   const [y, m, d] = v.split('-').map(Number);
   const f = new Date(y, m - 1, d);
@@ -88,7 +88,7 @@ function dia(v: string | null) {
   const año = f.getFullYear() !== hoy.getFullYear() ? `/${String(y).slice(2)}` : '';
   return `${DIAS[f.getDay()]} ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}${año}`;
 }
-const hoyIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+export const hoyIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export default function ProduccionPage() {
@@ -475,8 +475,8 @@ function useOpcionesEstado(estados: Estado[]) {
 // abre flotando (Fecha.tsx). Elegir un día lo guarda; «Quitar fecha» la borra.
 // Cuántos días después de lo pactado quedó la entrega real. Nada si está en fecha o antes.
 const diasEntre = (a: string, b: string) => Math.round((Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 86_400_000);
-const pasada = (pactada: string | null | undefined, real: string | null | undefined) => (pactada && real && real > pactada ? diasEntre(pactada, real) : 0);
-function Corrida({ pactada, real }: { pactada: string | null; real: string | null }) {
+export const pasada = (pactada: string | null | undefined, real: string | null | undefined) => (pactada && real && real > pactada ? diasEntre(pactada, real) : 0);
+export function Corrida({ pactada, real }: { pactada: string | null; real: string | null }) {
   const n = pasada(pactada, real);
   if (!n) return null;
   return <span className="prod-corrida" title={`La entrega real es ${n} día${n === 1 ? '' : 's'} después de la pactada (${dia(pactada!)})`}>+{n} d</span>;
@@ -537,7 +537,7 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
 // ---------- Lista: el PDV y abajo sus artículos ----------
 
 // La flecha de abrir y cerrar, como en ClickUp: para abajo si está abierto, para la derecha si está cerrado.
-const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
+export const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
 
 function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filtros }: {
   filtros: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: CtxFiltros };
@@ -713,7 +713,7 @@ function Notas({ a, p, v }: { a: Articulo; p: Pdv; v: Vista }) {
 // La foto del producto a la izquierda del nombre, como en los productos del pedido (la misma foto). Un clic la abre
 // grande; sin foto, el ícono de producto.
 const fotosRotas = new Set<string>();
-function FotoProducto({ url, nombre, grande }: { url?: string | null; nombre: string; grande?: boolean }) {
+export function FotoProducto({ url, nombre, grande }: { url?: string | null; nombre: string; grande?: boolean }) {
   const [rota, setRota] = useState(() => !url || fotosRotas.has(url));
   useEffect(() => { setRota(!url || fotosRotas.has(url)); }, [url]);
   const cls = `prod-foto${grande ? ' grande' : ''}`;

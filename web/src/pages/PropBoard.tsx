@@ -5,6 +5,7 @@ import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAva
 import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 import { ChatChip } from './Conversacion';
+import { hayResumen, ProductosTarjeta, ResumenProduccion, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido } from './PedidosProductos';
 
 // amount: suma del monto de la columna (en pedidos, el total sin IVA); sin_monto: cuántas tarjetas no lo tienen.
 interface Column { value: string; label: string; total: number; amount: number; sin_monto: number; records: CrmRecord[] }
@@ -51,7 +52,8 @@ function OrderLine({ r }: { r: CrmRecord }) {
 // en rojo «· total» si no pagó nada; en ámbar «· parcial» si ya pagó algo (el anticipo), con cuánto al pasar el mouse
 // (aviso de Rodrigo del 13/11/2026); en verde, con un tilde, si está todo pago. Sin dato de Finnegans (o anulado), no se
 // muestra: no saber no es lo mismo que estar pago.
-function Saldo({ r }: { r: CrmRecord }) {
+// `corto`: en la lista de pedidos, «Debe $ 1,5 M» en lugar de «Saldo pendiente $ 1,5 M».
+export function Saldo({ r, corto }: { r: CrmRecord; corto?: boolean }) {
   const p = r.props;
   const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
   const saldo = num(p.saldo_pendiente_de_pago_mxn);
@@ -65,7 +67,7 @@ function Saldo({ r }: { r: CrmRecord }) {
     : `Saldo pendiente en Finnegans: ${fmtMoneyExact(saldo, 'ARS')} sin IVA.${detalle}`;
   return (
     <div className={`saldo debe${c?.parcial ? ' parcial' : ''}`} title={title}>
-      Saldo pendiente <span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
+      {corto ? 'Debe' : 'Saldo pendiente'} <span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
     </div>
   );
 }
@@ -90,7 +92,7 @@ function Fotos({ r, onOpen }: { r: CrmRecord; onOpen: () => void }) {
 // Abajo de la tarjeta de pedido: si tiene factura, remito y bocetos (cuántos de sus productos tienen), con un iconito
 // cada uno que se pinta cuando está.
 interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; mensajes?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
-function Adjuntos({ r }: { r: CrmRecord }) {
+export function Adjuntos({ r }: { r: CrmRecord }) {
   const a = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos;
   if (!a) return null;
   const n = (k: number, uno: string, varios: string) => `${k} ${k === 1 ? uno : varios}`;
@@ -109,31 +111,38 @@ function Adjuntos({ r }: { r: CrmRecord }) {
   );
 }
 
-// Quién lo tiene en producción, con su foto, mientras se produce (no en los entregados ni anulados).
-function Produccion({ r }: { r: CrmRecord }) {
+// Quién lo tiene en producción, con su foto, y la fecha real que propuso Producción (PedidosProductos.tsx), mientras se
+// produce (no en los entregados ni anulados).
+function Produccion({ r, prod }: { r: CrmRecord; prod?: ProduccionPedido }) {
+  if ([ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage)) return null;
+  if (hayResumen(r, prod)) return <div className="card-prod"><ResumenProduccion p={prod} r={r} tarjeta /></div>;
   const p = (r as CrmRecord & { adjuntos?: AdjuntosPedido }).adjuntos?.produccion;
-  if (!p || [ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage)) return null;
+  if (!p) return null;
   return <div className="card-prod"><QuienProduce asignados={p.asignados} listos={p.listos} total={p.total} /></div>;
 }
+type Acciones = CardActions & { productos?: (id: number) => void };
 
 // Tarjeta del tablero (empresas, contactos o pedidos). No se vuelve a dibujar si no cambió: lo que hace al tocarla lo lee
 // de `acciones`, que el tablero actualiza en cada vuelta.
-const subtitleDe = (type: ObjectType, r: CrmRecord) => (type === 'company' ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
+const subtitleDe = (type: ObjectType, r: CrmRecord, conProductos = false) => (type === 'company' ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
     // El PDV solo si el nombre no lo dice ya; mientras se produce, cómo vienen los artículos («2 en el impresor · 1 listo…»).
     : type === 'order' ? [r.props.hs_total_price != null && r.props.hs_total_price !== '' && fmtMoney(r.props.hs_total_price, r.props.hs_currency_code),
       r.props.pdv_finnegans && !r.name.includes(String(r.props.pdv_finnegans)) && `PDV ${r.props.pdv_finnegans}`,
-      ![ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage) && r.props.detalle_produccion].filter(Boolean).join(' · ')
+      // Con los productos a la vista (cada uno con su estado), el resumen de ClickUp sobra.
+      !conProductos && ![ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage) && r.props.detalle_produccion].filter(Boolean).join(' · ')
       : [r.props.jobtitle, r.props.company || r.props.email].filter(Boolean).join(' · '));;
 
-const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel, selecting, canSelect, acciones }: {
-  r: CrmRecord; type: ObjectType; cardProps?: string[]; dragging: boolean; on: boolean; sel: boolean; selecting: boolean; canSelect: boolean; acciones: { current: CardActions };
+const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel, selecting, canSelect, acciones, prod, abierto = false }: {
+  r: CrmRecord; type: ObjectType; cardProps?: string[]; dragging: boolean; on: boolean; sel: boolean; selecting: boolean; canSelect: boolean; acciones: { current: Acciones };
+  prod?: ProduccionPedido; abierto?: boolean;   // pedidos: sus productos (PedidosProductos.tsx) y si se ven en la tarjeta
 }) {
   const { meta } = useMeta();
   const onOpen = (id: number, t?: Activity['type']) => acciones.current.onOpen?.(id, t);
   const ultima = r.props.notes_last_updated || r.props.createdate;   // nunca vacía: cargarlo ya es actividad
   const stale = ultima && Date.now() - Date.parse(ultima) > 30 * 86_400_000;
   const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen(r.id, t); };
-  const subtitle = subtitleDe(type, r);
+  const conProductos = abierto && !!prod?.articulos.length;
+  const subtitle = subtitleDe(type, r, conProductos);
   return (
     <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable
       onClick={(e) => (canSelect && (e.metaKey || e.ctrlKey || e.shiftKey || selecting) ? acciones.current.onSelect?.(r.id) : onOpen(r.id))}
@@ -145,12 +154,13 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
         : subtitle && <div className="meta"><span className="ellipsis">{subtitle}</span></div>}
       {type === 'order' && !cardProps?.length && <OrderLine r={r} />}
       {type === 'order' && <Saldo r={r} />}
-      {type === 'order' && <Fotos r={r} onOpen={() => onOpen(r.id)} />}
+      {type === 'order' && !conProductos && <Fotos r={r} onOpen={() => onOpen(r.id)} />}
       <div className="meta">
         <UserAvatar id={r.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>
       </div>
-      {type === 'order' && <Produccion r={r} />}
+      {type === 'order' && <Produccion r={r} prod={prod} />}
+      {type === 'order' && <ProductosTarjeta p={prod} r={r} abierto={abierto} onToggle={() => acciones.current.productos?.(r.id)} />}
       <div className="card-actions">
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
@@ -194,8 +204,12 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const [montoActivos, setMontoActivos] = useState<number | null>(null);
   useEffect(() => { if (board.data) { setCols(board.data.columns); setActivos(board.data.activos ?? null); setMontoActivos(board.data.activos_monto ?? null); } }, [board.data]);
   const [dragId, setDragId] = useState<number | null>(null);
-  const acciones = useRef<CardActions>({});
-  acciones.current = { onOpen, onSelect, setDragId };
+  const acciones = useRef<Acciones>({});
+  // Pedidos: los productos de cada tarjeta (una consulta para todo el tablero) y si se ven, como en el tablero de Producción.
+  const esPedidos = type === 'order';
+  const prods = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data).pedidos;
+  const productos = useProductosAbiertos('crm.pedidos.tablero.productos');
+  acciones.current = { onOpen, onSelect, setDragId, productos: productos.alternar };
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const colapso = useColapso(`crm.board.collapsed.${type}.${prop}`, vacias);
@@ -271,7 +285,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
       </div>
       <div className="col-body">
         {c.records.map((r) => <PropCard key={r.id} r={r} type={type} cardProps={cardProps} dragging={dragId === r.id} on={openId === r.id}
-          sel={!!selected?.has(r.id)} selecting={!!selected?.size} canSelect={!!onSelect} acciones={acciones} />)}
+          sel={!!selected?.has(r.id)} selecting={!!selected?.size} canSelect={!!onSelect} acciones={acciones}
+          {...(esPedidos ? { prod: prods[r.id], abierto: productos.abierto(r) } : {})} />)}
         {c.total > c.records.length && (
           <button className="btn sm ghost more" disabled={loadingMore === c.value} onClick={() => loadMore(c)}>
             {loadingMore === c.value ? 'Cargando…' : `Cargar más (quedan ${(c.total - c.records.length).toLocaleString('es-AR')})`}
@@ -309,6 +324,12 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
         </label>
         <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />
         <BotonVacias value={vacias} onChange={onVacias} />
+        {esPedidos && (
+          <button type="button" className={`btn qf-btn${productos.cerrados ? '' : ' on'}`} onClick={() => productos.todos(productos.cerrados)} aria-pressed={!productos.cerrados}
+            title={productos.cerrados ? 'Mostrar en cada tarjeta sus productos, con su estado, quién los tiene y la fecha real' : 'Tarjetas compactas, sin el detalle de cada producto'}>
+            <span className={`flecha${productos.cerrados ? ' cerrada' : ''}`}><Icon name="down" size={14} /></span>{productos.cerrados ? 'Expandir productos' : 'Colapsar productos'}
+          </button>
+        )}
         <div className="row small bar-label" title="Datos que muestra cada tarjeta (se guarda en la vista)">
           <span>Tarjeta</span>
           <MultiPick small options={propsOf(meta, type).filter((p) => !['name', 'hs_order_name'].includes(p.name)).map((p) => ({ value: p.name, label: p.label }))}

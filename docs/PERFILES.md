@@ -38,7 +38,9 @@ Una vendedora (perfil Comercial que no es administradora) ve:
 
 No ve ni hace:
 
-- **Producción** (tampoco quién tiene el pedido en producción) ni la pantalla **Entregas** (la bandeja de Logística).
+- La pantalla **Producción** ni la pantalla **Entregas** (la bandeja de Logística). De sus pedidos sí ve quién los tiene en
+  Producción, el estado de cada producto y la fecha real, en la lista de Pedidos y en la ficha (pedido de Rodrigo del
+  17/11/2026, [PEDIDOS.md](PEDIDOS.md#los-productos-de-cada-pedido-en-la-lista)).
 - **Importar** ni **exportar** listas (cuida la base de clientes; si necesita una lista, se la baja un administrador).
 - Abrir lo de otra vendedora: si lo busca, el buscador le muestra los **contactos y empresas** que ya existen con
   «Ya existe · es de Fulana» (solo el nombre y de quién es) para que no los cargue de nuevo; abrirlos le dice de quién es y

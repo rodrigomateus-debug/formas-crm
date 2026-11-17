@@ -140,6 +140,51 @@ $ 1,7 M (49 %)». Una diferencia de menos del 1 % del total cuenta como que no p
 total del pedido no se puede saber y se muestra solo el saldo. Un pago que todavía no se imputó a ninguna factura
 (cobranza sin aplicar) no baja el saldo del pedido, así que hasta que se aplica el pedido sigue diciendo «total».
 
+## Los productos de cada pedido en la lista
+
+Pedido de Rodrigo del 17/11/2026: la lista y el tablero de Pedidos son el pantallazo de la vendedora. Se parecen a
+Producción, pero simplificados: lo que ella necesita para saber cómo vienen sus pedidos, qué le toca y qué decirle al
+cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro, quién no tiene nada asignado).
+
+- **Cada producto** con su foto, el nombre con que se vendió (el del renglón del pedido atado al artículo, el mismo de los
+  productos del pedido; si no está atado, el de ClickUp), la cantidad, su **estado en palabras de la vendedora** (la
+  pastilla de la etapa del pedido que tendría si fuera el único producto: Esperando boceto o confirmación, En producción,
+  Listo para entregar, Entregado; «Sin arrancar» si Producción todavía no lo empezó) y **quién lo tiene en Producción**
+  (foto y nombre; sin asignar no se dice). No se ven los servicios ni los anulados.
+- **La entrega**, como se la dice al cliente: «Pactada vie 20/11» (la de Finnegans) o, si Producción propuso otra,
+  «Pactada vie 20/11 → mar 24/11 +4 d». El «+4 d» en ámbar es para avisarle al cliente; en rojo, lo que ya pasó y no
+  está listo. La fecha de Producción del pedido es la más lejana entre la del PDV y la de sus productos que faltan. Un
+  producto muestra su fecha solo si es otra que la del pedido.
+- **Lo que le toca a ella**: en «$ Pendiente de Anticipo», «Te toca: el anticipo»; en «Pendiente Boceto Digital», «Te
+  toca: el boceto».
+- **Lista**: el estado de cada producto va en la columna «Etapa del pedido» y quién lo tiene en la columna
+  «Producción» (si alguna no está en la tabla, al lado del nombre). La columna «Producción» del pedido junta lo que le
+  toca, quién lo tiene, cuántos productos están listos («1/3 listos») y la entrega. Se suma sola una vez, al lado de la
+  etapa, en «Todos» y «Míos» de cada navegador; en las vistas guardadas se agrega desde «Columnas».
+- **Tablero**, como el de Producción: cada tarjeta con sus productos adentro (hasta 4 y «+ N productos más»), con su
+  estado y quién lo tiene; arriba, quién tiene el pedido, cuántos están listos, lo que le toca y, si Producción propuso
+  otra fecha, «Nueva fecha mar 24/11 +4 d» (la pactada ya está en la tarjeta). Con los productos a la vista no van las
+  miniaturas ni el resumen de ClickUp («2 en el impresor…»).
+- **Abrir y cerrar**: la flecha de cada pedido (en la tarjeta, «3 productos»), o «Colapsar productos» / «Expandir
+  productos» para todos: el tablero queda compacto, sin el detalle por producto, o con el detalle. La lista y el tablero
+  lo recuerdan cada uno en el navegador; por defecto, abiertos, salvo los entregados y anulados. Un clic en un producto
+  abre la vista previa del pedido.
+- **Lo entregado de cada producto** según los remitos, en los pedidos con entregas a medias (Entregado parcial, o los
+  remitos dicen que falta algo o hay diferencias): «60 de 150 entregadas», «Sin entregar» o «Entregadas ✓», al lado del
+  estado. Es la misma cuenta de la tarjeta «Entrega» del pedido (`calcularEntrega` en `remitos.ts`), por el renglón del
+  pedido atado a cada artículo; se calcula para hasta 40 pedidos por consulta.
+- **Columna «Cobro y papeles»** en la lista: el saldo («Pagado», «Debe $ 1,5 M · parcial»; de Finnegans, sin IVA) y los
+  iconitos de factura, remito, bocetos y conversación de la tarjeta del tablero (`adjuntosSql`, con `&adjuntos=1`).
+- **Columnas por defecto del perfil Ventas**: Etapa del pedido, Producción, Cobro y papeles, Total y Fecha de creación
+  (sin «PDV Finnegans», que ya está en el nombre, ni «Unidad de negocio» ni «Propietario»). Las vendedoras que ya tenían
+  sus columnas pasan una sola vez a estas en «Todos» y «Míos» (sin las dos que sobran y con «Cobro y papeles»); lo que
+  cambien después queda. Los demás perfiles siguen con las de siempre y suman las nuevas desde «Columnas».
+- Un pedido sin PDV en ClickUp muestra sus productos (los renglones del pedido, sin servicios) sin estado.
+- Sale de la tabla `produccion` (la sincronización de ClickUp de cada 10 minutos), en una sola consulta para la página o
+  el tablero: `GET /api/pedidos/articulos?ids=…` (hasta 500; `src/worker/pedidosprod.ts`, pantalla en
+  `web/src/pages/PedidosProductos.tsx`, usada en `ObjectIndex.tsx` y `PropBoard.tsx`). Devuelve solo los pedidos que quien
+  pregunta puede ver, así que la vendedora la usa para los suyos. Prueba en `test/produccion.test.mjs`.
+
 ## Miniaturas de los productos en la tarjeta
 
 Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, la tarjeta muestra hasta 3 fotos de los productos del pedido,

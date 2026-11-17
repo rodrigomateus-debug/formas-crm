@@ -151,6 +151,9 @@ contaban como artículo y dejaban el PDV en «Entregado parcial» por un adicion
 
 ## Lo que ven las vendedoras
 
+- **Lista de Pedidos** (pedido de Rodrigo del 17/11/2026): cada pedido con sus productos abajo, como acá pero
+  simplificado: foto, estado (la etapa del pedido: esperando boceto, en producción, listo para entregar, entregado),
+  quién lo tiene y la fecha real que propuso Producción. Ver [PEDIDOS.md](PEDIDOS.md#los-productos-de-cada-pedido-en-la-lista).
 - **Cabecera de la ficha y de la vista previa del pedido** (pedido de Rodrigo del 12/11/2026): la etapa y
   «Producción:» con quién lo tiene (foto y nombre) y cuántos artículos están listos, lo mismo que la tarjeta del tablero
   de pedidos. Lo trae `GET /api/records/order/:id` (`produccion`, con `produccionDePedido`). La vista previa que se

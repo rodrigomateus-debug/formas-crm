@@ -1,5 +1,6 @@
 // Perfil Ventas (src/worker/alcance.ts): una vendedora (perfil Comercial, no administradora) ve lo suyo, lo que no tiene
-// propietario y lo asociado a lo suyo; no ve lo de otra vendedora, ni Producción, ni Entregas, ni exporta ni importa.
+// propietario y lo asociado a lo suyo; no ve lo de otra vendedora, ni la pantalla Producción (sí quién tiene sus pedidos),
+// ni Entregas, ni exporta ni importa.
 // Lo mismo con Claude (MCP). Los demás perfiles siguen viendo todo.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -111,7 +112,10 @@ test('perfil Ventas: lo suyo, lo sin dueño y lo asociado; nada de otra vendedor
     assert.equal(r.status, 403, `${m} ${p}`);
     assert.match(r.data.error, /no está en el perfil Ventas/);
   }
-  assert.equal((await call('GET', `/records/order/${pedVera.id}`, undefined, V)).data.produccion, undefined, 'tampoco quién lo tiene en producción');
+  // Quién lo tiene en Producción sí lo ve (pedido de Rodrigo del 17/11/2026), en la lista de pedidos: solo de sus pedidos.
+  const arts = await call('GET', `/pedidos/articulos?ids=${pedVera.id},${pedOlga.id}`, undefined, V);
+  assert.equal(arts.status, 200, 'la lista de pedidos con sus productos no va por /produccion');
+  assert.ok(!(pedOlga.id in arts.data.pedidos), 'de un pedido que no ve, nada');
 
   // Los remitos de sus pedidos sí: los ve y los baja para mandárselos al cliente. Cargarlos y revisarlos es de Logística.
   const subir = async (pedido) => {

@@ -1931,3 +1931,51 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .ch-fila.abierta { background: var(--ui-surface-sunken); }
 .ch-bajas summary { cursor: pointer; margin-bottom: 6px; }
 @media (max-width: 640px) { .ch-acceso { padding-left: 14px; } }
+
+/* ---------- Pedidos: los productos de cada pedido abajo (pages/PedidosProductos.tsx), como Producción pero simplificado ---------- */
+.ped-nombre { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.ped-flecha { flex: none; display: inline-block; width: 24px; }
+button.ped-flecha { display: inline-flex; }
+table.grid td.ped-prod { max-width: none; }
+.ped-prod-in { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.ped-real { font-size: 12px; color: var(--ui-ink-2); white-space: nowrap; display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
+.ped-real.fecha-alerta { color: var(--ui-negative-ink); }
+/* Los productos van corridos a la derecha con una línea que baja desde el pedido, como las subtareas (y como Producción).
+   El pedido y sus productos se leen como un bloque: sin la raya entre ellos. */
+table.grid tr.ped-con-arts td, table.grid tr.ped-art:not(.ultimo) td { border-bottom-color: transparent; }
+table.grid tr.ped-art td { height: 40px; cursor: pointer; }
+table.grid tr.ped-art.sel td { background: var(--row-sel); }
+.ped-art-t { display: flex; align-items: center; gap: 8px; padding-left: 30px; min-width: 0; color: var(--ui-ink); }
+.ped-art-n { min-width: 0; font-size: 13px; }
+.ped-cant { flex: none; }
+.ped-art-t .prod-foto { width: 28px; height: 28px; }
+table.grid tr.ped-art td.name::before { content: ''; position: absolute; left: 26px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); }
+table.grid tr.ped-art.ultimo td.name::before { bottom: 50%; }
+table.grid tr.ped-art td.name::after { content: ''; position: absolute; left: 26px; top: 50%; width: 12px; border-top: 1.5px solid var(--ui-line-strong); }
+table.grid tr.ped-art.entregado .ped-art-n { color: var(--ui-ink-2); }
+/* «+4 d»: Producción corrió la entrega (ámbar, hay que avisarle al cliente); el rojo queda para lo vencido. */
+.ped-corrida { flex: none; font-size: 10.5px; font-weight: 600; line-height: 1.5; padding: 0 6px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); white-space: nowrap; font-variant-numeric: tabular-nums; margin-left: 5px; }
+.ped-real { gap: 0; }
+/* Lo que le toca a la vendedora (anticipo, boceto) o lo que espera Producción. */
+.ped-pendiente { flex: none; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; white-space: nowrap;
+  background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.ped-pendiente.tuyo { background: var(--ui-info-soft); color: var(--ui-info-ink); box-shadow: inset 0 0 0 1px currentColor; }
+.ped-sin-arrancar { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500;
+  color: var(--ui-ink-2); background: var(--ui-surface-sunken); box-shadow: inset 0 0 0 1px var(--ui-line); white-space: nowrap; }
+/* Tablero: los productos adentro de la tarjeta, como los hijos de la tarjeta del PDV en el tablero de Producción. */
+.ped-card-prods { display: flex; flex-direction: column; margin: 2px -12px 0; }
+.ped-card-toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 2px 6px; border: 0; border-radius: var(--r-control);
+  background: none; color: var(--ui-ink-2); font-size: 12px; font-weight: 500; cursor: pointer; }
+.ped-card-toggle:hover, .ped-card-toggle:focus-visible { background: var(--ui-surface-sunken); color: var(--ui-ink); }
+.ped-hijos { margin-top: 4px; cursor: pointer; }
+.ped-hijo-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 1px; }
+.card-prod .ped-prod-in { flex-wrap: wrap; row-gap: 4px; }
+.ped-hijos .prod-hijo-pie { flex-wrap: wrap; row-gap: 4px; }
+.ped-hijos .prod-hijo-pie .etapa { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* Lo entregado de cada producto según los remitos, en los pedidos con entregas a medias. */
+.ped-entregado { flex: none; font-size: 11.5px; font-weight: 600; padding: 0 7px; line-height: 20px; border-radius: var(--r-pill); white-space: nowrap;
+  background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.ped-entregado.ok { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+/* La columna «Cobro y papeles» de la lista: el saldo y los iconitos de factura, remito y bocetos de la tarjeta. */
+.ped-cobro { display: inline-flex; align-items: center; gap: 4px; }
+.ped-cobro .card-adj { margin-left: 2px; }

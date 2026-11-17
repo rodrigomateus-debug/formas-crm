@@ -30,11 +30,11 @@ test('crea empresa, contacto con dominio corporativo y se asocian solos', async 
   assert.equal(dup.status, 409);
   const ct = await call('POST', '/hooks/bundle', undefined); // sin token
   assert.equal(ct.status, 401);
-  const contact = await api('POST', '/records/contact', { props: { firstname: 'Ana', lastname: `Pérez ${RUN}`, email: `ana@acme-${RUN}.com.ar`, phone: '+54 9 11 5555-0001' }, associations: [state.company] });
+  const contact = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Ana', lastname: `Pérez ${RUN}`, email: `ana@acme-${RUN}.com.ar`, phone: '+54 9 11 5555-0001' }, associations: [state.company] });
   assert.equal(contact.status, 201, JSON.stringify(contact.data));
   state.contact = contact.data.id;
   assert.equal(contact.data.name, `Ana Pérez ${RUN}`);
-  const again = await api('POST', '/records/contact', { props: { email: `ANA@acme-${RUN}.com.ar` } });
+  const again = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', email: `ANA@acme-${RUN}.com.ar` } });
   assert.equal(again.status, 409, 'dedupe por email sin importar mayúsculas');
   const rec = await api('GET', `/records/contact/${state.contact}`);
   assert.equal(rec.data.associations.company.length, 1);
@@ -58,19 +58,19 @@ test('tipo de relación: los proveedores, el equipo de Formas y otros no se mezc
   }
   const tag = `Rel ${RUN}`;
   // Equipo Formas, solo: el mail de un dominio de Formas.
-  const vendedora = (await api('POST', '/records/contact', { props: { firstname: 'Vende', lastname: tag, email: `vende.rel.${RUN}@formas.ar` } })).data;
+  const vendedora = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Vende', lastname: tag, email: `vende.rel.${RUN}@formas.ar` } })).data;
   assert.equal(vendedora.props.tipo_de_relacion, 'equipo');
   // Una empresa proveedora: sus contactos (por dominio, se asocian solos como principal) heredan el tipo.
   const prov = (await api('POST', '/records/company', { props: { name: `Proveedor ${tag}`, domain: `prov-${RUN}.com.ar`, tipo_de_relacion: 'proveedor' } })).data;
-  const juan = (await api('POST', '/records/contact', { props: { firstname: 'Juan', lastname: tag, email: `juan@prov-${RUN}.com.ar` }, associations: [prov.id] })).data;
+  const juan = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Juan', lastname: tag, email: `juan@prov-${RUN}.com.ar` }, associations: [prov.id] })).data;
   assert.equal((await api('GET', `/records/contact/${juan.id}`)).data.record.props.tipo_de_relacion, 'proveedor', 'hereda el de su empresa');
   // Uno que se marcó a mano como cliente lo conserva cuando la empresa cambia; el que heredó, sigue a la empresa.
-  const pepa = (await api('POST', '/records/contact', { props: { firstname: 'Pepa', lastname: tag, email: `pepa@prov-${RUN}.com.ar`, tipo_de_relacion: 'cliente' }, associations: [prov.id] })).data;
+  const pepa = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Pepa', lastname: tag, email: `pepa@prov-${RUN}.com.ar`, tipo_de_relacion: 'cliente' }, associations: [prov.id] })).data;
   await api('PATCH', `/records/company/${prov.id}`, { props: { tipo_de_relacion: 'otro' } });
   assert.equal((await api('GET', `/records/contact/${juan.id}`)).data.record.props.tipo_de_relacion, 'otro');
   assert.equal((await api('GET', `/records/contact/${pepa.id}`)).data.record.props.tipo_de_relacion, 'cliente');
   // Un cliente común (sin tipo).
-  const cli = (await api('POST', '/records/contact', { props: { firstname: 'Cliente', lastname: tag, email: `cli.${RUN}@cliente-${RUN}.com.ar` } })).data;
+  const cli = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Cliente', lastname: tag, email: `cli.${RUN}@cliente-${RUN}.com.ar` } })).data;
   // La lista filtra por relación (vacío = cliente): la de clientes no trae al equipo ni a los otros.
   const lista = async (values) => (await api('GET', `/records/contact?q=${encodeURIComponent(tag)}&groups=${encodeURIComponent(JSON.stringify([[{ prop: '__relacion', op: 'in', values }]]))}`)).data.results.map((r) => r.id).sort();
   assert.deepEqual(await lista(['cliente']), [pepa.id, cli.id].sort());
@@ -463,7 +463,7 @@ test('al crear se asocia con lo que ya existe de los otros objetos (y el negocio
   assert.ok(enAlta.includes('origen'), `el origen va en el alta del negocio: ${enAlta}`);
 
   const emp = (await api('POST', '/records/company', { props: { name: `${tag} SA` } })).data;
-  const con = (await api('POST', '/records/contact', { props: { firstname: 'Alta', lastname: tag }, associations: [emp.id] })).data;
+  const con = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Alta', lastname: tag }, associations: [emp.id] })).data;
   const ped = (await api('POST', '/records/order', { props: { hs_order_name: `${tag} PDV`, hs_total_price: 1234 } })).data;
   // Negocio con empresa, contacto y pedido: queda asociado a los tres y toma el monto del pedido.
   const r = await api('POST', '/records/deal', { props: { dealname: `${tag} negocio`, pipeline: 'default', origen: 'Llamada entrante' }, associations: [emp.id, con.id, ped.id] });
@@ -473,7 +473,7 @@ test('al crear se asocia con lo que ya existe de los otros objetos (y el negocio
   assert.deepEqual([a.company.map((x) => x.id), a.contact.map((x) => x.id), a.order.map((x) => x.id)], [[emp.id], [con.id], [ped.id]]);
 
   // Contacto con negocio y pedido; empresa con contactos, negocio y pedido; pedido con empresa, contacto y negocio.
-  const c2 = (await api('POST', '/records/contact', { props: { firstname: 'Otra', lastname: tag }, associations: [r.data.id, ped.id, emp.id] })).data;
+  const c2 = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Otra', lastname: tag }, associations: [r.data.id, ped.id, emp.id] })).data;
   const c2a = (await api('GET', `/records/contact/${c2.id}`)).data.associations;
   assert.deepEqual([c2a.deal.map((x) => x.id), c2a.order.map((x) => x.id), c2a.company.map((x) => x.id)], [[r.data.id], [ped.id], [emp.id]]);
   const e2 = (await api('POST', '/records/company', { props: { name: `${tag} Dos` }, associations: [con.id, r.data.id, ped.id] })).data;
@@ -492,7 +492,7 @@ test('al crear se asocia con lo que ya existe de los otros objetos (y el negocio
   const dos = await api('POST', '/records/order', { props: { hs_order_name: `${tag} sobra` }, associations: [r.data.id, otroNeg.id] });
   assert.equal(dos.status, 400);
   assert.match(dos.data.error, /un solo negocio/);
-  const mismo = await api('POST', '/records/contact', { props: { firstname: 'Mismo', lastname: tag }, associations: [con.id] });
+  const mismo = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Mismo', lastname: tag }, associations: [con.id] });
   assert.equal(mismo.status, 400);
   assert.deepEqual([await cuenta('deal', `${tag} ocupado`), await cuenta('order', `${tag} sobra`), await cuenta('contact', `Mismo ${tag}`)], [0, 0, 0]);
 });
@@ -511,7 +511,7 @@ test('tablero: ponderado, «Cargar más», orden y datos de la tarjeta', async (
   const tag = `Tab ${Date.now().toString(36)}`;
   const pipe = (await api('GET', '/meta')).data.pipelines.find((p) => p.id === '740095901');
   const st = pipe.stages[1];
-  const con = (await api('POST', '/records/contact', { props: { firstname: 'Tarjeta', lastname: tag, email: `t.${Date.now()}@formas.ar` } })).data;
+  const con = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Tarjeta', lastname: tag, email: `t.${Date.now()}@formas.ar` } })).data;
   const ids = [];
   for (const amount of [1000, 3000, 2000]) {
     ids.push((await api('POST', '/records/deal', { props: { dealname: `${tag} ${amount}`, pipeline: pipe.id, dealstage: st.id, amount }, associations: [con.id] })).data.id);
@@ -611,7 +611,7 @@ test('usuarios: eliminar pasa sus registros y tareas abiertas a otro, no entra m
   const email = `chau.${RUN}@formas.ar`;
   const ida = (await api('POST', '/users', { email, name: `Chau ${RUN}`, profile: 'logistica', teams: [57132078] })).data;
   const recibe = (await api('POST', '/users', { email: `recibe.${RUN}@formas.ar`, name: `Recibe ${RUN}` })).data;
-  const contacto = (await api('POST', '/records/contact', { props: { firstname: 'Chau', lastname: RUN, email: `cliente.chau.${RUN}@ejemplo.com`, owner_id: ida.id } })).data;
+  const contacto = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Chau', lastname: RUN, email: `cliente.chau.${RUN}@ejemplo.com`, owner_id: ida.id } })).data;
   const negocio = (await api('POST', '/records/deal', { props: { dealname: `Negocio chau ${RUN}`, pipeline: 'default', owner_id: ida.id } })).data;
   const abierta = (await api('POST', '/activities', { type: 'task', subject: `Abierta ${RUN}`, owner_id: ida.id, links: [contacto.id] })).data;
   const hecha = (await api('POST', '/activities', { type: 'task', subject: `Hecha ${RUN}`, owner_id: ida.id, status: 'COMPLETED', links: [contacto.id] })).data;
@@ -660,7 +660,28 @@ test('usuarios: eliminar pasa sus registros y tareas abiertas a otro, no entra m
 
   // Sin propietario: los registros quedan sin asignar.
   const otro = (await api('POST', '/users', { email: `nadie.${RUN}@formas.ar`, name: `Nadie ${RUN}` })).data;
-  const suyo = (await api('POST', '/records/contact', { props: { firstname: 'Sin', lastname: RUN, email: `sin.${RUN}@ejemplo.com`, owner_id: otro.id } })).data;
+  const suyo = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Sin', lastname: RUN, email: `sin.${RUN}@ejemplo.com`, owner_id: otro.id } })).data;
   assert.equal((await api('DELETE', `/users/${otro.id}`, { reasignar_a: null })).status, 200);
   assert.equal((await api('GET', `/records/contact/${suyo.id}`)).data.record.props.owner_id ?? null, null);
+});
+
+test('el canal de contacto es obligatorio al cargar un contacto a mano, no en las entradas solas', async () => {
+  const tag = `Canal ${RUN}`;
+  // A mano (pantalla o Claude con create_record): sin canal no se crea.
+  const sin = await api('POST', '/records/contact', { props: { firstname: 'Sin', lastname: tag, email: `sin.canal.${RUN}@gmail.com` } });
+  assert.equal(sin.status, 400);
+  assert.match(sin.data.error, /Canal de contacto/);
+  const con = await api('POST', '/records/contact', { props: { firstname: 'Con', lastname: tag, email: `con.canal.${RUN}@gmail.com`, origen_del_contacto: 'Contacto por Whatsapp' } });
+  assert.equal(con.status, 201, JSON.stringify(con.data));
+  // Si ya existe, se avisa eso y no que falta el canal.
+  assert.equal((await api('POST', '/records/contact', { props: { email: `con.canal.${RUN}@gmail.com` } })).status, 409);
+  // En el formulario de alta, marcado como obligatorio.
+  const prop = (await api('GET', '/meta')).data.properties.find((p) => p.object_type === 'contact' && p.name === 'origen_del_contacto');
+  assert.ok(prop.required && prop.in_create_form);
+  // La importación (y Gmail, Darwin, LinkedIn: todas pasan por upsertContact) crea igual, sin canal.
+  const imp = await api('POST', '/import/contact', { rows: [{ firstname: 'Importado', lastname: tag, email: `imp.canal.${RUN}@gmail.com` }] });
+  assert.equal(imp.data.created, 1, JSON.stringify(imp.data));
+  // Copiar un contacto viejo sin canal también anda.
+  const viejo = (await api('GET', `/records/contact?q=${encodeURIComponent(`imp.canal.${RUN}`)}`)).data.results[0];
+  assert.equal((await api('POST', `/records/contact/${viejo.id}/clone`)).status, 201);
 });

@@ -34,8 +34,8 @@ test('filtro por unidad de negocio en negocios, pedidos, contactos, empresas y t
   assert.ok(ords.includes(oNe.id) && !ords.includes(oSh.id));
 
   // Contactos sin empresa (mail personal: no se les crea una) y empresas sin unidad a mano ni compras: por el equipo del propietario.
-  const cShop = (await api('POST', '/records/contact', { props: { firstname: `Ana ${RUN}`, email: `ana.${RUN}@gmail.com`, owner_id: shop.id } })).data;
-  const cCorp = (await api('POST', '/records/contact', { props: { firstname: `Beto ${RUN}`, email: `beto.${RUN}@gmail.com`, owner_id: corp.id } })).data;
+  const cShop = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: `Ana ${RUN}`, email: `ana.${RUN}@gmail.com`, owner_id: shop.id } })).data;
+  const cCorp = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: `Beto ${RUN}`, email: `beto.${RUN}@gmail.com`, owner_id: corp.id } })).data;
   const cons = ids(await api('GET', `/records/contact?groups=${groups(['shop'], [{ prop: 'firstname', op: 'contains', value: RUN }])}`));
   assert.ok(cons.includes(cShop.id) && !cons.includes(cCorp.id));
   assert.ok(ids(await api('GET', `/records/company?groups=${groups(['corporate'], mismo)}`)).includes(emp.id));
@@ -79,8 +79,8 @@ test('unidad de la empresa: a mano, por sus compras o por el propietario; los co
 
   // Contactos: la de su empresa principal (aunque su propietario sea de otro equipo); sin empresa, la de su propietario.
   const shopUser = (await api('POST', '/users', { email: `shop2.${R}@formas.ar`, name: `Shop2 ${R}`, team_id: 57132078 })).data;
-  const conEmp = (await api('POST', '/records/contact', { props: { firstname: `ConEmp ${R}`, email: `conemp.${R}@gmail.com`, owner_id: shopUser.id }, associations: [aMano.id] })).data;
-  const sinEmp = (await api('POST', '/records/contact', { props: { firstname: `SinEmp ${R}`, email: `sinemp.${R}@gmail.com`, owner_id: shopUser.id } })).data;
+  const conEmp = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: `ConEmp ${R}`, email: `conemp.${R}@gmail.com`, owner_id: shopUser.id }, associations: [aMano.id] })).data;
+  const sinEmp = (await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: `SinEmp ${R}`, email: `sinemp.${R}@gmail.com`, owner_id: shopUser.id } })).data;
   const contactos = async (u) => ids(await api('GET', `/records/contact?groups=${groups([u], [{ prop: 'firstname', op: 'contains', value: R }])}`));
   assert.ok((await contactos('corporate')).includes(conEmp.id) && !(await contactos('shop')).includes(conEmp.id), 'hereda la de su empresa');
   assert.ok((await contactos('shop')).includes(sinEmp.id), 'sin empresa, la del propietario');

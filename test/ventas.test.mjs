@@ -15,7 +15,7 @@ async function call(method, path, body, headers = {}) {
   return { status: res.status, data };
 }
 const crear = async (type, props, associations) => {
-  const r = await call('POST', `/records/${type}`, { props, associations });
+  const r = await call('POST', `/records/${type}`, { props: type === 'contact' ? { origen_del_contacto: 'Linkedin', ...props } : props, associations });
   assert.equal(r.status, 201, JSON.stringify(r.data));
   return r.data;
 };

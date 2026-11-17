@@ -76,7 +76,7 @@ test('migra usuarios, registros, asociaciones, historia de etapas y actividades'
   assert.equal((await fetch(`${CRM}/hooks/migrate`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"kind":"users","items":[]}' })).status, 401, 'sin token no entra');
   // Antes de migrar, el CRM ya había creado solo el contacto (por ejemplo, desde Gmail) y su empresa por el dominio.
   const json = { 'content-type': 'application/json' };
-  const nativo = await api('/records/contact', { method: 'POST', headers: json, body: JSON.stringify({ props: { firstname: 'Marta', email: CONTACT.properties.email.toUpperCase() } }) });
+  const nativo = await api('/records/contact', { method: 'POST', headers: json, body: JSON.stringify({ props: { origen_del_contacto: 'Contacto por email', firstname: 'Marta', email: CONTACT.properties.email.toUpperCase() } }) });
   const nativoEmp = (await api(`/records/contact/${nativo.id}`)).associations.company[0];
   assert.ok(nativoEmp, 'empresa creada sola por el dominio');
   await api('/activities', { method: 'POST', headers: json, body: JSON.stringify({ type: 'note', body: `Nota de Gmail ${seed}`, links: [nativo.id] }) });

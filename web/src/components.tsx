@@ -432,6 +432,9 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
     if (needsCompany && !elegidos('company').length && !elegidos('contact').length) {
       toast(`En «${pipeline!.label}» el negocio tiene que tener una empresa asociada.`, true); return;
     }
+    // Las obligatorias del alta (como el «Canal de contacto» del contacto), antes de mandar.
+    const vacias = fields.filter((p) => p.required && p.name !== 'dealstage' && (form[p.name] == null || form[p.name] === ''));
+    if (vacias.length) { toast(`Falta: ${vacias.map((p) => p.label).join(', ')}.`, true); return; }
     const missing = stage ? faltanObligatorias(stage, form) : [];
     if (missing.length) { toast(`Para crear en «${stage!.label}» falta: ${missing.map((m) => propOf(meta, type, m)?.label ?? m).join(', ')}.`, true); return; }
     setBusy(true);

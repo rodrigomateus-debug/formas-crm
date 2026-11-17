@@ -392,7 +392,8 @@ api.post('/records/:type/:id/clone', async (c) => {
     const open = pipe?.stages.find((s) => !s.is_closed);
     if (open) props.dealstage = open.id;
   }
-  const row = await createRecord(c.env.DB, ctx, type, props);
+  // Sin las obligatorias de Configuración: una copia de un registro viejo (sin «Canal de contacto», por ejemplo) se tiene que poder hacer.
+  const row = await createRecord(c.env.DB, ctx, type, props, { strict: false });
   const { results } = await c.env.DB.prepare("SELECT to_id, is_primary FROM associations WHERE from_id = ? AND to_type IN ('contact', 'company')").bind(src.id).all<{ to_id: number; is_primary: number }>();
   for (const a of results) await associate(c.env.DB, ctx, row.id, a.to_id, { primary: !!a.is_primary });
   return c.json(rowToRecord(await getRow(c.env.DB, row.id)), 201);

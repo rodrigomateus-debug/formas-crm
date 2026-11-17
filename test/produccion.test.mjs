@@ -133,19 +133,25 @@ before(async () => {
       // La ficha del Necessaire tiene foto: es la que se ve en el pedido y en Producción.
       if (p === `/fin/producto/NEC_${RUN}`) return send({ Nombre: 'Necessaire', ProductoImagen: FOTO_NEC });
       if (p.startsWith('/fin/producto/')) return send({ Nombre: 'Producto' });
-      // Las órdenes de compra del pedido (ordenescompra.ts): entre los documentos destino, una OC y un remito; el detalle de
-      // la OC junta este pedido y otro, cada renglón con su pedido de venta en la dimensión.
-      if (p === '/fin/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals') {
-        if (url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen') !== `PEDVTASTP - ${PDV.padStart(8, '0')}`) return send([]);
+      // Las órdenes de compra (ordenescompra.ts): el informe ANALISISORDENESCOMPRA, un renglón por producto y pedido. La OC
+      // 4321 junta este pedido (el Necessaire) y otro (la Pelota), más una fila de IVA; la 4330 es de hoy y el informe todavía
+      // no tiene su pedido: sale del detalle (el Set de pinturas). La 4340 está anulada.
+      if (p === '/fin/reports/ANALISISORDENESCOMPRA') {
+        if (url.searchParams.get('PARAMWEBREPORT_dimension') !== 'PEDVTA' || url.searchParams.get('PARAMWEBREPORT_Empresa') !== 'EMPRE01') return send({ error: 'parámetros' }, 400);
+        const hoy = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10).split('-').reverse().join('-');
+        const fila = (o) => ({ TRANSACCIONSUBTIPOID: 71, ESTADO: 'Activa', FECHA: '10-11-2026', PROVEEDOR: `STOCK SUR ${RUN}`, ...o });
         return send([
-          { TIPODOCUMENTO: 'FPOC', CATEGORIATIPODOCUMENTO: -2, DESTINONOMBRE: 'FPOC - 00004321', DESTINOIDENTIFICACIONEXTERNA: `FPOC ${RUN}`, DESTINOTRANSACCIONID: 987654, DESTINOIMPORTETOTAL: 0, OBTUVOCAE: 'NO', DESTINOFECHA: '2026-11-10' },
-          { TIPODOCUMENTO: 'FPREMVTA', CATEGORIATIPODOCUMENTO: -7, DESTINONOMBRE: 'FPREMVTA - 00000001', DESTINOIDENTIFICACIONEXTERNA: `REM ${RUN}`, DESTINOTRANSACCIONID: 1, DESTINOIMPORTETOTAL: 0, OBTUVOCAE: 'NO', DESTINOFECHA: '2026-11-10' },
+          fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: `NEC_${RUN}`, DIMENSIONVALOR: `PEDVTASTP - ${PDV}` }),
+          fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: 'PEL_1', DIMENSIONVALOR: 'PEDVTASTP - 99999' }),
+          fila({ TRANSACCIONID: 987654, IDENTIFICACIONEXTERNA: `OC - 00${PDV} - P01435 ${RUN}`, DOCNROINT: 'OC - 4321', CODIGOPROD: null, DIMENSIONVALOR: 'Sin dimensión valor' }),
+          fila({ TRANSACCIONID: 987660, IDENTIFICACIONEXTERNA: `OC - 4330 ${RUN}`, DOCNROINT: 'OC - 4330', FECHA: hoy, CODIGOPROD: 'SET_1', DIMENSIONVALOR: 'Sin dimensión valor' }),
+          fila({ TRANSACCIONID: 987670, IDENTIFICACIONEXTERNA: `OC - 4340 ${RUN}`, DOCNROINT: 'OC - 4340', ESTADO: 'Anulada', CODIGOPROD: 'PEL_1', DIMENSIONVALOR: `PEDVTASTP - ${PDV}` }),
         ]);
       }
-      if (p === `/fin/ordenCompra/FPOC ${RUN}`) return send({ ProveedorNombre: `STOCK SUR ${RUN}`, Items: [
-        { ProductoCodigo: `NEC_${RUN}`, Cantidad: 600, Dimensiones: [{ Codigo: 'PEDVTA', Valor: `PEDVTASTP - ${PDV.padStart(8, '0')}` }] },
-        { ProductoCodigo: 'PEL_1', Cantidad: 600, Dimensiones: [{ Codigo: 'PEDVTA', Valor: 'PEDVTASTP - 00099999' }] },
-      ] });
+      if (p === `/fin/ordenCompra/OC - 4330 ${RUN}`) return send({ Items: [{ ProductoCodigo: 'SET_1', Cantidad: 250, DimensionDistribucion: [
+        { dimensionCodigo: 'DIMCTC', distribucionItems: [{ codigo: 'IMP', porcentaje: 100 }] },
+        { dimensionCodigo: 'PEDVTA', distribucionItems: [{ codigo: `PEDVTASTP - ${PDV.padStart(8, '0')}`, porcentaje: 100 }] },
+      ] }] });
       const t = PDVS().find((x) => x.id === tarea);
       if (t) return send(t);
       return send({ err: 'no' }, 404);
@@ -364,25 +370,27 @@ test('pedidos: cada producto con su estado simplificado, quién lo tiene en Prod
   const pel = p.articulos.find((a) => a.asignados.some((x) => x.id === SOLE.id));
   assert.ok(pel, 'cada producto con quien lo tiene');
   assert.equal(pel.etapa, '1237498996', '«listo para entergar» es Listo para entregar');
-  // La OC de Finnegans: en el Necessaire (su renglón es de este pedido), no en la Pelota (ese renglón de la OC es de otro
-  // pedido); en el pedido, todas. Con link a Finnegans GO por la transacción. El remito no es una OC.
-  assert.deepEqual(nec.oc?.map((o) => o.numero), ['OC 4321'], 'el Necessaire con su OC');
-  assert.match(nec.oc[0].url, /go\.finneg\.com\/mas\/vista\?fafViewCode=DF_VIEWER&pk=987654&/, 'con link a la OC');
-  assert.equal(nec.oc[0].proveedor, `STOCK SUR ${RUN}`);
-  assert.deepEqual(p.articulos.filter((a) => a.oc?.length).map((a) => a.nombre), ['Necessaire'], 'solo el Necessaire: el renglón de la Pelota en la OC es de otro pedido');
-  assert.deepEqual(p.ocs.map((o) => o.numero), ['OC 4321'], 'el pedido, con todas sus OC');
-  const enProduccion = pdvDe(await vista(), PDV);
-  assert.deepEqual(enProduccion.articulos.find((a) => a.nombre.startsWith('Necessaire')).oc?.map((o) => o.numero), ['OC 4321'], 'también en Producción');
-  // Lo que imprime la tarea de cada hora (repo público): solo cantidades y los códigos de tipo de documento.
+  // Las OC de Finnegans (la tarea de cada hora lee el informe): el Necessaire con la 4321 (su renglón es de este pedido),
+  // la Pelota sin OC (su renglón de la 4321 es de otro pedido y la 4340 está anulada), el Set de pinturas con la 4330 (de
+  // hoy, por el detalle). Con link a Finnegans GO por la transacción. En el pedido, todas.
   const tok = (await api('POST', '/tokens', { name: `OC ${RUN}`, source: 'api' })).data.token;
-  const est = await (await fetch(`${BASE}/hooks/ordenes-compra/estado`, { headers: { authorization: `Bearer ${tok}` } })).json();
-  assert.ok(est.total >= 1 && est.con_productos >= 1, 'cuenta las OC leídas');
-  assert.ok(est.tipos.some((t) => t.tipo === 'FPOC' && t.es_oc) && est.tipos.some((t) => t.tipo === 'FPREMVTA' && !t.es_oc), 'los tipos vistos, y cuál es OC');
-  assert.equal((await fetch(`${BASE}/hooks/ordenes-compra/estado`)).status, 401, 'sin token, no');
-  // La tanda de cada hora: los pedidos en curso cuyas OC no se leyeron hace poco (este se acaba de leer: no está).
-  const tanda = await (await fetch(`${BASE}/hooks/ordenes-compra/pendientes?limit=5`, { method: 'POST', headers: { authorization: `Bearer ${tok}` } })).json();
-  assert.equal(typeof tanda.leidos, 'number');
-  assert.equal(typeof tanda.quedan, 'number');
+  const hook = (ruta, method = 'GET') => fetch(`${BASE}/hooks/ordenes-compra/${ruta}`, { method, headers: { authorization: `Bearer ${tok}` } });
+  assert.equal((await fetch(`${BASE}/hooks/ordenes-compra/sincronizar`, { method: 'POST' })).status, 401, 'sin token, no');
+  const sync = await (await hook('sincronizar?dias=30', 'POST')).json();
+  assert.deepEqual([sync.ocs, sync.anuladas, sync.detalles], [3, 1, 1], 'tres OC, una anulada, el detalle de la de hoy');
+  assert.ok(sync.cruzadas >= 2, 'atadas a este pedido');
+  const conOc = (await api('GET', `/pedidos/articulos?ids=${pdv.record_id}`)).data.pedidos[pdv.record_id];
+  const necOc = conOc.articulos.find((a) => a.nombre.startsWith('Necessaire'));
+  assert.deepEqual(necOc.oc?.map((o) => o.numero), ['OC 4321'], 'el Necessaire con su OC (por el número interno, no la identificación)');
+  assert.match(necOc.oc[0].url, /go\.finneg\.com\/mas\/vista\?fafViewCode=DF_VIEWER&pk=987654&docId=71&/, 'con link a la OC');
+  assert.equal(necOc.oc[0].proveedor, `STOCK SUR ${RUN}`);
+  assert.deepEqual(conOc.ocs.map((o) => o.numero).sort(), ['OC 4321', 'OC 4330'], 'el pedido, con todas sus OC (no la anulada)');
+  const enProduccion = pdvDe(await vista(), PDV);
+  const ocDe = (n) => enProduccion.articulos.find((a) => a.nombre.startsWith(n))?.oc?.map((o) => o.numero) ?? [];
+  assert.deepEqual([ocDe('Necessaire'), ocDe('Set pinturas'), ocDe('Pelota')], [['OC 4321'], ['OC 4330'], []], 'en Producción, cada artículo con la suya');
+  // Lo que imprime la tarea de cada hora (repo público): solo cantidades.
+  const est = await (await hook('estado')).json();
+  assert.ok(est.total >= 2 && est.pedidos >= 1 && est.ultima?.ocs === 3, 'cuenta las OC y la última lectura');
   // La columna «Cobro y papeles»: factura, remito y bocetos de cada pedido, solo si se piden.
   assert.deepEqual(r.data.adjuntos, {}, 'sin pedirlos, no van');
   const conAdj = (await api('GET', `/pedidos/articulos?ids=${pdv.record_id}&adjuntos=1`)).data.adjuntos[pdv.record_id];

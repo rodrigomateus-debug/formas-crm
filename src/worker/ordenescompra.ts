@@ -1,137 +1,147 @@
 import type { Env } from './env';
-import type { Budget } from './budget';
-import { OutOfBudget } from './budget';
-import { fin, finnegansToken, pedidoIds, type Destino } from './finnegans';
+import { Budget, OutOfBudget } from './budget';
+import { fin, finnegansToken } from './finnegans';
 import { lista } from './produccion';
+import { clavePedido } from './totales';
 
 // Órdenes de compra a proveedores (pedido de Rodrigo del 17/11/2026): en Producción y en Pedidos, cada producto con el
 // número de su OC de Finnegans, con link a la OC en Finnegans GO.
 //
-// - Cuáles: las OC se generan desde el pedido de venta, así que Finnegans las da entre los documentos destino del pedido
-//   (el mismo informe de las facturas y los remitos, `ApiGetDocumentosDestinoByIdentificacionExternaDeals`). Se toman los
-//   documentos cuyo tipo dice orden de compra (`esOc`).
-// - De qué producto: el detalle de cada OC (`ordenCompra/<id>`) trae sus renglones con el código del producto. Una OC
-//   puede juntar varios pedidos del mismo proveedor: cada renglón lleva el pedido de venta en la dimensión, así que de una
-//   OC se toman los renglones que nombran este pedido (si ninguno nombra un pedido, todos). Si el detalle no se puede
-//   leer, la OC queda solo en el pedido (`codigos` NULL).
-// - Cuándo: al leer los productos del pedido de Finnegans (al abrirlo, cada 6 horas, y de fondo una vez por día los
-//   activos, productos.ts). El detalle de cada OC se lee una sola vez.
-// - El link: el visor de documentos de Finnegans GO con la transacción de la OC (`pk`), el formato que pasó Rodrigo.
+// Cómo están en Finnegans (lo investigó una sesión en el entorno de Finnegans el 17/11/2026, con datos reales):
+// - Las OC (categoría «Orden de Compra», subtipo `OC`, id 71) NO son documentos destino del pedido de venta. Cada renglón
+//   lleva el pedido en la dimensión `PEDVTA` (un renglón puede repartirse entre varios pedidos y una OC puede juntar
+//   pedidos distintos).
+// - `reports/ANALISISORDENESCOMPRA` (rango de fechas, `Empresa=EMPRE01`, `dimension=PEDVTA`) trae en una sola consulta un
+//   renglón por producto y por pedido: TRANSACCIONID, IDENTIFICACIONEXTERNA, DOCNROINT («OC - 11394»), PROVEEDOR (nombre),
+//   CODIGOPROD, DIMENSIONVALOR (el pedido por nombre, «PEDVTASTP - 31546»), ESTADO. Las filas sin CODIGOPROD son IVA y
+//   conceptos. «Sin dimensión valor» / «Sin distribuir»: el renglón no tiene pedido.
+// - Las OC del mismo día a veces salen en el informe sin pedido aunque lo tengan: para esas se lee el detalle
+//   (`ordenCompra/<id>`, `Items[].DimensionDistribucion[dimensionCodigo=PEDVTA].distribucionItems[].codigo`, con la
+//   identificación externa del pedido, «PEDVTASTP - 00031577»).
+// - El link: el visor de Finnegans GO con `pk` = TRANSACCIONID y `docId=71`.
 //
-// Los nombres del tipo de documento y de los campos del detalle no están documentados: `GET
-// /api/integrations/finnegans/documentos?pedido=…` (administrador) muestra lo que devuelve Finnegans para revisarlo.
+// La tarea de cada hora (scripts/pedidos-productos.mjs → POST /hooks/ordenes-compra/sincronizar) lee los últimos 30 días
+// (la primera vez, 120) y reemplaza las OC de ese rango. El pedido se cruza por su número (clavePedido: «PEDVTASTP -
+// 00031577» y «PEDVTASTP - 31577» son el mismo). Una consulta por corrida, más una por cada OC del día que salió sin pedido.
 
 export const urlOc = (transaccion: number | null) => (transaccion
   ? `https://go.finneg.com/mas/vista?fafViewCode=DF_VIEWER&pk=${transaccion}&docId=71&claseVO=OperacionVO&appitemID=50255&customXsl=mainPageNoFrame.xsl&modoF4=1`
   : null);
 
-// Un documento destino que es una orden de compra (no una factura, un remito o una nota).
-export const esOc = (d: Pick<Destino, 'TIPODOCUMENTO' | 'DESTINONOMBRE'>) => {
-  const t = `${d.TIPODOCUMENTO ?? ''} ${d.DESTINONOMBRE ?? ''}`.toUpperCase();
-  return /(^|[^A-Z])(FP|ST|NE)?O\.?C(OMPRA|PROV|PRO)?([^A-Z]|$)|ORD(EN)?\s*(DE\s*)?COMPRA|ORDCOMP|OCOMPRA/.test(t) && !/VTA|REM|FAC|^(NC|ND)\b/.test(t);
-};
-
-// «FPOC - 00001234» → «OC 1234».
+// «OC - 11744» → «OC 11744» (el número interno de la OC; las automáticas de Formas Shop se identifican «OC - 00031651 -
+// P01435», pero su número interno es el de siempre).
 export const numeroOc = (nombre: string | null) => {
-  const n = String(nombre ?? '').match(/(\d+)\D*$/)?.[1];
+  const n = String(nombre ?? '').match(/OC\D*?(\d+)/i)?.[1] ?? String(nombre ?? '').match(/(\d+)/)?.[1];
   return n ? `OC ${Number(n)}` : String(nombre ?? 'OC');
 };
 
+interface FilaAnalisis {
+  TRANSACCIONID?: number; IDENTIFICACIONEXTERNA?: string; DOCNROINT?: string | null; FECHA?: string | null; PROVEEDOR?: string | null;
+  CODIGOPROD?: string | null; DIMENSIONVALOR?: string | null; ESTADO?: string | null;
+}
 interface DetalleOc {
-  Proveedor?: string; ProveedorNombre?: string; Organizacion?: string; RazonSocial?: string; Fecha?: string;
-  Items?: Array<Record<string, unknown> & { ProductoCodigo?: string }>;
+  Items?: Array<{ ProductoCodigo?: string; DimensionDistribucion?: Array<{ dimensionCodigo?: string; distribucionItems?: Array<{ codigo?: string }> }> }>;
 }
+interface Oc { ie: string; nombre: string; tx: number | null; proveedor: string | null; fecha: string | null; anulada: boolean; sinPedido: boolean; porPedido: Map<string, Set<string>> }
 
-// Los renglones de una OC que son de este pedido: los que nombran el pedido de venta (en la dimensión o donde sea); si
-// ninguno nombra un pedido de venta, todos.
-function codigosDelPedido(det: DetalleOc, pedido: string) {
-  const items = det.Items ?? [];
-  const ids = pedidoIds(pedido).map((x) => x.toUpperCase().replace(/\s+/g, ''));
-  const texto = (it: unknown) => JSON.stringify(it).toUpperCase().replace(/\s+/g, '');
-  const conPedido = items.filter((it) => /PEDVTA/.test(texto(it)));
-  const suyos = conPedido.length ? conPedido.filter((it) => ids.some((id) => texto(it).includes(id))) : items;
-  return [...new Set(suyos.map((it) => String(it.ProductoCodigo ?? '').trim().toUpperCase()).filter(Boolean))];
-}
+// «17-11-2026» → «2026-11-17».
+const isoDe = (f: string | null | undefined) => { const m = String(f ?? '').match(/^(\d{1,2})-(\d{1,2})-(\d{4})/); return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : (String(f ?? '').slice(0, 10) || null); };
+const hoyBA = (dias = 0) => new Date(Date.now() - 3 * 3600_000 - dias * 86_400_000).toISOString().slice(0, 10);
 
-// Lee las OC de un pedido y las guarda. Una consulta por el informe y una por cada OC nueva.
-export async function leerOrdenesCompra(env: Env, token: string, recordId: number, pedido: string, b?: Budget) {
+export async function sincronizarOrdenesCompra(env: Env, opts: { dias?: number; budget?: Budget } = {}) {
   const db = env.DB;
-  const rows = await fin<Destino[]>(env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: pedidoIds(pedido)[0] }, b);
-  const ocs = (rows ?? []).filter(esOc);
-  await anotarTipos(db, rows ?? []);
-  const ya = new Map((await db.prepare('SELECT ie, codigos FROM ordenes_compra WHERE record_id = ?').bind(recordId).all<{ ie: string; codigos: string | null }>()).results.map((r) => [r.ie, r]));
-  const at = new Date().toISOString();
-  const stmts: D1PreparedStatement[] = [];
-  for (const o of ocs) {
-    const ie = String(o.DESTINOIDENTIFICACIONEXTERNA ?? o.DESTINONOMBRE ?? '').trim();
+  const b = opts.budget ?? Budget.of(env);
+  const antes = await db.prepare("SELECT value FROM settings WHERE key = 'ordenes_compra_sync'").first<{ value: string }>();
+  const dias = Math.min(Math.max(opts.dias ?? (antes ? 30 : 120), 1), 180);
+  const token = await finnegansToken(env, b);
+  if (!token) return { error: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
+  const filas = (await fin<FilaAnalisis[]>(env, token, 'reports/ANALISISORDENESCOMPRA', {
+    PARAMWEBREPORT_FechaDesde: hoyBA(dias), PARAMWEBREPORT_FechaHasta: hoyBA(), PARAMWEBREPORT_Empresa: 'EMPRE01', PARAMWEBREPORT_dimension: 'PEDVTA',
+  }, b)) ?? [];
+  // Cada OC con sus productos por pedido.
+  const ocs = new Map<string, Oc>();
+  for (const f of Array.isArray(filas) ? filas : []) {
+    const ie = String(f.IDENTIFICACIONEXTERNA ?? '').trim();
     if (!ie) continue;
-    let codigos: string[] | null = ya.get(ie)?.codigos ? lista(ya.get(ie)!.codigos) : null;
+    let o = ocs.get(ie);
+    if (!o) {
+      o = { ie, nombre: String(f.DOCNROINT ?? '').trim() || ie, tx: Number(f.TRANSACCIONID) || null, proveedor: f.PROVEEDOR?.trim() || null, fecha: isoDe(f.FECHA),
+        anulada: false, sinPedido: false, porPedido: new Map() };
+      ocs.set(ie, o);
+    }
+    if (/anul/i.test(f.ESTADO ?? '')) o.anulada = true;
+    const codigo = String(f.CODIGOPROD ?? '').trim().toUpperCase();
+    if (!codigo) continue;   // IVA y otros conceptos
+    const pedido = clavePedido(f.DIMENSIONVALOR);
+    if (!pedido) { o.sinPedido = true; continue; }
+    const s = o.porPedido.get(pedido) ?? new Set<string>();
+    s.add(codigo);
+    o.porPedido.set(pedido, s);
+  }
+  // Las OC de hoy y ayer con renglones sin pedido: el informe puede no tenerlo todavía; el detalle sí.
+  let detalles = 0;
+  for (const o of [...ocs.values()].filter((x) => x.sinPedido && !x.anulada && (x.fecha ?? '') >= hoyBA(1)).slice(0, 25)) {
+    if (b.left() < 3) break;
     let det: DetalleOc | null = null;
-    if (!codigos) {
-      try { det = await fin<DetalleOc>(env, token, `ordenCompra/${encodeURIComponent(ie)}`, {}, b); } catch (e) { if (e instanceof OutOfBudget) throw e; }
-      codigos = det?.Items?.length ? codigosDelPedido(det, pedido) : null;
+    try { det = await fin<DetalleOc>(env, token, `ordenCompra/${encodeURIComponent(o.ie)}`, {}, b); } catch (e) { if (e instanceof OutOfBudget) break; continue; }
+    detalles++;
+    for (const it of det?.Items ?? []) {
+      const codigo = String(it.ProductoCodigo ?? '').trim().toUpperCase();
+      if (!codigo) continue;
+      for (const d of (it.DimensionDistribucion ?? []).filter((x) => x.dimensionCodigo === 'PEDVTA')) {
+        for (const di of d.distribucionItems ?? []) {
+          const pedido = clavePedido(di.codigo);
+          if (!pedido) continue;
+          const s = o.porPedido.get(pedido) ?? new Set<string>();
+          s.add(codigo);
+          o.porPedido.set(pedido, s);
+        }
+      }
     }
-    const proveedor = det ? det.ProveedorNombre ?? det.RazonSocial ?? det.Organizacion ?? det.Proveedor ?? null : null;
-    stmts.push(db.prepare(`INSERT INTO ordenes_compra (record_id, ie, nombre, transaccion_id, proveedor, fecha, codigos, leido_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(record_id, ie) DO UPDATE SET nombre = excluded.nombre, transaccion_id = excluded.transaccion_id,
-        proveedor = COALESCE(excluded.proveedor, ordenes_compra.proveedor), fecha = excluded.fecha, codigos = COALESCE(excluded.codigos, ordenes_compra.codigos), leido_at = excluded.leido_at`)
-      .bind(recordId, ie, o.DESTINONOMBRE ?? ie, o.DESTINOTRANSACCIONID ?? null, proveedor, o.DESTINOFECHA ?? null, codigos ? JSON.stringify(codigos) : null, at));
   }
-  // Las que ya no están (la anularon o la desvincularon del pedido).
-  stmts.push(db.prepare('DELETE FROM ordenes_compra WHERE record_id = ? AND leido_at != ?').bind(recordId, at));
-  stmts.push(db.prepare('INSERT OR REPLACE INTO ordenes_compra_lecturas (record_id, leido_at, ocs) VALUES (?, ?, ?)').bind(recordId, at, ocs.length));
+  // Los pedidos del CRM, por su número de Finnegans.
+  const { results } = await db.prepare(`SELECT id, json_extract(props, '$.pedido_finnegans') AS pedido FROM records
+      WHERE object_type = 'order' AND archived = 0 AND json_extract(props, '$.pedido_finnegans') IS NOT NULL`).all<{ id: number; pedido: string }>();
+  const porPedido = new Map<string, number>();
+  for (const r of results) { const k = clavePedido(r.pedido); if (k && !porPedido.has(k)) porPedido.set(k, r.id); }
+  const at = new Date().toISOString();
+  const filasOc: unknown[] = [];
+  let cruzadas = 0;
+  for (const o of ocs.values()) {
+    if (o.anulada) continue;
+    for (const [pedido, codigos] of o.porPedido) {
+      const rid = porPedido.get(pedido);
+      if (!rid) continue;
+      cruzadas++;
+      filasOc.push([rid, o.ie, o.nombre, o.tx, o.proveedor, o.fecha, JSON.stringify([...codigos]), at]);
+    }
+  }
+  // Las OC del rango se reemplazan (las anuladas o que cambiaron de pedido dejan de estar); las más viejas quedan.
+  const stmts: D1PreparedStatement[] = [];
+  const ies = [...ocs.keys()];
+  for (let i = 0; i < ies.length; i += 500) stmts.push(db.prepare('DELETE FROM ordenes_compra WHERE ie IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ies.slice(i, i + 500))));
+  for (let i = 0; i < filasOc.length; i += 500) {
+    stmts.push(db.prepare(`INSERT OR REPLACE INTO ordenes_compra (record_id, ie, nombre, transaccion_id, proveedor, fecha, codigos, leido_at)
+      SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]'), json_extract(value, '$[3]'), json_extract(value, '$[4]'),
+        json_extract(value, '$[5]'), json_extract(value, '$[6]'), json_extract(value, '$[7]') FROM json_each(?)`).bind(JSON.stringify(filasOc.slice(i, i + 500))));
+  }
+  const estado = { at, dias, filas: Array.isArray(filas) ? filas.length : 0, ocs: ocs.size, anuladas: [...ocs.values()].filter((o) => o.anulada).length,
+    sin_pedido: [...ocs.values()].filter((o) => !o.porPedido.size).length, cruzadas, detalles };
+  stmts.push(db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ordenes_compra_sync', ?)").bind(JSON.stringify(estado)));
   await db.batch(stmts);
-  return ocs.length;
+  return estado;
 }
 
-// Los pedidos en curso (desde que se confirman hasta que se entregan) cuyas OC no se leyeron en las últimas 6 horas: la
-// tarea de cada hora (scripts/pedidos-productos.mjs) los lee de a tandas, así cada producto tiene su OC sin esperar a que
-// alguien abra el pedido. Primero los que nunca se leyeron.
-const EN_CURSO = ['4b27b500-f031-4927-9811-68a0b525cbae', '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03', 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9',
-  '3725360f-519b-4b18-a593-494d60a29c9f', 'esperando_boceto', '1237498994', '1237498996', 'entregado_parcial'];
-const PENDIENTES_OC = `r.object_type = 'order' AND r.archived = 0 AND json_extract(r.props, '$.pedido_finnegans') LIKE 'PEDVTA%'
-  AND json_extract(r.props, '$.hs_pipeline_stage') IN (SELECT value FROM json_each(?1)) AND (l.record_id IS NULL OR l.leido_at < ?2)`;
-export async function ordenesCompraPendientes(env: Env, b: Budget, limit = 15) {
-  const db = env.DB;
-  const binds = [JSON.stringify(EN_CURSO), new Date(Date.now() - 6 * 3600_000).toISOString()];
-  const { results } = await db.prepare(`SELECT r.id, json_extract(r.props, '$.pedido_finnegans') AS pedido FROM records r
-      LEFT JOIN ordenes_compra_lecturas l ON l.record_id = r.id WHERE ${PENDIENTES_OC} ORDER BY (l.record_id IS NULL) DESC, r.updated_at DESC LIMIT ?3`)
-    .bind(...binds, limit).all<{ id: number; pedido: string }>();
-  let leidos = 0, ocs = 0;
-  if (results.length) {
-    const token = await finnegansToken(env, b);
-    if (!token) return { leidos, ocs, quedan: 0, error: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
-    for (const r of results) {
-      if (b.left() < 6) break;   // el informe y alguna OC nueva
-      try { ocs += await leerOrdenesCompra(env, token, r.id, r.pedido, b); } catch (e) { if (e instanceof OutOfBudget) break; console.error('órdenes de compra', r.id, (e as Error).message); }
-      leidos++;
-    }
-  }
-  const q = await db.prepare(`SELECT COUNT(*) AS n FROM records r LEFT JOIN ordenes_compra_lecturas l ON l.record_id = r.id WHERE ${PENDIENTES_OC}`).bind(...binds).first<{ n: number }>();
-  return { leidos, ocs, quedan: q?.n ?? 0 };
-}
-
-// Los tipos de documento destino que se vieron (solo los códigos, «FPREMVTA», y si se toman como OC): para revisar que
-// las OC se reconozcan (`estadoOrdenesCompra`). Se escribe solo cuando aparece un tipo nuevo.
-async function anotarTipos(db: D1Database, rows: Destino[]) {
-  const vistos = [...new Set(rows.map((r) => String(r.TIPODOCUMENTO ?? '').trim()).filter(Boolean))];
-  if (!vistos.length) return;
-  const r = await db.prepare("SELECT value FROM settings WHERE key = 'finnegans_tipos_destino'").first<{ value: string }>();
-  const antes = new Set<string>(r ? lista(r.value).map(String) : []);
-  if (vistos.every((t) => antes.has(t)) || antes.size >= 60) return;
-  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('finnegans_tipos_destino', ?)").bind(JSON.stringify([...new Set([...antes, ...vistos])].slice(0, 60))).run();
-}
-// Cuántas OC hay leídas y qué tipos de documento se vieron (solo cantidades y códigos de tipo, sin datos de clientes ni
-// proveedores): lo imprime la tarea de cada hora (scripts/pedidos-productos.mjs), que corre en un repo público.
+// Cuántas OC hay y cómo salió la última lectura (solo cantidades, sin datos de clientes ni proveedores): lo imprime la
+// tarea de cada hora (scripts/pedidos-productos.mjs), que corre en un repo público.
 export async function estadoOrdenesCompra(db: D1Database) {
-  const [n, t] = await db.batch([
-    db.prepare('SELECT COUNT(*) AS total, COUNT(codigos) AS con_detalle, SUM(codigos IS NOT NULL AND codigos != \'[]\') AS con_productos, COUNT(DISTINCT record_id) AS pedidos FROM ordenes_compra'),
-    db.prepare("SELECT value FROM settings WHERE key = 'finnegans_tipos_destino'"),
+  const [n, s] = await db.batch([
+    db.prepare("SELECT COUNT(DISTINCT ie) AS total, COUNT(DISTINCT record_id) AS pedidos FROM ordenes_compra"),
+    db.prepare("SELECT value FROM settings WHERE key = 'ordenes_compra_sync'"),
   ]);
-  const c = (n.results[0] ?? {}) as { total: number; con_detalle: number; con_productos: number | null; pedidos: number };
-  const tipos = lista((t.results[0] as { value?: string } | undefined)?.value).map(String);
-  return { total: c.total ?? 0, con_detalle: c.con_detalle ?? 0, con_productos: c.con_productos ?? 0, pedidos: c.pedidos ?? 0,
-    tipos: tipos.map((x) => ({ tipo: x, es_oc: esOc({ TIPODOCUMENTO: x, DESTINONOMBRE: '' }) })) };
+  const c = (n.results[0] ?? {}) as { total: number; pedidos: number };
+  const v = (s.results[0] as { value?: string } | undefined)?.value;
+  return { total: c.total ?? 0, pedidos: c.pedidos ?? 0, ultima: v ? JSON.parse(v) : null };
 }
 
 // Para la pantalla: las OC de cada pedido y, por código de producto, las de cada producto.

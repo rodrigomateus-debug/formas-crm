@@ -36,18 +36,18 @@ async function tandas(path, minutos, campo, pausa = 0) {
 
 const p = await tandas('/hooks/productos/pendientes?limit=25', 20, 'leidos');
 console.log(`Productos: ${p.leidos ?? 0} pedidos leídos en ${p.vueltas} tandas; quedan ${p.quedan ?? '?'}.`);
-// Las órdenes de compra de los pedidos en curso (ordenescompra.ts), de a tandas, hasta 5 minutos.
-const oc = await tandas('/hooks/ordenes-compra/pendientes?limit=15', 5, 'leidos');
-console.log(`Órdenes de compra: ${oc.leidos ?? 0} pedidos en curso revisados en ${oc.vueltas} tandas, ${oc.ocs ?? 0} OC encontradas; quedan ${oc.quedan ?? '?'}.`);
-// Las órdenes de compra de Finnegans que quedaron leídas (ordenescompra.ts): cantidades y los códigos de tipo de documento
-// destino vistos, para revisar que las OC se reconozcan. Nada de clientes ni proveedores.
+// Las órdenes de compra de Finnegans (ordenescompra.ts): una lectura del informe de los últimos 30 días (la primera vez,
+// 120). Solo cantidades.
 try {
-  const res = await fetch(`${base}/hooks/ordenes-compra/estado`, { headers: { authorization: `Bearer ${process.env.CRM_TOKEN}` }, redirect: 'manual' });
-  if (res.ok) {
-    const o = await res.json();
-    console.log(`Órdenes de compra: ${o.total} en ${o.pedidos} pedidos; ${o.con_detalle} con detalle leído, ${o.con_productos} atadas a productos.`);
-    console.log(`Tipos de documento destino vistos: ${o.tipos.map((t) => `${t.tipo}${t.es_oc ? ' (OC)' : ''}`).join(', ') || 'ninguno todavía'}.`);
-  } else console.log(`Órdenes de compra: HTTP ${res.status}`);
+  const res = await fetch(`${base}/hooks/ordenes-compra/sincronizar`, { method: 'POST', headers: { authorization: `Bearer ${process.env.CRM_TOKEN}` }, redirect: 'manual' });
+  const o = res.ok ? await res.json() : null;
+  if (!o) console.log(`Órdenes de compra: HTTP ${res.status}`);
+  else if (o.error) console.log(`Órdenes de compra: ${o.error}`);
+  else {
+    console.log(`Órdenes de compra: ${o.ocs} OC de los últimos ${o.dias} días (${o.filas} renglones), ${o.cruzadas} atadas a pedidos del CRM; ${o.sin_pedido} sin pedido, ${o.anuladas} anuladas, ${o.detalles} detalles leídos.`);
+    const e = await (await fetch(`${base}/hooks/ordenes-compra/estado`, { headers: { authorization: `Bearer ${process.env.CRM_TOKEN}` }, redirect: 'manual' })).json();
+    console.log(`En el CRM: ${e.total} OC en ${e.pedidos} pedidos.`);
+  }
 } catch (e) { console.log(`Órdenes de compra: ${e.message}`); }
 // Cada tanda usa hasta ~45 consultas a ClickUp, que deja 100 por minuto (y la sincronización también usa): una cada 30 s.
 const r = await tandas('/hooks/pedidos/remitos/pendientes?limit=20', 8, 'revisados', 30_000);

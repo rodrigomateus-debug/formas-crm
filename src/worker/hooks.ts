@@ -15,8 +15,7 @@ import { aplicarCompras, empresasParaCruce, guardarHistorico, historico } from '
 import { refrescarFce } from './facturar';
 import { aplicarSaldos, aplicarTotales } from './totales';
 import { aplicarImagenes, cargarProductosPendientes } from './productos';
-import { estadoOrdenesCompra, ordenesCompraPendientes } from './ordenescompra';
-import { Budget } from './budget';
+import { estadoOrdenesCompra, sincronizarOrdenesCompra } from './ordenescompra';
 import { aplicarCostosLogo } from './costoslogo';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
@@ -354,13 +353,15 @@ hooks.post('/productos/pendientes', async (c) => {
   return c.json(await cargarProductosPendientes(c.env, Math.min(Math.max(Number(c.req.query('limit')) || 25, 1), 50)));
 });
 
-// Las órdenes de compra de los pedidos en curso que no se leyeron en las últimas 6 horas: una tanda por llamada.
-hooks.post('/ordenes-compra/pendientes', async (c) => {
+// Las órdenes de compra de Finnegans de los últimos días (por defecto 30; la primera vez, 120), del informe
+// ANALISISORDENESCOMPRA (ordenescompra.ts). Devuelve solo cantidades.
+hooks.post('/ordenes-compra/sincronizar', async (c) => {
   await adminToken(c.env, c.req.raw);
-  return c.json(await ordenesCompraPendientes(c.env, Budget.of(c.env), Math.min(Math.max(Number(c.req.query('limit')) || 15, 1), 30)));
+  const dias = Number(c.req.query('dias')) || undefined;
+  return c.json(await sincronizarOrdenesCompra(c.env, { dias }));
 });
 
-// Órdenes de compra leídas de Finnegans (ordenescompra.ts): cuántas y qué tipos de documento se vieron. Solo cantidades.
+// Órdenes de compra leídas de Finnegans (ordenescompra.ts): cuántas y cómo salió la última lectura. Solo cantidades.
 hooks.get('/ordenes-compra/estado', async (c) => {
   await adminToken(c.env, c.req.raw);
   return c.json(await estadoOrdenesCompra(c.env.DB));

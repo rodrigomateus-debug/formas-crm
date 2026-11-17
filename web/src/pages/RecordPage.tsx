@@ -1102,7 +1102,7 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
       {mode === 'pick' && (
         <div className="panel-body stack" onKeyDown={alEsc(() => setMode(''))}>
           <RecordPicker type={toType} exclude={[record.id, ...items.map((i) => i.id)]} onPick={add} />
-          <button className="btn sm" onClick={() => setMode('create')}>Crear {OBJECTS[toType].single.toLowerCase()} nuevo</button>
+          <button className="btn sm" onClick={() => setMode('create')}>Crear {OBJECTS[toType].single.toLowerCase()} {toType === 'company' ? 'nueva' : 'nuevo'}</button>
         </div>
       )}
       {mode === 'create' && <CreateRecord type={toType} associateWith={record} onClose={() => setMode('')} onCreated={() => onChange()} />}

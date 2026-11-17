@@ -2062,3 +2062,7 @@ span.oc-link { color: var(--ui-ink-2); }
 }
 .board > .formas-loader { flex: 1; align-self: center; }
 .card .meta .logo-empresa { width: 13px; height: 13px; flex: none; border-radius: 3px; object-fit: contain; }
+/* Resultados del buscador para asociar (RecordPicker): ocupan el ancho del panel, el texto en dos renglones que no se pisan
+   y los nombres largos cortados con «…». */
+.btn.picker-opt { width: 100%; min-width: 0; height: auto; padding: 6px 8px; justify-content: flex-start; text-align: left; line-height: 1.35; }
+.picker-opt .picker-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 1px; }

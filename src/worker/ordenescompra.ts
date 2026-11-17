@@ -1,7 +1,7 @@
 import type { Env } from './env';
 import type { Budget } from './budget';
 import { OutOfBudget } from './budget';
-import { fin, pedidoIds, type Destino } from './finnegans';
+import { fin, finnegansToken, pedidoIds, type Destino } from './finnegans';
 import { lista } from './produccion';
 
 // Órdenes de compra a proveedores (pedido de Rodrigo del 17/11/2026): en Producción y en Pedidos, cada producto con el
@@ -79,8 +79,36 @@ export async function leerOrdenesCompra(env: Env, token: string, recordId: numbe
   }
   // Las que ya no están (la anularon o la desvincularon del pedido).
   stmts.push(db.prepare('DELETE FROM ordenes_compra WHERE record_id = ? AND leido_at != ?').bind(recordId, at));
+  stmts.push(db.prepare('INSERT OR REPLACE INTO ordenes_compra_lecturas (record_id, leido_at, ocs) VALUES (?, ?, ?)').bind(recordId, at, ocs.length));
   await db.batch(stmts);
   return ocs.length;
+}
+
+// Los pedidos en curso (desde que se confirman hasta que se entregan) cuyas OC no se leyeron en las últimas 6 horas: la
+// tarea de cada hora (scripts/pedidos-productos.mjs) los lee de a tandas, así cada producto tiene su OC sin esperar a que
+// alguien abra el pedido. Primero los que nunca se leyeron.
+const EN_CURSO = ['4b27b500-f031-4927-9811-68a0b525cbae', '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03', 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9',
+  '3725360f-519b-4b18-a593-494d60a29c9f', 'esperando_boceto', '1237498994', '1237498996', 'entregado_parcial'];
+const PENDIENTES_OC = `r.object_type = 'order' AND r.archived = 0 AND json_extract(r.props, '$.pedido_finnegans') LIKE 'PEDVTA%'
+  AND json_extract(r.props, '$.hs_pipeline_stage') IN (SELECT value FROM json_each(?1)) AND (l.record_id IS NULL OR l.leido_at < ?2)`;
+export async function ordenesCompraPendientes(env: Env, b: Budget, limit = 15) {
+  const db = env.DB;
+  const binds = [JSON.stringify(EN_CURSO), new Date(Date.now() - 6 * 3600_000).toISOString()];
+  const { results } = await db.prepare(`SELECT r.id, json_extract(r.props, '$.pedido_finnegans') AS pedido FROM records r
+      LEFT JOIN ordenes_compra_lecturas l ON l.record_id = r.id WHERE ${PENDIENTES_OC} ORDER BY (l.record_id IS NULL) DESC, r.updated_at DESC LIMIT ?3`)
+    .bind(...binds, limit).all<{ id: number; pedido: string }>();
+  let leidos = 0, ocs = 0;
+  if (results.length) {
+    const token = await finnegansToken(env, b);
+    if (!token) return { leidos, ocs, quedan: 0, error: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
+    for (const r of results) {
+      if (b.left() < 6) break;   // el informe y alguna OC nueva
+      try { ocs += await leerOrdenesCompra(env, token, r.id, r.pedido, b); } catch (e) { if (e instanceof OutOfBudget) break; console.error('órdenes de compra', r.id, (e as Error).message); }
+      leidos++;
+    }
+  }
+  const q = await db.prepare(`SELECT COUNT(*) AS n FROM records r LEFT JOIN ordenes_compra_lecturas l ON l.record_id = r.id WHERE ${PENDIENTES_OC}`).bind(...binds).first<{ n: number }>();
+  return { leidos, ocs, quedan: q?.n ?? 0 };
 }
 
 // Los tipos de documento destino que se vieron (solo los códigos, «FPREMVTA», y si se toman como OC): para revisar que

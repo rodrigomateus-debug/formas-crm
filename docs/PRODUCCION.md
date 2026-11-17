@@ -115,9 +115,12 @@ proveedor de cada producto («OC 4321»); un clic la abre en Finnegans GO.
   los renglones de este pedido. El artículo se cruza por su SKU (el «Código:» de ClickUp o el del renglón atado). Si el
   detalle no se puede leer, la OC queda en el pedido (en la fila del PDV en Producción y en el renglón del pedido en
   Pedidos) y no en un producto.
-- **Cuándo:** al leer los productos del pedido de Finnegans (al abrirlo, cada 6 horas, y de fondo una vez por día los
-  activos). Una consulta del informe y una por cada OC nueva; el detalle de cada OC se lee una sola vez. Tabla
-  `ordenes_compra` (migración `0072_ordenes_compra.sql`).
+- **Cuándo:** al leer los productos del pedido de Finnegans (al abrirlo, cada 6 horas), y la tarea de cada hora
+  (`scripts/pedidos-productos.mjs`, `POST /hooks/ordenes-compra/pendientes`) lee de a tandas los pedidos en curso
+  (desde confirmado hasta entregado parcial) que no se leyeron en las últimas 6 horas. Una consulta del informe por pedido
+  y una por cada OC nueva; el detalle de cada OC se lee una sola vez. Tablas `ordenes_compra` y `ordenes_compra_lecturas`
+  (migraciones `0072` y `0073`). La tarea imprime cuántas OC hay y los códigos de tipo de documento que vio (solo eso: el
+  repo es público).
 - **El link:** el visor de documentos de Finnegans GO con la transacción de la OC (`pk`), con el formato de un link real
   de una OC (`docId=71`, `appitemID=50255`). Si alguna OC abre otra cosa, se ajusta en `urlOc`.
 - **Revisar lo que trae Finnegans:** el tipo de documento de la OC y los campos del detalle no están documentados; se

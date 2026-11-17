@@ -36,6 +36,9 @@ async function tandas(path, minutos, campo, pausa = 0) {
 
 const p = await tandas('/hooks/productos/pendientes?limit=25', 20, 'leidos');
 console.log(`Productos: ${p.leidos ?? 0} pedidos leídos en ${p.vueltas} tandas; quedan ${p.quedan ?? '?'}.`);
+// Las órdenes de compra de los pedidos en curso (ordenescompra.ts), de a tandas, hasta 5 minutos.
+const oc = await tandas('/hooks/ordenes-compra/pendientes?limit=15', 5, 'leidos');
+console.log(`Órdenes de compra: ${oc.leidos ?? 0} pedidos en curso revisados en ${oc.vueltas} tandas, ${oc.ocs ?? 0} OC encontradas; quedan ${oc.quedan ?? '?'}.`);
 // Las órdenes de compra de Finnegans que quedaron leídas (ordenescompra.ts): cantidades y los códigos de tipo de documento
 // destino vistos, para revisar que las OC se reconozcan. Nada de clientes ni proveedores.
 try {

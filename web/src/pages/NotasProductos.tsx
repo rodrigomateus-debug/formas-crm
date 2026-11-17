@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { http, qs, useDebounced, Icon, fmtRelative } from '../lib';
+import { http, qs, useDebounced, Icon, fmtRelative, Cargando } from '../lib';
 import { Select } from '../Select';
 import { FichaProducto, GRAVEDAD, useCambioNotas, type Gravedad } from '../notasProducto';
 
@@ -56,7 +56,7 @@ export default function NotasProductosPage() {
         <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={archivadas} onChange={(e) => setArchivadas(e.target.checked)} />Incluir las que ya no aplican</label>
       </div>
       {error && <div className="tag bad">{error}</div>}
-      {!datos && !error && <div className="muted">Cargando…</div>}
+      {!datos && !error && <Cargando />}
       {datos && !filas.length && (
         <div className="panel"><div className="panel-body muted">
           {q || tipo || gravedad ? 'No hay notas con esos filtros.' : 'Todavía no hay notas. Se cargan desde Producción (botón «+ Nota» al pasar el mouse por un artículo) o con «Abrir un SKU».'}

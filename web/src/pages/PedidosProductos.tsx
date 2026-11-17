@@ -167,15 +167,22 @@ export function CeldaProduccion({ p, r }: { p?: ProduccionPedido; r: CrmRecord }
     </td>
   );
 }
+// En la lista, quién lo tiene va en su propia columna («Responsable»); en la tarjeta del tablero, acá.
 export function ResumenProduccion({ p, r, tarjeta }: { p?: ProduccionPedido; r: CrmRecord; tarjeta?: boolean }) {
   const cerrado = CERRADOS.includes(r.props.hs_pipeline_stage);
   return (
     <span className="ped-prod-in">
       <Pendiente r={r} />
-      {p && !cerrado && <Quien asignados={p.asignados} listos={p.listos} total={p.total} soloFotos />}
+      {p && !cerrado && (tarjeta ? <Quien asignados={p.asignados} listos={p.listos} total={p.total} soloFotos />
+        : !!p.total && <span className={`prod-avance${p.listos >= p.total ? ' ok' : ''}`} title={`${p.listos} de ${p.total} productos listos`}>{p.listos}/{p.total} listos</span>)}
       <Entrega r={r} p={p} soloSiCambia={tarjeta} />
     </span>
   );
+}
+// La columna «Responsable» del pedido: quién lo tiene en Producción (el PDV y sus productos que faltan), con foto y nombre.
+export function CeldaResponsable({ p, r }: { p?: ProduccionPedido; r: CrmRecord }) {
+  const ver = !!p?.asignados.length && !CERRADOS.includes(r.props.hs_pipeline_stage);
+  return <td className="ped-prod">{ver ? <Quien asignados={p!.asignados} /> : <span className="muted">—</span>}</td>;
 }
 // Si la tarjeta del tablero tiene algo de esto para mostrar.
 export const hayResumen = (r: CrmRecord, p?: ProduccionPedido) => !CERRADOS.includes(r.props.hs_pipeline_stage)
@@ -188,21 +195,20 @@ function EstadoArticulo({ a }: { a: ArticuloPedido }) {
   return <EtapaPedido value={a.etapa} label={formatValue(meta, 'order', 'hs_pipeline_stage', a.etapa)} />;
 }
 
-function QuienArticulo({ a, p, r }: { a: ArticuloPedido; p: ProduccionPedido; r: CrmRecord }) {
-  if (!a.produccion) return null;
-  return (
-    <span className="ped-prod-in">
-      {a.etapa !== ENTREGADO && <Quien asignados={a.asignados} />}
-      <EntregaArticulo a={a} p={p} r={r} />
-    </span>
-  );
+// Quién tiene el producto (columna «Responsable»).
+function QuienArticulo({ a }: { a: ArticuloPedido }) {
+  if (!a.produccion || a.etapa === ENTREGADO) return null;
+  return <Quien asignados={a.asignados} />;
 }
 
-// Los productos del pedido, un renglón cada uno debajo del pedido. El estado va en la columna de la etapa y quién lo tiene
-// en la de Producción; si alguna de las dos no está en la tabla, van al lado del nombre. Un clic abre la vista previa.
+// Los productos del pedido, un renglón cada uno debajo del pedido, cada dato en su columna: el estado en «Etapa del
+// pedido», la fecha en «Producción», quién lo tiene en «Responsable» y la OC en «OC» (con los productos abiertos, esas
+// columnas se ven siempre: ObjectIndex.tsx). Un clic abre la vista previa del pedido.
 export function FilasProductos({ p, r, columns, sel, onAbrir }: { p: ProduccionPedido; r: CrmRecord; columns: string[]; sel: boolean; onAbrir: () => void }) {
-  const conEtapa = columns.includes('hs_pipeline_stage');
-  const conProd = columns.includes('__produccion');
+  const celda = (a: ArticuloPedido, col: string) => (col === 'hs_pipeline_stage' ? <span className="ped-prod-in"><EstadoArticulo a={a} /><Entregado a={a} /></span>
+    : col === '__produccion' ? <EntregaArticulo a={a} p={p} r={r} />
+    : col === '__responsable' ? <QuienArticulo a={a} />
+    : col === '__oc' ? <OcLinks ocs={a.oc} /> : null);
   return (
     <>
       {p.articulos.map((a, i) => (
@@ -214,18 +220,9 @@ export function FilasProductos({ p, r, columns, sel, onAbrir }: { p: ProduccionP
               <FotoProducto url={a.foto} nombre={a.nombre} />
               <span className="ped-art-n ellipsis" title={a.nombre}>{a.nombre}</span>
               {a.cantidad != null && <span className="muted small num ped-cant">{a.cantidad.toLocaleString('es-AR')} u.</span>}
-              {!conEtapa && <EstadoArticulo a={a} />}
-              {!conEtapa && <Entregado a={a} />}
-              {!conProd && <QuienArticulo a={a} p={p} r={r} />}
-              {!columns.includes('__oc') && <OcLinks ocs={a.oc} />}
             </span>
           </td>
-          {columns.map((col) => (
-            <td key={col} className={col === '__produccion' || col === '__oc' ? 'ped-prod' : undefined}>
-              {col === 'hs_pipeline_stage' ? <span className="ped-prod-in"><EstadoArticulo a={a} /><Entregado a={a} /></span> : col === '__produccion' ? <QuienArticulo a={a} p={p} r={r} />
-                : col === '__oc' ? <OcLinks ocs={a.oc} /> : null}
-            </td>
-          ))}
+          {columns.map((col) => <td key={col} className={['__produccion', '__responsable', '__oc'].includes(col) ? 'ped-prod' : undefined}>{celda(a, col)}</td>)}
         </tr>
       ))}
     </>

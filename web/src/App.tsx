@@ -111,6 +111,8 @@ export default function App() {
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />
         </Routes>
+        {/* Al pie: la barra de las vistas (BarraVista en vistas.tsx) se dibuja acá cuando la pantalla tiene vistas. */}
+        <div id="barra-vista" />
       </div>
     </div>
   );

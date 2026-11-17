@@ -326,3 +326,32 @@ test('cada uno ordena sus pestañas de vistas sin cambiárselas a los demás', a
   assert.equal((await api('GET', '/meta')).data.orden_vistas.contact, undefined);
   asUser = null;
 });
+
+// Pipelines elegidos por usuario en Configuración → Usuarios (pedido de Rodrigo del 17/11/2026): si se eligen, ve solo esos
+// (en /meta y en el tablero); con null vuelve a «según sus equipos». Los administradores ven todos igual.
+test('pipelines que ve cada usuario, elegidos a mano', async () => {
+  asUser = null;
+  const email = `pipes-${RUN}@formaspublicitarias.com`;
+  const u = await api('POST', '/users', { email, name: `Pipes ${RUN}`, profile: 'comercial' });
+  assert.equal(u.status, 201, JSON.stringify(u.data));
+  const todos = (await api('GET', '/meta')).data.pipelines.map((p) => p.id);
+  const elegido = todos.find((id) => id !== '674405796') ?? todos[0];
+  const otro = todos.find((id) => id !== elegido);
+
+  // Elegidos: solo los que existen quedan guardados.
+  const r = await api('PATCH', `/users/${u.data.id}`, { pipelines: [elegido, 'no-existe'] });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  asUser = email;
+  const meta = (await api('GET', '/meta')).data;
+  assert.deepEqual(meta.pipelines.map((p) => p.id), [elegido]);
+  assert.equal(JSON.parse(meta.users.find((x) => x.id === u.data.id).pipelines).join(), elegido);
+  assert.equal((await api('GET', `/board?pipeline=${otro}`)).status, 403);
+  assert.equal((await api('GET', `/board?pipeline=${elegido}`)).status, 200);
+
+  // Volver a «según sus equipos».
+  asUser = null;
+  await api('PATCH', `/users/${u.data.id}`, { pipelines: null });
+  asUser = email;
+  assert.ok((await api('GET', '/meta')).data.pipelines.length > 1);
+  asUser = null;
+});

@@ -66,6 +66,7 @@ export interface User {
   profile: Profile;
   team_id: number | null;
   extra_teams?: string;
+  pipelines?: string | null;   // JSON con los pipelines que ve (Configuración → Usuarios); NULL: según sus equipos
   active: number;
   photo_url?: string | null;   // foto de su cuenta de Google (fotos.ts)
   avisos_mail?: number;        // 1: recibe los avisos por mail (avisos.ts); apagado por defecto

@@ -94,9 +94,20 @@ export function teamsOf(user: User) {
   return new Set([user.team_id, ...extra].filter((t): t is number => t != null).map(Number));
 }
 
+// Los pipelines elegidos para el usuario en Configuración → Usuarios (null: no se eligieron, vale la regla de los equipos).
+export function pipelinesDe(user: Pick<User, 'pipelines'>): string[] | null {
+  if (!user.pipelines) return null;
+  try { const v = JSON.parse(user.pipelines); return Array.isArray(v) ? v.map(String) : null; } catch { return null; }
+}
+
+// Quién ve un pipeline: los administradores, todos; quien tiene pipelines elegidos, esos; si no, según sus equipos
+// (sin equipos en el pipeline, todos).
 export function canSee(user: User, pipeline: Pipeline) {
+  if (user.role === 'admin') return true;
+  const elegidos = pipelinesDe(user);
+  if (elegidos) return elegidos.includes(pipeline.id);
   const teams = pipeline.config.visible_teams ?? [];
-  if (user.role === 'admin' || !teams.length) return true;
+  if (!teams.length) return true;
   const mine = teamsOf(user);
   return teams.some((t) => mine.has(Number(t)));
 }

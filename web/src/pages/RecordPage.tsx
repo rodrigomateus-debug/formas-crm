@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl,
+  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando
 } from '../lib';
 import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion } from '../components';
 import { StageProps } from './Board';
@@ -33,7 +33,7 @@ export default function RecordPage() {
   const [peek, setPeek] = useState<{ type: ObjectType; id: number } | null>(null);
   useEffect(() => { if (data.data?.redirect) navigate(recordUrl(type, data.data.redirect), { replace: true }); }, [data.data, navigate, type]);
   if (data.error) return <div className="content"><div className="empty plain">{data.error} <Link to={`/${objectPath}`}>Volver</Link></div></div>;
-  if (!data.data?.record) return <div className="content"><div className="empty plain">Cargando…</div></div>;
+  if (!data.data?.record) return <div className="content"><Cargando /></div>;
   const { record, associations } = data.data;
   const refresh = () => { data.reload(); setTlKey((k) => k + 1); };
   return (
@@ -510,6 +510,16 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
   );
 }
 
+// Acceso directo al mail en Gmail. Los sincronizados guardan el id del hilo y el buzón: se abre el hilo en esa cuenta.
+// Los que vinieron de HubSpot no tienen id de Gmail: se busca por el asunto.
+function gmailUrl(a: Activity): string | null {
+  const cuenta = a.meta?.mailbox ? `?authuser=${encodeURIComponent(a.meta.mailbox)}` : '';
+  const hilo = a.meta?.gmail_id ? a.thread_id || a.meta.gmail_id : null;
+  if (hilo) return `https://mail.google.com/mail/${cuenta}#all/${hilo}`;
+  const asunto = a.subject?.replace(/^\s*((re|fwd?|rv)\s*:\s*)+/i, '').trim();
+  return asunto ? `https://mail.google.com/mail/${cuenta}#search/${encodeURIComponent(`subject:"${asunto.replace(/"/g, '')}"`)}` : null;
+}
+
 function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: number; onChange: () => void }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -539,7 +549,10 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· <UserChip id={a.owner_id} size="xs" />{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
         <span className={`when${overdue ? ' overdue' : ''}`}>{a.type === 'task' ? `Vence ${fmtDate(a.due_at, true)}` : fmtDate(a.occurred_at, true)}</span>
         <button className="btn ghost sm" onClick={pin} title={a.meta?.pinned ? 'Desfijar' : 'Fijar arriba de todo'}>{a.meta?.pinned ? 'Desfijar' : 'Fijar'}</button>
-        <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>
+        {/* Los mails vienen de Gmail: no se editan acá, se abren en su hilo (pedido de Rodrigo del 17/11/2026). */}
+        {a.type === 'email'
+          ? gmailUrl(a) && <a className="btn ghost sm" href={gmailUrl(a)!} target="_blank" rel="noopener noreferrer" title={a.meta?.gmail_id ? 'Abrir el hilo en Gmail' : 'Buscar este mail en Gmail'}><Icon name="external" size={13} />Ver en Gmail</a>
+          : <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>}
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}
@@ -1061,7 +1074,7 @@ function FilesCard({ recordId }: { recordId: number }) {
             : <span className="small muted" title="Se baja sola de Finnegans en la próxima hora">PDF en camino</span>}
         </div>
       ))}
-      {!list.length && <div className="panel-body muted small">{files.loading ? 'Cargando…' : 'Cuando Finnegans tenga la factura con CAE, aparece acá sola.'}</div>}
+      {!list.length && <div className="panel-body muted small">{files.loading ? <Cargando chico /> : 'Cuando Finnegans tenga la factura con CAE, aparece acá sola.'}</div>}
     </div>
   );
 }
@@ -1228,7 +1241,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {type === 'deal' && meta.me.role !== 'viewer' && <button className="btn" onClick={clone} title="Crea una copia con los mismos datos y asociaciones">Clonar</button>}
         <Link className="btn primary" style={{ flex: 1, justifyContent: 'center' }} to={recordUrl(type, id)}>Ver registro</Link>
       </>}>
-      {!record ? <div className="muted">{data.error ?? 'Cargando…'}</div> : <>
+      {!record ? (data.error ? <div className="muted">{data.error}</div> : <Cargando />) : <>
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
           <div className="grow" style={{ minWidth: 0 }}>
@@ -1265,7 +1278,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
           <div className="panel-head"><h3>Última actividad</h3></div>
           <div className="panel-body stack">
             {tl.data?.activities.length ? tl.data.activities.map((a) => <ActivityItem key={a.id} a={a} currentId={id} onChange={changed} />)
-              : <div className="muted small">{tl.loading ? 'Cargando…' : 'Todavía no hay actividad registrada.'}</div>}
+              : <div className="muted small">{tl.loading ? <Cargando chico /> : 'Todavía no hay actividad registrada.'}</div>}
           </div>
         </div>
       </>}

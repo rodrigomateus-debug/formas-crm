@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { http, qs, useMeta, useToast, Icon, fmtRelative } from '../lib';
+import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando } from '../lib';
 import { Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
@@ -217,7 +217,7 @@ function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: nu
         <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={historial} onChange={(e) => setHistorial(e.target.checked)} />Últimos 6 meses</label>
       </div>
       {error && <div className="aviso warn small">{error}</div>}
-      {!datos && !error && <div className="empty plain">Cargando…</div>}
+      {!datos && !error && <Cargando />}
       {datos && !datos.length && <div className="empty plain">{todos ? 'No hay encargos con ese filtro.' : 'Todavía no cargaste encargos. Con «Nuevo encargo» le pedís algo al recorrido de un día.'}</div>}
       <div className="rc-lista">
         {grupos.map(([fecha, es]) => (
@@ -285,7 +285,7 @@ function Destinos() {
           {datos.copia.at > 0 && ` Última copia de la planilla: ${fmtRelative(new Date(datos.copia.at).toISOString())}.`}{datos.copia.error ? ` (${datos.copia.error})` : ''}
           {organiza && <> <button type="button" className="cr-link" onClick={actualizar}>Traer la planilla ahora</button></>}</p>
       )}
-      {!datos && <div className="empty plain">Cargando…</div>}
+      {!datos && <Cargando />}
       {datos && (
         <div className="table-wrap rc-tabla">
           <table className="grid">
@@ -460,7 +460,7 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
   }
 
   const titulo = enc ? `Encargo a ${lindo(enc.destino)}` : 'Nuevo encargo';
-  if (id && !enc) return <Modal title="Encargo" onClose={onClose}>{error ? <div className="aviso warn small">{error}</div> : <div className="empty plain">Cargando…</div>}</Modal>;
+  if (id && !enc) return <Modal title="Encargo" onClose={onClose}>{error ? <div className="aviso warn small">{error}</div> : <Cargando />}</Modal>;
   return (
     <Modal wide title={titulo} onClose={onClose} footer={<>
       {enc && editable && enc.estado !== 'cancelado' && <button type="button" className="btn ghost danger" disabled={ocupado} onClick={() => cambiarEstado('cancelado')}>Cancelar encargo</button>}

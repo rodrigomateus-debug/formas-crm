@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from 'r
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, defaultPipeline, TagChips, vuelveALaLista,
+  http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, Cargando, defaultPipeline, TagChips, vuelveALaLista,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEmpresa, origenUnidad, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -15,8 +15,8 @@ import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, U
 import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
-import { SaveView, ViewMenu } from '../vistas';
-import { CeldaOc, CeldaProduccion, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
+import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
+import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -24,11 +24,11 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', '__unidad', 'lifecyclestage', 'notes_last_updated', 'createdate'],
   company: ['domain', 'owner_id', '__unidad', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
-  order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__responsable', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
 };
 // Pedidos para el perfil Ventas (pedido de Rodrigo del 17/11/2026): su pantallazo. Sin «PDV Finnegans» (el número ya está
 // en el nombre), «Unidad de negocio» ni «Propietario» (vende en su unidad y ve lo suyo); con «Cobro y papeles».
-const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__oc', '__cobro', 'hs_total_price', 'createdate'];
+const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__responsable', '__oc', '__cobro', 'hs_total_price', 'createdate'];
 // El perfil de quien mira (lo pone IndexFor al dibujarse): las columnas por defecto de Pedidos dependen de él.
 const perfil = { ventas: false };
 const columnasPorDefecto = (t: ObjectType) => (t === 'order' && perfil.ventas ? PEDIDOS_VENTAS : DEFAULT_COLUMNS[t]);
@@ -90,13 +90,19 @@ function loadLocal(t: ObjectType): ViewConfig {
 // «Todos» y «Míos» de este navegador. Si después la quitan, no vuelve.
 const OC_SUMADA = 'crm.view.order.oc';
 function conColumnaOc(v: ViewConfig): ViewConfig {
+  return conColumnaUnaVez(conColumnaUnaVez(v, '__oc', OC_SUMADA, ['__produccion', 'hs_pipeline_stage']),
+    '__responsable', 'crm.view.order.responsable', ['__produccion', 'hs_pipeline_stage']);
+}
+// Una columna nueva de Pedidos se suma una sola vez en «Todos» y «Míos» de este navegador, después de la primera de
+// `despuesDe` que esté. Si después la quitan, no vuelve.
+function conColumnaUnaVez(v: ViewConfig, col: string, clave: string, despuesDe: string[]): ViewConfig {
   try {
-    if (localStorage.getItem(OC_SUMADA) || v.columns.includes('__oc')) return v;
-    localStorage.setItem(OC_SUMADA, '1');
+    if (localStorage.getItem(clave) || v.columns.includes(col)) return v;
+    localStorage.setItem(clave, '1');
   } catch { return v; }
   const columns = [...v.columns];
-  const i = Math.max(columns.indexOf('__produccion'), columns.indexOf('hs_pipeline_stage'));
-  columns.splice(i >= 0 ? i + 1 : columns.length, 0, '__oc');
+  const i = Math.max(-1, ...despuesDe.map((d) => columns.indexOf(d)));
+  columns.splice(i + 1, 0, col);
   return { ...v, columns };
 }
 // Las vendedoras que ya tenían sus columnas de Pedidos pasan una sola vez a las de su pantallazo: sin «PDV Finnegans» ni
@@ -189,9 +195,9 @@ function IndexFor({ type }: { type: ObjectType }) {
     try { saved = localStorage.getItem(PIPE_KEY); } catch { /* sin preferencia guardada */ }
     const fromUrl = params.get('pipeline');
     const deLaVista = 'pipeline' in inicio ? inicio.pipeline : undefined;
-    return valid(fromUrl) ? fromUrl! : valid(deLaVista) ? deLaVista! : valid(saved) ? saved! : defaultPipeline(meta).id;
+    return valid(fromUrl) ? fromUrl! : valid(deLaVista) ? deLaVista! : valid(saved) ? saved! : (defaultPipeline(meta)?.id ?? '');
   });
-  const boardPipeline = pipelineSel === 'all' ? defaultPipeline(meta).id : pipelineSel;
+  const boardPipeline = pipelineSel === 'all' ? (defaultPipeline(meta)?.id ?? '') : pipelineSel;
   const setPipelineSel = (v: string) => {
     setPipelineSelRaw(v);
     try { localStorage.setItem(PIPE_KEY, v); } catch { /* ignorar */ }
@@ -231,7 +237,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const [preview, setPreviewState] = useState<{ id: number; compose?: Activity['type'] } | null>(null);
   const setPreview = (id: number | null, compose?: Activity['type']) => setPreviewState(id ? { id, compose } : null);
   const [boardKey, setBoardKey] = useState(0);
-  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'save' | 'import'>('');
+  const [show, setShow] = useState<'' | 'filters' | 'columns' | 'create' | 'import'>('');
   const vistaDe = (k: string) => views.data?.find((v) => String(v.id) === k);
   // Las que se pueden dibujar (las vistas guardadas aparecen cuando llegan).
   const visibles = pestanas.filter((k) => esFija(k) || vistaDe(k));
@@ -301,7 +307,23 @@ function IndexFor({ type }: { type: ObjectType }) {
     return (viewGroups.length ? viewGroups : [[]]).map((g) => [...g, ...pipe]).filter((g) => g.length);
   }, [viewGroups, pipelineSel, type]);
   // Con «Todos los pipelines» la tabla muestra de qué pipeline es cada negocio.
-  const columns = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
+  // Pedidos con los productos abiertos (PedidosProductos.tsx): cada dato de un producto va en su columna (etapa, responsable
+  // y OC), así que esas columnas se ven siempre, aunque la vista guardada no las tenga (pedido de Rodrigo del 17/11/2026).
+  const productos = useProductosAbiertos();
+  const columns = useMemo(() => {
+    const base = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
+    if (type !== 'order' || mode !== 'table' || productos.cerrados) return base;
+    const cols = [...base];
+    const poner = (col: string, despuesDe: string[]) => {
+      if (cols.includes(col)) return;
+      const i = Math.max(-1, ...despuesDe.map((d) => cols.indexOf(d)));
+      cols.splice(i + 1, 0, col);
+    };
+    poner('hs_pipeline_stage', ['pdv_finnegans']);
+    poner('__responsable', ['__produccion', 'hs_pipeline_stage']);
+    poner('__oc', ['__responsable']);
+    return cols;
+  }, [type, pipelineSel, cfg.columns, mode, productos.cerrados]);
 
   type ListRes = { results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number };
   const listUrl = urlLista(type, dq, groups, cfg, pageSize, page * pageSize);
@@ -400,7 +422,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
   };
   const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : col === '__unidad' ? 'Unidad de negocio' : col === '__produccion' ? 'Producción'
-    : col === '__cobro' ? 'Cobro y papeles' : col === '__oc' ? 'OC'
+    : col === '__cobro' ? 'Cobro y papeles' : col === '__oc' ? 'OC' : col === '__responsable' ? 'Responsable'
     : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
@@ -411,7 +433,6 @@ function IndexFor({ type }: { type: ObjectType }) {
   // Pedidos: sus productos abajo y quién los tiene en Producción (PedidosProductos.tsx).
   const esPedidos = type === 'order' && mode === 'table';
   const { pedidos: prod, adjuntos } = useProduccionPedidos(esPedidos ? rows.map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
-  const productos = useProductosAbiertos();
 
   const resize = useColumnResize(cfg.widths, (widths) => setCfg((c) => ({ ...c, widths })));
   // Pedidos sin negocio, para control (un pedido va en un solo negocio): es un filtro común sobre «Negocios asociados», así
@@ -461,6 +482,20 @@ function IndexFor({ type }: { type: ObjectType }) {
     </div>
   );
 
+  // La barra de abajo (BarraVista): cuántos hay, el paginado de la tabla, y el nombre de la vista nueva o duplicada.
+  const [crear, setCrear] = useState<CrearVista>('');
+  const nTotal = mode === 'board' ? boardTotal ?? null : list.data?.total ?? null;
+  const pager = (
+    <div className="pager">
+      <span>Por página</span>
+      <Select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
+        {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
+      </Select>
+      <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>
+      <button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button>
+      <button className="btn sm" disabled={!list.data || (page + 1) * pageSize >= list.data.total} onClick={() => setPage(page + 1)}>Siguiente</button>
+    </div>
+  );
   const exportCsv = () => {
     const url = `/api/export/${type}${qs({ q: dq, groups: groups.length ? groups : undefined, sort: cfg.sort, dir: cfg.dir, columns: columns.filter((c) => !c.startsWith('__') || c === '__company').join(',') })}`;
     window.location.href = url;
@@ -485,9 +520,8 @@ function IndexFor({ type }: { type: ObjectType }) {
             <button type="button" className={mode === 'board' ? 'on' : ''} aria-pressed={mode === 'board'} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
           </div>
         )}
-        {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). */}
+        {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). Exportar está en la barra de abajo. */}
         {!esVentas(meta.me) && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
-        {!esVentas(meta.me) && <button className="btn" onClick={exportCsv}><Icon name="download" size={16} />Exportar</button>}
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
@@ -508,28 +542,14 @@ function IndexFor({ type }: { type: ObjectType }) {
                 title={`${v.shared ? 'Compartida con todos' : v.team_id ? `Compartida con ${meta.teams.find((t) => t.id === v.team_id)?.name ?? 'un equipo'}` : 'Solo vos'}. ${AYUDA_ORDEN}`}>
                 {v.config.mode === 'board' && <Icon name="board" size={13} />}{v.name}
               </button>
-              {activeView === k && <ViewMenu type={type} view={v} onChanged={() => views.reload()} onDeleted={() => { views.reload(); applyView(visibles.find((x) => x !== k) ?? 'all'); }}
+              {activeView === k && <ViewMenu type={type} view={v} onRenombrar={() => setCrear('renombrar')} onDeleted={() => { views.reload(); applyView(visibles.find((x) => x !== k) ?? 'all'); }}
                 onMover={(d) => moverPestana(k, d)} puedeIzq={i > 0} puedeDer={i < visibles.length - 1}
                 primera={i === 0} onPrimera={() => { guardarOrden([k, ...pestanas.filter((x) => x !== k)]); toast(`«${v.name}» quedó primera: se abre al entrar`); }} />}
             </div>
           );
         })}
-        <button className="tab add" onClick={() => setShow('save')}>+ Agregar vista</button>
+        <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>
       </div>
-
-      {/* Con cambios sin guardar aparece la barra abajo (como en HubSpot); al guardar o descartar, se va. */}
-      {(dirty || filtersChanged) && !selected.size && (
-        <div className="save-bar" role="region" aria-label="Cambios sin guardar en la vista">
-          <span className="grow">{dirty ? <>Cambiaste la vista <b>{activeSaved!.name}</b></> : 'Cambiaste los filtros'}</span>
-          <button className="btn sm ghost" onClick={() => applyView(activeView)}>Descartar</button>
-          {dirty ? <>
-            <button className="btn sm" onClick={() => setShow('save')}>Guardar como nueva</button>
-            {canSaveView
-              ? <button className="btn sm primary" onClick={saveView}>Guardar</button>
-              : <button className="btn sm primary" disabled title="Solo quien creó la vista (o un administrador) la puede cambiar">Guardar</button>}
-          </> : <button className="btn sm primary" onClick={() => setShow('save')}>Guardar como vista nueva</button>}
-        </div>
-      )}
 
       {selected.size > 0 && (
         <BulkBar type={type} sel={{ ids: selected, all: selAll }} total={mode === 'board' ? boardTotal : list.data?.total}
@@ -599,6 +619,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     : col === '__unidad' ? <UnidadCell key={col} type={type} record={r} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />
                     : col === '__produccion' ? <CeldaProduccion key={col} p={p} r={r} />
                     : col === '__oc' ? <CeldaOc key={col} p={p} />
+                    : col === '__responsable' ? <CeldaResponsable key={col} p={p} r={r} />
                     : col === '__cobro' ? <td key={col} className="ped-prod"><span className="ped-cobro"><Saldo r={r} corto />{adjuntos[r.id] && <Adjuntos r={{ ...r, adjuntos: adjuntos[r.id] } as CrmRecord} />}</span></td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
@@ -608,17 +629,9 @@ function IndexFor({ type }: { type: ObjectType }) {
               })}
             </tbody>
           </table>
+          {!list.data && list.loading && <Cargando />}
           {!list.loading && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
           {list.error && <div className="empty plain">{list.error}</div>}
-        </div>
-        <div className="pager">
-          <span>Por página</span>
-          <Select className="input sm" style={{ width: 84 }} value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(0); }}>
-            {[25, 50, 100, 200].map((n) => <option key={n}>{n}</option>)}
-          </Select>
-          <span className="num">{list.data ? `${Math.min(page * pageSize + 1, list.data.total)}–${Math.min((page + 1) * pageSize, list.data.total)} de ${list.data.total}` : ''}</span>
-          <button className="btn sm" disabled={page === 0} onClick={() => setPage(page - 1)}>Anterior</button>
-          <button className="btn sm" disabled={!list.data || (page + 1) * pageSize >= list.data.total} onClick={() => setPage(page + 1)}>Siguiente</button>
         </div>
       </>}
 
@@ -627,7 +640,13 @@ function IndexFor({ type }: { type: ObjectType }) {
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} addProp={filterProp} onClose={() => { setShow(''); setFilterProp(undefined); }} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); setFilterProp(undefined); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
-      {show === 'save' && <SaveView type={type} config={current} onClose={() => setShow('')} onSaved={(id) => { setShow(''); views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }} />}
+      <BarraVista tipo={type} abierta={activeSaved} cambiada={dirty} filtrosCambiados={filtersChanged} puedeGuardar={canSaveView}
+        total={nTotal == null ? null : `${nTotal.toLocaleString('es-AR')} ${nTotal === 1 ? OBJECTS[type].single.toLowerCase() : OBJECTS[type].plural.toLowerCase()}`}
+        centro={mode === 'table' ? pager : undefined}
+        onDescartar={() => applyView(activeView)} onGuardar={saveView} actual={current}
+        onCreada={(id) => { views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }}
+        crear={crear} setCrear={setCrear} onRecargar={() => { list.reload(); setBoardKey((k) => k + 1); }}
+        onExportar={esVentas(meta.me) ? undefined : exportCsv} onRenombrada={() => views.reload()} />
     </div>
   );
 }
@@ -780,7 +799,7 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
     ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
     ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
     ...(type !== 'order' ? [{ name: '__unidad', label: 'Unidad de negocio' }] : []),
-    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (quién lo tiene y la entrega)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }, { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
+    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (lo que te toca, listos y la entrega)' }, { name: '__responsable', label: 'Responsable (quién lo tiene en Producción)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }, { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
     ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
   ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };

@@ -28,7 +28,6 @@ import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, 
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { fin, finnegansState, finnegansToken, pedidoIds, syncFacturas, type Destino } from './finnegans';
-import { esOc, numeroOc, urlOc } from './ordenescompra';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
@@ -120,7 +119,7 @@ api.get('/meta', async (c) => {
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
-    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -624,8 +623,8 @@ api.get('/tasks', async (c) => {
 
 // Datos extra de las tarjetas del tablero, en tres consultas para todas: el contacto y la empresa asociados
 // (los principales primero) y la próxima actividad (tarea abierta o reunión por venir), como en HubSpot.
-// El contacto lleva su celular (o su teléfono) para el botón de WhatsApp de la tarjeta.
-type CardInfo = { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } };
+// El contacto lleva su celular (o su teléfono) para el botón de WhatsApp de la tarjeta; la empresa, su dominio para el logo.
+type CardInfo = { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string; domain?: string | null }; next?: { type: string; subject: string; at: string } };
 async function cardInfo(db: D1Database, ids: number[]) {
   const info = new Map<number, CardInfo>(ids.map((id) => [id, {}]));
   if (!ids.length) return info;
@@ -634,7 +633,7 @@ async function cardInfo(db: D1Database, ids: number[]) {
     db.prepare(`SELECT a.from_id, r.id, r.name, COALESCE(NULLIF(json_extract(r.props, '$.mobilephone'), ''), r.phone) AS phone
       FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'contact' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
-    db.prepare(`SELECT a.from_id, r.id, r.name FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
+    db.prepare(`SELECT a.from_id, r.id, r.name, NULLIF(json_extract(r.props, '$.domain'), '') AS domain FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
     db.prepare(`SELECT l.record_id, a.type, a.subject, COALESCE(a.due_at, a.occurred_at) AS at FROM activity_links l JOIN activities a ON a.id = l.activity_id
       WHERE l.record_id IN (SELECT value FROM json_each(?)) AND a.archived = 0
@@ -642,7 +641,7 @@ async function cardInfo(db: D1Database, ids: number[]) {
       ORDER BY at`).bind(list, now()),
   ]);
   for (const r of contacts.results as Array<{ from_id: number; id: number; name: string; phone: string | null }>) { const i = info.get(r.from_id); if (i && !i.contact) i.contact = { id: r.id, name: r.name, phone: r.phone }; }
-  for (const r of companies.results as Array<{ from_id: number; id: number; name: string }>) { const i = info.get(r.from_id); if (i && !i.company) i.company = { id: r.id, name: r.name }; }
+  for (const r of companies.results as Array<{ from_id: number; id: number; name: string; domain: string | null }>) { const i = info.get(r.from_id); if (i && !i.company) i.company = { id: r.id, name: r.name, domain: r.domain }; }
   for (const r of next.results as Array<{ record_id: number; type: string; subject: string; at: string }>) { const i = info.get(r.record_id); if (i && !i.next) i.next = { type: r.type, subject: r.subject, at: r.at }; }
   return info;
 }
@@ -1576,8 +1575,8 @@ api.post('/integrations/clickup/sync', async (c) => {
   const b = await c.req.json<{ full?: boolean }>().catch(() => ({} as { full?: boolean }));
   return c.json(await syncClickup(c.env, { full: !!b.full }));
 });
-// Lo que devuelve Finnegans de un pedido de venta: sus documentos destino (facturas, remitos, órdenes de compra) y el
-// detalle de la primera OC, para revisar cómo vienen (ordenescompra.ts). Solo lectura, administrador.
+// Lo que devuelve Finnegans de un pedido de venta: sus documentos destino (facturas, remitos y notas). Solo lectura,
+// administrador, para revisar cómo vienen.
 api.get('/integrations/finnegans/documentos', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   const pedido = String(c.req.query('pedido') ?? '').trim();
@@ -1585,9 +1584,7 @@ api.get('/integrations/finnegans/documentos', async (c) => {
   const token = await finnegansToken(c.env);
   if (!token) throw new HttpError(503, 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.');
   const documentos = (await fin<Destino[]>(c.env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: pedidoIds(pedido)[0] })) ?? [];
-  const oc = documentos.find(esOc);
-  const detalle = oc ? await fin<unknown>(c.env, token, `ordenCompra/${encodeURIComponent(oc.DESTINOIDENTIFICACIONEXTERNA)}`).catch((e) => ({ error: (e as Error).message })) : null;
-  return c.json({ pedido: pedidoIds(pedido), documentos: documentos.map((d) => ({ ...d, es_oc: esOc(d) })), oc: oc ? { ...oc, numero: numeroOc(oc.DESTINONOMBRE), url: urlOc(oc.DESTINOTRANSACCIONID) } : null, detalle_oc: detalle });
+  return c.json({ pedido: pedidoIds(pedido), documentos });
 });
 
 api.post('/integrations/finnegans/sync', async (c) => {
@@ -1829,7 +1826,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; pipelines?: string[] | null }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -1844,6 +1841,12 @@ api.patch('/users/:id', async (c) => {
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
     if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
+  }
+  // Pipelines que ve: la lista elegida (solo ids que existen) o null para volver a «según sus equipos».
+  if (b.pipelines !== undefined) {
+    const existen = new Set((await new Meta(c.env.DB).pipelines()).map((p) => p.id));
+    const ids = b.pipelines === null ? null : [...new Set(b.pipelines.map(String))].filter((id) => existen.has(id));
+    await c.env.DB.prepare('UPDATE users SET pipelines = ? WHERE id = ?').bind(ids ? JSON.stringify(ids) : null, cur.id).run();
   }
   const { team_id, extra_teams } = equiposDe(b, cur);
   await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ?, avisos_mail = ? WHERE id = ?')

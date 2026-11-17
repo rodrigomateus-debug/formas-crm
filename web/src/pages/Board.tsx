@@ -1,14 +1,14 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
+  http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, Cargando, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
 } from '../lib';
 import { ChatDarwin, ChatWhatsApp, Modal, PropertyInput, UserAvatar, telDeDarwin } from '../components';
 import { Select } from '../Select';
 
 // Lo que el servidor agrega a cada tarjeta: contacto y empresa asociados y la próxima actividad.
-export interface CardInfo { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string }; next?: { type: string; subject: string; at: string } }
+export interface CardInfo { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string; domain?: string | null }; next?: { type: string; subject: string; at: string } }
 type Card = CrmRecord & { card?: CardInfo };
 interface Column { stage: Stage; total: number; amount: number; weighted: number; deals: Card[] }
 
@@ -63,12 +63,20 @@ export function useFillHeight() {
   const ref = useRef<HTMLDivElement>(null);
   const [h, setH] = useState<number>();
   useLayoutEffect(() => {
-    const calc = () => { const el = ref.current; if (el) setH(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 12))); };
+    // Hasta la barra de las vistas al pie (#barra-vista, en App), si la hay; si no, hasta el final de la ventana.
+    const pie = document.getElementById('barra-vista');
+    const calc = () => {
+      const el = ref.current;
+      if (!el) return;
+      const hasta = pie && pie.offsetHeight ? pie.getBoundingClientRect().top : window.innerHeight;
+      setH(Math.max(360, Math.floor(hasta - el.getBoundingClientRect().top - 12)));
+    };
     calc();
     window.addEventListener('resize', calc);
     const ro = new ResizeObserver(calc);
     const prev = ref.current?.previousElementSibling;
     if (prev) ro.observe(prev);
+    if (pie) ro.observe(pie);
     return () => { window.removeEventListener('resize', calc); ro.disconnect(); };
   }, []);
   return [ref, h ? { height: h } : undefined] as const;
@@ -180,7 +188,8 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
           <span className="sep">·</span>Ponderado <b className="num">{fmtMoney(sum.weighted) || '$ 0'}</b>
         </span>
       </div>
-      <div className={`board${boardStyle ? ' fill' : ''}${board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
+      <div className={`board${boardStyle ? ' fill' : ''}${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
+        {!board.data && !board.error && <Cargando />}
         {cols.map((c) => (colapso.cerrada(c.stage.id, c.total) ? (
           <div key={c.stage.id} className={`col collapsed${over === c.stage.id ? ' over' : ''}`} {...drop(c)} onClick={() => colapso.alternar(c.stage.id, c.total)}
             title={`${c.stage.label}: ${c.total} · ${fmtMoney(c.amount) || '$ 0'}. Clic para mostrar.`} role="button" aria-label={`Mostrar la columna ${c.stage.label}`}>
@@ -239,7 +248,8 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
   const late = next && Date.parse(next.at) < Date.now();
   const darwin = safeUrl(d.props.link_a_darwin);
   const owner = userName(meta, d.props.owner_id);
-  const with_ = [d.card?.contact?.name, d.card?.company?.name].filter(Boolean).join(' · ');
+  const contacto = d.card?.contact?.name;
+  const empresa = d.card?.company?.name;
   const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen?.(d.id, t); };
   return (
     <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable
@@ -254,11 +264,15 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
         if (!v) return null;
         return <div key={k} className="meta"><span className={k === 'amount' ? 'amount num' : 'ellipsis'} title={propOf(meta, 'deal', k)?.label}>{k === 'closedate' ? `Cierre ${v}` : v}</span></div>;
       })}
-      {with_ && <div className="meta" title="Contacto y empresa"><Icon name="contact" size={13} /><span className="ellipsis">{with_}</span></div>}
-      <div className={`next${next ? '' : ' none'}${late ? ' late' : ''}`} title={next ? `Próxima ${ACTIVITY_LABEL[next.type as Activity['type']]?.toLowerCase() ?? 'actividad'}` : undefined}>
-        {next ? <><Icon name={next.type === 'meeting' ? 'meeting' : 'task'} size={13} /><span className="ellipsis grow">{next.subject || ACTIVITY_LABEL[next.type as Activity['type']]}</span><span className="num">{fmtDate(next.at)}</span></>
-          : 'Sin próximas actividades'}
-      </div>
+      {/* Con quién es: contacto y empresa, cada uno en su renglón y dicho si falta (pedido de Rodrigo del 17/11/2026). */}
+      <div className={`meta${contacto ? '' : ' falta'}`} title="Contacto asociado"><Icon name="contact" size={13} /><span className="ellipsis">{contacto || 'Sin contacto asociado'}</span></div>
+      <div className={`meta${empresa ? '' : ' falta'}`} title="Empresa asociada"><LogoEmpresa domain={d.card?.company?.domain} /><span className="ellipsis">{empresa || 'Sin empresa asociada'}</span></div>
+      {/* La próxima actividad solo si hay una; si no, no se dice nada. */}
+      {next && (
+        <div className={`next${late ? ' late' : ''}`} title={`Próxima ${ACTIVITY_LABEL[next.type as Activity['type']]?.toLowerCase() ?? 'actividad'}`}>
+          <Icon name={next.type === 'meeting' ? 'meeting' : 'task'} size={13} /><span className="ellipsis grow">{next.subject || ACTIVITY_LABEL[next.type as Activity['type']]}</span><span className="num">{fmtDate(next.at)}</span>
+        </div>
+      )}
       <div className="meta">
         <UserAvatar id={d.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{owner || 'Sin propietario'}</span>
@@ -279,6 +293,16 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
     </div>
   );
 });
+
+// El logo de la empresa (el favicon de su dominio) en la tarjeta; si no tiene dominio o no hay imagen, el iconito.
+const sinLogo = new Set<string>();
+function LogoEmpresa({ domain }: { domain?: string | null }) {
+  const src = domain ? `/api/favicon/${encodeURIComponent(domain.trim().toLowerCase())}` : '';
+  const [falla, setFalla] = useState(() => !src || sinLogo.has(src));
+  useEffect(() => { setFalla(!src || sinLogo.has(src)); }, [src]);
+  if (falla) return <Icon name="company" size={13} />;
+  return <img className="logo-empresa" src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => { sinLogo.add(src); setFalla(true); }} />;
+}
 
 // Antes de mover un negocio a una etapa que pide datos (motivo de pérdida, monto…), se piden en un cuadro.
 export function StageProps({ deal, stage, missing, onClose, onSave }: { deal: CrmRecord; stage: Stage; missing: string[]; onClose: () => void; onSave: (extra: Record<string, unknown>) => void }) {

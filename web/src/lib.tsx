@@ -19,7 +19,7 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 // photo_url: la foto de su cuenta de Google (la trae el CRM, src/worker/fotos.ts); sin foto, se ven sus iniciales.
-export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
+export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
@@ -46,6 +46,7 @@ export interface Activity {
   id: number; type: 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp'; occurred_at: string; owner_id: number | null; subject: string; body: string;
   direction: string | null; status: string | null; outcome: string | null; due_at: string | null; completed_at: string | null; priority: string | null;
   task_type: string | null; meta: Record<string, any>; links: Array<{ id: number; type: ObjectType; name: string }>; source: string; created_by: number | null;
+  thread_id?: string | null; external_id?: string | null;
 }
 export interface Filter { prop: string; op: string; value?: unknown; values?: unknown[]; high?: unknown }
 
@@ -142,7 +143,7 @@ export function MetaProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => { reload(); }, [reload]);
   if (error) return <div className="empty">No se pudo abrir el CRM: {error}</div>;
-  if (!meta) return <div className="empty">Cargando…</div>;
+  if (!meta) return <Cargando pantalla texto="Abriendo Formas Hub…" />;
   return <MetaCtx.Provider value={{ meta, reload }}>{children}</MetaCtx.Provider>;
 }
 
@@ -173,15 +174,24 @@ export function defaultPipeline(meta: Meta) {
     ?? meta.pipelines.find((p) => p.id === meta.me.deal_pipelines?.[0])
     ?? meta.pipelines[0];
 }
-// Quién ve un pipeline (misma regla que el servidor): sin equipos, todos; si no, sus equipos y los administradores.
+// Quién ve un pipeline (misma regla que el servidor): los administradores, todos; quien tiene pipelines elegidos en
+// Configuración → Usuarios, esos; si no, sin equipos en el pipeline, todos, y con equipos, los de esos equipos.
 export function userTeams(u: User) {
   let extra: number[] = [];
   try { extra = JSON.parse(u.extra_teams ?? '[]'); } catch { /* sin equipos extra */ }
   return new Set([u.team_id, ...extra].filter((t): t is number => t != null).map(Number));
 }
+// Los pipelines elegidos para el usuario en Configuración → Usuarios (null: según sus equipos).
+export function pipelinesDe(u: Pick<User, 'pipelines'>): string[] | null {
+  if (!u.pipelines) return null;
+  try { const v = JSON.parse(u.pipelines); return Array.isArray(v) ? v.map(String) : null; } catch { return null; }
+}
 export function canSeePipeline(u: User, p: Pipeline) {
+  if (u.role === 'admin') return true;
+  const elegidos = pipelinesDe(u);
+  if (elegidos) return elegidos.includes(p.id);
   const teams = p.config.visible_teams ?? [];
-  if (u.role === 'admin' || !teams.length) return true;
+  if (!teams.length) return true;
   const mine = userTeams(u);
   return teams.some((t) => mine.has(Number(t)));
 }
@@ -416,6 +426,9 @@ const paths: Record<string, string> = {
   filter: 'M3 5h18l-7 8v6l-4 2v-8z',
   columns: 'M4 4h6v16H4zM14 4h6v16h-6z',
   download: 'M12 3v12M7 10l5 5 5-5M4 21h16',
+  refresh: 'M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4',
+  undo: 'M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3',
+  copy: 'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
   upload: 'M12 21V9M7 14l5-5 5 5M4 3h16',
   menu: 'M4 6h16M4 12h16M4 18h16',
   dots: 'M5 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2ZM12 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2ZM19 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2Z',
@@ -459,6 +472,23 @@ export function Icon({ name, size }: { name: keyof typeof paths | string; size?:
       width={size} height={size} aria-hidden="true">
       <path d={paths[name] ?? paths.note} />
     </svg>
+  );
+}
+
+// ---------- Cargando: el isotipo de Formas animado ----------
+// La cinta del logo se dibuja por el contorno, se rellena y se borra, en loop, mientras el círculo «respira».
+// «chico» va dentro de un renglón o panel; «pantalla» ocupa toda la ventana (la primera carga del CRM).
+const CINTA = 'M595.71,272.9c-21.44-30.93-47.87-48.56-76.44-50.98-30.49-2.56-62.21,11.97-91.74,42.09-32.04,32.68-54.15,72.92-74.21,113.41-1.31,2.64-5.04,2.63-6.35,0-19.71-39.86-41.64-79.25-72.76-111.79-30.79-32.2-64.09-47.13-96.27-43.3-31.6,3.8-59.71,25.57-81.3,62.95-19.14,33.15-23.2,63.88-12.07,91.33,18.28,45.06,72.87,68.93,115.46,81.01,48.52,13.77,99.38,20.76,149.93,20.76,22.91,0,45.76-1.44,68.28-4.32,59.23-7.6,137.99-25.25,176.82-66.17,35.1-37,35.33-84.94.64-134.99ZM284.99,406.59c-27.92-3.87-56.29-9.12-82.88-18.35-33.03-11.47-51.1-23.78-55.26-37.61-3.33-11.08,1.9-25.73,15.54-43.55,8.97-11.71,17.27-17.96,24.67-18.59.44-.04.89-.05,1.35-.05,7.97,0,18.02,5.73,30.66,17.46,28.16,26.14,48.88,62.27,66.92,99.32.34.69-.24,1.49-1,1.39ZM553.14,350.63c-4.15,13.84-22.23,26.14-55.26,37.61-26.59,9.23-54.96,14.48-82.88,18.35-.76.11-1.34-.69-1-1.39,18.04-37.05,38.76-73.18,66.92-99.32,12.64-11.73,22.7-17.46,30.66-17.46.46,0,.91.02,1.35.05,7.4.63,15.7,6.89,24.67,18.59,13.64,17.82,18.87,32.47,15.54,43.55Z';
+export function Cargando({ texto = 'Cargando…', chico, pantalla }: { texto?: string; chico?: boolean; pantalla?: boolean }) {
+  return (
+    <div className={`formas-loader${chico ? ' chico' : ''}${pantalla ? ' pantalla' : ''}`} role="status" aria-live="polite">
+      <svg viewBox="0 0 700 700" aria-hidden="true">
+        <circle className="halo" cx="350" cy="350" r="350" />
+        <circle className="fondo" cx="350" cy="350" r="350" />
+        <path className="cinta" d={CINTA} pathLength={1} />
+      </svg>
+      {texto && <span className="t">{texto}</span>}
+    </div>
   );
 }
 

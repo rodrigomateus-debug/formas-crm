@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, cobroPedido, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, cobroPedido, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, Cargando, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
 import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
@@ -342,7 +342,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           {/* Arriba, el total de los activos (lo que está en curso); el de cada etapa va abajo de su columna. */}
           {conMonto && montoActivos != null && <><span className="sep">·</span>Total activos sin IVA <b className="num" title={fmtMoneyExact(montoActivos, 'ARS')}>{fmtMoney(montoActivos, 'ARS') || '$ 0'}</b></>}</span>
       </div>
-      <div className={`board${boardStyle ? ' fill' : ''}${board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
+      <div className={`board${boardStyle ? ' fill' : ''}${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
+        {!board.data && !board.error && <Cargando />}
         {porArea ? segmentos.map((s) => (
           <section key={`${s.area ?? 'otras'}-${s.cols[0].value || 'vacio'}`} className={`col-group${s.area ? ` area-${s.area}` : ' sin-area'}`}
             aria-label={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>

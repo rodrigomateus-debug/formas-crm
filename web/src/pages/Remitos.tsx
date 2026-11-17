@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, esVentas, useToast, userName, Icon, type CrmRecord, cabecerasVerComo } from '../lib';
+import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, esVentas, useToast, userName, Icon, type CrmRecord, cabecerasVerComo, Cargando } from '../lib';
 import { EstadoEntrega, Modal, alEsc } from '../components';
 import { BotonArchivos } from './Bocetos';
 import { DireccionesEntrega } from './Direcciones';
@@ -195,7 +195,7 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       )}
       {remitos.length > 0 && <div className="remitos-sub small muted">Remitos ({remitos.length})</div>}
       {remitos.map((r) => <RemitoFila key={r.id} r={r} orderId={record.id} onCambio={recargar} soloVer={!puedeEditar} />)}
-      {!remitos.length && <div className="panel-body muted small">{res.loading ? 'Cargando…' : 'Todavía no hay remitos. Llegan solos de ClickUp y de la app del chofer, o subí la foto acá.'}</div>}
+      {!remitos.length && <div className="panel-body muted small">{res.loading ? <Cargando chico /> : 'Todavía no hay remitos. Llegan solos de ClickUp y de la app del chofer, o subí la foto acá.'}</div>}
       {/* Los internos no los ve Ventas (el servidor no se los manda). */}
       {internos.length > 0 && <div className="remitos-sub small muted">Remitos internos ({internos.length}) · retiros, egresos y encargos, para Producción y Logística</div>}
       {internos.map((r) => <RemitoInterno key={r.id} r={r} orderId={record.id} puede={!!d?.puede_finalizar} onCambio={recargar} />)}
@@ -421,7 +421,7 @@ function Bandeja() {
       <p className="small muted" style={{ margin: 0 }}>Los remitos que no se pudieron adjuntar solos a su pedido (porque algo no cierra) o que no se pudieron leer. Elegí el pedido, descartalo o leelo de nuevo.</p>
       {res.data && !res.data.lector && <div className="aviso warn small">Falta conectar la API de Claude: los remitos se guardan pero no se leen.</div>}
       {lista.map((r) => <RevisionCard key={r.id} r={r} onCambio={() => res.reload()} />)}
-      {!lista.length && <div className="empty plain">{res.loading ? 'Cargando…' : 'No hay remitos para revisar.'}</div>}
+      {!lista.length && <div className="empty plain">{res.loading ? <Cargando chico /> : 'No hay remitos para revisar.'}</div>}
     </div>
   );
 }
@@ -435,7 +435,7 @@ function Revisados() {
     <div className="stack" style={{ gap: 12, marginTop: 12 }}>
       <p className="small muted" style={{ margin: 0 }}>Los remitos que ya revisó alguien: a qué pedido se confirmaron (y a qué producto va cada renglón) o por qué se descartaron. Si algo quedó mal, corregilo desde acá.</p>
       {lista.map((r) => <RevisionCard key={r.id} r={r} revisado onCambio={() => res.reload()} />)}
-      {!lista.length && <div className="empty plain">{res.loading ? 'Cargando…' : 'Todavía no se revisó ningún remito.'}</div>}
+      {!lista.length && <div className="empty plain">{res.loading ? <Cargando chico /> : 'Todavía no se revisó ningún remito.'}</div>}
     </div>
   );
 }

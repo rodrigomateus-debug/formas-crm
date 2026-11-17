@@ -16,7 +16,7 @@ import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
-import { CeldaOc, CeldaProduccion, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
+import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -24,11 +24,11 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', '__unidad', 'lifecyclestage', 'notes_last_updated', 'createdate'],
   company: ['domain', 'owner_id', '__unidad', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
-  order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__responsable', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
 };
 // Pedidos para el perfil Ventas (pedido de Rodrigo del 17/11/2026): su pantallazo. Sin «PDV Finnegans» (el número ya está
 // en el nombre), «Unidad de negocio» ni «Propietario» (vende en su unidad y ve lo suyo); con «Cobro y papeles».
-const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__oc', '__cobro', 'hs_total_price', 'createdate'];
+const PEDIDOS_VENTAS = ['hs_pipeline_stage', '__produccion', '__responsable', '__oc', '__cobro', 'hs_total_price', 'createdate'];
 // El perfil de quien mira (lo pone IndexFor al dibujarse): las columnas por defecto de Pedidos dependen de él.
 const perfil = { ventas: false };
 const columnasPorDefecto = (t: ObjectType) => (t === 'order' && perfil.ventas ? PEDIDOS_VENTAS : DEFAULT_COLUMNS[t]);
@@ -90,13 +90,19 @@ function loadLocal(t: ObjectType): ViewConfig {
 // «Todos» y «Míos» de este navegador. Si después la quitan, no vuelve.
 const OC_SUMADA = 'crm.view.order.oc';
 function conColumnaOc(v: ViewConfig): ViewConfig {
+  return conColumnaUnaVez(conColumnaUnaVez(v, '__oc', OC_SUMADA, ['__produccion', 'hs_pipeline_stage']),
+    '__responsable', 'crm.view.order.responsable', ['__produccion', 'hs_pipeline_stage']);
+}
+// Una columna nueva de Pedidos se suma una sola vez en «Todos» y «Míos» de este navegador, después de la primera de
+// `despuesDe` que esté. Si después la quitan, no vuelve.
+function conColumnaUnaVez(v: ViewConfig, col: string, clave: string, despuesDe: string[]): ViewConfig {
   try {
-    if (localStorage.getItem(OC_SUMADA) || v.columns.includes('__oc')) return v;
-    localStorage.setItem(OC_SUMADA, '1');
+    if (localStorage.getItem(clave) || v.columns.includes(col)) return v;
+    localStorage.setItem(clave, '1');
   } catch { return v; }
   const columns = [...v.columns];
-  const i = Math.max(columns.indexOf('__produccion'), columns.indexOf('hs_pipeline_stage'));
-  columns.splice(i >= 0 ? i + 1 : columns.length, 0, '__oc');
+  const i = Math.max(-1, ...despuesDe.map((d) => columns.indexOf(d)));
+  columns.splice(i + 1, 0, col);
   return { ...v, columns };
 }
 // Las vendedoras que ya tenían sus columnas de Pedidos pasan una sola vez a las de su pantallazo: sin «PDV Finnegans» ni
@@ -301,7 +307,23 @@ function IndexFor({ type }: { type: ObjectType }) {
     return (viewGroups.length ? viewGroups : [[]]).map((g) => [...g, ...pipe]).filter((g) => g.length);
   }, [viewGroups, pipelineSel, type]);
   // Con «Todos los pipelines» la tabla muestra de qué pipeline es cada negocio.
-  const columns = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
+  // Pedidos con los productos abiertos (PedidosProductos.tsx): cada dato de un producto va en su columna (etapa, responsable
+  // y OC), así que esas columnas se ven siempre, aunque la vista guardada no las tenga (pedido de Rodrigo del 17/11/2026).
+  const productos = useProductosAbiertos();
+  const columns = useMemo(() => {
+    const base = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
+    if (type !== 'order' || mode !== 'table' || productos.cerrados) return base;
+    const cols = [...base];
+    const poner = (col: string, despuesDe: string[]) => {
+      if (cols.includes(col)) return;
+      const i = Math.max(-1, ...despuesDe.map((d) => cols.indexOf(d)));
+      cols.splice(i + 1, 0, col);
+    };
+    poner('hs_pipeline_stage', ['pdv_finnegans']);
+    poner('__responsable', ['__produccion', 'hs_pipeline_stage']);
+    poner('__oc', ['__responsable']);
+    return cols;
+  }, [type, pipelineSel, cfg.columns, mode, productos.cerrados]);
 
   type ListRes = { results: Array<CrmRecord & { company?: { id: number; name: string } | null }>; total: number };
   const listUrl = urlLista(type, dq, groups, cfg, pageSize, page * pageSize);
@@ -400,7 +422,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     setCfg((c) => ({ ...c, sort: prop, dir: c.sort === prop && c.dir === 'desc' ? 'asc' : 'desc' }));
   };
   const label = (col: string) => col === '__company' ? 'Empresa' : col === '__tags' ? 'Etiquetas' : col === '__unidad' ? 'Unidad de negocio' : col === '__produccion' ? 'Producción'
-    : col === '__cobro' ? 'Cobro y papeles' : col === '__oc' ? 'OC'
+    : col === '__cobro' ? 'Cobro y papeles' : col === '__oc' ? 'OC' : col === '__responsable' ? 'Responsable'
     : propOf(meta, type, col)?.label ?? col;
   const nFilters = cfg.groups.reduce((n, g) => n + g.length, 0);
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
@@ -411,7 +433,6 @@ function IndexFor({ type }: { type: ObjectType }) {
   // Pedidos: sus productos abajo y quién los tiene en Producción (PedidosProductos.tsx).
   const esPedidos = type === 'order' && mode === 'table';
   const { pedidos: prod, adjuntos } = useProduccionPedidos(esPedidos ? rows.map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
-  const productos = useProductosAbiertos();
 
   const resize = useColumnResize(cfg.widths, (widths) => setCfg((c) => ({ ...c, widths })));
   // Pedidos sin negocio, para control (un pedido va en un solo negocio): es un filtro común sobre «Negocios asociados», así
@@ -598,6 +619,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     : col === '__unidad' ? <UnidadCell key={col} type={type} record={r} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />
                     : col === '__produccion' ? <CeldaProduccion key={col} p={p} r={r} />
                     : col === '__oc' ? <CeldaOc key={col} p={p} />
+                    : col === '__responsable' ? <CeldaResponsable key={col} p={p} r={r} />
                     : col === '__cobro' ? <td key={col} className="ped-prod"><span className="ped-cobro"><Saldo r={r} corto />{adjuntos[r.id] && <Adjuntos r={{ ...r, adjuntos: adjuntos[r.id] } as CrmRecord} />}</span></td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
@@ -777,7 +799,7 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
     ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
     ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
     ...(type !== 'order' ? [{ name: '__unidad', label: 'Unidad de negocio' }] : []),
-    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (quién lo tiene y la entrega)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }, { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
+    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (lo que te toca, listos y la entrega)' }, { name: '__responsable', label: 'Responsable (quién lo tiene en Producción)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }, { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
     ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
   ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };

@@ -157,10 +157,13 @@ cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro
   producto muestra su fecha solo si es otra que la del pedido.
 - **Lo que le toca a ella**: en «$ Pendiente de Anticipo», «Te toca: el anticipo»; en «Pendiente Boceto Digital», «Te
   toca: el boceto».
-- **Lista**: el estado de cada producto va en la columna «Etapa del pedido» y quién lo tiene en la columna
-  «Producción» (si alguna no está en la tabla, al lado del nombre). La columna «Producción» del pedido junta lo que le
-  toca, quién lo tiene, cuántos productos están listos («1/3 listos») y la entrega. Se suma sola una vez, al lado de la
-  etapa, en «Todos» y «Míos» de cada navegador; en las vistas guardadas se agrega desde «Columnas».
+- **Lista**: cada dato en su columna (pedido de Rodrigo del 17/11/2026: «así no se entiende nada»): el estado de cada
+  producto en «Etapa del pedido», quién lo tiene en **«Responsable»**, su OC en **«OC»** y su fecha, si es otra que la del
+  pedido, en «Producción». La columna «Producción» del pedido junta lo que le toca a la vendedora, cuántos productos
+  están listos («1/3 listos») y la entrega. Con los productos abiertos, «Etapa del pedido», «Responsable» y «OC» se ven
+  siempre, aunque la vista guardada no las tenga, para que nada se amontone al lado del nombre del producto. «Producción»,
+  «Responsable» y «OC» se suman solas una vez en «Todos» y «Míos» de cada navegador; en las vistas guardadas se agregan
+  desde «Columnas».
 - **Tablero**, como el de Producción: cada tarjeta con sus productos adentro (hasta 4 y «+ N productos más»), con su
   estado y quién lo tiene; arriba, quién tiene el pedido, cuántos están listos, lo que le toca y, si Producción propuso
   otra fecha, «Nueva fecha mar 24/11 +4 d» (la pactada ya está en la tarjeta). Con los productos a la vista no van las

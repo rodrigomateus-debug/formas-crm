@@ -1220,11 +1220,7 @@ api.delete('/choferes/:id', async (c) => {
 
 // El registro existe y quien pide lo puede ver: pipelines por equipo y, en el perfil Ventas, que sea suyo, sin propietario
 // o asociado a lo suyo (alcance.ts).
-// Referidos (referidos.ts): la pantalla Referidos, la tarjeta de la ficha y la carga desde la ficha del cliente.
-api.get('/referidos', async (c) => {
-  const owner = Number(c.req.query('owner')) || undefined;
-  return c.json(await listarReferidos(c.env.DB, c.get('ctx').user, { owner }));
-});
+// Referidos (referidos.ts): la tarjeta de la ficha y la carga desde la ficha del cliente.
 
 api.get('/records/:type/:id/referidos', async (c) => {
   const type = assertType(c.req.param('type'));

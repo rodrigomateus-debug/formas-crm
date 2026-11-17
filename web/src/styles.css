@@ -420,7 +420,7 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .card .amount { font-weight: 600; color: var(--ui-ink); font-variant-numeric: tabular-nums; }
 .card .stale { color: var(--warn); }
 .card .next { display: flex; gap: 6px; align-items: center; font-size: 12px; border: 1px solid var(--ui-line); border-radius: var(--r-control); padding: 2px 8px; color: var(--ui-ink-2); }
-.card .next.none { border-color: transparent; background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.card .meta.falta { font-style: italic; opacity: .75; }
 .card .next.late { border-color: transparent; background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 .card .days { font-size: 11px; color: var(--text-3); background: var(--ui-surface-sunken); border-radius: var(--r-pill); padding: 1px 7px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card .card-actions { display: flex; gap: 2px; align-items: center; margin: 0 -4px -4px; }

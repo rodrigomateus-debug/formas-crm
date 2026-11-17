@@ -46,6 +46,7 @@ export interface Activity {
   id: number; type: 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp'; occurred_at: string; owner_id: number | null; subject: string; body: string;
   direction: string | null; status: string | null; outcome: string | null; due_at: string | null; completed_at: string | null; priority: string | null;
   task_type: string | null; meta: Record<string, any>; links: Array<{ id: number; type: ObjectType; name: string }>; source: string; created_by: number | null;
+  thread_id?: string | null; external_id?: string | null;
 }
 export interface Filter { prop: string; op: string; value?: unknown; values?: unknown[]; high?: unknown }
 

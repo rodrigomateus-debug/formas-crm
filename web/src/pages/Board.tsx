@@ -239,7 +239,8 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
   const late = next && Date.parse(next.at) < Date.now();
   const darwin = safeUrl(d.props.link_a_darwin);
   const owner = userName(meta, d.props.owner_id);
-  const with_ = [d.card?.contact?.name, d.card?.company?.name].filter(Boolean).join(' · ');
+  const contacto = d.card?.contact?.name;
+  const empresa = d.card?.company?.name;
   const act = (e: React.MouseEvent, t: Activity['type']) => { e.stopPropagation(); onOpen?.(d.id, t); };
   return (
     <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable
@@ -254,11 +255,15 @@ const DealCard = memo(function DealCard({ d, cardProps, on, dragging, sel, selec
         if (!v) return null;
         return <div key={k} className="meta"><span className={k === 'amount' ? 'amount num' : 'ellipsis'} title={propOf(meta, 'deal', k)?.label}>{k === 'closedate' ? `Cierre ${v}` : v}</span></div>;
       })}
-      {with_ && <div className="meta" title="Contacto y empresa"><Icon name="contact" size={13} /><span className="ellipsis">{with_}</span></div>}
-      <div className={`next${next ? '' : ' none'}${late ? ' late' : ''}`} title={next ? `Próxima ${ACTIVITY_LABEL[next.type as Activity['type']]?.toLowerCase() ?? 'actividad'}` : undefined}>
-        {next ? <><Icon name={next.type === 'meeting' ? 'meeting' : 'task'} size={13} /><span className="ellipsis grow">{next.subject || ACTIVITY_LABEL[next.type as Activity['type']]}</span><span className="num">{fmtDate(next.at)}</span></>
-          : 'Sin próximas actividades'}
-      </div>
+      {/* Con quién es: contacto y empresa, cada uno en su renglón y dicho si falta (pedido de Rodrigo del 17/11/2026). */}
+      <div className={`meta${contacto ? '' : ' falta'}`} title="Contacto asociado"><Icon name="contact" size={13} /><span className="ellipsis">{contacto || 'Sin contacto asociado'}</span></div>
+      <div className={`meta${empresa ? '' : ' falta'}`} title="Empresa asociada"><Icon name="company" size={13} /><span className="ellipsis">{empresa || 'Sin empresa asociada'}</span></div>
+      {/* La próxima actividad solo si hay una; si no, no se dice nada. */}
+      {next && (
+        <div className={`next${late ? ' late' : ''}`} title={`Próxima ${ACTIVITY_LABEL[next.type as Activity['type']]?.toLowerCase() ?? 'actividad'}`}>
+          <Icon name={next.type === 'meeting' ? 'meeting' : 'task'} size={13} /><span className="ellipsis grow">{next.subject || ACTIVITY_LABEL[next.type as Activity['type']]}</span><span className="num">{fmtDate(next.at)}</span>
+        </div>
+      )}
       <div className="meta">
         <UserAvatar id={d.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{owner || 'Sin propietario'}</span>

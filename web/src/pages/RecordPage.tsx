@@ -510,6 +510,16 @@ function Timeline({ type, record, associations, onChange }: { type: ObjectType; 
   );
 }
 
+// Acceso directo al mail en Gmail. Los sincronizados guardan el id del hilo y el buzón: se abre el hilo en esa cuenta.
+// Los que vinieron de HubSpot no tienen id de Gmail: se busca por el asunto.
+function gmailUrl(a: Activity): string | null {
+  const cuenta = a.meta?.mailbox ? `?authuser=${encodeURIComponent(a.meta.mailbox)}` : '';
+  const hilo = a.meta?.gmail_id ? a.thread_id || a.meta.gmail_id : null;
+  if (hilo) return `https://mail.google.com/mail/${cuenta}#all/${hilo}`;
+  const asunto = a.subject?.replace(/^\s*((re|fwd?|rv)\s*:\s*)+/i, '').trim();
+  return asunto ? `https://mail.google.com/mail/${cuenta}#search/${encodeURIComponent(`subject:"${asunto.replace(/"/g, '')}"`)}` : null;
+}
+
 function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: number; onChange: () => void }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -539,7 +549,10 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· <UserChip id={a.owner_id} size="xs" />{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
         <span className={`when${overdue ? ' overdue' : ''}`}>{a.type === 'task' ? `Vence ${fmtDate(a.due_at, true)}` : fmtDate(a.occurred_at, true)}</span>
         <button className="btn ghost sm" onClick={pin} title={a.meta?.pinned ? 'Desfijar' : 'Fijar arriba de todo'}>{a.meta?.pinned ? 'Desfijar' : 'Fijar'}</button>
-        <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>
+        {/* Los mails vienen de Gmail: no se editan acá, se abren en su hilo (pedido de Rodrigo del 17/11/2026). */}
+        {a.type === 'email'
+          ? gmailUrl(a) && <a className="btn ghost sm" href={gmailUrl(a)!} target="_blank" rel="noopener noreferrer" title={a.meta?.gmail_id ? 'Abrir el hilo en Gmail' : 'Buscar este mail en Gmail'}><Icon name="external" size={13} />Ver en Gmail</a>
+          : <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>}
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}

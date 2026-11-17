@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative } from '../lib';
-import { Modal, alEsc } from '../components';
+import { Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
@@ -151,7 +151,8 @@ function Agenda({ version, puede, onNuevo, onAbrir }: { version: number; puede: 
                     {p.encargos.map((e) => (
                       <button key={e.id} type="button" className="rc-p-enc" onClick={() => onAbrir(e.id)}>
                         <span className={`rc-estado ${ESTADO[e.estado].clase}`}>{ESTADO[e.estado].nombre}</span>
-                        <span>{resumen(e)}</span>{e.quien && <span className="muted"> · {e.quien.split(' ')[0]}</span>}
+                        <span>{resumen(e)}</span>
+                        <span className="rc-p-pidio"><QuienPidio id={e.user_id} name={e.quien} corto /></span>
                       </button>
                     ))}
                     {puede && !p.anonima && d.fecha >= datos.hoy && (
@@ -233,7 +234,7 @@ function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: nu
                 <div className="rc-enc-que">{resumen(e)}</div>
                 <div className="rc-enc-pie muted small">
                   {e.direccion && <span>{e.direccion}</span>}
-                  {todos && e.quien && <span>Pidió {e.quien}</span>}
+                  {e.quien && <span className="rc-enc-pidio">Pidió <QuienPidio id={e.user_id} name={e.quien} /></span>}
                   {e.motivo && <span className="rc-motivo">{e.motivo}</span>}
                   {e.hecho_chofer && e.estado === 'hecho' && <span>Lo hizo {e.hecho_chofer}</span>}
                   <span className="grow" />
@@ -474,7 +475,7 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
         {enc && (
           <div className="rc-estado-linea">
             <span className={`rc-estado ${ESTADO[enc.estado].clase}`}>{ESTADO[enc.estado].nombre}</span>
-            <span className="muted small">Lo pidió {enc.quien ?? 'alguien'} {fmtRelative(enc.created_at)}{enc.hecho_chofer ? ` · lo marcó ${enc.hecho_chofer}` : ''}{enc.motivo ? ` · ${enc.motivo}` : ''}{enc.chofer ? ` · va con ${enc.chofer}` : ''}</span>
+            <span className="muted small">Lo pidió {enc.quien ? <QuienPidio id={enc.user_id} name={enc.quien} /> : 'alguien'} {fmtRelative(enc.created_at)}{enc.hecho_chofer ? ` · lo marcó ${enc.hecho_chofer}` : ''}{enc.motivo ? ` · ${enc.motivo}` : ''}{enc.chofer ? ` · va con ${enc.chofer}` : ''}</span>
             {enc.origen === 'planilla' && <span className="cr-tag">De la planilla vieja</span>}
           </div>
         )}

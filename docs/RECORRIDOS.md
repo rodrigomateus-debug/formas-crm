@@ -91,9 +91,24 @@ cambia un encargo para hoy o para un día que ya tiene el recorrido armado, se l
 - **Destinos**: la base de destinos, con cuántos viajes hubo a cada uno; se agregan y se corrigen. Para los
   administradores, abajo: el número del remito de traslado y traer el historial de la planilla.
 
+## Quién lo pidió, con su foto
+
+Pedido de Rodrigo del 17/11/2026: en cada encargo se ve **la foto y el nombre de quien lo pidió** (la foto de su cuenta
+de Google; sin foto, sus iniciales). Antes era solo el nombre de pila, en texto.
+
+- **Próximos días**: debajo de lo que lleva o retira, en cada encargo de la parada.
+- **Encargos**: «Pidió …» con el nombre completo, también en «Los míos» (antes solo en «De todos»).
+- **El encargo abierto**: «Lo pidió … hace 2 horas».
+- **Cronograma, semana**: debajo del destino, en la tarjeta del carril «Encargos».
+- **Cronograma, ruta del día**: «Encargo de …» en la parada.
+
+Es el componente `QuienPidio` (`web/src/components.tsx`): toma el usuario de `meta.users`; los encargos de la planilla
+vieja que no tienen usuario muestran el nombre que traían, con sus iniciales. La app del chofer sigue con el nombre en
+texto («Lo pidió …»): no tiene la lista de usuarios.
+
 ## En el Cronograma y la app del chofer
 
-- **Semana**: un carril «Encargos» (verde) en cada día, con quién lo pidió, qué se deja y qué se retira. Como las demás
+- **Semana**: un carril «Encargos» (verde) en cada día, con quién lo pidió (foto y nombre), qué se deja y qué se retira. Como las demás
   tarjetas: se arrastra a otro día (o el ícono de calendario), se le elige el **chofer** (pasa toda la parada de ese lugar
   al recorrido de ese chofer) y se marca hecho; un clic lo abre. Cuenta en los pendientes del día y en la barra de semanas.
 - **Ruta del día**: el encargo va **en la parada del mismo lugar** si ese día ya se va ahí (el mismo destino de la

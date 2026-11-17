@@ -26,13 +26,16 @@ export function CeldaOc({ p }: { p?: ProduccionPedido }) {
 // Factura, remito, bocetos y conversación de cada pedido (los iconitos de la tarjeta del tablero, PropBoard.tsx).
 export interface AdjuntosPedido { facturas: number; remitos: number; bocetos: number; con_boceto: number; productos: number; mensajes?: number }
 const VACIO = { pedidos: {} as Record<number, ProduccionPedido>, adjuntos: {} as Record<number, AdjuntosPedido> };
+// La dirección de los productos de esos pedidos (también para traerlos antes de tiempo, en las otras pestañas de la lista).
+export const urlArticulos = (ids: number[], adjuntos = false) => `/pedidos/articulos?ids=${ids.join(',')}${adjuntos ? '&adjuntos=1' : ''}`;
 // Los productos de los pedidos de la página o del tablero (una consulta) y, en la lista, sus adjuntos. `version`: cambia
-// cuando se recarga.
+// cuando se recarga. Quedan en la memoria de la página, como las listas: al volver a Pedidos aparecen enseguida.
+// `listo`: lo que trae es de estos pedidos (si no, es lo de antes, esperando), para no dibujar la lista sin sus productos y
+// estirarla un instante después (el «titileo» al entrar a Pedidos).
 export function useProduccionPedidos(ids: number[], activo: boolean, version: unknown, adjuntos = false) {
-  const key = ids.join(',');
-  const r = useAsync(() => (activo && ids.length ? http<typeof VACIO>('GET', `/pedidos/articulos?ids=${key}${adjuntos ? '&adjuntos=1' : ''}`) : Promise.resolve(VACIO)),
-    [key, activo, version, adjuntos]);
-  return r.data ?? VACIO;
+  const url = activo && ids.length ? urlArticulos(ids, adjuntos) : undefined;
+  const r = useAsync(() => (url ? http<typeof VACIO>('GET', url) : Promise.resolve(VACIO)), [url, version], url);
+  return { ...(r.data ?? VACIO), listo: !url || r.fresh };
 }
 
 // Lo entregado de un producto según los remitos, en los pedidos con entregas a medias: «80 de 150 entregadas» (qué falta

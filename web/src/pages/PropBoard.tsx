@@ -5,7 +5,7 @@ import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAva
 import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
 import { Select } from '../Select';
 import { ChatChip } from './Conversacion';
-import { hayResumen, ProductosTarjeta, ResumenProduccion, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido } from './PedidosProductos';
+import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
 
 // amount: suma del monto de la columna (en pedidos, el total sin IVA); sin_monto: cuántas tarjetas no lo tienen.
 interface Column { value: string; label: string; total: number; amount: number; sin_monto: number; records: CrmRecord[] }
@@ -186,8 +186,9 @@ export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecy
 
 // Tablero de empresas, contactos o pedidos agrupado por una propiedad (etapa del ciclo de vida, etapa del pedido…).
 // Arrastrar una tarjeta a otra columna cambia esa propiedad, como en el tablero de negocios.
-export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias }: {
+export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCardProps, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias, productos: productosDeLaVista }: {
   vacias?: boolean; onVacias?: (v: boolean) => void;
+  productos?: ProductosAbiertos;   // pedidos: si los productos se ven lo decide la vista (ObjectIndex); sin esto, este navegador
   type: ObjectType; prop?: string; onProp: (p: string) => void; cardProps?: string[]; onCardProps: (p: string[]) => void; q: string; groups?: Filter[][];
   sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
   tools?: ReactNode; search: string; onSearch: (s: string) => void;
@@ -207,8 +208,15 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const acciones = useRef<Acciones>({});
   // Pedidos: los productos de cada tarjeta (una consulta para todo el tablero) y si se ven, como en el tablero de Producción.
   const esPedidos = type === 'order';
-  const prods = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data).pedidos;
-  const productos = useProductosAbiertos('crm.pedidos.tablero.productos');
+  const prodsRes = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data);
+  const prods = prodsRes.pedidos;
+  // La primera vez, las tarjetas de Pedidos aparecen junto con sus productos (si no, se estiran un instante después). Lo que
+  // se mueve o se carga de más después ya no espera: sigue lo que se veía.
+  const yaListo = useRef(false);
+  if ((cols.length || board.data?.columns.length === 0) && prodsRes.listo) yaListo.current = true;
+  const esperaProductos = esPedidos && !yaListo.current;
+  const productosDeAca = useProductosAbiertos(PREF_PRODUCTOS.board);
+  const productos = productosDeLaVista ?? productosDeAca;
   acciones.current = { onOpen, onSelect, setDragId, productos: productos.alternar };
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
@@ -343,8 +351,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           {conMonto && montoActivos != null && <><span className="sep">·</span>Total activos sin IVA <b className="num" title={fmtMoneyExact(montoActivos, 'ARS')}>{fmtMoney(montoActivos, 'ARS') || '$ 0'}</b></>}</span>
       </div>
       <div className={`board${boardStyle ? ' fill' : ''}${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
-        {!board.data && !board.error && <Cargando />}
-        {porArea ? segmentos.map((s) => (
+        {(!board.data || esperaProductos) && !board.error && <Cargando />}
+        {esperaProductos ? null : porArea ? segmentos.map((s) => (
           <section key={`${s.area ?? 'otras'}-${s.cols[0].value || 'vacio'}`} className={`col-group${s.area ? ` area-${s.area}` : ' sin-area'}`}
             aria-label={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>
             <div className="col-group-head" title={s.area ? `${AREAS_PEDIDO[s.area].label}: ${AREAS_PEDIDO[s.area].nota.toLowerCase()}` : undefined}>

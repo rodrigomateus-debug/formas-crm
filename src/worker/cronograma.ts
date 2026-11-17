@@ -1025,7 +1025,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
           movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.cantidad, hecho: m.hecho })),
           encargos: p.encargos.map((e) => ({ id: e.id, llevar: e.llevar, retirar: e.retirar, desde: nombreBase(e.desde, r.bases), hacia: nombreBase(e.hacia, r.bases),
-            horario: e.horario, contacto: e.contacto, notas: e.notas, urgente: e.urgente, quien: e.quien, estado: e.estado })),
+            horario: e.horario, contacto: e.contacto, notas: e.notas, urgente: e.urgente, quien: e.quien, quien_foto: e.quien_foto ?? null, estado: e.estado })),
         })),
       };
     }),
@@ -1112,21 +1112,23 @@ export interface EncargoDia {
   record_id: number | null; llevar: ItemEnc[]; retirar: ItemEnc[]; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
   notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
   origen: string; created_at: string;
+  quien_foto?: string | null;   // la foto de Google de quien lo pidió: para la app del chofer, que no tiene la lista de usuarios
   chofer?: string | null;   // en la semana: el chofer del recorrido en el que cae su parada
   parada?: string;          // en la semana: la parada en la que cae
   hora?: string | null;     // en la semana: la hora fijada a mano en esa parada
 }
 export interface EncargoFila {
-  id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; destino: string; direccion: string | null; lugar_id: number | null;
+  id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; quien_foto?: string | null; destino: string; direccion: string | null; lugar_id: number | null;
   company_id: number | null; record_id: number | null; llevar: string; retirar: string; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
   notas: string | null; urgente: number; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null; origen: string; created_at: string;
 }
-export const SELECT_ENC = 'SELECT e.*, COALESCE(u.name, e.pedido_por) AS quien FROM encargos e LEFT JOIN users u ON u.id = e.user_id';
+export const SELECT_ENC = 'SELECT e.*, COALESCE(u.name, e.pedido_por) AS quien, u.photo_url AS quien_foto FROM encargos e LEFT JOIN users u ON u.id = e.user_id';
 const itemsDe = (s: string): ItemEnc[] => (lista(s) as ItemEnc[]).filter((x) => x && typeof x.que === 'string');
 export const aEncargo = (r: EncargoFila): EncargoDia => ({
   id: r.id, fecha: r.fecha, user_id: r.user_id, quien: r.quien, destino: r.destino, direccion: r.direccion, lugar_id: r.lugar_id, company_id: r.company_id, record_id: r.record_id,
   llevar: itemsDe(r.llevar), retirar: itemsDe(r.retirar), desde: r.desde, hacia: r.hacia, horario: r.horario, contacto: r.contacto, notas: r.notas, urgente: !!r.urgente,
   estado: r.estado, motivo: r.motivo, remito: r.remito, hecho_chofer: r.hecho_chofer, hecho_por: r.hecho_por, origen: r.origen, created_at: r.created_at,
+  quien_foto: r.quien_foto ?? null,
 });
 // Los de esos días, sin los cancelados ni el historial de la planilla.
 export async function encargosEntre(db: D1Database, desde: string, hasta: string) {

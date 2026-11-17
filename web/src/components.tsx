@@ -44,6 +44,17 @@ export function UserChip({ id, name, empty = 'Sin asignar', size = 'sm' }: { id:
   return <span className="user-chip" title={n}><Avatar name={n} photo={u?.photo_url} size={size} /><span className="ellipsis">{n}</span></span>;
 }
 
+// Quien pidió un encargo (Recorridos, Cronograma y ruta del día; pedido de Rodrigo del 17/11/2026): su foto y su nombre.
+// `corto` deja el nombre de pila, para las tarjetas angostas. Los encargos de la planilla vieja pueden no tener usuario:
+// ahí va el nombre que traían, con sus iniciales. Sin nombre no se dibuja nada.
+export function QuienPidio({ id, name, corto }: { id: unknown; name?: string | null; corto?: boolean }) {
+  const { meta } = useMeta();
+  const u = userOf(meta, id);
+  const n = (u?.name ?? name ?? '').trim();
+  if (!n) return null;
+  return <span className="user-inline quien-pidio" title={`Lo pidió ${n}`}><Avatar name={n} photo={u?.photo_url} size="xs" />{corto ? n.split(' ')[0] : n}</span>;
+}
+
 // Contenido de un <option> de usuario en los desplegables (Select): la foto y el nombre. Va como fragmento para que el
 // buscador del desplegable siga encontrando por nombre.
 export const userOption = (u: User, extra = '') => <><Avatar name={u.name} photo={u.photo_url} size="xs" />{u.name}{extra}</>;

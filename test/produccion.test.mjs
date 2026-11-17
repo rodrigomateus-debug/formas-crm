@@ -8,7 +8,8 @@ const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
 const PDV = String(40000 + Math.floor(Math.random() * 20000));
 const PDV_C = String(Number(PDV) + 1);   // de Corporate: se ve, pero se sigue trabajando en ClickUp
-const PDV_Z = String(Number(PDV) + 2);   // de Formas Shop, con artículos sin proveedor: sale del SKU
+const PDV_Z = String(Number(PDV) + 2);
+const PDV_R = String(Number(PDV) + 3);   // de Formas Shop: sus renglones de Finnegans se atan a los artículos por el nombre   // de Formas Shop, con artículos sin proveedor: sale del SKU
 let asUser = null;
 async function api(method, path, body) {
   const res = await fetch(`${BASE}/api${path}`, {
@@ -89,7 +90,13 @@ function pdvTask(id, npdv, unidad, arts) {
     subtasks,
   };
 }
-const PDVS = () => [pdvTask(`pa${RUN}`, PDV, 'FORMAS SHOP', ARTS.shop), pdvTask(`pc${RUN}`, PDV_C, 'CORPORATE', ARTS.corp), pdvTask(`pz${RUN}`, PDV_Z, 'FORMAS SHOP', ARTS.sku)];
+// El PDV de los renglones (aviso de Rodrigo del 17/11/2026, PDV 31544): sus artículos llegan sin la descripción (sin el
+// «Código:») y el pedido de Finnegans trae los renglones sin descripción; tienen la misma cantidad.
+const ARTS_R = [{ nombre: `Gorro Sidney ${RUN} - Naranja`, codigo: `GOR_R${RUN}`, cantidad: 50, status: 'en el impresor', updated: 0 },
+  { nombre: `Mochila Lisa ${RUN} - Azul Francia`, codigo: `MOC_R${RUN}`, cantidad: 50, status: 'en el impresor', updated: 0 }];
+const sinDescripcion = (t) => ({ ...t, subtasks: t.subtasks.map(({ text_content: _t, ...s }) => s) });
+const PDVS = () => [pdvTask(`pa${RUN}`, PDV, 'FORMAS SHOP', ARTS.shop), pdvTask(`pc${RUN}`, PDV_C, 'CORPORATE', ARTS.corp), pdvTask(`pz${RUN}`, PDV_Z, 'FORMAS SHOP', ARTS.sku),
+  sinDescripcion(pdvTask(`pr${RUN}`, PDV_R, 'FORMAS SHOP', ARTS_R))];
 
 let server;
 before(async () => {
@@ -129,7 +136,13 @@ before(async () => {
       }
       // Finnegans: el pedido sin renglones, así los productos salen de los artículos de ClickUp.
       if (p === '/fin/oauth/token') { res.setHeader('content-type', 'application/json'); return res.end('"token-de-prueba"'); }
+      if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_R.padStart(8, '0')}`) return send({ Cliente: 'C1', MonedaCodigo: 'PES', Items: [
+        { ProductoCodigo: `MOC_R${RUN}`, Cantidad: 50, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '' },
+        { ProductoCodigo: `GOR_R${RUN}`, Cantidad: 50, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '' },
+      ] });
       if (p.startsWith('/fin/pedidoVenta/')) return send({ Items: [] });
+      if (p === `/fin/producto/GOR_R${RUN}`) return send({ Nombre: `Gorro Sidney ${RUN} - Naranja` });
+      if (p === `/fin/producto/MOC_R${RUN}`) return send({ Nombre: `Mochila Lisa ${RUN} - Azul Francia` });
       // La ficha del Necessaire tiene foto: es la que se ve en el pedido y en Producción.
       if (p === `/fin/producto/NEC_${RUN}`) return send({ Nombre: 'Necessaire', ProductoImagen: FOTO_NEC });
       if (p.startsWith('/fin/producto/')) return send({ Nombre: 'Producto' });
@@ -417,6 +430,20 @@ test('pedidos: cada producto con su estado simplificado, quién lo tiene en Prod
     asUser = null;
     await api('PATCH', `/records/order/${pdv.record_id}`, { props: { owner_id: antes } });
   }
+});
+
+// Aviso de Rodrigo del 17/11/2026 (PDV 31544): los productos del pedido no se ataban a sus artículos de ClickUp cuando el
+// renglón de Finnegans viene sin descripción y la consulta liviana de ClickUp no trae el «Código:». Sin eso no salían la OC,
+// el costo del logo ni el proveedor por el SKU. Ahora se atan por el nombre de la ficha del producto.
+test('productos: los renglones de Finnegans sin descripción se atan a su artículo por el nombre de la ficha', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const pdv = pdvDe(await vista(), PDV_R);
+  assert.ok(pdv?.record_id, 'el PDV con su pedido');
+  const prods = (await api('GET', `/records/order/${pdv.record_id}/products?refresh=1`)).data;
+  const tarea = (code) => prods.items.find((i) => i.code === code)?.clickup_task;
+  assert.deepEqual([tarea(`GOR_R${RUN}`), tarea(`MOC_R${RUN}`)], [`pr${RUN}-a0`, `pr${RUN}-a1`], 'cada renglón con su artículo, por el nombre (no por el orden ni la cantidad)');
+  assert.ok(prods.items.every((i) => i.status === 'en el impresor'), 'cada producto con su estado de producción');
 });
 
 test('producción: el proveedor que falta sale del SKU y se escribe en ClickUp', async (t) => {

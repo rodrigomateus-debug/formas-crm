@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
-import { Avatar, EditarEnLinea, Modal, alEsc } from '../components';
+import { Avatar, EditarEnLinea, Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -478,8 +478,9 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, onAbrir, onChofer, 
       onDragStart={(ev) => { ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', `enc:${e.id}`); } catch { /* no hace falta */ } onArrastrar(true); ev.currentTarget.classList.add('arrastrando'); }}
       onDragEnd={(ev) => { ev.currentTarget.classList.remove('arrastrando'); onArrastrar(false); }}
       onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button, a, .popover, .select-pop, [role="dialog"]')) onAbrir(); }}>
-      <div className="cr-t-rol"><Icon name="route" size={11} />Encargo{e.quien ? ` · ${e.quien.split(' ')[0]}` : ''}</div>
+      <div className="cr-t-rol"><Icon name="route" size={11} />Encargo</div>
       <div className="cr-t-quien"><span>{lindo(e.destino)}</span></div>
+      <div className="cr-t-pidio"><QuienPidio id={e.user_id} name={e.quien} corto /></div>
       {lineas.length > 0 && (
         <div className="cr-t-prods">
           {lineas.map(([que, i], k) => <div key={k}><b>{que}</b><span>{itemTexto(i)}</span></div>)}

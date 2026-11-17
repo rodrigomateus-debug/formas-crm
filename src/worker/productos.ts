@@ -60,30 +60,72 @@ async function refresh(env: Env, recordId: number, pedido: string | null, taskId
   if (taskId && env.CLICKUP_TOKEN && items.length) {
     try { arts = await articulosLivianos(env, taskId, b); } catch (e) { if (e instanceof OutOfBudget) throw e; }
   }
-  const norm = (s: unknown) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-  const usados = new Set<string>();
-  const articuloDe = (code: string | undefined, desc: string | undefined) => {
-    const c = norm(code), d = norm(desc);
-    const a = arts.find((x) => !usados.has(x.task_id) && c && norm(x.code) === c)
-      ?? arts.find((x) => !usados.has(x.task_id) && c && norm(x.name).includes(c))
-      ?? arts.find((x) => !usados.has(x.task_id) && d && (norm(x.name).includes(d) || d.includes(norm(x.name))))
-      ?? (arts.length === 1 && items.length === 1 ? arts[0] : undefined);
-    if (a) usados.add(a.task_id);
-    return a;
-  };
+  // Las fichas antes que los renglones: el nombre del producto sirve para encontrar su artículo.
+  await fichas(env, token, items.map((it) => it.ProductoCodigo), b);
+  const asignados = await articulosDeRenglones(db, items.map((it) => ({ code: it.ProductoCodigo, desc: it.Descripcion, cantidad: it.Cantidad })), arts, taskId);
   await db.batch([
     db.prepare('DELETE FROM line_items WHERE record_id = ?').bind(recordId),
     ...items.map((it, i) => {
       // Los dos descuentos de Finnegans van uno sobre otro.
       const discount = 1 - (1 - (it.Descuento1 ?? 0) / 100) * (1 - (it.Descuento2 ?? 0) / 100);
-      const art = articuloDe(it.ProductoCodigo, it.Descripcion);
+      const art = asignados[i];
       return db.prepare(`INSERT INTO line_items (record_id, position, code, description, quantity, unit_price, discount, tax_included, currency, status, clickup_task)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(recordId, i, it.ProductoCodigo ?? null, it.Descripcion?.trim() || null, it.Cantidad ?? null,
         it.Precio ?? null, Math.round(discount * 10000) / 100, it.IncluyeImpuesto ? 1 : 0, currency, art?.status || null, art?.task_id ?? null);
     }),
   ]);
-  await fichas(env, token, items.map((it) => it.ProductoCodigo), b);
   return items.length ? 'finnegans' : null;
+}
+
+// El artículo de ClickUp de cada renglón del pedido de Finnegans: con él cada producto muestra su estado y quién lo tiene,
+// su boceto va a esa subtarea, y Producción sabe su SKU (costo del logo, proveedor por el SKU, OC). Solo se ata cuando no
+// hay dudas (si dos artículos sirven, no se ata), de lo más seguro a lo menos:
+//   1. el código (el «Código:» del artículo; la consulta liviana de ClickUp no trae la descripción, así que también el que
+//      ya guardó Producción, tabla `produccion`);
+//   2. el nombre: la descripción del renglón o el nombre de la ficha del producto contra el nombre del artículo (aviso de
+//      Rodrigo del 17/11/2026: en los pedidos de Formas Shop el renglón viene sin descripción y no se ataba nada, así que
+//      tampoco salían la OC, el costo del logo ni el proveedor);
+//   3. la cantidad, si un solo artículo de los que quedan tiene esa cantidad;
+//   4. si queda un renglón y un artículo, esos.
+async function articulosDeRenglones(db: D1Database, renglones: Array<{ code?: string; desc?: string; cantidad?: number }>, arts0: Articulo[], taskId: string | null) {
+  const out: Array<Articulo | undefined> = renglones.map(() => undefined);
+  if (!arts0.length) return out;
+  const norm = (s: unknown) => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const codes = [...new Set(renglones.map((r) => r.code).filter((c): c is string => !!c))];
+  const [prod, fichas] = await db.batch([
+    db.prepare('SELECT task_id, codigo, cantidad, nombre FROM produccion WHERE es_pdv = 0 AND pdv_task = ?').bind(taskId ?? ''),
+    db.prepare('SELECT code, name FROM products WHERE code IN (SELECT value FROM json_each(?))').bind(JSON.stringify(codes)),
+  ]);
+  const guardado = new Map((prod.results as Array<{ task_id: string; codigo: string | null; cantidad: number | null; nombre: string }>).map((r) => [r.task_id, r]));
+  const nombreFicha = new Map((fichas.results as Array<{ code: string; name: string | null }>).map((r) => [r.code, r.name]));
+  // Cada artículo con su código y su cantidad, de la consulta o de lo que guardó Producción. Sin anulados.
+  const arts = arts0.filter((a) => !/anulad/i.test(a.status)).map((a) => {
+    const g = guardado.get(a.task_id);
+    return { a, code: norm(a.code || g?.codigo), nombre: norm(a.name), cantidad: a.quantity ?? g?.cantidad ?? null };
+  });
+  type Art = (typeof arts)[number];
+  const libres = () => arts.filter((x) => !out.includes(x.a));
+  const parecido = (n: string, m: string) => !!n && !!m && (n === m || (Math.min(n.length, m.length) >= 10 && (n.includes(m) || m.includes(n))));
+  const pasos: Array<(r: (typeof renglones)[number], x: Art) => boolean> = [
+    (r, x) => !!r.code && !!x.code && x.code === norm(r.code),
+    (r, x) => !!r.code && norm(r.code).length >= 6 && x.nombre.includes(norm(r.code)),
+    (r, x) => parecido(norm(r.desc), x.nombre),
+    (r, x) => parecido(norm(r.code ? nombreFicha.get(r.code) : null), x.nombre),
+    (r, x) => !!r.cantidad && x.cantidad === r.cantidad,
+  ];
+  // En cada paso se ata un renglón a un artículo solo si es su único candidato y el artículo no le sirve a otro renglón.
+  for (const paso of pasos) {
+    const pendientes = renglones.map((r, i) => ({ r, i })).filter(({ i }) => !out[i]);
+    const candidatos = pendientes.map(({ r, i }) => ({ i, xs: libres().filter((x) => paso(r, x)) }));
+    for (const { i, xs } of candidatos) {
+      if (xs.length !== 1) continue;
+      if (candidatos.filter((c) => c.xs.includes(xs[0])).length !== 1) continue;
+      out[i] = xs[0].a;
+    }
+  }
+  const sinAtar = renglones.map((_, i) => i).filter((i) => !out[i]);
+  if (sinAtar.length === 1 && libres().length === 1) out[sinAtar[0]] = libres()[0].a;
+  return out;
 }
 
 // La ficha de cada producto (nombre, descripción y foto), si no se leyó en los últimos 30 días.

@@ -101,10 +101,12 @@ de Google; sin foto, sus iniciales). Antes era solo el nombre de pila, en texto.
 - **El encargo abierto**: «Lo pidió … hace 2 horas».
 - **Cronograma, semana**: debajo del destino, en la tarjeta del carril «Encargos».
 - **Cronograma, ruta del día**: «Encargo de …» en la parada.
+- **App del chofer**: «Lo pidió …» en la parada, con la foto y el nombre de pila.
 
-Es el componente `QuienPidio` (`web/src/components.tsx`): toma el usuario de `meta.users`; los encargos de la planilla
-vieja que no tienen usuario muestran el nombre que traían, con sus iniciales. La app del chofer sigue con el nombre en
-texto («Lo pidió …»): no tiene la lista de usuarios.
+En el Hub es el componente `QuienPidio` (`web/src/components.tsx`): toma el usuario de `meta.users`; los encargos de la
+planilla vieja que no tienen usuario muestran el nombre que traían, con sus iniciales. La app del chofer no tiene la
+lista de usuarios: el servidor le manda la foto en cada encargo (`quien_foto`, de `SELECT_ENC` en `cronograma.ts`). Si
+la foto no carga (sin señal), quedan las iniciales.
 
 ## En el Cronograma y la app del chofer
 

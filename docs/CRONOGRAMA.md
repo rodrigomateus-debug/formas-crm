@@ -62,7 +62,7 @@ parada del mismo lugar en la ruta del día.
   de cada día. Se arrastran a otro día, se les elige el chofer (pasa toda la parada de ese lugar) y se marcan hechos como
   las demás tarjetas; un clic abre el encargo. A quien lo pidió le llega un aviso si se lo cambian.
 - **Remito de traslado de un egreso** (pedido de Rodrigo del 16/11/2026): en la tarjeta de un egreso, el ícono de la
-  impresora (y «Remito de traslado» en su parada de la Ruta del día) arma el remito con todo lo que va a ese impresor ese
+  impresora (y «Remito» en su parada de la Ruta del día, que después muestra su número) arma el remito con todo lo que va a ese impresor ese
   día, de todos sus PDV, como el de los encargos de [Recorridos](RECORRIDOS.md): una hoja A4 por remito, con el número que
   sigue el de la planilla. Se numera la primera vez y, si cambian los egresos, se vuelve a armar con el mismo número
   (`POST /api/cronograma/remito-traslado` con `{ fecha, clave }`, tabla `remitos_traslado`).
@@ -87,10 +87,18 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   se le suma una parada o se ubica una dirección (la barra dice «Se ordena solo por el recorrido más corto»). Arrastrar
   una parada o moverla con las flechas lo deja ordenado a mano: desde ahí queda en el orden que se le dio, lo que se le
   suma desde una tarjeta entra donde menos lo alarga, y aparece «Ordenar por el recorrido más corto» (tiene en cuenta el
-  horario de recepción de cada lugar).
+  horario de recepción de cada lugar) y lo deja otra vez automático. La primera vez que se mueve una parada, un aviso
+  dice que el recorrido quedó ordenado a mano.
 - **Hora de llegada a cada parada, por ahora sin el tránsito del momento**: el tiempo de cada tramo con la calle libre
   por un factor según la hora, como un día de tránsito moderado (`web/src/ruta.ts`: 1,6 de 7 a 10, 1,35 de 10 a 12,
-  1,4 de 12 a 14, 1,3 de 14 a 16:30, 1,65 de 16:30 a 19:30). Más el tiempo en cada parada (8 minutos y 4 por movimiento).
+  1,4 de 12 a 14, 1,3 de 14 a 16:30, 1,65 de 16:30 a 19:30). Un tramo que cruza de una franja a otra va con el factor de
+  cada parte (`minutosDeViaje`). Más el tiempo en cada parada (8 minutos y 4 por movimiento). El tramo dice «tránsito
+  habitual fluido / moderado / pesado» en grises: el rojo queda para llegar tarde.
+- **Direcciones sin ubicar**: el tramo que llega a esa parada (o la vuelta, si no se ubicó dónde termina) dice «Sin
+  calcular: falta ubicar *tal lugar*», en ámbar, con el botón para arreglarlo («Ubicarla en el mapa», «Cargar la
+  dirección» o «Cambiar el lugar»). Las horas que vienen después llevan «≈»: no cuentan ese viaje. El resto del recorrido
+  igual se pide por calles con las paradas que sí están ubicadas. Mientras el servidor sigue buscando, la parada dice
+  «Buscando en el mapa…»; si tarda demasiado, «Volver a fijarse».
 - **Horario de recepción** («9 a 13», propiedad nueva de la empresa): si el orden deja una parada fuera de horario,
   queda en rojo. El horario escrito en un encargo o en la libreta también cuenta, aunque esté escrito como «antes de las
   14 hs», «después de las 15», «luego del mediodía» o «a las 12».
@@ -99,20 +107,30 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   para cumplirla junto con las demás horas fijadas y los horarios de recepción (aunque estuviera ordenado a mano): llegar
   tarde a una hora fijada pesa mucho más que llegar tarde a un horario de recepción, así que el orden más corto la cumple
   aunque el recorrido quede más largo. Si además el lugar tiene horario de recepción, vale lo que cumpla los dos. La parada
-  dice «A las 12:00» (en rojo si igual llega tarde); si llega antes, la hora de la parada es la de cuando se la atiende,
-  con «llega 9:36» abajo. Se ve también en la tarjeta de la semana y en la app del chofer. «Sacar la hora» la quita. Es de
+  dice «A las 12:00» (en rojo si igual llega tarde); si llega antes, espera hasta las 12:00 (no hasta las 11:45, aunque
+  llegar a esa hora no sea tarde) y la hora de la parada es la de cuando se la atiende, con «llega 11:36 y espera» abajo.
+  Si el recorrido estaba ordenado a mano, el panel avisa que al guardar se pierde ese orden. Se ve también en la tarjeta de la semana y en la app del chofer. «Sacar la hora» la quita. Es de
   esa parada ese día: tabla `cronograma_horas` (migración `0065_horas_pactadas.sql`), `PUT /api/cronograma/hora`
   (`{ fecha, clave, modo: 'a_las' | 'antes' | 'desde', hora: '12:00' }`, sin `modo` la saca). Prueba: `test/horas.test.mjs`.
 - **Mapa**: OpenStreetMap. El dibujo y la distancia por calles salen del servicio público de OSRM; si no contesta, el
   recorrido se ve en línea recta y los tiempos son estimados (dice cuál de los dos es). Los números del mapa no se arrastran. Para corregir un punto mal
-  ubicado: «Corregir ubicación» en su parada, se arrastra solo ese número y se guarda con «Guardar ubicación» (vale para
-  esa dirección en todas las rutas). «Volver a buscar en el mapa» saca la corrección.
+  ubicado: «Corregir el punto en el mapa» en el menú ⋯ de su parada, se arrastra solo ese número y se guarda con «Guardar
+  ubicación» (vale para esa dirección en todas las rutas). Una que no se encontró se ubica igual: su número aparece en
+  el centro del mapa para llevarlo a su lugar. «Volver a buscar en el mapa» saca la corrección. Un clic en un número del
+  mapa lleva a su parada en la lista.
+- **La tarjeta de cada parada**: el número (y su manija) se arrastra para cambiar el orden; la dirección, lo que se
+  lleva o se trae (primero qué y cuánto, abajo el PDV) y la hora. Debajo, una fila con los estados (hora fijada, sin
+  ubicar, foto del remito) y otra con las acciones: **Marcar hecha** (cambia ClickUp; el aviso trae «Deshacer»),
+  **Remito** en los egresos, **Fijar hora**, el menú **⋯** (corregir la dirección, diciendo si se cambia en el pedido o
+  en la ficha de la empresa; corregir el punto en el mapa; mandar por expreso; cómo llegar; pasar a otro recorrido) y
+  las flechas. Se abre un panel por vez. «Pasar a otro recorrido» entra donde menos lo alarga si ese recorrido está
+  ordenado a mano (la misma cuenta que el servidor, `dondeEntra` en `ruta.ts`) y el aviso trae «Deshacer».
 
 ### Choferes, expresos y de dónde sale
 
 - **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido (y el de cada tarjeta de la semana) tiene
   los choferes, los expresos (transportes de terceros) y «+ Agregar chofer o expreso…». Todos los desplegables del
-  cronograma (Chofer, Sale de, Pasar a…, Expreso) son el del Hub (`web/src/Select.tsx`), no la lista del navegador. Del expreso se guarda además su dirección, que es a donde se le lleva la
+  cronograma (Chofer, Sale de, Expreso) son el del Hub (`web/src/Select.tsx`), no la lista del navegador. Del expreso se guarda además su dirección, que es a donde se le lleva la
   mercadería (se puede buscar en la libreta). El link de la app del chofer sigue siendo aparte (Choferes en la barra lateral de
   Logística, o Entregas → Choferes, con el mismo nombre): un chofer puede estar en la lista sin link.
 - **Una entrega por expreso.** En la parada de una entrega, «Mandar por expreso»: se elige el expreso y, cuando se

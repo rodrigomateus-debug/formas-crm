@@ -637,6 +637,8 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
 .toast .toast-ic { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-positive); color: var(--toast-bg); }
 .toast.err .toast-ic { background: var(--ui-negative); }
 .toast .toast-msg { padding-top: 1px; }
+.toast .toast-accion { flex: none; margin: -4px -6px -4px 4px; padding: 4px 8px; min-height: 28px; border: 0; border-radius: var(--r-control); background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.toast .toast-accion:hover { background: rgba(255, 255, 255, .12); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px) scale(.98); } to { opacity: 1; transform: translate(-50%, 0); } }
 .gsearch { position: relative; width: min(520px, 100%); }
 .gsearch .popover { left: 0; right: 0; top: 40px; }
@@ -1634,22 +1636,36 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-kpis b { font-size: 20px; font-weight: 600; letter-spacing: -.01em; } .cr-kpis small { font-size: 12px; font-weight: 500; color: var(--text-3); margin-left: 4px; }
 .cr-ruta-cuerpo { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: 14px; align-items: start; }
 .cr-paradas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; min-width: 0; }
-.cr-tramo { display: flex; align-items: center; gap: 10px; padding: 5px 0 5px 23px; font-size: 11.5px; color: var(--text-3); --tc: var(--ui-positive); }
-.cr-tramo.moderado { --tc: var(--ui-warning); } .cr-tramo.pesado { --tc: var(--ui-negative); }
-.cr-tramo::before { content: ''; width: 3px; height: 20px; border-radius: 2px; background: var(--tc); }
-.cr-tramo b { font-weight: 600; color: var(--ui-ink-2); }
+/* El tramo entre paradas: una línea que une los números. El tránsito habitual va en grises (más oscuro, más pesado): no es
+   un problema. Sin calcular es un aviso, en ámbar, con lo que falta ubicar. */
+.cr-tramo { display: flex; align-items: center; gap: 10px; padding: 4px 0 4px 25px; font-size: 11.5px; color: var(--text-3); --tc: var(--ui-line-strong); }
+.cr-tramo.moderado { --tc: var(--ui-ink-3); } .cr-tramo.pesado { --tc: var(--ui-ink-2); }
+.cr-tramo::before { content: ''; flex: none; width: 3px; height: 20px; border-radius: 2px; background: var(--tc); }
+.cr-tramo.sin { --tc: var(--ui-warning); color: var(--ui-warning-ink); padding-left: 25px; gap: 6px; }
+.cr-tramo.sin::before { background: repeating-linear-gradient(to bottom, var(--tc) 0 4px, transparent 4px 7px); margin-right: 4px; }
+.cr-tramo.sin svg { flex: none; }
+.cr-tramo.sin b { font-weight: 600; }
+.cr-tramo .cr-link { font-size: inherit; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .cr-parada { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); padding: 10px 12px; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 4px 10px; transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
-.cr-parada[draggable="true"] { cursor: grab; }
+/* Se arrastra desde el número y su manija; el resto de la tarjeta deja seleccionar texto. */
+.cr-n-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.cr-n-col.asa { cursor: grab; }
+.cr-asa { width: 10px; height: 14px; opacity: .45; background: radial-gradient(circle, var(--ui-ink-2) 1.2px, transparent 1.6px) 0 0 / 5px 4.7px; }
+.cr-parada:hover .cr-asa, .cr-n-col.asa:focus-visible .cr-asa { opacity: .8; }
 .cr-parada.caliente { border-color: var(--ui-line-strong); box-shadow: 0 6px 16px -10px rgba(18, 20, 58, .35); }
 .cr-parada.sobre { box-shadow: 0 -3px 0 0 var(--accent-ink); }
-.cr-parada.hecha { opacity: .65; }
+.cr-parada.sobre.abajo { box-shadow: 0 3px 0 0 var(--accent-ink); }
+/* Hecha: se apaga lo que ya pasó, no los avisos (la foto del remito que falta) ni las acciones. */
+.cr-parada.hecha > :is(.cr-p-quien, .cr-eta, .cr-p-movs, .cr-libreta) { opacity: .6; }
 .cr-parada.base { background: none; border-color: transparent; padding: 6px 12px; cursor: default; }
 .cr-n { width: 26px; height: 26px; border-radius: 50%; background: var(--c, var(--accent)); color: #fff; font-weight: 600; font-size: 12px; display: grid; place-items: center; }
 .cr-n.base { background: var(--ui-ink); color: var(--ui-canvas); border-radius: 7px; }
 .cr-parada.hecha .cr-n { background: var(--ok-fill); color: var(--on-ok-fill); }
+.cr-origen { color: var(--ui-warning-ink); }
 .cr-p-nombre { font-weight: 600; font-size: 13.5px; line-height: 1.3; overflow-wrap: anywhere; }
 .cr-p-sub { font-size: 11.5px; color: var(--text-3); overflow-wrap: anywhere; }
-.cr-eta { text-align: right; white-space: nowrap; } .cr-eta b { display: block; font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; } .cr-eta span { font-size: 11px; color: var(--text-3); }
+.cr-eta { text-align: right; white-space: nowrap; }
+.cr-p-movs, .cr-p-sub { -webkit-user-select: text; user-select: text; } .cr-eta b { display: block; font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; } .cr-eta span { font-size: 11px; color: var(--text-3); }
 .cr-eta.tarde b { color: var(--bad); }
 .cr-p-movs, .cr-llegan { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--ui-ink-2); }
 .cr-p-movs { grid-column: 2 / 4; margin-top: 4px; }
@@ -1659,6 +1675,9 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-p-movs b, .cr-llegan b { font-weight: 600; color: var(--k); margin-right: 5px; }
 .cr-p-movs .ok > span, .cr-llegan .ok > span { text-decoration: line-through; opacity: .7; }
 .cr-p-movs .cr-link { font-size: inherit; margin-right: 3px; }
+.cr-p-movs .cr-que { color: var(--ui-ink); font-weight: 500; }
+.cr-p-movs .cr-pdv { display: block; color: var(--text-3); }
+.cr-p-movs .cr-pdv .cr-link { font-weight: 500; }
 .cr-sugerencia { grid-column: 2 / 4; display: flex; gap: 8px; margin-top: 6px; padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 12px; line-height: 1.45; }
 .cr-sugerencia svg { flex: none; margin-top: 2px; } .cr-sugerencia .btn { white-space: normal; height: auto; min-height: var(--control-h-sm); text-align: left; padding: 4px 10px; }
 .cr-libreta { grid-column: 2 / 4; display: flex; flex-direction: column; gap: 2px; margin-top: 4px; padding: 6px 9px; border-radius: var(--r-control); background: var(--ui-surface-sunken); font-size: 11.5px; color: var(--ui-ink-2); overflow-wrap: anywhere; }
@@ -1679,14 +1698,35 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .cr-visita { grid-column: 2 / 4; display: flex; gap: 8px; align-items: flex-start; margin-top: 6px; padding: 7px 10px; border-radius: var(--r-control); font-size: 12px; background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 .cr-visita.salteada { background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
 .cr-visita svg { flex: none; margin-top: 1px; }
-.cr-p-pie { grid-column: 2 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; }
+/* Debajo: primero los estados (fila propia, para que las acciones no cambien de lugar) y después las acciones. */
+.cr-p-estado { grid-column: 2 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 6px; }
+.cr-p-acciones { grid-column: 2 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ui-line); }
+.cr-p-acciones .btn.sm { padding: 0 9px; }
+.cr-p-acciones .btn.ghost { color: var(--accent-ink); }
+.cr-p-acciones .btn.ghost.on { background: var(--accent-soft); }
+.cr-hecho { color: var(--ui-ink-2); }
+.cr-hecho.on { background: var(--ok-fill); border-color: var(--ok-fill); color: var(--on-ok-fill); }
+.cr-mover { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.cr-menu { position: relative; display: inline-flex; }
+.cr-menu-btn { width: 30px; height: 30px; display: inline-grid; place-items: center; padding: 0; border: 1px solid var(--ui-line); border-radius: var(--r-control); background: var(--ui-surface); color: var(--ui-ink-2); cursor: pointer; }
+.cr-menu-btn:hover, .cr-menu-btn.on { background: var(--ui-surface-sunken); color: var(--accent-ink); }
+.cr-menu-pop .opt { width: 100%; border: 0; background: none; font: inherit; font-size: 13px; color: inherit; text-align: left; align-items: flex-start; }
+.cr-menu-pop .opt svg { flex: none; margin-top: 2px; color: var(--ui-ink-2); }
+.cr-menu-pop .opt:focus-visible { background: var(--ui-surface-sunken); outline: none; }
+.cr-menu-pop .opt small { display: block; font-size: 11.5px; color: var(--text-3); }
+.cr-ojo { display: flex; gap: 6px; align-items: flex-start; color: var(--ui-warning-ink); } .cr-ojo svg { flex: none; margin-top: 2px; }
 .input.select-like.cr-pasar { width: auto; height: 26px; padding: 0 24px 0 9px; font-size: 11.5px; border-color: var(--ui-line); }
 .input.select-like.cr-pasar.placeholder { color: var(--ui-ink-2); }
 /* Con la lista abierta, una parada hecha no queda transparente: si no, la lista quedaría debajo del mapa. */
 .cr-parada.hecha:has(.select-pop) { opacity: 1; }
 .cr-flechas { display: inline-flex; gap: 2px; }
-.cr-flechas button { width: 26px; height: 26px; border-radius: var(--r-control); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-2); padding: 0; cursor: pointer; font: inherit; }
-.cr-flechas button:disabled { opacity: .3; cursor: default; }
+.cr-flechas button { width: 30px; height: 30px; border-radius: var(--r-control); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink-2); padding: 0; cursor: pointer; font: inherit; }
+.cr-flechas button:disabled { opacity: .45; cursor: default; background: none; }
+/* En pantallas táctiles, todo lo que se toca de la tarjeta mide por lo menos 40px. */
+@media (pointer: coarse) {
+  .cr-p-acciones .btn.sm, .cr-menu-btn, .cr-flechas button { min-height: 40px; height: 40px; }
+  .cr-menu-btn, .cr-flechas button { width: 40px; }
+}
 .cr-editar { grid-column: 2 / 4; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--ui-line); }
 .cr-editar label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--text-3); }
 .cr-ruta-lado { display: flex; flex-direction: column; gap: 14px; min-width: 0; position: sticky; top: 0; }
@@ -1712,7 +1752,7 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .cr-llegan h3 { font-size: 13px; margin-bottom: 4px; } .cr-llegan h3 .muted { font-weight: 400; font-size: 12px; }
 @media (max-width: 980px) {
   .cr-ruta-cuerpo { grid-template-columns: minmax(0, 1fr); }
-  .cr-ruta-lado { position: static; order: -1; } .cr-mapa { height: 46vh; }
+  .cr-ruta-lado { position: static; order: -1; } .cr-mapa { height: 36vh; }
   .cr-bandeja-tit { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .cr-pin, .cr-tarjeta, .cr-dia { transition: none; } }

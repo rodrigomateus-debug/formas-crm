@@ -8,7 +8,7 @@ import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
 import { MODELO } from './remitos';
-import { optimizar, simular, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
+import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
 // repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
@@ -702,7 +702,9 @@ export interface Parada {
   lugar?: LugarInfo | null; // lo que dice la libreta de direcciones de ese lugar
   pactada?: (Pactada & { texto: string }) | null;   // la hora fijada a mano en la ruta del día; `horario` ya es esa ventana
   fotos?: number;           // las fotos del remito que mandó el chofer de esta parada ese día (obligatoria en todas)
+  remito?: number | null;   // el número del remito de traslado del egreso, si ya se imprimió (se numera la primera vez)
   estricto?: boolean;
+  espera_hasta?: number | null;   // con una hora fijada «a las 12:00», se espera hasta esa hora (ruta.ts)
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
@@ -859,6 +861,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     if (!h) continue;
     const v = ventanaPactada(h), r = p.horario;
     p.pactada = { ...h, texto: textoPactada(h) };
+    p.espera_hasta = h.modo === 'a_las' ? h.min : null;
     p.horario = r && Math.max(r[0], v[0]) < Math.min(r[1], v[1]) ? [Math.max(r[0], v[0]), Math.min(r[1], v[1])] : v;
     p.estricto = true;
   }
@@ -887,6 +890,10 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     const pedidos = new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!));
     p.fotos = new Set(fotos.filter((f) => f.parada === p.clave || (/^p:/.test(p.clave) && !f.parada && f.record_id && pedidos.has(f.record_id))).map((f) => f.id)).size;
   }
+  // El remito de traslado de los egresos que ya se imprimió: la tarjeta muestra su número (y que imprimirlo de nuevo no
+  // gasta otro).
+  const remitos = new Map((await db.prepare('SELECT clave, numero FROM remitos_traslado WHERE fecha = ?').bind(fecha).all<{ clave: string; numero: number }>()).results.map((x) => [x.clave, x.numero]));
+  for (const p of lista_) p.remito = remitos.get(p.clave) ?? null;
 
   // «Sale de» y «Termina en»: un depósito de Formas o, con «otro», el lugar que se eligió (con su punto en el mapa).
   const rutas: RutaGuardada[] = guardadas.length
@@ -985,16 +992,12 @@ export async function asignarChofer(env: Env, ctx: Ctx, b: { fecha?: unknown; id
   await escribirRutas(env.DB, ctx, fecha, quedan);
   return { ok: true, chofer: destino.chofer, recorrido: quedan.indexOf(destino) + 1, paradas: paradas.length, movimientos: paradas.reduce((n, p) => n + p.movimientos.length + p.encargos.length, 0) };
 }
-// Dónde entra una parada en un recorrido que alguien ordenó: en el lugar que menos lo alarga. Sin ubicar, al final.
+// Dónde entra una parada en un recorrido que alguien ordenó: en el lugar que menos lo alarga (ruta.ts). Sin ubicar, al final.
 function dondeEntra(salida: Punto | null, fin: Destino, orden: string[], p: Parada, porClave: Map<string, Parada>, hora: number) {
   const actual = orden.map((c) => porClave.get(c)).filter((x): x is Parada => !!x);
-  if (!salida || p.lat == null || p.lng == null || actual.length !== orden.length) return [...orden, p.clave];
-  let mejor = orden.length, costo = Infinity;
-  for (let i = 0; i <= actual.length; i++) {
-    const c = simular(salida, [...actual.slice(0, i), p, ...actual.slice(i)], hora, null, fin).costo;
-    if (c < costo - 0.01) { costo = c; mejor = i; }
-  }
-  return [...orden.slice(0, mejor), p.clave, ...orden.slice(mejor)];
+  if (actual.length !== orden.length) return [...orden, p.clave];
+  const i = posicionNueva(salida, fin, actual, p, hora);
+  return [...orden.slice(0, i), p.clave, ...orden.slice(i)];
 }
 
 // El recorrido de un chofer para la app de los remitos (/hooks/chofer): las paradas en el orden que armó Logística, con
@@ -1016,7 +1019,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
         fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
-          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, fotos: p.fotos ?? 0,
+          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,

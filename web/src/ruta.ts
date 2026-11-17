@@ -6,10 +6,13 @@
 export interface Punto { lat: number; lng: number }
 // `estricto`: el horario es una hora fijada a mano en la ruta del día («a las 12:00»): llegar tarde ahí pesa mucho más
 // que a un horario de recepción, así el orden más corto la cumple.
-export interface ParadaRuta { clave: string; lat: number | null; lng: number | null; horario: [number, number] | null; movimientos: unknown[]; encargos?: unknown[]; estricto?: boolean }
-export interface Tramo { km: number; min: number; nivel: 'fluido' | 'moderado' | 'pesado'; estimado: boolean; sinUbicar: boolean }
-export interface Llegada { clave: string; llega: number; espera: number; tarde: number; servicio: number; tramo: Tramo }
-export interface Simulacion { paradas: Llegada[]; vuelta: Tramo; fin: number; km: number; tarde: number; sinUbicar: number; costo: number }
+// `espera_hasta`: con una hora fijada «a las 12:00» se espera hasta las 12:00, aunque llegar a las 11:45 no es tarde.
+export interface ParadaRuta { clave: string; lat: number | null; lng: number | null; horario: [number, number] | null; movimientos: unknown[]; encargos?: unknown[]; estricto?: boolean; espera_hasta?: number | null }
+// `falta`: si no se pudo calcular, qué punta no está ubicada: de donde sale el tramo o adonde va.
+export interface Tramo { km: number; min: number; nivel: 'fluido' | 'moderado' | 'pesado'; estimado: boolean; sinUbicar: boolean; falta?: 'desde' | 'hasta' | null }
+// `incierta`: antes hay un tramo sin calcular (falta ubicar una dirección), así que la hora sale de menos.
+export interface Llegada { clave: string; llega: number; espera: number; tarde: number; servicio: number; tramo: Tramo; incierta: boolean }
+export interface Simulacion { paradas: Llegada[]; vuelta: Tramo; fin: number; km: number; tarde: number; sinUbicar: number; costo: number; incierta: boolean }
 // Lo que devolvió el servicio de rutas para un orden dado: por tramo, km y minutos con la calle libre.
 export interface TramosReales { clave: string; tramos: Array<{ km: number; min: number }> }
 // Dónde termina el recorrido (pedido de Rodrigo del 13/11/2026): un punto (el mismo de donde sale, otro depósito u otro
@@ -26,6 +29,19 @@ export function factorTransito(t: number) {
   return h < 7 ? 1.15 : h < 10 ? 1.6 : h < 12 ? 1.35 : h < 14 ? 1.4 : h < 16.5 ? 1.3 : h < 19.5 ? 1.65 : 1.15;
 }
 const nivelDe = (f: number): Tramo['nivel'] => (f >= 1.55 ? 'pesado' : f >= 1.3 ? 'moderado' : 'fluido');
+// Las horas en que cambia el factor de factorTransito (en minutos).
+const CORTES = [7, 10, 12, 14, 16.5, 19.5].map((h) => h * 60);
+// Cuánto tarda un tramo de `libre` minutos con la calle libre que sale a la hora `t`: si cruza a otra franja (sale a las
+// 9:30 y llega pasadas las 10), cada parte va con el factor de su franja, no todo con el de la salida.
+export function minutosDeViaje(t: number, libre: number) {
+  let ahora = t, falta = libre;
+  for (let n = 0; n < 16 && falta > 1e-9; n++) {
+    const h = ((ahora % 1440) + 1440) % 1440, f = factorTransito(h), corte = CORTES.find((c) => c > h);
+    const alcanza = corte == null ? Infinity : (corte - h) / f;
+    if (falta <= alcanza) { ahora += falta * f; falta = 0; } else { ahora += corte! - h; falta -= alcanza; }
+  }
+  return ahora - t;
+}
 // Minutos en cada parada: estacionar, más cargar o descargar cada movimiento.
 export const servicioDe = (movs: number) => Math.min(35, 8 + 4 * movs);
 const coord = (p: Punto | ParadaRuta | null) => (p && p.lat != null ? `${p.lat!.toFixed(5)},${p.lng!.toFixed(5)}` : '?');
@@ -35,38 +51,41 @@ export const claveOrden = (base: Punto | null, orden: ParadaRuta[], destino: Des
 // Sin `destino`, vuelve a donde salió.
 export function simular(base: Punto | null, orden: ParadaRuta[], salida: number, reales?: TramosReales | null, destino: Destino = base): Simulacion {
   const usar = reales && reales.clave === claveOrden(base, orden, destino) ? reales.tramos : null;
-  let t = salida, prev: Punto | null = base, km = 0, tarde = 0, sinUbicar = 0, tardeFija = 0;
+  let t = salida, prev: Punto | null = base, km = 0, tarde = 0, sinUbicar = 0, tardeFija = 0, incierta = false;
   const tramo = (a: Punto | null, b: Punto | null, i: number): Tramo => {
-    const f = factorTransito(t);
-    if (!a || !b) return { km: 0, min: 0, nivel: nivelDe(f), estimado: true, sinUbicar: true };
+    if (!a || !b) { incierta = true; return { km: 0, min: 0, nivel: nivelDe(factorTransito(t)), estimado: true, sinUbicar: true, falta: !b ? 'hasta' : 'desde' }; }
     const r = usar?.[i];
     const d = r ? r.km : distanciaKm(a, b) * 1.35;
     const libre = r ? r.min : (d / 38) * 60;
-    return { km: d, min: libre * f, nivel: nivelDe(f), estimado: !r, sinUbicar: false };
+    const min = minutosDeViaje(t, libre);
+    return { km: d, min, nivel: nivelDe(libre > 0 ? min / libre : factorTransito(t)), estimado: !r, sinUbicar: false, falta: null };
   };
   const paradas: Llegada[] = [];
   orden.forEach((p, i) => {
     const aca = p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null;
-    const tr = tramo(prev, aca, i);
+    const tr = tramo(prev, aca, i), dudosa = incierta;
     if (!aca) sinUbicar++;
     t += tr.min; km += tr.km;
     const llega = t;
     let espera = 0;
-    if (p.horario && t < p.horario[0]) { espera = p.horario[0] - t; t = p.horario[0]; }
-    const late = p.horario && llega > p.horario[1] ? llega - p.horario[1] : 0;
+    // Desde cuándo la atienden: el principio de su horario o, con una hora fijada «a las», esa hora.
+    const abre = p.espera_hasta != null ? Math.max(p.horario?.[0] ?? 0, Math.min(p.espera_hasta, p.horario?.[1] ?? p.espera_hasta)) : p.horario?.[0];
+    if (abre != null && t < abre) { espera = abre - t; t = abre; }
+    // Sin ubicar no se sabe a qué hora llega: no cuenta como tarde.
+    const late = aca && p.horario && llega > p.horario[1] ? llega - p.horario[1] : 0;
     tarde += late;
     if (p.estricto) tardeFija += late;
     const servicio = servicioDe(p.movimientos.length + (p.encargos?.length ?? 0));
-    paradas.push({ clave: p.clave, llega, espera, tarde: late, servicio, tramo: tr });
+    paradas.push({ clave: p.clave, llega, espera, tarde: late, servicio, tramo: tr, incierta: dudosa });
     t += servicio;
     if (aca) prev = aca;
   });
   // La vuelta: al lugar donde termina; si termina en la última parada, no hay.
-  const vuelta = destino === 'ultima' ? { km: 0, min: 0, nivel: nivelDe(factorTransito(t)), estimado: false, sinUbicar: false } : tramo(prev, destino, orden.length);
+  const vuelta: Tramo = destino === 'ultima' ? { km: 0, min: 0, nivel: nivelDe(factorTransito(t)), estimado: false, sinUbicar: false, falta: null } : tramo(prev, destino, orden.length);
   km += vuelta.km;
   const fin = t + vuelta.min;
   // Lo que cuesta cada orden: el tiempo en la calle, más llegar tarde (a una hora fijada, mucho más).
-  return { paradas, vuelta, fin, km, tarde, sinUbicar, costo: fin - salida + tarde * 6 + tardeFija * 40 };
+  return { paradas, vuelta, fin, km, tarde, sinUbicar, costo: fin - salida + tarde * 6 + tardeFija * 40, incierta };
 }
 
 // El orden más corto: primero el vecino más cercano y después se prueba mover y dar vuelta tramos mientras mejore. Tiene
@@ -100,6 +119,18 @@ export function optimizar(base: Punto | null, paradas: ParadaRuta[], salida: num
     }
   }
   return [...o, ...sin];
+}
+
+// Dónde entra una parada nueva en un recorrido que alguien ordenó a mano: en el lugar que menos lo alarga. Sin ubicar, al
+// final. Devuelve la posición. La usan el servidor y la Ruta del día («Pasar a…»).
+export function dondeEntra(salida: Punto | null, fin: Destino, actual: ParadaRuta[], p: ParadaRuta, hora: number) {
+  if (!salida || p.lat == null || p.lng == null) return actual.length;
+  let mejor = actual.length, costo = Infinity;
+  for (let i = 0; i <= actual.length; i++) {
+    const c = simular(salida, [...actual.slice(0, i), p, ...actual.slice(i)], hora, null, fin).costo;
+    if (c < costo - 0.01) { costo = c; mejor = i; }
+  }
+  return mejor;
 }
 
 // Una hora fijada a mano: el horario en el que hay que llegar. «A las 12:00» es de 11:45 a 12:15.

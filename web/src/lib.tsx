@@ -320,14 +320,16 @@ export function formatValue(meta: Meta, type: ObjectType, name: string, value: u
 
 // ---------- Avisos ----------
 
-const ToastCtx = createContext<(msg: string, err?: boolean) => void>(() => {});
+// `accion`: un botón en el aviso (por ejemplo «Deshacer»); el aviso dura más para que dé tiempo a tocarlo.
+export type AccionToast = { label: string; onClick: () => void };
+const ToastCtx = createContext<(msg: string, err?: boolean, accion?: AccionToast) => void>(() => {});
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [t, setT] = useState<{ msg: string; err: boolean } | null>(null);
+  const [t, setT] = useState<{ msg: string; err: boolean; accion?: AccionToast } | null>(null);
   const timer = useRef<number>();
-  const show = useCallback((msg: string, err = false) => {
-    setT({ msg, err });
+  const show = useCallback((msg: string, err = false, accion?: AccionToast) => {
+    setT({ msg, err, accion });
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setT(null), err ? 6000 : 2800);
+    timer.current = window.setTimeout(() => setT(null), err ? 6000 : accion ? 7000 : 2800);
   }, []);
   return (
     <ToastCtx.Provider value={show}>
@@ -336,6 +338,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         <div className={`toast${t.err ? ' err' : ''}`} role={t.err ? 'alert' : 'status'}>
           <span className="toast-ic" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d={t.err ? 'M5 5l6 6M11 5l-6 6' : 'M4 8.5 6.8 11 12 5'} /></svg></span>
           <span className="toast-msg">{t.msg}</span>
+          {t.accion && <button type="button" className="toast-accion" onClick={() => { const a = t.accion!; window.clearTimeout(timer.current); setT(null); a.onClick(); }}>{t.accion.label}</button>}
         </div>
       )}
     </ToastCtx.Provider>

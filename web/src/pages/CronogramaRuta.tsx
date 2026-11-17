@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { http, qs, useToast, Icon } from '../lib';
 import { alEsc, useEsc } from '../components';
-import { Select } from '../Select';
+import { Select, useFloating } from '../Select';
 import { seguimientoExpreso } from '../expresos';
-import { claveOrden, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
+import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 
@@ -24,6 +24,8 @@ interface Parada {
   // La hora fijada a mano (pedido de Rodrigo del 16/11/2026): `horario` ya es esa ventana y el orden más corto la cumple.
   pactada?: { modo: ModoHora; min: number; texto: string } | null; estricto?: boolean;
   fotos?: number;   // las fotos del remito que mandó el chofer de esta parada (obligatoria en todas)
+  remito?: number | null;   // el número del remito de traslado del egreso, si ya se imprimió
+  espera_hasta?: number | null;   // con una hora fijada «a las», hasta cuándo se espera (ruta.ts)
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
 }
@@ -50,8 +52,23 @@ const ORIGEN: Record<string, string> = { pedido: 'Dirección cargada en el pedid
 const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
 
-// Una parada está hecha cuando están hechos sus movimientos de ClickUp y sus encargos.
-const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
+// Una parada está hecha cuando están hechos sus movimientos de ClickUp y sus encargos (una sin nada para hacer, no).
+const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.length + (p.encargos?.length ?? 0) > 0 && p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
+// La dirección como viene de las fichas y los pedidos («domingo prat 2260, 1603 villa rosa, VILLA ROSA PILAR»): cada parte
+// toda en minúscula o toda en mayúscula pasa a «Domingo Prat 2260»; las que ya vienen bien escritas quedan como están.
+const SIGLAS = new Set(['caba', 'cp', 'pb', 'gba', 'pba', 'amba', 'sa', 'srl', 'ruta', 'km']);
+const MENORES = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y', 'e']);
+function lindaDireccion(d: string) {
+  const vistas = new Set<string>();
+  return d.split(',').map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => {
+    const k = x.toLowerCase();
+    if (!x || vistas.has(k)) return false;
+    vistas.add(k); return true;
+  }).map((x) => (/[a-záéíóúñ]/.test(x) && /[A-ZÁÉÍÓÚÑ]/.test(x) ? x : x.toLowerCase().split(' ').map((w, i) =>
+    SIGLAS.has(w) && w !== 'ruta' && w !== 'km' ? w.toUpperCase() : i > 0 && MENORES.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)).join(' '))).join(', ');
+}
+// De dónde salió la dirección, cuando no es la del pedido: se dice en la tarjeta si es una suposición.
+const ORIGEN_DUDOSO: Partial<Record<NonNullable<Parada['origen']>, string>> = { ultima_entrega: 'de la última entrega', libreta: 'de la libreta' };
 
 // Las paradas que no están en ningún recorrido van al primero; las que ya no existen se sacan.
 function acomodar(rutas: Recorrido[], paradas: Parada[]): Recorrido[] {
@@ -99,7 +116,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [expresando, setExpresando] = useState<string | null>(null);
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo que se abrió para ver o cambiar
   const arrastre = useRef<string | null>(null);
-  const [sobre, setSobre] = useState<string | null>(null);
+  // Sobre qué parada se está soltando la que se arrastra; `abajo`: queda después de ella (se arrastra hacia abajo).
+  const [sobre, setSobre] = useState<{ clave: string; abajo: boolean } | null>(null);
+  const [marcando, setMarcando] = useState<string | null>(null);   // la parada que se está marcando como hecha (o pendiente)
+  const [agotado, setAgotado] = useState(false);   // se dejó de preguntar si ya se ubicaron las direcciones
   const pedido = useRef(0);
   const sucio = useRef(false);
   const tocado = useRef(false);                                       // alguien cambió el orden a mano: no se reordena solo
@@ -121,6 +141,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       });
       // Faltan ubicar direcciones (se buscan de a pocas): vuelve a pedir hasta que estén.
       window.clearTimeout(sondeo.current);
+      setAgotado(d.buscando > 0 && intento >= 12);
       if (d.buscando > 0 && intento < 12) sondeo.current = window.setTimeout(() => { if (n === pedido.current) void cargar(intento + 1); }, 1500);
     } catch (e) { if (n === pedido.current) setError((e as Error).message); }
   }, [fecha]);
@@ -137,6 +158,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   }, [cargar]);
 
   const puede = !!datos?.puede_editar;
+  const datosRef = useRef(datos);
+  datosRef.current = datos;
   const porClave = useMemo(() => new Map((datos?.paradas ?? []).map((p) => [p.clave, p])), [datos]);
   const cambiar = (f: (r: Recorrido[]) => Recorrido[]) => {
     sucio.current = true; tocado.current = true;
@@ -160,20 +183,26 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
   // El recorrido por calles (distancia y tiempo de cada tramo, y el dibujo). Si el servicio no contesta, queda la
   // estimación en línea recta.
+  // Con alguna dirección sin ubicar se pide igual, con las que sí están: así un punto que falta no deja todo el recorrido
+  // en línea recta.
   useEffect(() => {
-    const faltan = armadas.filter((a) => a.paradas.length && !a.clave.includes('?') && !reales[a.clave]);
+    const faltan = armadas.filter((a) => punto(a.base) && a.paradas.some((p) => punto(p)) && !reales[a.clave]);
     if (!faltan.length) return;
     const ctl = new AbortController();
     const t = window.setTimeout(async () => {
       for (const a of faltan) {
-        const pts = [a.base!, ...a.paradas, ...(a.fin ? [a.fin] : [])].map((p) => `${p.lng},${p.lat}`).join(';');
+        const ubicadas = a.paradas.filter((p) => punto(p)), fin = punto(a.fin) ? a.fin : null;
+        const pts = [a.base!, ...ubicadas, ...(fin ? [fin] : [])].map((p) => `${p.lng},${p.lat}`).join(';');
         try {
           const res = await fetch(`${ROUTER}${pts}?overview=full&geometries=geojson`, { signal: ctl.signal });
           if (!res.ok) continue;
           const j = (await res.json()) as { routes?: Array<{ legs: Array<{ distance: number; duration: number }>; geometry: { coordinates: Array<[number, number]> } }> };
           const ruta = j.routes?.[0];
-          if (!ruta || ruta.legs.length !== a.paradas.length + (a.fin ? 1 : 0)) continue;
-          setReales((r) => ({ ...r, [a.clave]: { clave: a.clave, tramos: ruta.legs.map((l) => ({ km: l.distance / 1000, min: l.duration / 60 })), linea: ruta.geometry.coordinates.map(([x, y]) => [y, x]) } }));
+          if (!ruta || ruta.legs.length !== ubicadas.length + (fin ? 1 : 0)) continue;
+          // Al orden de la simulación: cada parada ubicada, el tramo desde la anterior ubicada; las que faltan, ninguno.
+          let k = 0;
+          const tramos = [...a.paradas.map((p) => (punto(p) ? ruta.legs[k++] : null)), fin ? ruta.legs[k] : null].map((l) => (l ? { km: l.distance / 1000, min: l.duration / 60 } : { km: 0, min: 0 }));
+          setReales((r) => ({ ...r, [a.clave]: { clave: a.clave, tramos, linea: ruta.geometry.coordinates.map(([x, y]) => [y, x]) } }));
         } catch { /* sin servicio de rutas: sigue la estimación */ }
       }
     }, 500);
@@ -192,48 +221,81 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       await http('PUT', '/cronograma/hora', { fecha, clave: p.clave, modo, hora });
       toast(modo ? `${lindo(p.nombre)}: ${modo === 'antes' ? 'antes de las' : modo === 'desde' ? 'desde las' : 'a las'} ${hora}. El recorrido se ordenó para cumplirla.` : `${lindo(p.nombre)}: sin hora fijada.`);
     } catch (e) { toast((e as Error).message, true); return; }
-    setFijando(null); tocado.current = false; setRutas([]);
+    // Vuelve del servidor ya ordenado; mientras tanto queda a la vista lo que había (sin vaciar la pantalla ni el mapa).
+    setFijando(null); tocado.current = false;
     void cargar(); onCambio();
   }
   async function guardarYa(nuevas: Recorrido[]) {
     sucio.current = false; porGuardar.current = null; tocado.current = true;
     setRutas(Object.assign(nuevas, { fecha }));
-    try { await http('PUT', '/cronograma/ruta', { fecha, rutas: nuevas }); } catch (e) { toast((e as Error).message, true); }
-    setRutas([]);
+    try { await http('PUT', '/cronograma/ruta', { fecha, rutas: nuevas }); tocado.current = false; } catch (e) { toast((e as Error).message, true); }
     void cargar();
   }
   // Mover una parada a mano deja el recorrido ordenado a mano: ya no se reordena solo.
-  const mover = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => {
-    if (i !== act.i) return r;
-    const o = [...r.orden], de = o.indexOf(clave);
-    if (de < 0 || a < 0 || a >= o.length) return r;
-    o.splice(a, 0, o.splice(de, 1)[0]);
-    return { ...r, orden: o, a_mano: true };
-  }));
-  const pasar = (clave: string, a: number) => cambiar((rs) => rs.map((r, i) => ({ ...r, orden: i === a ? [...r.orden.filter((c) => c !== clave), clave] : r.orden.filter((c) => c !== clave) })));
+  const mover = (clave: string, a: number) => {
+    const antes = act.paradas.findIndex((p) => p.clave === clave);
+    if (antes < 0 || a < 0 || a >= act.paradas.length || a === antes) return;
+    cambiar((rs) => rs.map((r, i) => {
+      if (i !== act.i) return r;
+      const o = [...r.orden], de = o.indexOf(clave);
+      if (de < 0 || a >= o.length) return r;
+      o.splice(a, 0, o.splice(de, 1)[0]);
+      return { ...r, orden: o, a_mano: true };
+    }));
+    if (!act.r.a_mano) toast('El recorrido quedó ordenado a mano: ya no se reordena solo. «Ordenar por el recorrido más corto» lo vuelve a dejar automático.');
+  };
+  // A otro recorrido: si ese está ordenado a mano, entra donde menos lo alarga (igual que en el servidor); si no, se ordena solo.
+  const pasar = (p: Parada, a: number) => {
+    const previo = rutas, destino = armadas.find((x) => x.i === a);
+    if (!destino) return;
+    cambiar((rs) => rs.map((r, i) => {
+      const sin = r.orden.filter((c) => c !== p.clave);
+      if (i !== a) return { ...r, orden: sin };
+      const pos = r.a_mano ? dondeEntra(punto(destino.base), destinoDe(destino.fin), destino.paradas, p, r.salida) : sin.length;
+      return { ...r, orden: [...sin.slice(0, pos), p.clave, ...sin.slice(pos)] };
+    }));
+    toast(`${lindo(p.nombre)} pasó al recorrido ${a + 1}${destino.r.chofer ? ` (${destino.r.chofer})` : ''}.`, false, { label: 'Deshacer', onClick: () => cambiar(() => previo) });
+  };
+  // Ordena por el más corto y lo deja otra vez automático (se reordena solo a medida que cambia).
   const ordenar = () => {
     // Los dos órdenes se comparan con la misma cuenta (línea recta), y el de ahora solo se cambia si el nuevo es mejor.
     const b = punto(act.base), d = destinoDe(act.fin);
     const antes = simular(b, act.paradas, act.r.salida, null, d).costo;
     const nuevo = optimizar(b, act.paradas, act.r.salida, d);
     const despues = simular(b, nuevo, act.r.salida, null, d).costo;
-    if (antes - despues <= 1) { toast('Ya era el recorrido más corto.'); return; }
-    cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, orden: nuevo.map((p) => p.clave) } : r)));
-    toast(`Recorrido reordenado: unos ${duracion(antes - despues)} menos.`);
+    const mejor = antes - despues > 1;
+    cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, orden: mejor ? nuevo.map((p) => p.clave) : r.orden, a_mano: false } : r)));
+    toast(`${mejor ? `Recorrido reordenado: unos ${duracion(antes - despues)} menos.` : 'Ya era el recorrido más corto.'} Desde ahora se ordena solo.`);
   };
+  // Un panel abierto por vez en toda la lista: la hora, la dirección, el expreso o el punto en el mapa.
+  const abrirPanel = (que: 'hora' | 'direccion' | 'expreso' | 'ubicar' | null, clave: string) => {
+    setFijando(que === 'hora' ? clave : null); setEditando(que === 'direccion' ? clave : null); setExpresando(que === 'expreso' ? clave : null);
+    setUbicando(que === 'ubicar' ? { clave } : null);
+    if (que === 'ubicar') { setCaliente(clave); requestAnimationFrame(() => document.querySelector('.cr-mapa')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); }
+  };
+  async function imprimirRemito(p: Parada) {
+    await abrirRemitoEgreso(fecha, p.clave, toast);
+    void cargar();   // para que la tarjeta muestre el número
+  }
+  // Marca la parada como hecha (o la vuelve a pendiente): cambia el estado en ClickUp, así que no se puede tocar dos veces
+  // seguidas y el aviso trae «Deshacer».
   async function marcar(p: Parada) {
+    if (marcando) return;
     const hecho = !hechaParada(p);
     const porTipo = new Map<Tipo, string[]>();
     for (const m of p.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
-    const encs = (p.encargos ?? []).filter((e) => (e.estado === 'hecho') !== hecho);
+    const encs = (p.encargos ?? []).filter((e) => (e.estado === 'hecho') !== hecho), cambian = new Set(encs.map((e) => e.id));
+    setMarcando(p.clave);
     setDatos((d) => d && { ...d, paradas: d.paradas.map((x) => (x.clave === p.clave ? { ...x, movimientos: x.movimientos.map((m) => ({ ...m, hecho })),
-      encargos: (x.encargos ?? []).map((e) => ({ ...e, estado: hecho ? 'hecho' : 'pendiente' })) } : x)) });
+      encargos: (x.encargos ?? []).map((e) => (cambian.has(e.id) ? { ...e, estado: hecho ? 'hecho' : 'pendiente' } : e)) } : x)) });
     try {
       let cambiados = 0;
       for (const [tipo, ids] of porTipo) for (let i = 0; i < ids.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + TANDA), tipo, hecho })).cambiados;
       for (const e of encs) await http('PATCH', `/recorridos/encargos/${e.id}`, { estado: hecho ? 'hecho' : 'pendiente' });
-      toast(!hecho ? `${p.nombre}: quedó como pendiente.` : `${p.nombre}: hecho.${cambiados ? ` ${cambiados} artículo${cambiados === 1 ? ' cambió' : 's cambiaron'} de estado en ClickUp.` : ''}`);
-    } catch (e) { toast((e as Error).message, true); }
+      const deshacer = { label: 'Deshacer', onClick: () => { const q = datosRef.current?.paradas.find((x) => x.clave === p.clave); if (q) void marcar(q); } };
+      toast(!hecho ? `${lindo(p.nombre)}: quedó como pendiente.` : `${lindo(p.nombre)}: hecha.${cambiados ? ` ${cambiados} artículo${cambiados === 1 ? ' cambió' : 's cambiaron'} de estado en ClickUp.` : ''}`, false, deshacer);
+    } catch (e) { toast(`${(e as Error).message} Puede haber quedado a medias: revisá la parada.`, true); }
+    setMarcando(null);
     void cargar(); onCambio();
   }
   // Corregir dónde queda una parada en el mapa: se guarda recién con «Guardar ubicación», y vale para esa dirección en
@@ -266,7 +328,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   if (!datos || !act) return <>{cab}<div className="empty plain">Armando la ruta del {diaLargo(fecha).toLowerCase()}…</div></>;
 
   const movs = act.paradas.flatMap((p) => [...p.movimientos.map((m) => m.hecho), ...(p.encargos ?? []).map((e) => e.estado === 'hecho')]), hechos = movs.filter(Boolean).length, tarde = act.sim.paradas.filter((s) => s.tarde > 0).length;
-  const sinBase = !punto(act.base);
+  const sinBase = !punto(act.base), sinFin = !!act.fin && !punto(act.fin);
+  const incierto = act.sim.incierta || act.sim.vuelta.sinUbicar;
+  // Qué falta ubicar en un tramo sin calcular, y cómo arreglarlo desde ahí.
+  const faltaSalida = { nombre: act.base?.nombre ?? 'el lugar de salida', accion: puede && act.r.base === 'otro' ? { label: 'Cambiar el lugar', onClick: () => setPanel('salida') } : null };
   return (
     <div className="cr-ruta">
       {cab}
@@ -320,135 +385,171 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
       <div className="cr-kpis">
         <div><span>Paradas</span><b className="num">{act.paradas.length}<small>{movs.length} {movs.length === 1 ? 'cosa' : 'cosas'} para hacer</small></b></div>
-        <div><span>Recorrido</span><b className="num">{act.sim.km.toFixed(0)}<small>km{act.real ? '' : ' aprox.'}</small></b></div>
-        <div><span>En la calle</span><b className="num">{duracion(act.sim.fin - act.r.salida)}</b></div>
-        <div><span>{act.vuelve ? 'Vuelve' : 'Termina'}</span><b className="num">{hhmm(act.sim.fin)}</b></div>
+        <div><span>Recorrido</span><b className="num">{incierto ? '≈' : ''}{act.sim.km.toFixed(0)}<small>km{act.real && !incierto ? '' : ' aprox.'}</small></b></div>
+        <div><span>En la calle</span><b className="num">{act.sim.vuelta.sinUbicar ? '—' : `${incierto ? '≈' : ''}${duracion(act.sim.fin - act.r.salida)}`}</b></div>
+        <div><span>{act.vuelve ? 'Vuelve' : 'Termina'}</span><b className="num">{act.sim.vuelta.sinUbicar ? '—' : `${incierto ? '≈' : ''}${hhmm(act.sim.fin)}`}</b></div>
         <div><span>Hecho</span><b className="num">{hechos}<small>de {movs.length}</small></b></div>
         <div><span>Fuera de horario</span><b className={`num ${tarde ? 'danger-text' : ''}`}>{tarde || '—'}</b></div>
-        {act.sim.sinUbicar > 0 && <div><span>Sin ubicar</span><b className="num warn-text">{act.sim.sinUbicar}</b></div>}
+        {act.sim.sinUbicar + (sinFin ? 1 : 0) + (sinBase ? 1 : 0) > 0 && <div><span>Sin ubicar</span><b className="num warn-text">{act.sim.sinUbicar + (sinFin ? 1 : 0) + (sinBase ? 1 : 0)}</b></div>}
       </div>
-      {datos.buscando > 0 && <div className="aviso info small">Buscando en el mapa {datos.buscando} dirección{datos.buscando === 1 ? '' : 'es'}…</div>}
-      {sinBase && !datos.buscando && <div className="aviso warn small">No se pudo ubicar {act.base?.nombre ?? 'el depósito'} ({act.base?.direccion}). Corregí la dirección en la configuración del cronograma.</div>}
+      {datos.buscando > 0 && (agotado
+        ? <div className="aviso warn small">Todavía faltan ubicar en el mapa {datos.buscando} dirección{datos.buscando === 1 ? '' : 'es'}. <button type="button" className="cr-link" onClick={() => { setAgotado(false); void cargar(); }}>Volver a fijarse</button></div>
+        : <div className="aviso info small">Buscando en el mapa {datos.buscando} dirección{datos.buscando === 1 ? '' : 'es'}…</div>)}
+      {sinBase && !datos.buscando && <div className="aviso warn small">No se pudo ubicar {act.base?.nombre ?? 'el depósito'} ({act.base?.direccion}). {act.r.base === 'otro' ? <>Elegí otro lugar en «Sale de».</> : 'Corregí la dirección en la configuración del cronograma.'}</div>}
+      {sinFin && !datos.buscando && <div className="aviso warn small">No se pudo ubicar dónde termina: {act.fin!.nombre} ({act.fin!.direccion}). La vuelta queda sin calcular. {act.r.fin === 'otro' ? <>Elegí otro lugar en «Termina en».</> : 'Corregí la dirección en la configuración del cronograma.'}</div>}
 
       <div className="cr-ruta-cuerpo">
         <ol className="cr-paradas">
-          <li className="cr-parada base"><div className="cr-n base"><Icon name="home" size={13} /></div><div><div className="cr-p-nombre">{act.base?.nombre}</div><div className="cr-p-sub">{act.base?.direccion}</div></div><div className="cr-eta"><b className="num">{hhmm(act.r.salida)}</b><span>sale</span></div></li>
+          <li className="cr-parada base"><div className="cr-n-col"><div className="cr-n base"><Icon name="home" size={13} /></div></div><div><div className="cr-p-nombre">{act.base?.nombre}</div><div className="cr-p-sub">{act.base?.direccion}</div></div><div className="cr-eta"><b className="num">{hhmm(act.r.salida)}</b><span>sale</span></div></li>
           {!act.paradas.length && <li className="empty plain">{datos.paradas.length ? 'Este recorrido no tiene paradas. Pasale alguna desde otro recorrido.' : 'Este día no hay retiros, egresos, entregas ni encargos.'}</li>}
           {act.paradas.map((p, i) => {
-            const s = act.sim.paradas[i], todo = hechaParada(p);
+            const s = act.sim.paradas[i], todo = hechaParada(p), nombre = lindo(p.nombre);
             const entregas = [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
-            return [
-              <Tramo key={`t${p.clave}`} t={s.tramo} />,
-              <li key={p.clave} className={`cr-parada${todo ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${sobre === p.clave ? ' sobre' : ''}`} draggable={puede && editando !== p.clave && expresando !== p.clave && ubicando?.clave !== p.clave}
-                style={{ '--c': act.color } as React.CSSProperties}
-                onMouseEnter={() => setCaliente(p.clave)} onMouseLeave={() => setCaliente((c) => (c === p.clave ? null : c))}
-                onDragStart={(e) => { arrastre.current = p.clave; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', p.clave); } catch { /* no hace falta */ } }}
-                onDragEnd={() => { arrastre.current = null; setSobre(null); }}
-                onDragOver={(e) => { if (arrastre.current && arrastre.current !== p.clave) { e.preventDefault(); if (sobre !== p.clave) setSobre(p.clave); } }}
-                onDrop={(e) => { e.preventDefault(); const de = arrastre.current; arrastre.current = null; setSobre(null); if (de) mover(de, i); }}>
-                <div className="cr-n num">{todo ? <Icon name="check" size={13} /> : i + 1}</div>
-                <div className="cr-p-quien">
-                  <div className="cr-p-nombre">{lindo(p.nombre)}</div>
-                  {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia
-                    ? <> · guía {seguimientoExpreso(p.expreso.nombre, p.expreso.guia) ? <a className="cr-link num" href={seguimientoExpreso(p.expreso.nombre, p.expreso.guia)!} target="_blank" rel="noreferrer" title="Ver el seguimiento del envío">{p.expreso.guia} ↗</a> : <b className="num">{p.expreso.guia}</b>}</>
-                    : ' · sin guía todavía'}</div>}
-                  <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ?? 'Sin dirección cargada'}</div>
-                </div>
-                <div className={`cr-eta${s.tarde ? ' tarde' : ''}`}>{s.espera > 1 && !s.tramo.sinUbicar
-                  // Llega antes de su horario (o de la hora fijada): la hora es la de cuando se la atiende.
-                  ? <><b className="num">{hhmm(s.llega + s.espera)}</b><span>llega {hhmm(s.llega)}</span></>
-                  : <><b className="num">{s.tramo.sinUbicar ? '—' : hhmm(s.llega)}</b><span>{duracion(s.servicio)} ahí</span></>}</div>
-                {p.lugar && (p.lugar.contacto || p.lugar.telefono || p.lugar.observaciones || p.lugar.coordinacion || (p.lugar.horario && !p.horario)) && (
-                  <div className="cr-libreta" title={`De la libreta de direcciones: ${p.lugar.nombre}`}>
-                    {p.lugar.horario && !p.horario && <span><b>Horario</b>{p.lugar.horario}</span>}
-                    {(p.lugar.contacto || p.lugar.telefono) && <span><b>Contacto</b>{[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</span>}
-                    {p.lugar.observaciones && <span><b>Ojo</b>{p.lugar.observaciones}</span>}
-                    {p.lugar.coordinacion && <details><summary>Cómo se coordina la entrega</summary>{p.lugar.coordinacion}</details>}
-                  </div>
-                )}
-                <div className="cr-p-movs">
-                  {(p.encargos ?? []).map((e) => (
-                    <div key={`e${e.id}`} className={`cr-k-X${e.estado === 'hecho' ? ' ok' : ''}`}>
-                      <i /><span><b>Encargo</b><button type="button" className="cr-link" onClick={() => setEncargo(e.id)}>de {e.quien?.split(' ')[0] ?? 'alguien'}</button>
-                        {e.urgente ? ' · urgente' : ''}{e.llevar.length ? ` · deja ${e.llevar.map(itemTexto).join(', ')}` : ''}{e.retirar.length ? ` · retira ${e.retirar.map(itemTexto).join(', ')}` : ''}
-                        {!e.llevar.length && !e.retirar.length && e.notas ? ` · ${e.notas}` : ''}
-                        {e.desde && e.desde !== datos.bases[0]?.id && e.llevar.length ? ` · está en ${datos.bases.find((b) => b.id === e.desde)?.nombre ?? e.desde}` : ''}
-                        {e.hacia && e.hacia !== datos.bases[0]?.id && e.retirar.length ? ` · va a ${datos.bases.find((b) => b.id === e.hacia)?.nombre ?? e.hacia}` : ''}
-                        {e.contacto ? ` · preguntar por ${e.contacto}` : ''}{e.horario ? ` · ${e.horario}` : ''}{e.estado === 'no_se_pudo' && e.motivo ? ` · no se pudo: ${e.motivo}` : ''}</span>
-                    </div>
-                  ))}
-                  {p.movimientos.map((m) => (
-                    <div key={m.id} className={`cr-k-${carrilDe(m.tipo).k}${m.hecho ? ' ok' : ''}`}>
-                      <i /><span><b>{carrilDe(m.tipo).uno}</b>{m.record_id ? <button type="button" className="cr-link" onClick={() => onAbrir(m.record_id!)}>PDV {m.npdv}</button> : `PDV ${m.npdv ?? '—'}`}
-                        {m.tipo !== 'entrega' && m.cliente ? ` ${lindo(m.cliente)}` : ''}{m.articulo ? ` · ${cantidad(m)}` : ''}{m.evento ? ' · evento' : ''}</span>
-                    </div>
-                  ))}
-                </div>
-                {p.sugerencia && (
-                  <div className="cr-sugerencia">
-                    <Icon name="alert" size={14} />
-                    <div><b>Puede que vaya a otra dirección.</b> {p.sugerencia.motivo} El pedido dice «{p.direccion}».
-                      {puede && <div className="row" style={{ marginTop: 6 }}><button type="button" className="btn sm primary" onClick={() => sugerencia(p, true)}>Usar {p.sugerencia.sugerida}</button><button type="button" className="btn sm ghost" onClick={() => sugerencia(p, false)}>Dejar la del pedido</button></div>}
-                    </div>
-                  </div>
-                )}
-                {p.visita && p.visita.resultado !== 'hecho' && (
-                  <div className={`cr-visita ${p.visita.resultado}`}><Icon name="alert" size={14} />
-                    <span><b>{p.visita.resultado === 'salteada' ? 'El chofer la dejó para después' : MOTIVO[p.visita.motivo ?? 'otro'] ?? 'No se pudo'}</b>{p.visita.nota ? `: ${p.visita.nota}` : ''} · {p.visita.chofer ?? 'Chofer'}, {horaDe(p.visita.at)}</span></div>
-                )}
-                <div className="cr-p-pie">
-                  {p.pactada ? <span className={`cr-tag fija${s.tarde ? ' late' : ''}`} title="Hora fijada a mano: el recorrido se ordena para cumplirla"><Icon name="timer" size={11} />{p.pactada.texto}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>
-                    : (p.horario || s.espera > 1) && <span className={`cr-tag${s.tarde ? ' late' : ''}`}>{p.horario ? `Recibe de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : ''}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>}
-                  {puede && <button type="button" className="cr-link" onClick={() => setFijando(fijando === p.clave ? null : p.clave)}>{p.pactada ? 'Cambiar la hora' : 'Fijar hora'}</button>}
-                  {puede && p.movimientos.some((m) => m.tipo === 'egreso') && <button type="button" className="cr-link" onClick={() => abrirRemitoEgreso(fecha, p.clave, toast)}><Icon name="printer" size={12} />Remito de traslado</button>}
-                  {p.lat == null && <span className="cr-tag riesgo"><Icon name="alert" size={11} />{p.direccion ? 'No se encontró en el mapa' : 'Falta la dirección'}</span>}
-                  {p.visita?.resultado === 'hecho' && <span className="cr-tag">Lo marcó {p.visita.chofer ?? 'el chofer'} a las {horaDe(p.visita.at)}</span>}
-                  {(p.fotos ?? 0) > 0 ? <span className="cr-tag" title="La foto del remito que mandó el chofer: está en los pedidos de la parada"><Icon name="image" size={11} />{p.fotos === 1 ? 'Foto del remito' : `${p.fotos} fotos del remito`}</span>
-                    : (todo || p.visita?.resultado === 'hecho') && <span className="cr-tag riesgo" title="La foto del remito es obligatoria en todas las paradas"><Icon name="alert" size={11} />Sin foto del remito</span>}
-                  {puede && <button type="button" className="cr-link" onClick={() => marcar(p)}>{todo ? 'Volver a pendiente' : 'Marcar hecho'}</button>}
-                  {puede && !p.expreso && (p.company_id || entregas.length > 0) && <button type="button" className="cr-link" onClick={() => setEditando(editando === p.clave ? null : p.clave)}>{p.direccion ? 'Corregir dirección' : 'Cargar dirección'}</button>}
-                  {puede && /^p:/.test(p.clave) && <button type="button" className="cr-link" onClick={() => setExpresando(expresando === p.clave ? null : p.clave)}>{p.expreso ? (p.expreso.guia ? 'Cambiar expreso o guía' : 'Cargar la guía') : 'Mandar por expreso'}</button>}
-                  {puede && p.direccion && p.lat != null && ubicando?.clave !== p.clave && <button type="button" className="cr-link" onClick={() => { setUbicando({ clave: p.clave }); setCaliente(p.clave); }}>Corregir ubicación</button>}
-                  {p.lat != null && <a className="cr-link" href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noreferrer">Cómo llegar</a>}
-                  <span className="grow" />
-                  {puede && rutas.length > 1 && (
-                    <Select className="input cr-pasar" aria-label="Pasar a otro recorrido" value="" placeholder="Pasar a…" onChange={(e) => { if (e.target.value !== '') pasar(p.clave, Number(e.target.value)); }}>
-                      {armadas.filter((a) => a.i !== act.i).map((a) => <option key={a.i} value={a.i}>Recorrido {a.i + 1} · {a.r.chofer ?? 'sin chofer'}</option>)}
-                    </Select>
-                  )}
-                  {puede && <span className="cr-flechas"><button type="button" aria-label="Subir" disabled={i === 0} onClick={() => mover(p.clave, i - 1)}>↑</button><button type="button" aria-label="Bajar" disabled={i === act.paradas.length - 1} onClick={() => mover(p.clave, i + 1)}>↓</button></span>}
-                </div>
-                {ubicando?.clave === p.clave && (
-                  <div className="cr-ubicar">
-                    <span>Arrastrá el número <b>{i + 1}</b> en el mapa hasta donde queda de verdad. Vale para esta dirección en todas las rutas.{p.punto_manual ? ' Ya tiene una ubicación corregida a mano.' : ''}</span>
-                    <div className="acciones">
-                      <button type="button" className="btn sm ghost" onClick={() => setUbicando(null)}>Cancelar</button>
-                      {p.punto_manual && <button type="button" className="btn sm ghost" onClick={() => rebuscar(p)}>Volver a buscar en el mapa</button>}
-                      <button type="button" className="btn sm primary" disabled={ubicando.lat == null} onClick={() => fijar(p)}>Guardar ubicación</button>
-                    </div>
-                  </div>
-                )}
-                {expresando === p.clave && <PorExpreso p={p} expresos={datos.expresos ?? []} onListo={() => { setExpresando(null); void cargar(); onCambio(); }} />}
-                {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
-                {fijando === p.clave && <FijarHora p={p} llega={s.tramo.sinUbicar ? null : s.llega} onGuardar={(modo, hora) => fijarHora(p, modo, hora)} onCancelar={() => setFijando(null)} />}
-              </li>,
+            const abierto = fijando === p.clave || editando === p.clave || expresando === p.clave || ubicando?.clave === p.clave;
+            const buscando = p.lat == null && !!p.direccion && datos.buscando > 0 && !agotado;
+            const puedeDireccion = puede && !p.expreso && (!!p.company_id || entregas.length > 0);
+            const egreso = p.movimientos.some((m) => m.tipo === 'egreso');
+            // Arriba del tramo que llega a esta parada: si no se pudo calcular, qué falta ubicar (ella o de donde sale).
+            const falta = s.tramo.falta === 'desde' ? faltaSalida
+              : { nombre, accion: buscando ? null : puede && p.direccion ? { label: 'Ubicarla en el mapa', onClick: () => abrirPanel('ubicar', p.clave) }
+                : puedeDireccion ? { label: 'Cargar la dirección', onClick: () => abrirPanel('direccion', p.clave) } : null };
+            const atiende = s.llega + (s.espera > 1 ? s.espera : 0);
+            const menu: ItemMenu[] = [
+              ...(puedeDireccion ? [{ label: p.direccion ? 'Corregir la dirección' : 'Cargar la dirección', icon: 'edit', nota: entregas.length ? 'Se cambia en el pedido' : 'Se cambia en la ficha de la empresa', onClick: () => abrirPanel('direccion', p.clave) }] : []),
+              ...(puede && p.direccion ? [{ label: p.lat == null ? 'Ubicarla en el mapa' : 'Corregir el punto en el mapa', icon: 'pin', nota: 'Vale para esta dirección en todas las rutas', onClick: () => abrirPanel('ubicar', p.clave) }] : []),
+              ...(puede && /^p:/.test(p.clave) ? [{ label: p.expreso ? (p.expreso.guia ? 'Cambiar expreso o guía' : 'Cargar la guía') : 'Mandar por expreso', icon: 'truck', onClick: () => abrirPanel('expreso', p.clave) }] : []),
+              ...(p.lat != null ? [{ label: 'Cómo llegar (Google Maps)', icon: 'external', onClick: () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, '_blank', 'noopener') }] : []),
+              ...(puede ? armadas.filter((a) => a.i !== act.i).map((a, k) => ({ label: `Recorrido ${a.i + 1} · ${a.r.chofer ?? 'sin chofer'}`, icon: 'route', grupo: k === 0 ? 'Pasar a otro recorrido' : undefined, onClick: () => pasar(p, a.i) })) : []),
             ];
+            const tags = [
+              p.pactada ? <span key="h" className={`cr-tag fija${s.tarde ? ' late' : ''}`} title="Hora fijada a mano: el recorrido se ordena para cumplirla"><Icon name="timer" size={11} />{p.pactada.texto}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>
+                : (p.horario || s.espera > 1) && <span key="h" className={`cr-tag${s.tarde ? ' late' : ''}`}>{p.horario ? `Recibe de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : ''}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>,
+              p.lat == null && (buscando ? <span key="u" className="cr-tag">Buscando en el mapa…</span>
+                : <span key="u" className="cr-tag riesgo"><Icon name="alert" size={11} />{p.direccion ? 'No se encontró en el mapa' : 'Falta la dirección'}</span>),
+              p.visita?.resultado === 'hecho' && <span key="v" className="cr-tag">Lo marcó {p.visita.chofer ?? 'el chofer'} a las {horaDe(p.visita.at)}</span>,
+              (p.fotos ?? 0) > 0 ? <span key="f" className="cr-tag" title="La foto del remito que mandó el chofer: está en los pedidos de la parada"><Icon name="image" size={11} />{p.fotos === 1 ? 'Foto del remito' : `${p.fotos} fotos del remito`}</span>
+                : (todo || p.visita?.resultado === 'hecho') && <span key="f" className="cr-tag riesgo" title="La foto del remito es obligatoria en todas las paradas"><Icon name="alert" size={11} />Sin foto del remito</span>,
+            ].filter(Boolean);
+            const etaTexto = s.tramo.sinUbicar ? 'Hora sin calcular' : `${s.espera > 1 ? `Llega a las ${hhmm(s.llega)} y la atienden a las ${hhmm(atiende)}` : `Llega a las ${hhmm(s.llega)}, ${duracion(s.servicio)} en el lugar`}${s.incierta ? ' (aproximado: antes hay una dirección sin ubicar)' : ''}`;
+            return (
+              <Fragment key={p.clave}>
+                <Tramo t={s.tramo} falta={falta} />
+                <li data-clave={p.clave} className={`cr-parada${todo ? ' hecha' : ''}${caliente === p.clave ? ' caliente' : ''}${sobre?.clave === p.clave ? ` sobre${sobre.abajo ? ' abajo' : ''}` : ''}`}
+                  style={{ '--c': act.color } as React.CSSProperties}
+                  onMouseEnter={() => setCaliente(p.clave)} onMouseLeave={() => setCaliente((c) => (c === p.clave ? null : c))}
+                  onFocus={() => setCaliente(p.clave)}
+                  onDragOver={(e) => { const de = arrastre.current; if (de && de !== p.clave) { e.preventDefault(); const abajo = act.paradas.findIndex((x) => x.clave === de) < i; if (sobre?.clave !== p.clave || sobre.abajo !== abajo) setSobre({ clave: p.clave, abajo }); } }}
+                  onDrop={(e) => { e.preventDefault(); const de = arrastre.current; arrastre.current = null; setSobre(null); if (de) mover(de, i); }}>
+                  {/* Se arrastra desde el número (con la manija): así el resto de la tarjeta deja seleccionar y copiar. */}
+                  <div className={`cr-n-col${puede && !abierto ? ' asa' : ''}`} draggable={puede && !abierto} title={puede && !abierto ? 'Arrastrá para cambiar el orden' : undefined}
+                    onDragStart={(e) => { arrastre.current = p.clave; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', p.clave); const li = e.currentTarget.closest('li'); if (li) e.dataTransfer.setDragImage(li, 18, 18); } catch { /* no hace falta */ } }}
+                    onDragEnd={() => { arrastre.current = null; setSobre(null); }}>
+                    <div className="cr-n num" aria-label={`Parada ${i + 1}${todo ? ', hecha' : ''}`}>{i + 1}</div>
+                    {puede && !abierto && <span className="cr-asa" aria-hidden="true" />}
+                  </div>
+                  <div className="cr-p-quien">
+                    <div className="cr-p-nombre">{nombre}</div>
+                    {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia
+                      ? <> · guía {seguimientoExpreso(p.expreso.nombre, p.expreso.guia) ? <a className="cr-link num" href={seguimientoExpreso(p.expreso.nombre, p.expreso.guia)!} target="_blank" rel="noreferrer" title="Ver el seguimiento del envío">{p.expreso.guia} ↗</a> : <b className="num">{p.expreso.guia}</b>}</>
+                      : ' · sin guía todavía'}</div>}
+                    <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ? lindaDireccion(p.direccion) : 'Sin dirección cargada'}
+                      {p.direccion && p.origen && ORIGEN_DUDOSO[p.origen] && <span className="cr-origen"> · {ORIGEN_DUDOSO[p.origen]}</span>}</div>
+                  </div>
+                  <div className={`cr-eta${s.tarde ? ' tarde' : ''}`} role="group" aria-label={etaTexto} title={s.incierta ? 'Aproximada: antes hay una dirección sin ubicar, así que no cuenta ese viaje' : undefined}>
+                    <b className="num" aria-hidden="true">{s.tramo.sinUbicar ? '—' : `${s.incierta ? '≈' : ''}${hhmm(atiende)}`}</b>
+                    <span aria-hidden="true">{s.tramo.sinUbicar ? 'sin calcular' : s.espera > 1 ? `llega ${hhmm(s.llega)} y espera` : `${duracion(s.servicio)} en el lugar`}</span>
+                  </div>
+                  {p.lugar && (p.lugar.contacto || p.lugar.telefono || p.lugar.observaciones || p.lugar.coordinacion || (p.lugar.horario && !p.horario)) && (
+                    <div className="cr-libreta" title={`De la libreta de direcciones: ${p.lugar.nombre}`}>
+                      {p.lugar.horario && !p.horario && <span><b>Horario</b>{p.lugar.horario}</span>}
+                      {(p.lugar.contacto || p.lugar.telefono) && <span><b>Contacto</b>{[p.lugar.contacto, p.lugar.telefono].filter(Boolean).join(' · ')}</span>}
+                      {p.lugar.observaciones && <span><b>Ojo</b>{p.lugar.observaciones}</span>}
+                      {p.lugar.coordinacion && <details><summary>Cómo se coordina la entrega</summary>{p.lugar.coordinacion}</details>}
+                    </div>
+                  )}
+                  <div className="cr-p-movs">
+                    {(p.encargos ?? []).map((e) => (
+                      <div key={`e${e.id}`} className={`cr-k-X${e.estado === 'hecho' ? ' ok' : ''}`}>
+                        <i /><span><b>Encargo</b><button type="button" className="cr-link" onClick={() => setEncargo(e.id)}>de {e.quien?.split(' ')[0] ?? 'alguien'}</button>
+                          {e.urgente ? ' · urgente' : ''}{e.llevar.length ? ` · deja ${e.llevar.map(itemTexto).join(', ')}` : ''}{e.retirar.length ? ` · retira ${e.retirar.map(itemTexto).join(', ')}` : ''}
+                          {!e.llevar.length && !e.retirar.length && e.notas ? ` · ${e.notas}` : ''}
+                          {e.desde && e.desde !== datos.bases[0]?.id && e.llevar.length ? ` · está en ${datos.bases.find((b) => b.id === e.desde)?.nombre ?? e.desde}` : ''}
+                          {e.hacia && e.hacia !== datos.bases[0]?.id && e.retirar.length ? ` · va a ${datos.bases.find((b) => b.id === e.hacia)?.nombre ?? e.hacia}` : ''}
+                          {e.contacto ? ` · preguntar por ${e.contacto}` : ''}{e.horario ? ` · ${e.horario}` : ''}{e.estado === 'no_se_pudo' && e.motivo ? ` · no se pudo: ${e.motivo}` : ''}</span>
+                      </div>
+                    ))}
+                    {/* Primero qué se lleva o se trae y cuánto; abajo, de qué pedido es. */}
+                    {p.movimientos.map((m) => (
+                      <div key={m.id} className={`cr-k-${carrilDe(m.tipo).k}${m.hecho ? ' ok' : ''}`}>
+                        <i /><span><b>{carrilDe(m.tipo).uno}</b>{m.articulo ? <span className="cr-que">{cantidad(m)}</span> : null}
+                          <span className="cr-pdv">{m.record_id ? <button type="button" className="cr-link" onClick={() => onAbrir(m.record_id!)}>PDV {m.npdv}</button> : `PDV ${m.npdv ?? '—'}`}
+                            {m.tipo !== 'entrega' && m.cliente ? ` · ${lindo(m.cliente)}` : ''}{m.evento ? ' · evento' : ''}</span></span>
+                      </div>
+                    ))}
+                  </div>
+                  {p.sugerencia && (
+                    <div className="cr-sugerencia">
+                      <Icon name="alert" size={14} />
+                      <div><b>Puede que vaya a otra dirección.</b> {p.sugerencia.motivo} El pedido dice «{p.direccion}».
+                        {puede && <div className="row" style={{ marginTop: 6 }}><button type="button" className="btn sm primary" onClick={() => sugerencia(p, true)}>Usar {p.sugerencia.sugerida}</button><button type="button" className="btn sm ghost" onClick={() => sugerencia(p, false)}>Dejar la del pedido</button></div>}
+                      </div>
+                    </div>
+                  )}
+                  {p.visita && p.visita.resultado !== 'hecho' && (
+                    <div className={`cr-visita ${p.visita.resultado}`}><Icon name="alert" size={14} />
+                      <span><b>{p.visita.resultado === 'salteada' ? 'El chofer la dejó para después' : MOTIVO[p.visita.motivo ?? 'otro'] ?? 'No se pudo'}</b>{p.visita.nota ? `: ${p.visita.nota}` : ''} · {p.visita.chofer ?? 'Chofer'}, {horaDe(p.visita.at)}</span></div>
+                  )}
+                  {tags.length > 0 && <div className="cr-p-estado">{tags}</div>}
+                  {/* Las acciones: a la vista las de todos los días; lo de corregir, el expreso y pasar a otro recorrido, en «⋯». */}
+                  {(puede || menu.length > 0) && (
+                    <div className="cr-p-acciones">
+                      {puede && <button type="button" className={`btn sm cr-hecho${todo ? ' on' : ''}`} aria-pressed={todo} disabled={marcando === p.clave}
+                        title={todo ? 'Volver a pendiente' : 'Marcarla como hecha: cambia el estado de sus artículos en ClickUp'} onClick={() => marcar(p)}>
+                        <Icon name="check" size={13} />{marcando === p.clave ? 'Guardando…' : todo ? 'Hecha' : 'Marcar hecha'}</button>}
+                      {puede && egreso && <button type="button" className="btn sm ghost" onClick={() => imprimirRemito(p)}
+                        title={p.remito ? 'Volver a imprimirlo (no gasta otro número)' : 'Imprimir el remito de traslado: todo lo que va a este impresor ese día. Se numera la primera vez.'}>
+                        <Icon name="printer" size={13} />{p.remito ? <>Remito <span className="num">{p.remito}</span></> : 'Remito'}</button>}
+                      {puede && <button type="button" className={`btn sm ghost${fijando === p.clave ? ' on' : ''}`} aria-expanded={fijando === p.clave} onClick={() => abrirPanel(fijando === p.clave ? null : 'hora', p.clave)}>
+                        <Icon name="timer" size={13} />{p.pactada ? 'Cambiar hora' : 'Fijar hora'}</button>}
+                      <span className="cr-mover">
+                      <MenuParada nombre={nombre} items={menu} />
+                      {puede && <span className="cr-flechas"><button type="button" aria-label={`Subir ${nombre}`} title="Subir" disabled={i === 0} onClick={() => mover(p.clave, i - 1)}>↑</button><button type="button" aria-label={`Bajar ${nombre}`} title="Bajar" disabled={i === act.paradas.length - 1} onClick={() => mover(p.clave, i + 1)}>↓</button></span>}
+                      </span>
+                    </div>
+                  )}
+                  {ubicando?.clave === p.clave && (
+                    <div className="cr-ubicar">
+                      <span>{p.lat == null ? <>El número <b>{i + 1}</b> está en el centro del mapa: arrastralo hasta donde queda <b>{lindaDireccion(p.direccion!)}</b>.</> : <>Arrastrá el número <b>{i + 1}</b> en el mapa hasta donde queda de verdad.</>} Vale para esta dirección en todas las rutas.{p.punto_manual ? ' Ya tiene una ubicación corregida a mano.' : ''}</span>
+                      <div className="acciones">
+                        <button type="button" className="btn sm ghost" onClick={() => setUbicando(null)}>Cancelar</button>
+                        {p.punto_manual && <button type="button" className="btn sm ghost" onClick={() => rebuscar(p)}>Volver a buscar en el mapa</button>}
+                        <button type="button" className="btn sm primary" disabled={ubicando.lat == null} onClick={() => fijar(p)}>Guardar ubicación</button>
+                      </div>
+                    </div>
+                  )}
+                  {expresando === p.clave && <PorExpreso p={p} expresos={datos.expresos ?? []} onListo={() => { setExpresando(null); void cargar(); onCambio(); }} />}
+                  {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
+                  {fijando === p.clave && <FijarHora p={p} llega={s.tramo.sinUbicar ? null : s.llega} aMano={!!act.r.a_mano} onGuardar={(modo, hora) => fijarHora(p, modo, hora)} onCancelar={() => setFijando(null)} />}
+                </li>
+              </Fragment>
+            );
           })}
-          {act.paradas.length > 0 && act.fin && <Tramo t={act.sim.vuelta} />}
+          {act.paradas.length > 0 && act.fin && <Tramo t={act.sim.vuelta} falta={act.sim.vuelta.falta === 'desde' ? faltaSalida
+            : { nombre: act.fin.nombre, accion: puede && act.r.fin === 'otro' ? { label: 'Cambiar el lugar', onClick: () => setPanel('fin') } : null }} />}
           {act.paradas.length > 0 && (
-            <li className="cr-parada base"><div className="cr-n base"><Icon name={act.vuelve ? 'home' : 'pin'} size={13} /></div>
+            <li className="cr-parada base"><div className="cr-n-col"><div className="cr-n base"><Icon name={act.vuelve ? 'home' : 'pin'} size={13} /></div></div>
               <div><div className="cr-p-nombre">{!act.fin ? 'Termina en la última parada' : act.vuelve ? `Vuelta a ${act.base?.nombre}` : `Termina en ${act.fin.nombre}`}</div>
                 {act.fin && !act.vuelve && <div className="cr-p-sub">{act.fin.direccion}</div>}</div>
-              <div className="cr-eta"><b className="num">{hhmm(act.sim.fin)}</b><span>{act.fin ? 'llega' : 'termina'}</span></div></li>
+              <div className="cr-eta"><b className="num">{act.sim.vuelta.sinUbicar ? '—' : `${incierto ? '≈' : ''}${hhmm(act.sim.fin)}`}</b><span>{act.sim.vuelta.sinUbicar ? 'sin calcular' : act.fin ? 'llega' : 'termina'}</span></div></li>
           )}
         </ol>
 
         <div className="cr-ruta-lado">
           <div className="cr-mapa-caja">
-            <Mapa armadas={armadas} activa={act.i} bases={[...datos.bases, ...armadas.filter((a) => a.base && a.base.id.startsWith('otro-')).map((a) => a.base!), ...armadas.filter((a) => a.fin?.id.startsWith('fin-')).map((a) => a.fin!)]} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
+            <Mapa armadas={armadas} activa={act.i} bases={[...datos.bases, ...armadas.filter((a) => a.base && a.base.id.startsWith('otro-')).map((a) => a.base!), ...armadas.filter((a) => a.fin?.id.startsWith('fin-')).map((a) => a.fin!)]} caliente={caliente} puede={puede} onPin={(c, i) => { setActiva(i); setCaliente(c); requestAnimationFrame(() => document.querySelector(`.cr-parada[data-clave="${CSS.escape(c)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); }} ubicando={ubicando} onUbicar={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
             <div className="cr-mapa-pie small">
-              <span>{act.real ? 'Recorrido por calles.' : 'Recorrido en línea recta (estimado).'} Tiempos con tránsito moderado según la hora, sin el tránsito del momento.</span>
-              {puede && <span>Si un punto quedó mal, usá «Corregir ubicación» en su parada.</span>}
+              <span>{act.real ? 'Recorrido por calles.' : 'Recorrido en línea recta (estimado).'} Tiempos con el tránsito habitual de cada hora, no el del momento.</span>
+              {puede && <span>Si un punto quedó mal, corregilo desde el menú ⋯ de su parada.</span>}
               <Libreta puede={puede} onCambio={() => void cargar()} />
             </div>
           </div>
@@ -473,8 +574,56 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   );
 }
 
-function Tramo({ t }: { t: Simulacion['vuelta'] }) {
-  return <li className={`cr-tramo ${t.nivel}`}>{t.sinUbicar ? <span>Tramo sin calcular: falta ubicar una dirección</span> : <span className="num">{duracion(t.min)} · {t.km.toFixed(1).replace('.', ',')} km{t.estimado ? ' aprox.' : ''} · tránsito <b>{t.nivel}</b></span>}</li>;
+// El viaje entre dos puntos. Sin calcular (falta ubicar una de las puntas) es un aviso: dice cuál y cómo arreglarlo. El
+// tránsito va en tonos neutros: es el habitual a esa hora, no un problema (el rojo queda para llegar tarde).
+type Falta = { nombre: string; accion: { label: string; onClick: () => void } | null };
+function Tramo({ t, falta }: { t: Simulacion['vuelta']; falta: Falta }) {
+  if (t.sinUbicar) return (
+    <li role="presentation" className="cr-tramo sin"><Icon name="alert" size={12} />
+      <span>Sin calcular: falta ubicar <b>{lindo(falta.nombre)}</b>{falta.accion && <> · <button type="button" className="cr-link" onClick={falta.accion.onClick}>{falta.accion.label}</button></>}</span></li>
+  );
+  return <li role="presentation" className={`cr-tramo ${t.nivel}`}><span className="num">{duracion(t.min)} · {t.km.toFixed(1).replace('.', ',')} km{t.estimado ? ' aprox.' : ''} · tránsito habitual {t.nivel}</span></li>;
+}
+
+// «⋯» de cada parada: lo que no se usa todos los días (corregir la dirección o el punto, el expreso, cómo llegar, pasar a
+// otro recorrido). Cada opción dice, si hace falta, hasta dónde llega el cambio.
+type ItemMenu = { label: string; icon: string; nota?: string; grupo?: string; onClick: () => void };
+function MenuParada({ nombre, items }: { nombre: string; items: ItemMenu[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null), btn = useRef<HTMLButtonElement>(null), pop = useRef<HTMLDivElement>(null);
+  const { style } = useFloating(btn, pop, open, () => setOpen(false), 360);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); btn.current?.focus(); } };
+    document.addEventListener('mousedown', h); document.addEventListener('keydown', k);
+    requestAnimationFrame(() => pop.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); };
+  }, [open]);
+  if (!items.length) return null;
+  // Flechas para moverse entre las opciones.
+  const teclas = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const ops = [...(pop.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])], i = ops.indexOf(document.activeElement as HTMLElement);
+    ops[(i + (e.key === 'ArrowDown' ? 1 : ops.length - 1)) % ops.length]?.focus();
+  };
+  return (
+    <span className="cr-menu" ref={ref}>
+      <button ref={btn} type="button" className={`cr-menu-btn${open ? ' on' : ''}`} aria-label={`Más acciones de ${nombre}`} title="Más acciones" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}><Icon name="dots" size={16} /></button>
+      {open && (
+        <div ref={pop} className="popover cr-menu-pop" role="menu" aria-label={`Acciones de ${nombre}`} style={{ ...style, minWidth: 230 }} onKeyDown={teclas}>
+          {items.map((it) => (
+            <Fragment key={it.label}>
+              {it.grupo && <div className="grp" role="presentation">{it.grupo}</div>}
+              <button type="button" role="menuitem" className="opt" onClick={() => { setOpen(false); it.onClick(); }}>
+                <Icon name={it.icon} size={15} /><span>{it.label}{it.nota && <small>{it.nota}</small>}</span></button>
+            </Fragment>
+          ))}
+        </div>
+      )}
+    </span>
+  );
 }
 
 // «Sale de → Otro lugar» (o «Termina en»): se busca en la libreta por nombre o por dirección, o se escribe la dirección a mano.
@@ -527,8 +676,8 @@ function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id:
 }
 
 // Fijar la hora de una parada: «a las 12:00» (llega entre 15 minutos antes y 15 después), «antes de las…» o «desde las…».
-function FijarHora({ p, llega, onGuardar, onCancelar }: { p: Parada; llega: number | null; onGuardar: (modo: ModoHora | null, hora: string) => Promise<void>; onCancelar: () => void }) {
-  const dos = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(Math.round(m) % 60).padStart(2, '0')}`;
+function FijarHora({ p, llega, aMano, onGuardar, onCancelar }: { p: Parada; llega: number | null; aMano: boolean; onGuardar: (modo: ModoHora | null, hora: string) => Promise<void>; onCancelar: () => void }) {
+  const dos = (x: number) => { const m = Math.round(x); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
   const [modo, setModo] = useState<ModoHora>(p.pactada?.modo ?? 'a_las');
   const [hora, setHora] = useState(p.pactada ? dos(p.pactada.min) : llega != null ? dos(Math.round(llega / 15) * 15) : '12:00');
   const [ocupado, setOcupado] = useState(false);
@@ -542,6 +691,7 @@ function FijarHora({ p, llega, onGuardar, onCancelar }: { p: Parada; llega: numb
         <input type="time" className="input sm" value={hora} onChange={(e) => setHora(e.target.value)} aria-label="Hora" required />
       </div>
       <span className="muted small">{modo === 'a_las' ? 'Llega entre 15 minutos antes y 15 después.' : modo === 'antes' ? 'Tiene que llegar antes de esa hora.' : 'No antes de esa hora.'} El recorrido se ordena solo para cumplirla, junto con las demás horas fijadas.</span>
+      {aMano && <span className="cr-ojo small"><Icon name="alert" size={12} />Este recorrido está ordenado a mano: al guardar se vuelve a ordenar solo y se pierde ese orden.</span>}
       <div className="acciones">
         <button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button>
         {p.pactada && <button type="button" className="btn sm ghost" disabled={ocupado} onClick={() => guardar(null)}>Sacar la hora</button>}
@@ -610,7 +760,7 @@ function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]
         </ul>
       )}
       {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
-      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando}>Guardar</button></div>
+      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando || !direccion.trim()}>Guardar</button></div>
     </form>
   );
 }
@@ -664,22 +814,24 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, ubicando, onUbic
         L.polyline(linea, { color: a.color, weight: act ? 4.5 : 3, opacity: act ? 0.95 : 0.4, dashArray: a.real ? undefined : '2 9', lineCap: 'round', interactive: false }).addTo(g);
       }
       a.paradas.forEach((p, i) => {
-        if (p.lat == null || p.lng == null) return;
-        todos.push([p.lat, p.lng]);
-        const s = a.sim.paradas[i], hecha = hechaParada(p);
-        // Los números no se arrastran, salvo el de la parada a la que se le está corrigiendo la ubicación.
+        // Los números no se arrastran, salvo el de la parada a la que se le está corrigiendo la ubicación. Una que no se
+        // encontró en el mapa aparece en el centro para llevarla a su lugar.
         const mio = ubicando?.clave === p.clave;
-        const mk = L.marker(mio && ubicando.lat != null && ubicando.lng != null ? [ubicando.lat, ubicando.lng] : [p.lat, p.lng], {
+        if ((p.lat == null || p.lng == null) && !mio) return;
+        if (p.lat != null && p.lng != null) todos.push([p.lat, p.lng]);
+        const s = a.sim.paradas[i], hecha = hechaParada(p);
+        const donde: L.LatLngExpression = mio && ubicando.lat != null && ubicando.lng != null ? [ubicando.lat, ubicando.lng] : p.lat != null && p.lng != null ? [p.lat, p.lng] : m.getCenter();
+        const mk = L.marker(donde, {
           icon: L.divIcon({ className: 'cr-pin-wrap', html: `<span class="cr-pin${act ? '' : ' apagado'}${mio ? ' ubicando' : ''}${hecha ? ' hecha' : ''}${s.tarde || (p.visita && p.visita.resultado === 'no_se_pudo') ? ' tarde' : ''}" style="--c:${a.color}">${hecha ? '✓' : i + 1}</span>`, iconSize: [28, 28], iconAnchor: [14, 14] }),
           zIndexOffset: mio ? 4000 : act ? 1000 : 0, draggable: puede && mio, keyboard: false,
-        }).bindTooltip(esc(`${p.nombre} · ${hhmm(s.llega)}`), { direction: 'top', offset: [0, -14] }).addTo(g);
+        }).bindTooltip(esc(s.tramo.sinUbicar ? p.nombre : `${p.nombre} · ${hhmm(s.llega + (s.espera > 1 ? s.espera : 0))}`), { direction: 'top', offset: [0, -14] }).addTo(g);
         pines.current.set(p.clave, mk);
         mk.on('click', () => cb.current.onPin(p.clave, a.i));
         mk.on('dragend', () => { const ll = mk.getLatLng(); cb.current.onUbicar(ll.lat, ll.lng); });
       });
     }
     // Se vuelve a encuadrar solo cuando cambian los puntos, no al reordenar.
-    const firma = [...pines.current.keys()].sort().join('|');
+    const firma = armadas.flatMap((a) => a.paradas.filter((p) => p.lat != null).map((p) => p.clave)).sort().join('|');
     if (todos.length && firma !== encuadre.current) { encuadre.current = firma; m.fitBounds(L.latLngBounds(todos).pad(0.15), { maxZoom: 15, animate: false }); }
   }, [armadas, activa, bases, puede, ubicando]);
   // La parada sobre la que está el mouse: se resalta su pin sin rehacer el mapa.

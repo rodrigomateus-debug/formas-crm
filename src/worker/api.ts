@@ -32,6 +32,7 @@ import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProduct
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
+import { produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarDestinos, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
@@ -279,8 +280,9 @@ api.get('/records/:type/:id', async (c) => {
   }
   const tags = (await tagsFor(c.env.DB, c.get('ctx'), type, [row.id])).get(row.id) ?? [];
   // Pedidos: quién lo tiene en producción y cuántos artículos están listos, para la cabecera de la ficha y de la vista
-  // previa (lo mismo que la tarjeta del tablero de pedidos).
-  const prod = type === 'order' && !esVentas(c.get('ctx').user) ? await produccionDePedido(c.env.DB, row.id) : null;
+  // previa (lo mismo que la tarjeta del tablero de pedidos). También para Ventas, para saber a quién preguntar (pedido
+  // de Rodrigo del 17/11/2026).
+  const prod = type === 'order' ? await produccionDePedido(c.env.DB, row.id) : null;
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
   return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
 });
@@ -987,6 +989,15 @@ api.get('/records/order/:id/products', async (c) => {
   const rec = await getRow(c.env.DB, Number(c.req.param('id')));
   if (rec.object_type !== 'order') throw new HttpError(404, 'No es un pedido.');
   return c.json(await orderProducts(c.env, rec.id, JSON.parse(rec.props), { refresh: c.req.query('refresh') === '1' }));
+});
+
+// La lista de Pedidos con sus productos abajo (pedidosprod.ts, pedido de Rodrigo del 17/11/2026): de cada pedido de la
+// página, sus productos con foto, estado simplificado, quién los tiene en Producción y la fecha real. También para el
+// perfil Ventas (de sus pedidos): no va por /produccion. Solo los pedidos que quien pide puede ver.
+api.get('/pedidos/articulos', async (c) => {
+  const ids = [...new Set(String(c.req.query('ids') ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 200);
+  const visibles = await idsVisibles(c.env.DB, c.get('ctx').user, ids);
+  return c.json({ pedidos: await produccionDePedidos(c.env.DB, ids.filter((id) => visibles.has(id))) });
 });
 
 // La razón social con que se factura un pedido (razones.ts): la del pedido o la del pedido de un negocio, y las de una empresa.

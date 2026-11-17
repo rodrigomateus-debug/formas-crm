@@ -140,6 +140,31 @@ $ 1,7 M (49 %)». Una diferencia de menos del 1 % del total cuenta como que no p
 total del pedido no se puede saber y se muestra solo el saldo. Un pago que todavía no se imputó a ninguna factura
 (cobranza sin aplicar) no baja el saldo del pedido, así que hasta que se aplica el pedido sigue diciendo «total».
 
+## Los productos de cada pedido en la lista
+
+Pedido de Rodrigo del 17/11/2026: la lista de Pedidos (la que usan las vendedoras) se parece a Producción, pero
+simplificada. Cada pedido tiene sus productos abajo, con la misma línea que baja desde el pedido que en Producción:
+
+- **Cada producto** con su foto (la misma de los productos del pedido), su nombre y cantidad, su **estado en palabras de
+  la vendedora** (la pastilla de la etapa del pedido que tendría si fuera el único producto: Esperando boceto o
+  confirmación, En producción, Listo para entregar, Entregado; «Sin arrancar» si Producción todavía no lo empezó), **quién
+  lo tiene en Producción** (foto y nombre) y la **fecha real** que propuso Producción («Real mié 24/11», con «+4 d» si
+  quedó después de la pactada y en rojo si ya pasó y no está listo). No se ven los servicios ni los anulados, ni el
+  detalle interno (proveedor, impresor, fechas de ingreso y retiro).
+- **El estado va en la columna «Etapa del pedido» y quién lo tiene en la columna «Producción»**; si alguna no está en la
+  tabla, va al lado del nombre del producto.
+- **Columna «Producción»** en el renglón del pedido: quién lo tiene (el PDV y sus productos abiertos), cuántos productos
+  están listos («1/3») y la fecha real del PDV (o, si no tiene, la más lejana de sus productos abiertos). Se suma sola
+  una vez, al lado de la etapa, en «Todos» y «Míos» de cada navegador; en las vistas guardadas se agrega desde
+  «Columnas». Si alguien la quita, no vuelve.
+- **Abrir y cerrar**: la flecha de cada pedido, o «Colapsar productos» / «Expandir productos» arriba a la derecha para
+  todos (queda en el navegador; por defecto, abiertos). Un clic en un producto abre la vista previa del pedido.
+- Un pedido sin PDV en ClickUp muestra sus productos (los renglones del pedido, sin servicios) sin estado.
+- Sale de la tabla `produccion` (la sincronización de ClickUp de cada 10 minutos), en una sola consulta para la página:
+  `GET /api/pedidos/articulos?ids=…` (`src/worker/pedidosprod.ts`, pantalla en `web/src/pages/PedidosProductos.tsx`).
+  Devuelve solo los pedidos que quien pregunta puede ver, así que la vendedora la usa para los suyos. Prueba en
+  `test/produccion.test.mjs`.
+
 ## Miniaturas de los productos en la tarjeta
 
 Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, la tarjeta muestra hasta 3 fotos de los productos del pedido,

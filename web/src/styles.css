@@ -1923,3 +1923,25 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .ch-fila.abierta { background: var(--ui-surface-sunken); }
 .ch-bajas summary { cursor: pointer; margin-bottom: 6px; }
 @media (max-width: 640px) { .ch-acceso { padding-left: 14px; } }
+
+/* ---------- Pedidos: los productos de cada pedido abajo (pages/PedidosProductos.tsx), como Producción pero simplificado ---------- */
+.ped-nombre { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; vertical-align: middle; }
+.ped-flecha { flex: none; display: inline-block; width: 24px; }
+button.ped-flecha { display: inline-flex; }
+table.grid td.ped-prod { max-width: none; }
+.ped-prod-in { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.ped-real { font-size: 12px; color: var(--ui-ink-2); white-space: nowrap; display: inline-flex; align-items: center; font-variant-numeric: tabular-nums; }
+.ped-real.fecha-alerta { color: var(--ui-negative-ink); }
+/* Los productos van corridos a la derecha con una línea que baja desde el pedido, como las subtareas (y como Producción).
+   El pedido y sus productos se leen como un bloque: sin la raya entre ellos. */
+table.grid tr.ped-con-arts td, table.grid tr.ped-art:not(.ultimo) td { border-bottom-color: transparent; }
+table.grid tr.ped-art td { height: 40px; cursor: pointer; }
+table.grid tr.ped-art.sel td { background: var(--row-sel); }
+.ped-art-t { display: flex; align-items: center; gap: 8px; padding-left: 30px; min-width: 0; color: var(--ui-ink); }
+.ped-art-n { min-width: 0; font-size: 13px; }
+.ped-cant { flex: none; }
+.ped-art-t .prod-foto { width: 28px; height: 28px; }
+table.grid tr.ped-art td.name::before { content: ''; position: absolute; left: 26px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); }
+table.grid tr.ped-art.ultimo td.name::before { bottom: 50%; }
+table.grid tr.ped-art td.name::after { content: ''; position: absolute; left: 26px; top: 50%; width: 12px; border-top: 1.5px solid var(--ui-line-strong); }
+table.grid tr.ped-art.entregado .ped-art-n { color: var(--ui-ink-2); }

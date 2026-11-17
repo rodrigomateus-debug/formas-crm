@@ -328,6 +328,48 @@ test('producción: la vendedora ve quién lo tiene asignado, en la tarjeta y en 
   assert.ok(card.adjuntos.produccion.asignados.some((p) => p.nombre === `Ceci ${RUN}`));
 });
 
+// La lista de Pedidos con sus productos abajo (pedidosprod.ts, pedido de Rodrigo del 17/11/2026): como Producción pero
+// simplificado, también para la vendedora (solo de sus pedidos).
+test('pedidos: cada producto con su estado simplificado, quién lo tiene en Producción y la fecha real', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const pdv = pdvDe(await vista(), PDV);
+  const r = await api('GET', `/pedidos/articulos?ids=${pdv.record_id}`);
+  assert.equal(r.status, 200);
+  const p = r.data.pedidos[pdv.record_id];
+  assert.ok(p, 'el pedido con su producción');
+  assert.equal(p.articulos.length, 3, 'sin el anulado');
+  assert.deepEqual([p.listos, p.total], [pdv.listos, pdv.total], 'los mismos listos que en Producción');
+  assert.equal(p.entrega_real, pdv.entrega_real, 'la fecha real del PDV');
+  const ETAPAS = ['esperando_boceto', '1237498994', '1237498996', 'entregado_parcial', '1237498998', null];
+  for (const a of p.articulos) assert.ok(ETAPAS.includes(a.etapa), `estado simplificado: ${a.etapa}`);
+  const nec = p.articulos.find((a) => a.nombre.startsWith('Necessaire'));
+  assert.equal(nec.foto, FOTO_NEC, 'con la foto del producto');
+  assert.ok(nec.entrega_real, 'con la fecha real que propuso Producción');
+  assert.ok(p.asignados.some((x) => x.nombre === `Ceci ${RUN}` && x.user_id), 'quién lo tiene, con su usuario');
+  const pel = p.articulos.find((a) => a.nombre.startsWith('Pelota'));
+  assert.equal(pel.etapa, '1237498996', '«listo para entergar» es Listo para entregar');
+  assert.ok(pel.asignados.some((x) => x.id === SOLE.id), 'cada producto con quien lo tiene');
+
+  // La vendedora: de sus pedidos sí (no va por /produccion), de los demás nada; y en la ficha, quién lo tiene.
+  const vera = (await api('POST', '/users', { email: `vera.prod.${RUN}@formas.ar`, name: `Vera Prod ${RUN}`, profile: 'comercial', role: 'member' })).data;
+  const antes = (await api('GET', `/records/order/${pdv.record_id}`)).data.record.props.owner_id ?? null;
+  asUser = vera.email;
+  assert.deepEqual((await api('GET', `/pedidos/articulos?ids=${pdv.record_id}`)).data.pedidos, {}, 'un pedido que no es suyo, nada');
+  asUser = null;
+  await api('PATCH', `/records/order/${pdv.record_id}`, { props: { owner_id: vera.id } });
+  try {
+    asUser = vera.email;
+    const suyo = await api('GET', `/pedidos/articulos?ids=${pdv.record_id}`);
+    assert.equal(suyo.status, 200);
+    assert.equal(suyo.data.pedidos[pdv.record_id]?.articulos.length, 3, 'su pedido, con sus productos');
+    assert.ok((await api('GET', `/records/order/${pdv.record_id}`)).data.produccion?.asignados.length, 'en la ficha, quién lo tiene en Producción');
+  } finally {
+    asUser = null;
+    await api('PATCH', `/records/order/${pdv.record_id}`, { props: { owner_id: antes } });
+  }
+});
+
 test('producción: el proveedor que falta sale del SKU y se escribe en ClickUp', async (t) => {
   asUser = null;
   if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }

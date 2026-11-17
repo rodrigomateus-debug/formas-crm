@@ -16,7 +16,7 @@ import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
-import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
+import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
 
@@ -425,7 +425,9 @@ function IndexFor({ type }: { type: ObjectType }) {
         if (!vivo) return;
         if (key === activeView) continue;
         const g = gruposDeVista(c, type);
-        await precargar(m === 'board' ? urlTableroProp(meta, type, c.boardProp, c.q ?? '', g, c.sort, c.dir).url : urlLista(type, c.q ?? '', g, c, pageSize, 0));
+        const d = await precargar<{ results?: CrmRecord[] }>(m === 'board' ? urlTableroProp(meta, type, c.boardProp, c.q ?? '', g, c.sort, c.dir).url : urlLista(type, c.q ?? '', g, c, pageSize, 0));
+        // La tabla de Pedidos espera a sus productos para mostrarse: se traen también, así la pestaña aparece al instante.
+        if (vivo && type === 'order' && m === 'table' && d?.results?.length) await precargar(urlArticulos(d.results.map((r) => r.id), c.columns.includes('__cobro')));
       }
     }, 1200);
     return () => { vivo = false; window.clearTimeout(t); };
@@ -443,11 +445,17 @@ function IndexFor({ type }: { type: ObjectType }) {
   // Lo editado en las celdas se ve enseguida, sin recargar la lista (ni cambiar el orden).
   const [patched, setPatched] = useState<Record<number, CrmRecord>>({});
   useEffect(() => { setPatched({}); }, [list.data]);
-  const rows = (list.data?.results ?? []).map((r) => (patched[r.id] ? { ...r, ...patched[r.id] } : r));
-  const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
   // Pedidos: sus productos abajo y quién los tiene en Producción (PedidosProductos.tsx).
   const esPedidos = type === 'order' && mode === 'table';
-  const { pedidos: prod, adjuntos } = useProduccionPedidos(esPedidos ? rows.map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
+  const prodRes = useProduccionPedidos(esPedidos ? (list.data?.results ?? []).map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
+  // La página de Pedidos se muestra junto con sus productos: si no, aparecía sin ellos y un instante después se estiraba
+  // (la pantalla «titilaba» al entrar, al cambiar de página o de pestaña). Mientras llegan, queda lo de antes, atenuado.
+  const mostrada = useRef<{ data?: ListRes; prod: typeof prodRes.pedidos; adjuntos: typeof prodRes.adjuntos }>({ prod: {}, adjuntos: {} });
+  if (list.data && prodRes.listo) mostrada.current = { data: list.data, prod: prodRes.pedidos, adjuntos: prodRes.adjuntos };
+  const esperaProductos = !!list.data && !prodRes.listo;
+  const { prod, adjuntos } = mostrada.current;
+  const rows = (mostrada.current.data?.results ?? []).map((r) => (patched[r.id] ? { ...r, ...patched[r.id] } : r));
+  const allSel = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   const resize = useColumnResize(cfg.widths, (widths) => setCfg((c) => ({ ...c, widths })));
   // Pedidos sin negocio, para control (un pedido va en un solo negocio): es un filtro común sobre «Negocios asociados», así
@@ -594,7 +602,7 @@ function IndexFor({ type }: { type: ObjectType }) {
           </div>
         </div>
 
-        <div className={`table-wrap${list.fresh ? '' : ' cargando'}`} aria-busy={list.loading}>
+        <div className={`table-wrap${list.fresh && !esperaProductos ? '' : ' cargando'}`} aria-busy={list.loading || esperaProductos}>
           <ColumnWidths scope="grid-list" order={['__check', '__name', ...columns]} widths={resize.widths} />
           <table className="grid grid-list">
             <thead>
@@ -644,8 +652,8 @@ function IndexFor({ type }: { type: ObjectType }) {
               })}
             </tbody>
           </table>
-          {!list.data && list.loading && <Cargando />}
-          {!list.loading && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
+          {!mostrada.current.data && (list.loading || esperaProductos) && <Cargando />}
+          {!list.loading && !esperaProductos && !rows.length && <div className="empty">No hay {OBJECTS[type].plural.toLowerCase()} con estos filtros.</div>}
           {list.error && <div className="empty plain">{list.error}</div>}
         </div>
       </>}

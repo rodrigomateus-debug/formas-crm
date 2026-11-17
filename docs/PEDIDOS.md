@@ -198,6 +198,25 @@ cliente, sin el detalle interno (proveedor, impresor, fechas de ingreso y retiro
   `web/src/pages/PedidosProductos.tsx`, usada en `ObjectIndex.tsx` y `PropBoard.tsx`). Devuelve solo los pedidos que quien
   pregunta puede ver, así que la vendedora la usa para los suyos. Prueba en `test/produccion.test.mjs`.
 
+## Cada producto del pedido con su artículo de ClickUp
+
+Al leer los productos del pedido de Finnegans, cada renglón se ata a su artículo (subtarea) del PDV en ClickUp: de ahí
+salen su estado y quién lo tiene, la subtarea donde va su boceto y, para Producción, su SKU (costo del logo, proveedor por
+el SKU, OC). Se ata solo cuando no hay dudas, de lo más seguro a lo menos (`articulosDeRenglones` en `productos.ts`):
+
+1. el código: el «Código:» del artículo o, como la consulta liviana de ClickUp no trae la descripción, el que ya guardó
+   Producción (tabla `produccion`);
+2. el nombre: la descripción del renglón, o el nombre de la ficha del producto en Finnegans, contra el nombre del artículo
+   (aviso de Rodrigo del 17/11/2026, PDV 31544: en los pedidos de Formas Shop el renglón viene sin descripción y no se
+   ataba nada, así que el producto no mostraba su OC, el costo del logo ni el proveedor, aunque la foto sí, porque la
+   foto se busca por el nombre);
+3. la cantidad, si un solo artículo de los que quedan la tiene;
+4. si queda un renglón y un artículo, esos.
+
+En cada paso se ata un renglón solo si tiene un único candidato y ese artículo no le sirve a otro renglón (dos con la misma
+cantidad, por ejemplo, no se atan por la cantidad). Los pedidos ya leídos se vuelven a atar en su próxima lectura (al
+abrirlos, cada 6 horas, y de fondo una vez por día los activos). Prueba en `test/produccion.test.mjs`.
+
 ## Miniaturas de los productos en la tarjeta
 
 Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, la tarjeta muestra hasta 3 fotos de los productos del pedido,

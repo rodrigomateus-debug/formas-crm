@@ -39,6 +39,7 @@ import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProduct
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { resumenDireccion } from './direccion';
+import { inicioProduccion } from './inicioprod';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
@@ -886,6 +887,9 @@ api.get('/dashboard', async (c) => {
 
 // Inicio de Dirección (direccion.ts): solo para los usuarios con la marca «Dirección».
 api.get('/dashboard/direccion', async (c) => c.json(await resumenDireccion(c.env.DB, c.get('ctx'), c.req.query())));
+// Inicio de Producción (inicioprod.ts): pedidos, cumplimiento de lo pactado y tiempos de entrega. No se llama /produccion
+// para no caer en la regla de Ventas de esa ruta: Dirección con perfil Ventas también lo ve.
+api.get('/dashboard/pedidos', async (c) => c.json(await inicioProduccion(c.env.DB, c.get('ctx'), c.req.query())));
 
 function todayBounds(): [string, string, string] {
   const start = new Date(); start.setUTCHours(3, 0, 0, 0);

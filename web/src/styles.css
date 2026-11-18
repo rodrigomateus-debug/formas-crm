@@ -2474,3 +2474,5 @@ thead .ds-acciones { z-index: 2; }
 .darwin-sello { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 12px; color: var(--muted, #667); }
 .darwin-sello .darwin-de { display: inline-flex; align-items: center; gap: 5px; }
 .tag.ia { background: color-mix(in srgb, #3d5af1 12%, transparent); color: #3d5af1; font-weight: 600; }
+.inicio-pestanas { display: flex; gap: 8px; padding: 16px var(--gutter) 0; flex: none; }
+.inicio-pestanas + .content { padding-top: 12px; }

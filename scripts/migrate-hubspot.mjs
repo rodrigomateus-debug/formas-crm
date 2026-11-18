@@ -92,6 +92,21 @@ async function inChunks(items, size, kind) {
 
 const chunks = (arr, n) => { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
 
+// Recalcula última/próxima actividad de esos registros en tandas chicas (una empresa con miles de mails pesa: con 2.000
+// por pedido el CRM no llega). Si una tanda falla se parte en dos; lo que igual falla se avisa y se sigue.
+async function finalizeIds(ids) {
+  let fallidos = 0;
+  const go = async (part) => {
+    try { await crm('finalize', [], { ids: part }); }
+    catch (e) {
+      if (part.length > 10) { const h = Math.ceil(part.length / 2); await go(part.slice(0, h)); await go(part.slice(h)); }
+      else { fallidos += part.length; log(`  sin recalcular ${part.length} registros: ${e.message}`); }
+    }
+  };
+  for (const part of chunks([...ids].map(String), 200)) await go(part);
+  if (fallidos) bump('sin_recalcular', fallidos);
+}
+
 // Asociaciones (API v4) de muchos registros a la vez: { [fromId]: [{ to, primary }] }. Sigue la paginación de los que
 // tienen más de las que entran en una respuesta (una empresa con miles de mails).
 async function assocOf(from, to, ids) {
@@ -395,7 +410,7 @@ for (const [hsType, cfg] of Object.entries(ENG)) {
 // ---------- 5. Recalcular fechas de actividad ----------
 if (want('finalize') && !DRY && SINCE) {
   log(`Recalculando última y próxima actividad de ${TOUCHED.size} registros…`);
-  for (const part of chunks([...TOUCHED], 2000)) await crm('finalize', [], { ids: part });
+  await finalizeIds(TOUCHED);
 } else if (want('finalize') && !DRY) {
   log('Recalculando última y próxima actividad…');
   let offset = 0;
@@ -537,7 +552,8 @@ async function syncOwner(o) {
 
   // 6. Última y próxima actividad de lo que se tocó.
   const touched = [...new Set([...scope, ...REC_TYPES.flatMap((t) => [...related[t]]), ...Object.values(extraRecs).flat()].map(String))];
-  for (const part of chunks(touched, 2000)) await crm('finalize', [], { ids: part });
+  log(`  recalculando última y próxima actividad de ${touched.length} registros…`);
+  await finalizeIds(touched);
 
   // 7. Control: los totales de los dos lados tienen que dar igual.
   const after = await crm('owned', [], { owner_hs: oid });

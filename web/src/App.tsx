@@ -15,6 +15,7 @@ import RecorridosPage from './pages/Recorridos';
 import AnaliticasPage, { analiticasDe } from './pages/Analiticas';
 import NotasProductosPage from './pages/NotasProductos';
 import ChoferesPage from './pages/Choferes';
+import ConsultasPage from './pages/Consultas';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
@@ -71,6 +72,8 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
         {!produccion && <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>}
         {!produccion && <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>}
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
+        {/* Consultas por WhatsApp (darwin.ts): quién consultó por qué producto, y quién espera respuesta. */}
+        {!produccion && <NavLink to="/consultas" className="nav-link"><Icon name="whatsapp" />Consultas</NavLink>}
         {/* Operaciones, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas (y Choferes en Logística), y las
             Notas de productos. Perfil Ventas: Recorridos y las Notas de productos. */}
         <div className="nav-group">Operaciones</div>
@@ -120,6 +123,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
           {/* El link de antes de que existiera Analíticas. */}
           <Route path="/rendimiento" element={<Navigate to="/analiticas" replace />} />
           <Route path="/productos" element={<NotasProductosPage />} />
+          {!produccion && <Route path="/consultas" element={<ConsultasPage />} />}
           {(logistica || meta.me.role === 'admin') && <Route path="/choferes" element={<ChoferesPage />} />}
           <Route path="/settings/*" element={<Settings />} />
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />

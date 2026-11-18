@@ -1,4 +1,5 @@
 import { procesarSalidaClickup } from './clickup';
+import { buscarConsultas, estadoDarwin, pendientesDeRespuesta, resumirPendientes } from './darwin';
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType, User } from './env';
@@ -1637,6 +1638,17 @@ api.put('/rendimiento/chofer', async (c) => c.json(await marcarPropio(c.env, c.g
 api.patch('/rendimiento/:fecha/:n', async (c) => c.json(await corregir(c.env, c.get('ctx'), c.req.param('fecha'), Number(c.req.param('n')), await c.req.json())));
 
 api.get('/records/company/:id/produccion', async (c) => c.json(await produccionDeEmpresa(c.env.DB, Number(c.req.param('id')))));
+
+// Darwin (darwin.ts): las consultas de los clientes (quién consultó por botellas), las conversaciones sin respuesta y el
+// estado del resumen diario. Resumir a mano lo que quedó pendiente es de administradores (el cron lo hace a la madrugada).
+api.get('/consultas', async (c) => c.json(await buscarConsultas(c.env.DB, c.get('ctx').user, c.req.query())));
+api.get('/darwin/pendientes', async (c) => c.json(await pendientesDeRespuesta(c.env.DB, c.get('ctx').user, Number(c.req.query('horas')) || 24)));
+api.get('/darwin/estado', async (c) => c.json({ configured: !!c.env.ANTHROPIC_API_KEY, ...(await estadoDarwin(c.env.DB)) }));
+api.post('/darwin/resumir', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const b = await c.req.json<{ hasta?: string }>().catch(() => ({} as { hasta?: string }));
+  return c.json(await resumirPendientes(c.env, { hasta: b.hasta }));
+});
 
 api.get('/integrations/pedidos', async (c) => {
   const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();

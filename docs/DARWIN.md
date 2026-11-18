@@ -80,3 +80,54 @@ workflows que leen HubSpot. El teléfono ya viene resuelto, que es justo donde f
 
 «Outbound Pedidos» y «Outbound - Saldo Pendiente» están apagados (nunca se activaron: a la cuenta de HubSpot le
 faltaban permisos). Si se retoman, se hacen con un aviso del CRM sobre pedidos en vez de leer HubSpot.
+
+## 4. Actividad diaria: resumen del día y consultas (Darwin → CRM)
+
+Pedido del 18/11/2026: que el CRM se entere de lo que pasa en las conversaciones **después** de que Maru las pasa a una
+vendedora, con un resumen por día en el contacto y los datos duros de lo que consultó cada cliente («quién consultó por
+botellas»). Código: `src/worker/darwin.ts`; pantalla: **Consultas** (menú CRM) y la tarjeta «Consultas por WhatsApp» en la
+ficha del contacto y de la empresa; para Claude, las herramientas `buscar_consultas` y `pendientes_de_respuesta` del MCP.
+
+**De dónde salen los datos.** Darwin no tiene una acción de workflow para leer los mensajes, así que el CRM no va a
+buscarlos: Darwin se los manda. Un workflow nuevo, «Formas Shop → CRM: actividad»:
+
+1. Disparador `darwin-event` con `session.opened`, `session.replied`, `session.forwarded`, `session.analyzed`,
+   `session.closed` y `session.stage.transitioned` (todas las conversaciones del workspace: Maru y cada vendedora).
+2. Un paso `http-request`: `POST https://<crm>/hooks/darwin/evento`, header `Authorization: Bearer <token>` (el mismo
+   token tipo «Darwin»), body `json` con `evento` = `{{eventType}}`, `timestamp` = `{{timestamp}}` y `data` = `{{data}}`.
+
+Cada evento trae el resumen que hace Darwin de la sesión (`summary`), sus campos inteligentes (`producto`, `cantidad`,
+`Categoria`, `presupuesto`, `fecha_estimada`…), a quién se asignó y cuándo respondió el equipo (`lastHumanActivityAt`). El
+CRM los guarda tal cual (`darwin_eventos`) y lleva el estado de cada conversación (`darwin_conversaciones`).
+
+**El resumen del día.** De 0 a 6 de la mañana (cron de los :05, de a 15 por corrida), por cada conversación que tuvo
+movimiento el día anterior, Claude (`claude-sonnet-5-5`) lee los eventos, los resúmenes de Darwin, los campos y el resumen
+que el CRM guardó la vez anterior, y devuelve:
+
+- **El resumen**: quién habló, qué pidió el cliente, qué se le respondió y en qué quedó, y el próximo paso. Queda como
+  actividad de WhatsApp («Resumen del día», con el link a la conversación) en el **contacto** (buscado por teléfono, o por
+  mail), su **empresa** principal y su **negocio** (el que tiene el link a esa conversación, si no el abierto más reciente),
+  a nombre de la vendedora que la tiene (o del propietario del contacto).
+- **Las consultas**: un renglón por producto consultado ese día, con categoría y tipo de una **lista fija**
+  (`CATALOGO` en `darwin.ts`: Drinkware → Botella, Termo, Vaso…; Textil → Remera, Gorra…), producto como lo nombró, cantidad,
+  precio unitario y total, fecha en que lo necesita, ocasión (Fin de año, Día de la Madre…), personalización, si pidió
+  muestra o boceto, objeción, competidor y lugar de entrega. Para sumar un tipo, se agrega a la lista.
+
+Reglas:
+
+- Si el contacto **no está** en el CRM, no se crea nada (queda «sin contacto» en `darwin_resumenes`): el contacto lo crea el
+  aviso de siempre (§ 1) cuando Maru pasa la conversación.
+- Si ese día **no hubo nada nuevo** (un cierre automático, un saludo, lo mismo que ya decía el resumen anterior), no se escribe.
+- Si llega otro evento de un día ya resumido, ese día se rehace: se reemplaza el resumen y las consultas, sin duplicar.
+- A Claude no se le manda el teléfono, solo los últimos 4 dígitos.
+- Sin `ANTHROPIC_API_KEY` los eventos se guardan igual y se resumen cuando esté. «Resumir ahora» a mano:
+  `POST /api/darwin/resumir` (administradores). Estado: `GET /api/darwin/estado`.
+
+**Sin respuesta.** La pestaña «Sin respuesta» de Consultas lista las conversaciones que Maru ya pasó a una vendedora donde el
+cliente escribió (`session.replied`) después de la última respuesta del equipo (`lastHumanActivityAt`) y nadie le contestó en
+las últimas 4, 12, 24, 48 o 72 horas. El perfil Ventas ve las suyas. **A confirmar con eventos reales**: que
+`session.replied` sea la respuesta del cliente y que `lastHumanActivityAt` se actualice cuando contesta la vendedora.
+
+**Lo que falta para leer los mensajes uno por uno.** Hoy el resumen sale de los resúmenes y campos que arma Darwin, no del
+texto de cada mensaje. La API pública de Darwin (`api.getdarwin.ai`, con `X-API-KEY`) tendría que permitir leer los mensajes
+de una conversación; con una clave (`DARWIN_API_KEY`) se le puede pasar a Claude el texto del día y el resumen gana detalle.

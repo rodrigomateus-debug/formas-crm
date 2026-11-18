@@ -8,6 +8,7 @@ import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
 import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
+import { buscarConsultas, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
 import { assertActividadVisible, assertVisible, esOperaciones, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
@@ -389,6 +390,27 @@ const TOOLS: Tool[] = [
         hoy: new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10),
       };
     },
+  },
+  {
+    name: 'buscar_consultas',
+    description: `Lo que consultaron los clientes por WhatsApp (Darwin: Maru y las vendedoras), un renglón por producto, con datos fijos: quién consultó por botellas, quién pidió más de 100 unidades para fin de año, quién consultó y no compró. Filtros: tipo o categoría (de la lista), q (texto libre en producto, personalización, contacto o empresa), desde/hasta (AAAA-MM-DD), min_cantidad, ocasion, sin_venta (true: el contacto no tiene un negocio ganado después de la consulta), contact_id, company_id, owner_id. Categorías y tipos: ${Object.entries(CATALOGO).map(([c, t]) => `${c} (${t.join(', ')})`).join('; ')}. Ocasiones: ${OCASIONES.filter(Boolean).join(', ')}.`,
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {
+      tipo: { type: 'string' }, categoria: { type: 'string' }, q: { type: 'string' }, desde: { type: 'string' }, hasta: { type: 'string' },
+      min_cantidad: { type: 'integer' }, ocasion: { type: 'string' }, sin_venta: { type: 'boolean' }, contact_id: { type: 'integer' }, company_id: { type: 'integer' },
+      owner_id: { type: 'integer' }, limit: { type: 'integer' }, offset: { type: 'integer' },
+    } },
+    run: async (a, ctx, env, base) => {
+      const r = await buscarConsultas(env.DB, ctx.user, a);
+      return { ...r, catalogo: undefined, ocasiones: undefined, consultas: r.consultas.map((c) => ({ ...c, url: c.contact_id ? link(base, 'contact', Number(c.contact_id)) : null })) };
+    },
+  },
+  {
+    name: 'pendientes_de_respuesta',
+    description: 'Conversaciones de WhatsApp (Darwin) que Maru ya pasó a una vendedora donde el cliente escribió y nadie del equipo le contestó en las últimas `horas` (24 por defecto).',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { horas: { type: 'integer' } } },
+    run: async (a, ctx, env) => pendientesDeRespuesta(env.DB, ctx.user, Number(a.horas) || 24),
   },
   {
     name: 'get_activity',

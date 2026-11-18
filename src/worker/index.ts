@@ -22,6 +22,7 @@ import { StageError } from './pipelines';
 import { leerPendientes } from './remitos';
 import { cerrarPendientes } from './rendimiento';
 import { login } from './login';
+import { resumirPendientes } from './darwin';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 const GMAIL_CRON = '5-59/10 * * * *';   // el mismo que en wrangler.jsonc
@@ -118,6 +119,10 @@ export default {
         await safe(() => leerPendientes(env, b, 2));        // remitos sin leer (los del chofer se leen al llegar; acá los reintentos y ClickUp)
         // Rendimiento de los choferes: a los :45 se cierra un día que haya quedado sin medir (el de ayer, a la noche).
         if (turno === 4) await safe(() => cerrarPendientes(env, b));
+        // Darwin (darwin.ts): de 0 a 6 de la mañana de Buenos Aires, el resumen del día anterior de cada conversación con
+        // movimiento, de a 15 por corrida (cada una es una consulta a Claude).
+        const horaUtc = new Date(event.scheduledTime).getUTCHours();
+        if (horaUtc >= 3 && horaUtc < 9) await safe(() => resumirPendientes(env, { budget: b, max: 15 }));
         await safe(() => syncAll(env, b));
       }
       else {

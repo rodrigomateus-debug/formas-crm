@@ -9,6 +9,7 @@ import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select, useFloating } from '../Select';
 import { RemitosCard } from './Remitos';
+import { ConsultasCard } from './Consultas';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { TareaPanel } from '../TareaPanel';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
@@ -52,6 +53,7 @@ export default function RecordPage() {
         </section>
         <aside className="right">
           {type === 'company' && <ComprasCard record={record} />}
+          {(type === 'contact' || type === 'company') && <ConsultasCard type={type} id={record.id} />}
           {(type === 'company' || type === 'contact' || type === 'deal') && <ReferidosCard type={type} record={record} onChange={refresh} />}
           {type === 'company' && <LogosCard companyId={record.id} />}
           {!ventas && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
@@ -520,7 +522,7 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
     : a.type === 'email' ? `${a.direction === 'in' ? 'Email recibido' : 'Email enviado'}${a.subject ? `: ${a.subject}` : ''}`
       : a.type === 'call' ? `Llamada${a.outcome ? ` · ${a.outcome}` : ''}`
         : a.type === 'meeting' ? `Reunión${a.subject ? `: ${a.subject}` : ''}`
-          : a.type === 'whatsapp' ? `WhatsApp ${a.direction === 'in' ? 'recibido' : 'enviado'}`
+          : a.type === 'whatsapp' ? (a.meta?.darwin ? 'Resumen del día' : `WhatsApp ${a.direction === 'in' ? 'recibido' : 'enviado'}`)
             : `Nota`;
   const toggle = async () => {
     try { await http('PATCH', `/activities/${a.id}`, { status: done ? 'NOT_STARTED' : 'COMPLETED' }); onChange(); } catch (e) { toast((e as Error).message, true); }
@@ -542,7 +544,9 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         {/* Los mails vienen de Gmail: no se editan acá, se abren en su hilo (pedido de Rodrigo del 17/11/2026). */}
         {a.type === 'email'
           ? gmailUrl(a) && <a className="btn ghost sm" href={gmailUrl(a)!} target="_blank" rel="noopener noreferrer" title={a.meta?.gmail_id ? 'Abrir el hilo en Gmail' : 'Buscar este mail en Gmail'}><Icon name="external" size={13} />Ver en Gmail</a>
-          : <button className="btn ghost sm" onClick={() => setEdit(true)}>{a.type === 'task' ? 'Abrir' : 'Editar'}</button>}
+          : a.meta?.darwin
+            ? typeof a.meta.link === 'string' && <a className="btn ghost sm" href={a.meta.link} target="_blank" rel="noopener noreferrer" title="Abrir la conversación en Darwin"><Icon name="external" size={13} />Darwin</a>
+            : <button className="btn ghost sm" onClick={() => setEdit(true)}>{a.type === 'task' ? 'Abrir' : 'Editar'}</button>}
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}

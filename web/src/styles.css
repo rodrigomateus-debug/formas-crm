@@ -2450,6 +2450,24 @@ thead .ds-acciones { z-index: 2; }
 .tl-resumen { margin-top: 6px; padding: 8px 10px; border-radius: var(--r-control); background: var(--accent-soft); font-size: 13px; line-height: 1.45; }
 .tl-resumen > div { white-space: pre-line; margin-top: 4px; color: var(--ui-ink); }
 
+/* Inicio de Dirección (InicioDireccion.tsx) */
+.dir-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dir-tabla th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 4px 6px; border-bottom: 1px solid var(--ui-line, var(--viz-grid)); white-space: nowrap; }
+.dir-tabla td { padding: 5px 6px; vertical-align: middle; white-space: nowrap; }
+.dir-tabla th.num, .dir-tabla td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dir-tabla tbody tr + tr td { border-top: 1px solid var(--viz-grid); }
+.dir-tabla .dir-total td { border-top: 2px solid var(--viz-grid); font-weight: 600; }
+.dir-tabla .dir-ganada td { font-weight: 600; color: var(--ok); }
+.dir-barra { display: block; background: var(--sunken, var(--ui-surface-sunken)); border-radius: 3px; height: 8px; min-width: 40px; }
+.dir-barra i { display: block; height: 8px; border-radius: 3px; background: var(--viz-1); }
+.dir-ganada .dir-barra i { background: var(--viz-2); }
+.dir-embudos { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 20px 28px; }
+.dir-embudo { min-width: 0; overflow-x: auto; }
+.dir-embudo > .row { margin-bottom: 6px; }
+@media (max-width: 720px) { .dir-embudos { grid-template-columns: 1fr; } }
+.dir-alerta { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px; background: var(--ui-negative-soft, var(--warn-soft)); color: var(--ui-negative-ink, var(--warn)); text-decoration: none; font-size: 13px; }
+.dir-alerta:hover { text-decoration: underline; }
+
 /* Resumen del día de Darwin (RecordPage → ActivityItem): el logo de Darwin y el sello «Hecho con IA». */
 .tl-item .ic.darwin-ic { background: #fff; border: 1px solid var(--ui-border, rgba(0,0,0,.08)); }
 .tl-item .ic.darwin-ic img { display: block; }

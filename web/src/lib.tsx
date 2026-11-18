@@ -19,7 +19,7 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 // photo_url: la foto de su cuenta de Google (la trae el CRM, src/worker/fotos.ts); sin foto, se ven sus iniciales.
-export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
+export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number; direccion?: number }
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };

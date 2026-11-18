@@ -10,7 +10,7 @@ import { orderProducts } from './productos';
 import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 import { buscarConsultas, cargarConversacion, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
-import { assertActividadVisible, assertVisible, esOperaciones, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
+import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -551,7 +551,7 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   }
   // Asignar a otra persona, no: desde Claude cada uno se asigna a sí mismo (o lo deja sin propietario).
   const owner = tool === 'create_record' || tool === 'update_record' ? a.properties?.owner_id : a.owner_id;
-  if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me) {
+  if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me && !(await esDeSuEquipo(env.DB, ctx.user, owner))) {
     throw new HttpError(403, 'Desde Claude solo podés asignarte cosas a vos. Para asignarle algo a otra persona, hacelo en el CRM.');
   }
   if (Array.isArray(a.colaboradores) && a.colaboradores.some((u: unknown) => Number(u) !== me)) {
@@ -560,7 +560,7 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   for (const id of EDITA[tool]?.(a) ?? []) {
     const row = await getRow(env.DB, Number(id));
     // Asociar algo tuyo con una empresa o un contacto ajeno se puede (solo se toca lo tuyo); el resto, solo si es tuyo.
-    if (row.owner_id != null && Number(row.owner_id) !== me) {
+    if (row.owner_id != null && Number(row.owner_id) !== me && !(await esSuyo(env.DB, ctx.user, row))) {
       const de = (await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(row.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
       throw new HttpError(403, `«${row.name}» es de ${de}: desde Claude solo podés cambiar lo tuyo (o lo que no tiene propietario).`);
     }

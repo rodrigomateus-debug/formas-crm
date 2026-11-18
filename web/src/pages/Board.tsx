@@ -32,17 +32,20 @@ export function useCollapsed(key: string) {
   return [set, toggle] as const;
 }
 
-// «Colapsar vacías» (pedido de Rodrigo del 13/11/2026), opcional y guardado con la vista: las columnas sin nada se ven
-// angostas. Es dinámico: en cuanto una recibe algo (se arrastra una tarjeta, cambia un filtro) se abre sola, y si se vacía
-// vuelve a cerrarse. Una vacía se puede abrir con un clic (hasta salir de la pantalla); las que tienen algo siguen
-// el colapso a mano de siempre (useCollapsed).
+// «Colapsar vacías» (pedido de Rodrigo del 13/11/2026), opcional y guardado con la vista. Prendido, el tablero se
+// ordena solo por el conteo: las columnas con 0 se ven angostas y las que tienen algo, abiertas (aunque antes se hayan
+// achicado a mano). Es dinámico: en cuanto una recibe algo (se arrastra una tarjeta, cambia un filtro) se abre sola, y
+// si se vacía vuelve a cerrarse. Igual se puede abrir o cerrar cualquiera con un clic; eso dura hasta que cambie si está
+// vacía o no, se toque el botón o se salga de la pantalla. Apagado, vale el colapso a mano de siempre (useCollapsed).
 export function useColapso(key: string, vacias: boolean) {
   const [manual, toggleManual] = useCollapsed(key);
-  const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
-  const auto = (total: number) => vacias && total === 0;
-  const cerrada = (id: string, total: number) => (auto(total) ? !abiertas.has(id) : manual.has(id));
-  const alternar = (id: string, total: number) => (auto(total)
-    ? setAbiertas((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; })
+  // Clics con el botón prendido: «id:vacía» → la columna se invierte respecto de lo automático mientras siga igual.
+  const [invertidas, setInvertidas] = useState<Set<string>>(new Set());
+  useEffect(() => { setInvertidas(new Set()); }, [vacias, key]);
+  const llave = (id: string, total: number) => `${id}:${total === 0 ? 1 : 0}`;
+  const cerrada = (id: string, total: number) => (vacias ? (total === 0) !== invertidas.has(llave(id, total)) : manual.has(id));
+  const alternar = (id: string, total: number) => (vacias
+    ? setInvertidas((s) => { const n = new Set(s); const k = llave(id, total); n.has(k) ? n.delete(k) : n.add(k); return n; })
     : toggleManual(id));
   return { cerrada, alternar };
 }
@@ -52,7 +55,7 @@ export function BotonVacias({ value, onChange }: { value: boolean; onChange?: (v
   if (!onChange) return null;
   return (
     <button type="button" className={`btn qf-btn${value ? ' on' : ''}`} aria-pressed={value} onClick={() => onChange(!value)}
-      title={value ? 'Las columnas vacías se ven angostas y se abren solas cuando reciben algo. Clic para verlas todas abiertas.' : 'Achicar las columnas que no tienen nada (se abren solas cuando reciben algo). Se guarda con la vista.'}>
+      title={value ? 'Las columnas con 0 se ven angostas y las que tienen algo, abiertas; se acomodan solas. Clic para volver a como estaban.' : 'Achicar las columnas con 0 y abrir las que tienen algo (se acomodan solas). Se guarda con la vista.'}>
       <Icon name="columns" size={14} />Colapsar vacías</button>
   );
 }

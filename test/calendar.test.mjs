@@ -149,3 +149,28 @@ test('calendario: el resumen de Gemini (notas adjuntas) y el de Claude (conector
   assert.equal(r2.meta.resumen, 'Quedamos en mandar la cotización el lunes.');
   assert.equal(r2.meta.resumen_de, 'Claude');
 });
+
+test('calendario: la limpieza archiva lo grupal que se registró antes de la regla, y sus contactos y empresas nuevas', async (t) => {
+  const st = await api('GET', '/calendar');
+  if (!st.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba'); return; }
+  const cliente = `ventas@cliente-limpia-${run}.com.ar`;
+  const existente = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Ventas', email: cliente } });
+  eventos.push({ id: `e5${run}`, iCalUID: `e5${run}@google.com`, status: 'confirmed', summary: 'Evento grande', start: { dateTime: enHora(10) }, end: { dateTime: enHora(11) },
+    attendees: [{ email: me }, { email: cliente }, ...['a.com.ar', 'b.com', 'c.mx', 'd.com.br'].map((d) => ({ email: `socio@limpia-${run}-${d}` }))] });
+  await api('PUT', '/calendar', { enabled: true, users: [me], max_empresas: 10 });   // como antes de la regla
+  await api('POST', '/calendar/sync');
+  await api('PUT', '/calendar', { enabled: false, max_empresas: 3 });
+  assert.equal((await api('GET', `/records/contact?q=${encodeURIComponent(`limpia-${run}`)}`)).total, 5, 'el existente y 4 creados');
+  const tok = await (await fetch(`${CRM}/api/tokens`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: `Claude limpia ${run}`, source: 'mcp' }) })).json();
+  const rpc = async (args) => JSON.parse((await (await fetch(`${CRM}/mcp/${tok.token}`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'calendario_limpiar_grupales', arguments: args } }) })).json()).result.content[0].text);
+  const prueba = await rpc({});
+  assert.equal(prueba.aplicado, false);
+  assert.ok(prueba.reuniones.some((r) => r.endsWith('Evento grande')));
+  assert.equal(prueba.contactos.filter((c) => c.includes(`limpia-${run}`)).length, 4, 'solo los que creó el calendario');
+  assert.equal((await api('GET', `/records/contact?q=${encodeURIComponent(`limpia-${run}`)}`)).total, 5, 'sin aplicar no cambia nada');
+  await rpc({ aplicar: true });
+  const quedan = await api('GET', `/records/contact?q=${encodeURIComponent(`limpia-${run}`)}`);
+  assert.deepEqual(quedan.results.map((r) => r.id), [existente.id], 'el contacto que ya estaba queda');
+  assert.equal((await api('GET', `/records/contact/${existente.id}/timeline?types=meeting`)).activities.length, 0, 'la reunión grupal se archivó');
+});

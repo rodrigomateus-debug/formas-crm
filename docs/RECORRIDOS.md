@@ -300,6 +300,10 @@ siguen para revisar y nadie corrigió a mano):
   solo con 90 % o más, con fuente, coherentes con la planilla y confirmados en el mapa: **16**. A otros **47** se les
   suma lo encontrado como sugerencia. La búsqueda en internet tuvo un tope y unos 290 no se llegaron a buscar.
 - Resultado: **351 más cargados**; quedan **960 para revisar**.
+- **Tercera pasada** (`0090_destinos_tercera_corrida.sql`): Claude buscó en internet los 289 que la segunda no llegó a
+  buscar (de a 50 búsquedas por tanda). **10 más cargados** (Roche, Raffo, Puratos, Northlands, Provincia ART, Trafigura…),
+  27 suman sugerencia y quedan **950 para revisar**. Unos 80 tampoco se llegaron a buscar esta vez (sobre todo estaciones
+  YPF); la mayoría de lo que sí se buscó son comercios chicos, personas o domicilios que no aparecen en internet.
 
 ## Provincia y localidad, de un listado (18/11/2026)
 

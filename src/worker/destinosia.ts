@@ -4,6 +4,7 @@ import { HttpError, now } from './env';
 import { norm } from './clickup';
 import { claveCalle, claveDireccion, direccionLugar, puedeEditarCronograma, reindexarLugares } from './cronograma';
 import { MODELO } from './remitos';
+import { normalizarUbicacion } from '../../web/src/localidades';
 
 // Destinos completados con IA (pedido de Rodrigo del 18/11/2026). En la libreta (pestaña Destinos de Recorridos) muchos
 // lugares no tienen la localidad o la provincia, o la dirección está escrita de una forma que el mapa no encuentra. Claude
@@ -27,7 +28,7 @@ interface FilaLugar { id: number; nombre: string; direccion: string | null; loca
   observaciones: string | null; editado: number; ia_firma: string | null; tipo: string | null; empresa: string | null }
 interface Propuesta { id: number; direccion: string; localidad: string; provincia: string; confianza: number; motivo: string; tipo: string; tipo_confianza: number }
 
-const firmaDe = (l: { nombre: string; direccion: string | null; localidad: string | null; provincia: string | null }) =>
+export const firmaDe = (l: { nombre: string; direccion: string | null; localidad: string | null; provincia: string | null }) =>
   norm([l.nombre, l.direccion ?? '', l.localidad ?? '', l.provincia ?? ''].join('|'));
 const vacio = (s: string | null | undefined) => !String(s ?? '').trim();
 
@@ -144,7 +145,8 @@ export async function completarDestinos(env: Env, ctx: Ctx, b: { ids?: unknown }
     const p = propuestas.find((x) => x.id === l.id);
     if (!p) continue;   // no contestó por este: queda para la próxima tanda
     out.revisados++;
-    const nueva = { direccion: recorte(p.direccion, 300) ?? l.direccion, localidad: recorte(p.localidad, 80), provincia: recorte(p.provincia, 80) };
+    // La localidad y la provincia, como en el listado (normalizarUbicacion: «Capital Federal» → CABA, «Pompeya» → Nueva Pompeya).
+    const nueva = { direccion: recorte(p.direccion, 300) ?? l.direccion, ...normalizarUbicacion({ localidad: recorte(p.localidad, 80), provincia: recorte(p.provincia, 80), zona: l.zona }) };
     const conf = Math.max(0, Math.min(100, Math.round(Number(p.confianza) || 0)));
     const motivo = recorte(String(p.motivo ?? ''), 300) ?? '';
     // El tipo, si no tenía y Claude está seguro.

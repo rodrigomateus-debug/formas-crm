@@ -8,6 +8,7 @@ import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
 import { MODELO } from './remitos';
+import { normalizarUbicacion } from '../../web/src/localidades';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
@@ -1408,15 +1409,16 @@ export async function actualizarLugares(env: Env, puede: boolean, forzar = false
       telefono: t(f, I.telefono, 60), contacto: [t(f, I.c1, 80), t(f, I.c2, 80)].filter(Boolean).join(' / ') || null, observaciones: t(f, I.obs), coordinacion: t(f, I.coord, 1200) }))
       .filter((l): l is typeof l & { nombre: string } => !!l.nombre)
       // Dos filas con el mismo nombre y la misma dirección son el mismo lugar: vale la primera.
-      .map((l) => ({ ...l, clave: clavePlanilla(l.nombre, l.direccion), clave_dir: l.direccion ? claveCalle(l.direccion) || null : null }))
+      // La localidad como en el listado de Georef, y la provincia que sale de ella o de la zona (normalizarUbicacion).
+      .map((l) => ({ ...l, ...normalizarUbicacion(l), clave: clavePlanilla(l.nombre, l.direccion), clave_dir: l.direccion ? claveCalle(l.direccion) || null : null }))
       .filter((l) => !vistos.has(l.clave) && (vistos.add(l.clave), true));
     if (lugares.length < 1) throw new Error('La planilla vino vacía.');
     const copia = Date.now();
     // De a muchas filas por consulta (un JSON con todas): son miles de lugares. Lo corregido en el Hub no se pisa.
     const stmts: D1PreparedStatement[] = [];
     for (let i = 0; i < lugares.length; i += 400) {
-      stmts.push(db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, zona, horario, telefono, contacto, observaciones, coordinacion, clave_dir, clave_planilla, origen, activo, visto, updated_at)
-        SELECT json_extract(value, '$.nombre'), json_extract(value, '$.direccion'), json_extract(value, '$.localidad'), json_extract(value, '$.zona'), json_extract(value, '$.horario'),
+      stmts.push(db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, provincia, zona, horario, telefono, contacto, observaciones, coordinacion, clave_dir, clave_planilla, origen, activo, visto, updated_at)
+        SELECT json_extract(value, '$.nombre'), json_extract(value, '$.direccion'), json_extract(value, '$.localidad'), json_extract(value, '$.provincia'), json_extract(value, '$.zona'), json_extract(value, '$.horario'),
           json_extract(value, '$.telefono'), json_extract(value, '$.contacto'), json_extract(value, '$.observaciones'), json_extract(value, '$.coordinacion'), json_extract(value, '$.clave_dir'),
           json_extract(value, '$.clave'), 'planilla', 1, ?2, ?3
         FROM json_each(?1) WHERE true
@@ -1424,6 +1426,7 @@ export async function actualizarLugares(env: Env, puede: boolean, forzar = false
           nombre = CASE WHEN lugares.editado = 1 THEN lugares.nombre ELSE excluded.nombre END,
           direccion = CASE WHEN lugares.editado = 1 THEN lugares.direccion ELSE excluded.direccion END,
           localidad = CASE WHEN lugares.editado = 1 THEN lugares.localidad ELSE excluded.localidad END,
+          provincia = CASE WHEN lugares.editado = 1 THEN lugares.provincia ELSE COALESCE(excluded.provincia, lugares.provincia) END,
           zona = CASE WHEN lugares.editado = 1 THEN lugares.zona ELSE excluded.zona END,
           horario = CASE WHEN lugares.editado = 1 THEN lugares.horario ELSE excluded.horario END,
           telefono = CASE WHEN lugares.editado = 1 THEN lugares.telefono ELSE excluded.telefono END,

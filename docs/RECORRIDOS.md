@@ -287,3 +287,37 @@ planilla y no toca lo que ya se corrigió en el Hub):
   **1.311 «Para revisar»** con la sugerencia y el motivo (sin altura, sin localidad, o que el mapa no confirmó), **627
   con tipo** (473 clientes, 68 expresos, 36 impresores, 24 proveedores, 17 talleres, 9 otros) y **259 empresas con sus
   sucursales agrupadas** (994 direcciones: YPF, Nestlé, Adare, Opessa, Puma, L'Oréal, Quilmes, Telefónica…).
+
+## La segunda corrida (18/11/2026)
+
+Sobre los 1.311 que quedaron «Para revisar» (migración `0083_destinos_segunda_corrida.sql`, que solo toca los que
+siguen para revisar y nadie corrigió a mano):
+
+- Se arreglaron dos defectos de los controles de la primera: «0988» y «988» son la misma altura, y un error de tipeo en
+  la calle («Hulmbolt» → «Humboldt») no es otra calle.
+- Se buscó cada uno de nuevo en el mapa con dos buscadores (Photon y Nominatim por partes): **335 confirmados**.
+- Claude buscó en internet (sitio de la empresa, Google Maps, directorios) los que no tenían altura o localidad; se cargan
+  solo con 90 % o más, con fuente, coherentes con la planilla y confirmados en el mapa: **16**. A otros **47** se les
+  suma lo encontrado como sugerencia. La búsqueda en internet tuvo un tope y unos 290 no se llegaron a buscar.
+- Resultado: **351 más cargados**; quedan **960 para revisar**.
+
+## Provincia y localidad, de un listado (18/11/2026)
+
+Pedido de Rodrigo: que la provincia se elija de una lista y la localidad de la lista de esa provincia, y que las que ya
+existen se adapten.
+
+- **El listado** (`web/src/localidades.json`) sale de **Georef**, el servicio de normalización geográfica del Estado
+  (apis.datos.gob.ar/georef): las 24 provincias, las localidades del BAHRA y, en Buenos Aires, también los partidos, más
+  los nombres de uso que faltan en el AMBA (Don Torcuato, Nordelta, Boulogne…). En CABA la localidad es el **barrio** (los
+  48) o «CABA» si no se sabe.
+- **En el formulario**: la provincia es un desplegable y la localidad (o el barrio) se escribe y se elige de la lista de
+  esa provincia; si no está en la lista se avisa, pero se puede guardar igual.
+- **Normalización** (`normalizarUbicacion`, en `web/src/localidades.ts`, la usan la web y el servidor): sin tildes ni
+  mayúsculas, con alias («Once» → Balvanera, «Pompeya» → Nueva Pompeya, «Pq Patricios», «Gral Pacheco»), errores de
+  tipeo («Parlermo») y la provincia que sale de la localidad o de la zona de la planilla. Una zona escrita como localidad
+  («NORTE») se saca. Lo que no se reconoce queda como estaba, prolijo.
+- **Se aplica** a lo que entra (la copia diaria de la planilla, lo que se guarda a mano o de Google, lo de la IA) y, una
+  sola vez, a toda la libreta (`normalizarLibreta`, en `destinos.ts`, al abrir Destinos; queda marcado en `settings`
+  como `localidades_normalizadas`). Como el punto del mapa se guarda por la dirección completa, se copia a la dirección
+  nueva; y lo que la IA ya revisó no vuelve a revisarse. Sobre la planilla real: de 2.061 filas con localidad, quedan
+  fuera del listado unas 10 (siglas o lugares raros).

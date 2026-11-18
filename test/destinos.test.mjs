@@ -109,7 +109,7 @@ test('destinos: tipo, sucursales agrupadas, contacto y la dirección elegida de 
   // Elegida de Google: calle y altura, localidad, provincia y CP en partes, con el punto en el mapa.
   assert.equal(d(dep).direccion, 'Ruta 8 Km 50 1234');
   assert.equal(d(dep).localidad, 'Pilar');
-  assert.equal(d(dep).provincia, 'Provincia de Buenos Aires');
+  assert.equal(d(dep).provincia, 'Buenos Aires');   // como en el listado de provincias (Georef)
   assert.equal(d(dep).codigo_postal, 'B1629');
   assert.equal(d(dep).mapa, 'ok');
   assert.equal(d(dep).lat, -34.45);
@@ -118,7 +118,9 @@ test('destinos: tipo, sucursales agrupadas, contacto y la dirección elegida de 
   // El tipo por el nombre; lo que falta, a la vista.
   assert.equal(d(imp).tipo, 'impresor');
   assert.equal(d(imp).tipo_origen, 'nombre');
-  assert.ok(d(imp).faltan.includes('provincia') && d(imp).faltan.includes('contacto'));
+  assert.ok(d(imp).faltan.includes('contacto'));
+  // La provincia sale de la localidad (Avellaneda está en Buenos Aires).
+  assert.equal(d(imp).provincia, 'Buenos Aires');
   assert.equal(d(ofi).whatsapp, '11 5555-1234');
   assert.deepEqual(d(ofi).viajes, { seis: 0, total: 0, ultimo: null, proximo: null });
   // Sugiere juntar las dos de ZTK (mismo nombre).
@@ -219,4 +221,21 @@ test('destinos: se relacionan solos con su empresa del CRM (por el nombre) y lo 
   assert.equal(d(pilar).grupo_id ?? null, null);
   assert.equal(d(pilar).company_id ?? null, null, 'fuera del grupo ya no es de esa empresa');
   assert.equal(d(igual).company_id, otra, 'la que sigue en el grupo, sí');
+});
+
+test('destinos: la localidad y la provincia quedan escritas como en el listado de Georef', async () => {
+  const crear = async (b) => { const r = await call('POST', '/recorridos/libreta', b); assert.equal(r.status, 200, JSON.stringify(r.data)); return r.data.id; };
+  const a = await crear({ nombre: `Georef A ${RUN}`, direccion: 'Nicaragua 1651', localidad: 'SARANDI', provincia: 'Pcia de Buenos Aires' });
+  const b = await crear({ nombre: `Georef B ${RUN}`, direccion: 'Pueyrredón 100', localidad: 'ONCE', provincia: 'Capital Federal' });
+  const c = await crear({ nombre: `Georef C ${RUN}`, direccion: 'Uruguay 882', localidad: 'Parlermo', provincia: '' });
+  const l = (await call('GET', '/recorridos/libreta')).data;
+  const d = (id) => l.destinos.find((x) => x.id === id);
+  assert.deepEqual([d(a).localidad, d(a).provincia], ['Sarandí', 'Buenos Aires']);
+  assert.deepEqual([d(b).localidad, d(b).provincia], ['Balvanera', 'Ciudad Autónoma de Buenos Aires']);
+  // Un error de tipeo se corrige y la provincia sale del barrio.
+  assert.deepEqual([d(c).localidad, d(c).provincia], ['Palermo', 'Ciudad Autónoma de Buenos Aires']);
+  // Al editar, lo mismo.
+  assert.equal((await call('PATCH', `/recorridos/libreta/${a}`, { localidad: 'martinez', provincia: 'buenos aires' })).status, 200);
+  const l2 = (await call('GET', '/recorridos/libreta')).data;
+  assert.deepEqual([l2.destinos.find((x) => x.id === a).localidad, l2.destinos.find((x) => x.id === a).provincia], ['Martínez', 'Buenos Aires']);
 });

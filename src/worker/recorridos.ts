@@ -12,6 +12,7 @@ import {
 import { direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
 import { esTipo } from './destinos';
 import { zonaDe, type Zona } from '../../web/src/zonas';
+import { normalizarUbicacion } from '../../web/src/localidades';
 
 // Recorridos (pedido de Rodrigo del 13/11/2026): reemplaza la planilla «Recorridos» de Logística. Vendedoras, backoffice,
 // producción, compras y administración cargan lo que el chofer tiene que llevar o retirar un día (muestras, sobres,
@@ -307,6 +308,14 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   }
   const dirFinal = google ? (google.calle || google.direccion.split(',')[0]) : direccion;
   if (google) { campos.localidad = google.localidad ?? campos.localidad; campos.provincia = google.provincia ?? campos.provincia; campos.codigo_postal = google.codigo_postal ?? campos.codigo_postal; }
+  // La localidad y la provincia como en el listado de Georef (web/src/localidades.ts), vengan de Google o escritas a mano.
+  let provinciaNueva = false;
+  if (google || b.localidad !== undefined || b.provincia !== undefined) {
+    const n = normalizarUbicacion({ localidad: campos.localidad, provincia: campos.provincia });
+    if (google || b.localidad !== undefined) campos.localidad = n.localidad;
+    // La provincia que falta sale de la localidad («Avellaneda» → Buenos Aires).
+    if (google || b.provincia !== undefined || (b.localidad !== undefined && n.provincia)) { campos.provincia = n.provincia; provinciaNueva = true; }
+  }
   const tipo = b.tipo === undefined ? undefined : esTipo(b.tipo) ? b.tipo : null;
   if (id == null) {
     if (!nombre || !dirFinal) throw new HttpError(400, 'El destino necesita el nombre y la dirección.');
@@ -327,7 +336,7 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   const sets: string[] = [], vals: unknown[] = [];
   if (b.nombre !== undefined) { if (!nombre) throw new HttpError(400, 'El nombre no puede quedar vacío.'); sets.push('nombre = ?'); vals.push(nombre); }
   if (b.direccion !== undefined || google) { sets.push('direccion = ?', 'clave_dir = ?'); vals.push(dirFinal, dirFinal ? claveCalle(dirFinal) || null : null); }
-  for (const k of Object.keys(campos) as Array<keyof typeof campos>) if (b[k] !== undefined || (google && ['localidad', 'provincia', 'codigo_postal'].includes(k))) { sets.push(`${k} = ?`); vals.push(campos[k]); }
+  for (const k of Object.keys(campos) as Array<keyof typeof campos>) if (b[k] !== undefined || (google && ['localidad', 'provincia', 'codigo_postal'].includes(k)) || (k === 'provincia' && provinciaNueva)) { sets.push(`${k} = ?`); vals.push(campos[k]); }
   if (google) { sets.push('place_id = ?'); vals.push(google.place_id); }
   else if (b.direccion !== undefined && b.place_id === null) sets.push('place_id = NULL');
   if (tipo !== undefined) { sets.push('tipo = ?', 'tipo_origen = ?'); vals.push(tipo, tipo ? 'manual' : null); }

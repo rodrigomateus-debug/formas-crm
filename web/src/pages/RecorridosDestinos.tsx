@@ -69,14 +69,14 @@ function TipoTag({ tipo, origen }: { tipo: Tipo | null; origen?: string | null }
   return <span className="ds-tipo" style={{ '--c': t[2] } as React.CSSProperties} title={origen ? ORIGEN_TIPO[origen] : undefined}>{t[1]}</span>;
 }
 
-type Filtro = 'todos' | Tipo | 'sin_tipo';
+type Filtro = 'top' | 'todos' | Tipo | 'sin_tipo';   // top: los más visitados (el filtro de entrada)
 export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLElement | null }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [datos, setDatos] = useState<Datos | null>(null);
   const [v, setV] = useState(0);
   const [q, setQ] = useState('');
-  const [filtro, setFiltro] = useState<Filtro>('todos');
+  const [filtro, setFiltro] = useState<Filtro>('top');
   const [incompletos, setIncompletos] = useState(false);
   const [revisar, setRevisar] = useState(false);
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -122,7 +122,7 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
     const t = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const gnombre = new Map(datos.grupos.map((g) => [g.id, `${g.nombre} ${g.empresa ?? ''}`]));
     return datos.destinos.filter((d) => {
-      if (filtro === 'sin_tipo' ? d.tipo : filtro !== 'todos' && d.tipo !== filtro) return false;
+      if (filtro === 'sin_tipo' ? d.tipo : filtro !== 'todos' && filtro !== 'top' && d.tipo !== filtro) return false;
       if (incompletos && !d.faltan.length) return false;
       if (revisar && d.ia_estado !== 'dudoso') return false;
       if (!t) return true;
@@ -143,16 +143,20 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
     ];
     return lista.sort((a, b) => orden(b.destinos) - orden(a.destinos) || (a.grupo?.nombre ?? a.destinos[0].nombre).localeCompare(b.grupo?.nombre ?? b.destinos[0].nombre));
   }, [datos, visibles]);
-  // Por defecto se ven los más visitados (pedido de Rodrigo del 18/11/2026): con los miles de destinos a la vez, la lista y
-  // el mapa (que vuelve a dibujar todos sus puntos en cada clic) se ponían lentos. Los bloques ya vienen con los más
-  // visitados primero; el buscador y los filtros siguen buscando en todos. El elegido se ve siempre, aunque no esté entre ellos.
-  const mostrados = useMemo(() => {
-    if (verTodos || bloques.length <= TOPE) return bloques;
-    const top = bloques.slice(0, TOPE);
-    const elegido = foco != null && !top.some((b) => b.destinos.some((d) => d.id === foco)) ? bloques.find((b) => b.destinos.some((d) => d.id === foco)) : null;
-    return elegido ? [...top, elegido] : top;
-  }, [bloques, verTodos, foco]);
-  const enMapa = useMemo(() => mostrados.flatMap((b) => b.destinos), [mostrados]);
+  // «100 más visitados» (el filtro de entrada; pedido de Rodrigo del 18/11/2026): los bloques ya vienen con los más
+  // visitados primero. Si se busca algo, se busca en todos.
+  const mostrados = useMemo(() => (filtro === 'top' && !q.trim() ? bloques.slice(0, TOPE) : bloques), [bloques, filtro, q]);
+  // Para el pie: cuántas direcciones (cada sucursal cuenta) y cuántos grupos (empresas con sucursales) se ven.
+  const nDirecciones = mostrados.reduce((n, b) => n + b.destinos.length, 0), nGrupos = mostrados.filter((b) => b.grupo).length;
+  // El mapa, con muchos puntos (los vuelve a dibujar en cada clic), se pone lento: si la lista tiene más de 100, el mapa
+  // muestra los 100 primeros salvo que se pida ver todos. El elegido se ve siempre, aunque no esté entre ellos.
+  const mapaTope = !verTodos && mostrados.length > TOPE;
+  const enMapa = useMemo(() => {
+    if (!mapaTope) return mostrados.flatMap((b) => b.destinos);
+    const top = mostrados.slice(0, TOPE);
+    const elegido = foco != null && !top.some((b) => b.destinos.some((d) => d.id === foco)) ? mostrados.find((b) => b.destinos.some((d) => d.id === foco)) : null;
+    return (elegido ? [...top, elegido] : top).flatMap((b) => b.destinos);
+  }, [mostrados, mapaTope, foco]);
   // De a 40 por página (un grupo cuenta como uno): dibujar miles de filas de una traba la página. La búsqueda y los
   // filtros buscan en todos.
   const POR_PAGINA = 40;
@@ -209,8 +213,8 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
   if (!datos) return <Cargando />;
   const enfocado = foco != null ? porId.get(foco) ?? null : null;
   const pct = (n: number) => (datos.total ? Math.round((n / datos.total) * 100) : 0);
-  const filtrando = !!q.trim() || filtro !== 'todos' || incompletos || revisar;
-  const conteo = (t: Filtro) => datos.destinos.filter((d) => (t === 'todos' ? true : t === 'sin_tipo' ? !d.tipo : d.tipo === t)).length;
+  const filtrando = !!q.trim() || (filtro !== 'todos' && filtro !== 'top') || incompletos || revisar;
+  const conteo = (t: Filtro) => datos.destinos.filter((d) => (t === 'todos' || t === 'top' ? true : t === 'sin_tipo' ? !d.tipo : d.tipo === t)).length;
 
   return (
     <>
@@ -219,7 +223,9 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
           <input className="input" placeholder="Buscar nombre, calle, localidad, contacto…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destinos" />
         </div>
         <div className="ds-chips" role="tablist" aria-label="Tipo de destino">
-          {(['todos', ...TIPOS.map((t) => t[0]), 'sin_tipo'] as Filtro[]).map((t) => {
+          {(['top', 'todos', ...TIPOS.map((t) => t[0]), 'sin_tipo'] as Filtro[]).map((t) => {
+            if (t === 'top') return datos.destinos.length > TOPE || filtro === 'top' ? <button key={t} type="button" role="tab" aria-selected={filtro === t} className={`ds-chip${filtro === t ? ' on' : ''}`}
+              onClick={() => setFiltro(t)} title="Los destinos (y empresas con sucursales) con más viajes. El buscador busca en todos.">{TOPE} más visitados</button> : null;
             const n = conteo(t);
             if (!n && t !== 'todos') return null;
             const info = tipoDe(t);
@@ -244,16 +250,13 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
         <span><b>{datos.total}</b> destinos · <b>{pct(datos.resumen.en_mapa)} %</b> en el mapa · <b>{pct(datos.resumen.completos)} %</b> completos · <b>{datos.grupos.length}</b> con sucursales</span>
         <InfoTip label="Qué significan los números">
           <p><b>En el mapa:</b> con el punto ubicado. <b>Completos:</b> con dirección, localidad, provincia, mapa, teléfono y tipo. <b>Con sucursales:</b> empresas con varias direcciones agrupadas.</p>
-          <p>Tocá una dirección para verla en el mapa.{bloques.length > TOPE && !verTodos ? ` Se ven los ${TOPE} más visitados; el buscador encuentra cualquiera.` : ''}</p>
+          <p>Tocá una dirección para verla en el mapa.</p>
         </InfoTip>
         {datos.resumen.para_revisar > 0 && <button type="button" className={`ds-resumen-btn${revisar ? ' on' : ''}`} aria-pressed={revisar} onClick={() => setRevisar(!revisar)}><b>{datos.resumen.para_revisar}</b> para revisar</button>}
         <label className="row ds-check"><input type="checkbox" checked={incompletos} onChange={(e) => setIncompletos(e.target.checked)} />Solo incompletos</label>
         {organiza && sugeridos.length > 0 && (
           <button type="button" className="cr-link" onClick={() => setVerSugeridos(!verSugeridos)}>
             <Icon name="merge" size={13} /> {sugeridos.length} por agrupar{verSugeridos ? ' (ocultar)' : ''}</button>
-        )}
-        {bloques.length > TOPE && (
-          <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{verTodos ? `Ver los ${TOPE} más visitados` : `Ver los ${visibles.length}`}</button>
         )}
       </div>
       {ia && (
@@ -312,10 +315,17 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
             <FichaMapa d={enfocado} organiza={organiza} ubicando={ubicando?.id === enfocado.id} onUbicar={(lat, lng) => setUbicando({ id: enfocado.id, lat, lng })}
               onGuardar={guardarPunto} onCancelar={() => setUbicando(null)} onEditar={() => setEditando(enfocado)} />
           ) : datos.resumen.sin_buscar > 0 ? <p className="small muted ds-ficha">Buscando {datos.resumen.sin_buscar} direcciones en el mapa…</p> : null}
+          {mostrados.length > TOPE && (
+            <p className="small muted ds-mapa-tope">{mapaTope ? `En el mapa: los ${TOPE} más visitados.` : `En el mapa: los ${mostrados.length}.`}{' '}
+              <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{mapaTope ? 'Ver todos' : 'Solo los más visitados'}</button>
+              <InfoTip label="Por qué no se ven todos">Con miles de puntos el mapa se pone lento. La lista muestra todos.</InfoTip></p>
+          )}
         </aside>}
       </div>
       <nav className="ds-paginas" aria-label="Páginas">
-        <span className="small muted ds-pag-cuenta">{mostrados.length ? `${(pag - 1) * POR_PAGINA + 1}–${Math.min(pag * POR_PAGINA, mostrados.length)} de ${mostrados.length}` : 'Sin destinos'}</span>
+        <span className="small muted ds-pag-cuenta">{mostrados.length ? <>
+          <b>{nDirecciones.toLocaleString('es-AR')}</b> {nDirecciones === 1 ? 'dirección' : 'direcciones'}{nGrupos > 0 && <> · <b>{nGrupos.toLocaleString('es-AR')}</b> {nGrupos === 1 ? 'grupo' : 'grupos'}</>}
+          {paginas > 1 && ` · filas ${(pag - 1) * POR_PAGINA + 1}–${Math.min(pag * POR_PAGINA, mostrados.length)} de ${mostrados.length.toLocaleString('es-AR')}`}</> : 'Sin destinos'}</span>
         <InfoTip label="Planilla DESTINOS">
           <p>La libreta de Logística se copia de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.</p>
           {datos.copia.at > 0 && <p>Última copia: {fmtRelative(new Date(datos.copia.at).toISOString())}.{datos.copia.error ? ` Error: ${datos.copia.error}` : ''}</p>}

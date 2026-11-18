@@ -2438,3 +2438,4 @@ thead .ds-acciones { z-index: 2; }
 .info-tip-globo.arriba { transform: translate(-50%, -100%); }
 .info-tip-globo p { margin: 0; }
 .info-tip-globo p + p { margin-top: 6px; }
+.ds-mapa-tope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }

@@ -2254,6 +2254,12 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-sinmapa { font-size: 10.5px; padding: 0 5px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); white-space: nowrap; align-self: center; }
 .ds-gmaps { display: flex; width: max-content; align-items: center; gap: 3px; margin: 2px 0 0 17px; font-size: 11.5px; }
 .ds-contacto { min-width: 140px; max-width: 220px; }
+.ds-acciones { width: 1%; white-space: nowrap; text-align: right; position: sticky; right: 0; z-index: 1; background: var(--ui-surface); box-shadow: -6px 0 6px -6px rgba(0,0,0,.18); }
+thead .ds-acciones { z-index: 2; }
+.ds-grupo .ds-acciones { background: var(--ui-surface-sunken); }
+.ds-foco .ds-acciones { background: var(--ui-info-soft); }
+.ds-acciones .btn + .btn { margin-left: 2px; }
+.ds-borrar:hover { color: var(--ui-negative-ink); background: var(--ui-negative-soft); }
 .ds-wa { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, #25d366 18%, transparent); color: color-mix(in srgb, #128c4b 80%, var(--ui-ink)); text-decoration: none; }
 .ds-mapa-col { position: sticky; top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ds-mapa { height: min(62vh, 560px); border-radius: var(--r-control); overflow: hidden; background: var(--ui-surface-sunken); }
@@ -2282,3 +2288,4 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
   .ds-locmov { display: block; margin-left: 17px; }
   .ds-contacto { min-width: 110px; }
 }
+.ds-paginas { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-top: 1px solid var(--ui-line); background: var(--ui-surface); position: sticky; bottom: 0; }

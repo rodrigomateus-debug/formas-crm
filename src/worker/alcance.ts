@@ -62,7 +62,8 @@ export function visibleSql(al: string, user: User) {
 export function actividadVisibleSql(al: string, user: User) {
   if (!restringido(user)) return '1';
   const id = Number(user.id);
-  return `(${al}.owner_id = ${id} OR ${al}.created_by = ${id} OR EXISTS (SELECT 1 FROM activity_links vl
+  return `(${al}.owner_id = ${id} OR ${al}.created_by = ${id} OR EXISTS (SELECT 1 FROM tarea_colaboradores vc WHERE vc.activity_id = ${al}.id AND vc.user_id = ${id})
+    OR EXISTS (SELECT 1 FROM activity_links vl
     JOIN records vr ON vr.id = vl.record_id WHERE vl.activity_id = ${al}.id AND ${visibleSql('vr', user)}))`;
 }
 

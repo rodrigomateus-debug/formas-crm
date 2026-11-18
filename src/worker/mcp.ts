@@ -6,6 +6,7 @@ import { associate, associationsOf, dissociate, primaryCompanyId } from './assoc
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
+import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 import { assertActividadVisible, assertVisible, esOperaciones, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
@@ -200,19 +201,21 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'create_task',
-    description: 'Crea una tarea (ej. "Prospectar <empresa>", "Llamar para seguimiento") asociada a registros. due_at en ISO 8601. owner_id = vendedora (ver list_users).',
+    description: 'Crea una tarea (ej. "Prospectar <empresa>", "Llamar para seguimiento") asociada a registros (pedidos, negocios, empresas, contactos). due_at en ISO 8601. owner_id = responsable principal (ver list_users); colaboradores = otros usuarios que la trabajan.',
     inputSchema: {
       type: 'object',
       properties: {
         subject: { type: 'string' }, body: { type: 'string' }, due_at: { type: 'string' }, owner_id: { type: 'integer' },
         record_ids: IDS, priority: { type: 'string', enum: ['none', 'low', 'medium', 'high'] },
         task_type: { type: 'string', enum: ['todo', 'call', 'email', 'whatsapp', 'meeting'] },
+        status: { type: 'string', enum: ['NOT_STARTED', 'IN_PROGRESS', 'WAITING', 'COMPLETED'] },
+        colaboradores: { type: 'array', items: { type: 'integer' }, description: 'ids de usuarios que colaboran, además del responsable' },
       },
       required: ['subject'],
     },
     run: async (a, ctx, env) => {
       const t = await createActivity(env.DB, ctx, { ...a, type: 'task', links: (a.record_ids ?? []).map(Number) } as never);
-      return { id: t.id, subject: t.subject, due_at: t.due_at, owner_id: t.owner_id, links: t.links };
+      return { id: t.id, subject: t.subject, due_at: t.due_at, owner_id: t.owner_id, colaboradores: a.colaboradores ?? [], links: t.links };
     },
   },
   {
@@ -230,7 +233,33 @@ const TOOLS: Tool[] = [
     run: async (a, ctx, env) => {
       const owner = a.owner === 'all' ? 'all' : a.owner === 'me' || a.owner == null ? ctx.user.id : Number(a.owner);
       const res = await listTasks(env.DB, ctx, { owner, status: a.status, due: a.due, q: a.query, record: a.record_id, limit: a.limit ?? 50 });
-      return { total: res.total, results: res.results.map((t) => ({ id: t.id, subject: t.subject, due_at: t.due_at, status: t.status, owner_id: t.owner_id, priority: t.priority, body: t.body.slice(0, 600), links: t.links })) };
+      return { total: res.total, results: res.results.map((t) => ({ id: t.id, subject: t.subject, due_at: t.due_at, status: t.status, owner_id: t.owner_id,
+        colaboradores: t.colaboradores, comentarios: t.comentarios, priority: t.priority, body: t.body.slice(0, 600), links: t.links })) };
+    },
+  },
+  {
+    name: 'get_task',
+    description: 'Una tarea con su responsable, colaboradores, registros relacionados, checklist y su conversación (comentarios del equipo, con @[Nombre](id) para las menciones).',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
+    run: async (a, ctx, env) => {
+      const id = Number(a.id);
+      const t = await getActivity(env.DB, id);
+      if (t.type !== 'task') throw new HttpError(404, `No existe la tarea ${id}.`);
+      const extra = (await resumenTareas(env.DB, ctx.user.id, [id])).get(id)!;
+      const conv = await comentarios(env.DB, id);
+      return { id: t.id, subject: t.subject, body: t.body, status: t.status, due_at: t.due_at, priority: t.priority, owner_id: t.owner_id, colaboradores: extra.colaboradores,
+        checklist: t.meta?.checklist ?? [], links: t.links,
+        comentarios: conv.comentarios.filter((c) => !c.borrado_at).map((c) => ({ id: c.id, user_id: c.user_id, body: c.body, created_at: c.created_at })) };
+    },
+  },
+  {
+    name: 'comment_task',
+    description: 'Escribe un comentario en la conversación de una tarea. Para mencionar a alguien: @[Nombre](id del usuario) (ver list_users); le llega el aviso.',
+    inputSchema: { type: 'object', properties: { id: { type: 'integer', description: 'id de la tarea' }, body: { type: 'string' } }, required: ['id', 'body'] },
+    run: async (a, ctx, env) => {
+      const c = await comentar(env.DB, ctx, Number(a.id), { body: a.body });
+      return { id: c.id, activity_id: c.activity_id, created_at: c.created_at };
     },
   },
   {
@@ -241,6 +270,7 @@ const TOOLS: Tool[] = [
       properties: {
         id: { type: 'integer' }, status: { type: 'string', enum: ['NOT_STARTED', 'IN_PROGRESS', 'WAITING', 'COMPLETED'] }, due_at: { type: 'string' },
         subject: { type: 'string' }, body: { type: 'string' }, owner_id: { type: 'integer' }, archived: { type: 'boolean' }, record_ids: IDS,
+        colaboradores: { type: 'array', items: { type: 'integer' }, description: 'tareas: la lista completa de colaboradores (reemplaza la anterior)' },
       },
       required: ['id'],
     },
@@ -412,7 +442,7 @@ async function alcanceVentas(tool: string, a: Record<string, any>, ctx: Ctx, env
   if (esOperaciones(ctx.user) && tool === 'create_record' && a.object_type === 'deal') throw new HttpError(403, `Los negocios no están en el perfil ${nombrePerfil(ctx.user)}.`);
   const meta = new Meta(env.DB);
   for (const id of REGISTROS_DE[tool]?.(a) ?? []) await assertVisible(env.DB, meta, ctx.user, await getRow(env.DB, Number(id)));
-  if (tool === 'get_activity' || tool === 'update_activity') await assertActividadVisible(env.DB, ctx.user, Number(a.id));
+  if (['get_activity', 'update_activity', 'get_task', 'comment_task'].includes(tool)) await assertActividadVisible(env.DB, ctx.user, Number(a.id));
 }
 
 // Desde Claude, cada uno edita solo lo suyo (pedido de Rodrigo del 12/11/2026): los registros de los que es propietario o
@@ -432,6 +462,9 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   const owner = tool === 'create_record' || tool === 'update_record' ? a.properties?.owner_id : a.owner_id;
   if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me) {
     throw new HttpError(403, 'Desde Claude solo podés asignarte cosas a vos. Para asignarle algo a otra persona, hacelo en el CRM.');
+  }
+  if (Array.isArray(a.colaboradores) && a.colaboradores.some((u: unknown) => Number(u) !== me)) {
+    throw new HttpError(403, 'Desde Claude solo podés sumarte vos como colaborador. Para sumar a otras personas, hacelo en el CRM.');
   }
   for (const id of EDITA[tool]?.(a) ?? []) {
     const row = await getRow(env.DB, Number(id));

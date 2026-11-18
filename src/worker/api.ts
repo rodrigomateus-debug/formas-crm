@@ -27,6 +27,7 @@ import { cargarReferido, listarReferidos, pipelineDe } from './referidos';
 import { asignarRazon, razonesAEmpresa, razonSocialDe, resolverEmpresa } from './razones';
 import { adjunto, bandeja, borrarMensaje, conversacion, editarMensaje, escribir, marcarLeido, marcarNoLeido, quitarAdjunto, reaccionar, seguir, seVe, subirAdjunto } from './conversacion';
 import { marcarNotificaciones, notificaciones } from './notificaciones';
+import { borrarComentario, comentar, comentarios, editarComentario, guardarColaboradores, leerTarea, resumenTareas } from './tareas';
 import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
@@ -612,7 +613,9 @@ api.get('/tasks', async (c) => {
   const q = c.req.query();
   return c.json(await listTasks(c.env.DB, c.get('ctx'), {
     owner: q.owner === 'all' ? 'all' : num(q.owner),
-    status: (q.status as 'open' | 'done' | 'all') ?? 'open',
+    participa: q.participa === '1',
+    objeto: (q.objeto || undefined) as never,
+    status: (q.status as 'open' | 'done' | 'all' | 'board') ?? 'open',
     due: (q.due as 'overdue' | 'today' | 'week' | 'upcoming' | 'all') ?? 'all',
     q: q.q,
     record: num(q.record),
@@ -620,6 +623,63 @@ api.get('/tasks', async (c) => {
     limit: num(q.limit),
     offset: num(q.offset),
   }));
+});
+
+// Tareas en equipo (tareas.ts): la tarea con sus colaboradores, y su conversación.
+async function tareaVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
+  const t = await getActivity(c.env.DB, id);
+  if (t.type !== 'task') throw new HttpError(404, `No existe la tarea ${id}.`);
+  await assertActividadVisible(c.env.DB, c.get('ctx').user, id);
+  return t;
+}
+
+api.get('/tasks/:id', async (c) => {
+  const id = Number(c.req.param('id'));
+  const t = await tareaVisible(c, id);
+  const extra = (await resumenTareas(c.env.DB, c.get('ctx').user.id, [id])).get(id)!;
+  return c.json({ ...t, ...extra });
+});
+
+api.put('/tasks/:id/colaboradores', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const id = Number(c.req.param('id'));
+  await tareaVisible(c, id);
+  const b = await c.req.json<{ colaboradores?: unknown }>();
+  return c.json({ colaboradores: await guardarColaboradores(c.env.DB, ctx, id, b.colaboradores) });
+});
+
+api.get('/tasks/:id/comentarios', async (c) => {
+  const id = Number(c.req.param('id'));
+  await tareaVisible(c, id);
+  return c.json(await comentarios(c.env.DB, id, { desde: c.req.query('desde') }));
+});
+
+api.post('/tasks/:id/comentarios', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const id = Number(c.req.param('id'));
+  await tareaVisible(c, id);
+  return c.json(await comentar(c.env.DB, ctx, id, await c.req.json()), 201);
+});
+
+api.post('/tasks/:id/leido', async (c) => {
+  const id = Number(c.req.param('id'));
+  await tareaVisible(c, id);
+  const b = await c.req.json<{ hasta?: number }>().catch(() => ({} as { hasta?: number }));
+  return c.json(await leerTarea(c.env.DB, c.get('ctx'), id, b.hasta));
+});
+
+api.patch('/tarea-comentarios/:id', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  return c.json(await editarComentario(c.env.DB, ctx, Number(c.req.param('id')), await c.req.json()));
+});
+
+api.delete('/tarea-comentarios/:id', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  return c.json(await borrarComentario(c.env.DB, ctx, Number(c.req.param('id'))));
 });
 
 // ---------- Tablero de negocios ----------
@@ -1929,6 +1989,9 @@ api.delete('/users/:id', async (c) => {
       .bind(...(to == null ? [null, ts, cur.id] : [to, to, ts, cur.id])),
     db.prepare("UPDATE activities SET owner_id = ?, updated_at = ? WHERE owner_id = ? AND type = 'task' AND COALESCE(status, '') != 'COMPLETED'")
       .bind(to, ts, cur.id),
+    // Deja de colaborar en las tareas (y quien hereda sus tareas no queda a la vez como colaborador de ellas).
+    db.prepare('DELETE FROM tarea_colaboradores WHERE user_id = ?').bind(cur.id),
+    db.prepare('DELETE FROM tarea_colaboradores WHERE user_id = ? AND activity_id IN (SELECT id FROM activities WHERE owner_id = ?)').bind(to, to),
     // Los formularios web que le asignaban los contactos nuevos pasan a la misma persona.
     db.prepare(`UPDATE settings SET value = ${formProps} WHERE key LIKE 'form:%' AND json_extract(value, '$.owner_id') = ?`)
       .bind(...(to == null ? [cur.id] : [to, cur.id])),

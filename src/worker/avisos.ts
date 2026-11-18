@@ -140,12 +140,13 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
   const { results } = await db.prepare(`SELECT v.id, v.user_id, v.kind, v.record_id, v.activity_id, v.created_at, u.email, u.name AS user_name, u.avisos_mail,
       p.name AS by_name, r.name AS rec_name, r.object_type AS rec_type, a.subject AS act_subject, a.due_at AS act_due,
       json_extract(r.props, '$.estado_entrega') AS entrega, json_extract(r.props, '$.falta_entregar') AS falta,
-      CASE WHEN m.borrado_at IS NULL THEN m.body END AS msg_body
+      CASE WHEN m.borrado_at IS NULL THEN m.body END AS msg_body, v.detalle, CASE WHEN tc.borrado_at IS NULL THEN tc.body END AS com_body
     FROM avisos v JOIN users u ON u.id = v.user_id AND u.active = 1 LEFT JOIN users p ON p.id = v.by_user
     LEFT JOIN records r ON r.id = v.record_id LEFT JOIN activities a ON a.id = v.activity_id LEFT JOIN mensajes m ON m.id = v.mensaje_id
+    LEFT JOIN tarea_comentarios tc ON tc.id = v.comentario_id
     WHERE v.sent_at IS NULL ORDER BY v.user_id, v.id LIMIT 200`).all<{ id: number; user_id: number; kind: string; record_id: number | null; activity_id: number | null;
       created_at: string; email: string; user_name: string; avisos_mail: number; by_name: string | null; rec_name: string | null; rec_type: string | null; act_subject: string | null; act_due: string | null;
-      entrega: string | null; falta: string | null; msg_body: string | null }>();
+      entrega: string | null; falta: string | null; msg_body: string | null; detalle: string | null; com_body: string | null }>();
   const porPersona = new Map<number, typeof results>();
   for (const r of results) porPersona.set(r.user_id, [...(porPersona.get(r.user_id) ?? []), r]);
   const marcar = (ids: number[], error: string | null) => db.batch(ids.map((id) => db.prepare('UPDATE avisos SET sent_at = ?, error = ? WHERE id = ?').bind(new Date().toISOString(), error, id)));
@@ -155,7 +156,7 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     const resueltas = todas.filter((r) => r.kind === 'entrega' && r.entrega !== 'parcial' && r.entrega !== 'diferencias').map((r) => r.id);
     if (resueltas.length) await marcar(resueltas, 'ya no falta nada');
     // Una mención en un mensaje que después se borró no se avisa.
-    const borradas = todas.filter((r) => r.kind === 'mencion' && r.msg_body == null).map((r) => r.id);
+    const borradas = todas.filter((r) => (r.kind === 'mencion' && r.msg_body == null) || (r.kind === 'tarea_mencion' && r.com_body == null)).map((r) => r.id);
     if (borradas.length) await marcar(borradas, 'mensaje borrado');
     resueltas.push(...borradas);
     // Solo a quien tiene «Avisos por mail» prendido (lo de los demás se marca y no sale).
@@ -168,29 +169,33 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     // Lo que no pudo salir en 3 días no se manda más (por ejemplo, si falta el permiso de Google).
     const viejos = rows.filter((r) => Date.now() - Date.parse(r.created_at) > 3 * 86_400_000).map((r) => r.id);
     if (viejos.length === rows.length) { await marcar(ids, 'vencido'); continue; }
-    const lineas: Linea[] = rows.map((r) => r.kind === 'mencion'
+    const esMencion = (k: string) => k === 'mencion' || k === 'tarea_mencion';
+    const lineas: Linea[] = rows.map((r) => r.kind === 'tarea_mencion'
+      ? { titulo: r.act_subject || 'Tarea', detalle: `${r.by_name ?? 'Alguien'}: «${recorte(textoPlano(r.com_body ?? ''))}»`, url: `${APP_URL(env)}/tasks?tarea=${r.activity_id}` }
+      : r.kind === 'mencion'
       ? { titulo: r.rec_name || 'Conversación', detalle: `${r.by_name ?? 'Alguien'}: «${recorte(textoPlano(r.msg_body ?? ''))}»`, url: r.record_id && r.rec_type ? `${APP_URL(env)}/${PATHS[r.rec_type]}/${r.record_id}?conversacion=1` : APP_URL(env) }
       : r.kind === 'entrega'
       ? { titulo: r.rec_name || 'Pedido', detalle: r.entrega === 'diferencias' ? `con diferencias${r.falta ? ` · falta ${r.falta}` : ''}` : `falta ${r.falta ?? 'entregar'}`, url: `${APP_URL(env)}/orders/${r.record_id}` }
       : r.kind === 'tarea'
-      ? { titulo: r.act_subject || 'Tarea', detalle: [r.act_due && `vence el ${fecha(r.act_due)}`, r.by_name && `te la asignó ${r.by_name}`].filter(Boolean).join(' · '), url: `${APP_URL(env)}/tasks` }
+      ? { titulo: r.act_subject || 'Tarea', detalle: [r.act_due && `vence el ${fecha(r.act_due)}`, r.by_name && (r.detalle === 'colaborador' ? `te sumó ${r.by_name}` : `te la asignó ${r.by_name}`)].filter(Boolean).join(' · '),
+          url: `${APP_URL(env)}/tasks?tarea=${r.activity_id}` }
       : { titulo: r.rec_name || 'Registro', detalle: r.by_name ? `te lo asignó ${r.by_name}` : '', url: r.record_id && r.rec_type ? `${APP_URL(env)}/${PATHS[r.rec_type]}/${r.record_id}` : APP_URL(env) });
     const quien = [...new Set(rows.map((r) => r.by_name).filter(Boolean))];
     const entregas = rows.filter((r) => r.kind === 'entrega');
-    const menciones = rows.filter((r) => r.kind === 'mencion');
+    const menciones = rows.filter((r) => esMencion(r.kind));
     const subject = menciones.length === rows.length
-      ? (rows.length === 1 ? `${quien[0] ?? 'Alguien'} te mencionó en «${rows[0].rec_name ?? 'una conversación'}»` : `Te mencionaron ${rows.length} veces en Formas Hub`)
+      ? (rows.length === 1 ? `${quien[0] ?? 'Alguien'} te mencionó en «${(rows[0].kind === 'tarea_mencion' ? rows[0].act_subject : rows[0].rec_name) ?? 'una conversación'}»` : `Te mencionaron ${rows.length} veces en Formas Hub`)
       : entregas.length === rows.length
       ? (rows.length === 1 ? `Faltan entregas: ${rows[0].rec_name ?? 'un pedido'}` : `${rows.length} pedidos con faltantes de entrega`)
       : rows.length === 1
       ? `${quien[0] ?? 'Alguien'} te asignó ${rows[0].kind === 'tarea' ? 'una tarea' : `«${rows[0].rec_name ?? 'un registro'}»`}`
       : `Te asignaron ${rows.length} cosas en Formas Hub`;
     const grupos: Array<[string, Linea[]]> = [
-      ['Te mencionaron', lineas.filter((_, i) => rows[i].kind === 'mencion')],
+      ['Te mencionaron', lineas.filter((_, i) => esMencion(rows[i].kind))],
       ['Pedidos con faltantes de entrega (según los remitos)', lineas.filter((_, i) => rows[i].kind === 'entrega')],
-      ['Asignado a vos', lineas.filter((_, i) => rows[i].kind !== 'entrega' && rows[i].kind !== 'mencion')],
+      ['Asignado a vos', lineas.filter((_, i) => rows[i].kind !== 'entrega' && !esMencion(rows[i].kind))],
     ].filter(([, ls]) => ls.length) as Array<[string, Linea[]]>;
-    const { text, html } = cuerpo(env, menciones.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, te mencionaron en la conversación de:`
+    const { text, html } = cuerpo(env, menciones.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, te mencionaron en:`
       : entregas.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, a estos pedidos les falta entregar algo según sus remitos:`
       : `Hola ${u.user_name.split(' ')[0]}, te asignaron esto en Formas Hub:`, grupos);
     try {

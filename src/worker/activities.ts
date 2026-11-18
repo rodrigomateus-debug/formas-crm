@@ -5,6 +5,7 @@ import type { Ctx, User } from './env';
 import { HttpError, now } from './env';
 import { refreshActivityDates } from './records';
 import { primaryCompanyId } from './associations';
+import { guardarColaboradores, resumenTareas, sacarPrincipalDeColaboradores } from './tareas';
 
 export type ActivityType = 'note' | 'email' | 'call' | 'meeting' | 'task' | 'whatsapp';
 export const ACTIVITY_TYPES: ActivityType[] = ['note', 'email', 'call', 'meeting', 'task', 'whatsapp'];
@@ -27,6 +28,8 @@ export interface ActivityInput {
   links?: number[];
   // Si es false, no se asocia sola a la empresa principal del contacto.
   link_primary_company?: boolean;
+  // Tareas: los que la trabajan además del responsable principal (tareas.ts).
+  colaboradores?: number[];
 }
 
 export interface ActivityRow {
@@ -111,7 +114,10 @@ export async function createActivity(db: D1Database, ctx: Ctx, input: ActivityIn
     input.task_type ?? null, JSON.stringify(input.meta ?? {}), input.thread_id ?? null, input.external_id ?? null, ts, ts, ctx.user.id,
     ctx.source).first<{ id: number }>();
   await linkActivity(db, row!.id, links);
-  if (input.type === 'task') await avisarAsignacion(db, ctx, input.owner_id ?? ctx.user.id, { activityId: row!.id });
+  if (input.type === 'task') {
+    await avisarAsignacion(db, ctx, input.owner_id ?? ctx.user.id, { activityId: row!.id });
+    if (input.colaboradores?.length) await guardarColaboradores(db, ctx, row!.id, input.colaboradores);
+  }
   return getActivity(db, row!.id);
 }
 
@@ -161,7 +167,11 @@ export async function updateActivity(db: D1Database, ctx: Ctx, id: number, input
   await db.prepare(`UPDATE activities SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).bind(...keys.map((k) => fields[k]), id).run();
   if (input.links) await linkActivity(db, id, input.links);
   await refreshActivityDates(db, cur.links.map((l) => l.id));
-  if (cur.type === 'task' && fields.owner_id !== cur.owner_id) await avisarAsignacion(db, ctx, fields.owner_id as number | null, { activityId: id });
+  if (cur.type === 'task' && fields.owner_id !== cur.owner_id) {
+    await avisarAsignacion(db, ctx, fields.owner_id as number | null, { activityId: id });
+    await sacarPrincipalDeColaboradores(db, id, fields.owner_id as number | null);
+  }
+  if (cur.type === 'task' && input.colaboradores !== undefined) await guardarColaboradores(db, ctx, id, input.colaboradores);
   return getActivity(db, id);
 }
 
@@ -197,8 +207,10 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
   const counts = await db.prepare(
     `SELECT a.type, COUNT(*) AS n FROM activities a WHERE a.archived = 0 AND a.id IN (SELECT l.activity_id FROM activity_links l WHERE ${scope}) GROUP BY a.type`,
   ).bind(recordId, '', JSON.stringify(opts.hiddenPipelines ?? [])).all<{ type: string; n: number }>();
+  const acts = results.map(shape);
+  const tareas = await resumenTareas(db, opts.user?.id ?? 0, acts.filter((x) => x.type === 'task').map((x) => x.id));
   return {
-    activities: results.map(shape),
+    activities: acts.map((x) => (tareas.has(x.id) ? { ...x, ...tareas.get(x.id)! } : x)),
     changes: changes.results,
     counts: Object.fromEntries(counts.results.map((c) => [c.type, c.n])),
   };
@@ -206,7 +218,12 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
 
 export interface TaskQuery {
   owner?: number | 'all';
-  status?: 'open' | 'done' | 'all';
+  // Con `participa`, las de `owner` son también aquellas en las que colabora (la pantalla de Tareas).
+  participa?: boolean;
+  // 'board': las abiertas y las completadas en los últimos 14 días (la columna «Hecha» del tablero).
+  status?: 'open' | 'done' | 'all' | 'board';
+  // Relacionadas con algún registro de ese tipo, o 'none' (sin relacionar).
+  objeto?: 'contact' | 'company' | 'deal' | 'order' | 'none';
   due?: 'overdue' | 'today' | 'week' | 'upcoming' | 'all';
   q?: string;
   record?: number;
@@ -219,13 +236,21 @@ export async function listTasks(db: D1Database, ctx: Ctx, q: TaskQuery) {
   const where = ["a.type = 'task'", 'a.archived = 0'];
   const binds: unknown[] = [];
   const owner = q.owner ?? ctx.user.id;
-  if (owner !== 'all') { where.push('a.owner_id = ?'); binds.push(owner); }
+  if (owner !== 'all') {
+    if (q.participa) { where.push('(a.owner_id = ? OR a.id IN (SELECT activity_id FROM tarea_colaboradores WHERE user_id = ?))'); binds.push(owner, owner); }
+    else { where.push('a.owner_id = ?'); binds.push(owner); }
+  }
   // Perfil Ventas: sus tareas y las de los registros que ve (alcance.ts).
   if (restringido(ctx.user)) where.push(actividadVisibleSql('a', ctx.user));
   const unidades = (q.unidades ?? []).filter((k) => UNIDADES[k]);
   if (unidades.length) where.push(ownersOfUnitsSql(unidades, binds, 'a.owner_id'));
   if ((q.status ?? 'open') === 'open') where.push("a.status != 'COMPLETED'");
   if (q.status === 'done') where.push("a.status = 'COMPLETED'");
+  if (q.status === 'board') { where.push("(a.status != 'COMPLETED' OR a.completed_at >= ?)"); binds.push(new Date(Date.now() - 14 * 86_400_000).toISOString()); }
+  if (q.objeto === 'none') where.push('NOT EXISTS (SELECT 1 FROM activity_links ol WHERE ol.activity_id = a.id)');
+  else if (q.objeto && ['contact', 'company', 'deal', 'order'].includes(q.objeto)) {
+    where.push('EXISTS (SELECT 1 FROM activity_links ol WHERE ol.activity_id = a.id AND ol.object_type = ?)'); binds.push(q.objeto);
+  }
   const start = new Date(); start.setUTCHours(3, 0, 0, 0); // medianoche en Argentina (UTC-3)
   if (start.getTime() > Date.now()) start.setUTCDate(start.getUTCDate() - 1);
   const end = new Date(start.getTime() + 86_400_000);
@@ -240,8 +265,10 @@ export async function listTasks(db: D1Database, ctx: Ctx, q: TaskQuery) {
     db.prepare(`${SELECT_ACTIVITY} WHERE ${where.join(' AND ')} ORDER BY a.due_at IS NULL, a.due_at ASC LIMIT ${limit} OFFSET ${q.offset ?? 0}`).bind(...binds),
     db.prepare(`SELECT COUNT(*) AS n FROM activities a WHERE ${where.join(' AND ')}`).bind(...binds),
   ]);
+  const rows = (list.results as unknown as Array<ActivityRow & { links: string | null }>).map(shape);
+  const extra = await resumenTareas(db, ctx.user.id, rows.map((r) => r.id));
   return {
-    results: (list.results as unknown as Array<ActivityRow & { links: string | null }>).map(shape),
+    results: rows.map((r) => ({ ...r, ...extra.get(r.id)! })),
     total: (count.results[0] as { n: number }).n,
     today_end: end.toISOString(),
     today_start: start.toISOString(),

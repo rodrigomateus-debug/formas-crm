@@ -16,7 +16,7 @@ interface Ganado { owner_id: number | null; n: number; monto: number; pedidos: n
 interface EtapaEmbudo { id: string; label: string; ganada: boolean; n: number; monto: number }
 interface Embudo { id: string; label: string; creados: number; monto: number; etapas: EtapaEmbudo[]; perdidos: { n: number; monto: number }; abiertos: { n: number; monto: number } }
 interface Empresa { cid: number | null; name: string | null; oportunidades: number; oportunidades_monto: number; ganados: number; ganados_monto: number; perdidos: number; abiertos: number; abiertos_monto: number }
-interface Suelto { id: number; name: string; owner_id: number | null; amount: number | null; created_at: string; pedido: string | null }
+interface Suelto { id: number; name: string; owner_id: number | null; amount: number | null; fecha: string; pedido: string | null }
 interface Datos {
   desde: string; hasta: string; hoy: string;
   kpis: { nuevos: number | null; nuevos_monto: number | null; ganados: number | null; ganados_monto: number | null; perdidos: number | null; perdidos_monto: number | null; abiertos: number; abiertos_monto: number };
@@ -88,7 +88,7 @@ export default function InicioDireccion() {
                     <td className={`num small ${descuadre ? 'warn-text' : 'muted'}`} title={g.sin_pedido ? `${plural(g.sin_pedido, 'negocio ganado sin pedido', 'negocios ganados sin pedido')}` : descuadre ? 'El total de los pedidos no coincide con el de los negocios' : 'Cuadra con los pedidos'}>
                       {plural(g.pedidos, 'pedido', 'pedidos')}</td>
                     <td className={`num ${descuadre ? 'warn-text' : ''}`}><b>{fmtMoney(g.pedidos_monto) || '$ 0'}</b>{descuadre && <span title={g.sin_pedido ? `${g.sin_pedido} sin pedido` : 'No coincide'}> ⚠</span>}</td>
-                    <td className="num small">{suelto ? <a href="#sin-negocio" className="danger-text" title={`Pedidos cargados en el período que no están en ningún negocio (${fmtMoney(suelto.monto) || '$ 0'})`}>+{plural(suelto.n, 'pedido', 'pedidos')} sin negocio</a> : null}</td>
+                    <td className="num small">{suelto ? <a href="#sin-negocio" className="danger-text" title={`Pedidos del período (por la fecha del pedido) que no están en ningún negocio (${fmtMoney(suelto.monto) || '$ 0'})`}>+{plural(suelto.n, 'pedido', 'pedidos')} sin negocio</a> : null}</td>
                   </tr>
                 );
               })}
@@ -162,7 +162,7 @@ export default function InicioDireccion() {
           {sueltos?.negocios.length ? sueltos.negocios.map((o) => (
             <div key={o.id} className="assoc-item">
               <div className="grow" style={{ minWidth: 0 }}><Link to={recordUrl('order', o.id)} className="ellipsis" style={{ display: 'block' }}>{o.name}</Link>
-                <div className="small muted">{o.pedido ? `${o.pedido} · ` : ''}cargado el {corto(o.created_at.slice(0, 10))} · <UserChip id={o.owner_id} size="xs" /></div></div>
+                <div className="small muted">{o.pedido ? `${o.pedido} · ` : ''}del {corto(o.fecha)} · <UserChip id={o.owner_id} size="xs" /></div></div>
               <span className="small num">{fmtMoney(o.amount)}</span>
             </div>
           )) : <div className="empty plain">{res.loading ? 'Cargando…' : 'Todos los pedidos del período están en un negocio.'}</div>}
@@ -199,7 +199,7 @@ export default function InicioDireccion() {
             <span><b>Ganado / perdido:</b> negocios con fecha de cierre en el período. <b>Nuevos:</b> creados en el período. <b>Abiertos:</b> hoy.</span>
             <span><b>Pedidos:</b> los pedidos (no anulados) asociados a los negocios ganados. En naranja ⚠ cuando a algún ganado le falta el pedido o los totales no coinciden.</span>
             <span><b>Embudo:</b> de los negocios creados en el período, cuántos y cuánto monto llegaron a cada etapa (según el historial de etapas), con la conversión desde la primera y desde la anterior.</span>
-            <span><b>Pedidos sin negocio:</b> pedidos no anulados cargados en el período que no están asociados a ningún negocio. No debería haber ninguno.</span>
+            <span><b>Pedidos sin negocio:</b> pedidos no anulados hechos en el período (por la fecha del pedido en Finnegans) que no están asociados a ningún negocio. No debería haber ninguno.</span>
             <span><b>Empresas:</b> conversión = ganados / (ganados + perdidos) en el período; ticket = monto ganado / ganados.</span>
           </div>
         </div>

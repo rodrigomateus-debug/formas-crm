@@ -510,7 +510,9 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     const meta = new Meta(db);
     const known: Props = {};
     for (const [k, v] of Object.entries(fill)) if (await meta.property(type, k)) known[k] = v;
-    if (Object.keys(known).length) await updateRecord(db, ctx, type, primaryId, known, { strict: false });
+    // `system`: también las de solo lectura (pedido de Finnegans, razón social, CUIT, link de ClickUp…), que el duplicado ya
+    // tenía; sin eso, al combinar un pedido de HubSpot con su PDV de Finnegans se perdían y Finnegans no lo reconocía más.
+    if (Object.keys(known).length) await updateRecord(db, ctx, type, primaryId, known, { strict: false, system: true });
   }
   await refreshActivityDates(db, [primaryId]);
   return getRow(db, primaryId);

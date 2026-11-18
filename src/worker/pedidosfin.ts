@@ -93,7 +93,7 @@ export async function aplicarPedidos(env: Env, pedidos: Record<string, PedidoFin
       const row = await createRecord(db, ctx, 'order', {
         hs_order_name: `PDV ${n}${demo ? ' · DEMO' : ''}${cliente ? ` · ${cliente}` : ''}`, pdv_finnegans: String(n), pedido_finnegans: pedidoFin, unidad_de_negocio: unidad,
         cliente_clickup: cliente || null, ...facturacion(p), hs_pipeline_stage: STAGE.confirmado, hs_pipeline: pipeline ?? null, tipo_de_pedido: p.evento ? 'EVENTO' : 'PEDIDO NORMAL',
-        fecha_de_entrega: fecha(p.entrega),
+        fecha_de_entrega: fecha(p.entrega), fecha_pedido: fecha(p.fecha),
         // El vendedor viene como nombre (informe) o como mail (el pedido de Finnegans de la tienda).
         owner_id: usuarioPorNombre(users, /@/.test(p.vendedor ?? '') ? '' : String(p.vendedor ?? ''), /@/.test(p.vendedor ?? '') ? String(p.vendedor) : '') ?? null,
       }, { system: true, strict: false, createdAt: fecha(p.fecha) ? `${fecha(p.fecha)}T12:00:00.000Z` : undefined });

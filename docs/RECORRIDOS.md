@@ -242,6 +242,22 @@ para este tipo de libretas de direcciones, para que esté completa pero se pueda
   con el botón **WhatsApp** (abre el chat con esa persona, con un saludo de Formas), teléfono y mail, y **viajes**: en los
   últimos 6 meses / en total, el último y si ya hay uno previsto («va el 21/11»). Los grupos se ven como una empresa con
   sus direcciones abajo (se pliegan).
+- **Cada destino con su empresa del CRM** (pedido de Rodrigo del 18/11/2026): el Hub relaciona solo cada destino (y cada
+  grupo) con la empresa del CRM que se llama igual, sin mirar lo que va entre paréntesis, la forma societaria ni palabras
+  como «Depósito» o «Planta» («GADOR (DEPÓSITO)» y «Depósito Gador» son «Gador S.A.»). Si hay varias con ese nombre, gana
+  la que es cliente; después, la que tiene dominio. Las direcciones de un grupo relacionado toman la empresa del grupo.
+  En la lista se ve **el logo de la empresa** (el del dominio, como en el resto del Hub; sin dominio, las iniciales) y un
+  link que la abre en el CRM; el destino sin empresa lleva un pin gris. Con la empresa relacionada, el tipo (cliente o
+  proveedor) sale del CRM. Logística la elige, la cambia o la quita en «Editar» (del destino o de la empresa): lo hecho a
+  mano no se vuelve a deducir (`empresa_origen`: `nombre`, `grupo` o `manual`; migración `0081_destinos_empresa.sql`,
+  `vincularEmpresas` en `src/worker/destinos.ts`). La relación se busca cada vez que se abre la pestaña, así que una
+  empresa nueva del CRM aparece sola.
+- **De entrada, los 100 más visitados** (pedido de Rodrigo del 18/11/2026: con los 2.472 a la vez la pantalla se
+  trababa). La tabla y el mapa muestran los 100 destinos (o empresas con sus sucursales) con más viajes; el buscador y
+  los filtros buscan en toda la base, y «Ver todos» los trae completos (`TOPE` en `RecorridosDestinos.tsx`).
+- **Empresa y destino suelto, al mismo nivel**: los dos arrancan en la misma línea y con el mismo peso. Las direcciones
+  de una empresa cuelgan debajo con una línea que las une y un fondo apenas distinto, como los productos de un pedido.
+  Las filas tienen más aire.
 - **El mapa**: todos los destinos con un punto del color de su tipo. Al tocar una dirección, el mapa va a ese lugar y
   muestra la ficha con **«Ver en Google Maps»** (cada dirección tiene además su link «Maps» en la tabla), WhatsApp y
   Editar. Si no está ubicada, Logística la ubica a mano arrastrando el pin («Ubicar a mano» / «Corregir el punto»), y

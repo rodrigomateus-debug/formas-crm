@@ -15,6 +15,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Recorridos (reemplaza la planilla «Recorridos» de Logística: cualquiera le pide al recorrido de un día que lleve o retire algo, con una sola base de destinos, «ya van mañana a ese lugar» y el remito de traslado): [docs/RECORRIDOS.md](docs/RECORRIDOS.md).
 - Analíticas → Recorridos: el rendimiento de los choferes (qué recorrido hace cada uno cada día, en km y en tiempo: la salida y la llegada por el GPS de la app o el aviso del chofer, los km por calles, promedios por chofer, propios contra externos): [docs/RENDIMIENTO.md](docs/RENDIMIENTO.md).
 - Conversación de cada pedido (chat del equipo con @menciones y la actividad entremezclada): [docs/CONVERSACION.md](docs/CONVERSACION.md).
+- Tareas en equipo (tablero como ClickUp/Asana, responsable y colaboradores, relacionadas con pedidos, negocios, empresas y contactos, pasos y conversación con @menciones): [docs/TAREAS.md](docs/TAREAS.md).
 - Perfiles y qué ve cada uno (el perfil Ventas ve lo suyo): [docs/PERFILES.md](docs/PERFILES.md).
 - Unidad de negocio de empresas (a mano, por sus compras o por el propietario) y contactos (la de su empresa): [docs/UNIDADES.md](docs/UNIDADES.md).
 - Referidos (quién nos recomendó a quién: desde el Workspace de Formas Shop o la ficha del cliente, con negocio en Lead, nota, tarea y el agradecimiento al ganar): [docs/REFERIDOS.md](docs/REFERIDOS.md).

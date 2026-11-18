@@ -2230,17 +2230,54 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-sugeridos ul, .ds-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ds-sugeridos li, .ds-lista li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--ui-line); }
 .ds-seleccion { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface); box-shadow: 0 2px 10px rgba(0,0,0,.12); }
-.ds-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 30%); gap: 16px; align-items: start; }
+/* Destinos como las listas (list-fixed, en Recorridos.tsx): la tabla ocupa el resto de la pantalla y se desplaza adentro,
+   con la barra horizontal y el paginado siempre a la vista. El mapa, opcional, a la derecha y del mismo alto. */
+.ds-layout { display: flex; gap: 16px; align-items: stretch; min-height: 0; }
+.ds-layout > .ds-tabla { flex: 1 1 auto; min-width: 0; }
+.content.list-fixed > .ds-layout { flex: 1 1 auto; min-height: 240px; }
+.content.list-fixed.rc-page { overflow-y: auto; }
+.rc-page > .rc-admin:first-of-type { margin: 0 0 12px; padding: 6px 12px; }
+.ds-copia { min-width: 0; }
 .ds-locmov { display: none; }
-.ds-tabla { max-height: calc(100vh - 220px); overflow: auto; }
+.ds-tabla { overflow: auto; }
 .ds-tabla td { vertical-align: top; }
+/* Con más aire entre renglón y renglón (pedido de Rodrigo del 18/11/2026): cada fila tiene dos o tres líneas. */
+.ds-tabla table.grid td { height: auto; padding-top: 11px; padding-bottom: 11px; line-height: 1.45; }
 .ds-sel { width: 28px; }
-.ds-grupo td { background: var(--ui-surface-sunken); }
-.ds-grupo-nombre, .ds-nombre, .ds-dir, .ds-plegar { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
-.ds-grupo-nombre { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; }
-.ds-plegar { margin-right: 4px; color: var(--ui-ink-2); vertical-align: middle; }
-.ds-hijo td:nth-child(2) { padding-left: 28px; }
-.ds-hijo td:first-child.ds-sel + td { padding-left: 28px; }
+.ds-grupo-nombre, .ds-nombre, .ds-dir, .ds-plegar, .ds-cuantas { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+/* Una empresa con varias direcciones y un destino de una sola están al mismo nivel: el nombre arranca en la misma columna
+   y se ve igual. La empresa lleva la flecha en el margen; el destino suelto, ese mismo margen vacío. */
+.ds-td-nombre, .ds-grupo-celda { position: relative; }
+.ds-nivel { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ds-margen { flex: none; width: 18px; height: 18px; display: inline-grid; place-items: center; color: var(--ui-ink-2); border-radius: 4px; }
+button.ds-margen:hover { background: var(--ui-surface-sunken); color: var(--ui-ink); }
+.ds-grupo-nombre b, .ds-suelto .ds-nombre b { font-size: 13.5px; }
+.ds-cuantas { flex: none; font-size: 12px; color: var(--ui-ink-2); padding: 1px 8px; border-radius: var(--r-pill); background: var(--ui-surface-sunken); }
+.ds-cuantas:hover { color: var(--ui-ink); }
+.ds-suelto .ds-tags, .ds-grupo .ds-tags { margin-left: 58px; }
+/* El logo de la empresa del CRM (el favicon de su dominio); el destino sin empresa lleva un pin gris del mismo tamaño. */
+.ds-logo { flex: none; width: 24px; height: 24px; display: inline-grid; place-items: center; }
+.ds-logo .avatar { width: 24px; height: 24px; font-size: 10px; border-radius: 6px; }
+.ds-logo .avatar.logo img { width: 80%; height: 80%; }
+.ds-logo.vacio { border-radius: 6px; background: var(--ui-surface-sunken); color: var(--ui-ink-3); }
+.ds-crm { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; font-size: 11.5px; line-height: 1.35; padding: 1px 7px; border-radius: var(--r-pill); border: 1px solid var(--ui-line); color: var(--ui-ink-2); text-decoration: none; }
+.ds-crm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-crm:hover { color: var(--ui-ink); border-color: var(--ui-line-strong); background: var(--ui-surface-sunken); }
+.ds-empresa-elegida { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border: 1px solid var(--ui-line); border-radius: var(--r-control); font-weight: 400; }
+.ds-campo-empresa .stack { font-weight: 400; }
+/* Las direcciones de una empresa: corridas a la derecha y colgadas de una línea que baja desde la flecha, como los
+   productos de un pedido. La empresa y sus direcciones se leen como un bloque: sin la raya entre ellas y con otro fondo. */
+.ds-tabla table.grid tr.ds-grupo.ds-abierto td, .ds-tabla table.grid tr.ds-hijo:not(.ultimo) td { border-bottom-color: transparent; }
+/* Plegada, la flecha mira a la derecha (hacia lo que se abre); abierta, hacia abajo. */
+.ds-plegar svg { transition: transform .15s ease; }
+.ds-plegar[aria-expanded="false"] svg { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .ds-plegar svg { transition: none; } }
+.ds-tabla table.grid tr.ds-hijo td { background: color-mix(in srgb, var(--ui-surface-sunken) 55%, var(--ui-surface)); padding-top: 8px; padding-bottom: 8px; }
+.ds-tabla table.grid tr.ds-hijo td.ds-td-nombre { padding-left: 86px; }
+.ds-hijo .ds-td-nombre::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); }
+.ds-hijo.ultimo .ds-td-nombre::before { bottom: auto; height: 19px; }
+.ds-hijo .ds-td-nombre::after { content: ''; position: absolute; left: 22px; top: 18px; width: 54px; border-top: 1.5px solid var(--ui-line-strong); }
+.ds-hijo .ds-nombre b { font-weight: 500; }
 .ds-foco td { background: var(--ui-info-soft); }
 .ds-nombre:hover b, .ds-grupo-nombre:hover b { text-decoration: underline; }
 .ds-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
@@ -2256,13 +2293,12 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-contacto { min-width: 140px; max-width: 220px; }
 .ds-acciones { width: 1%; white-space: nowrap; text-align: right; position: sticky; right: 0; z-index: 1; background: var(--ui-surface); box-shadow: -6px 0 6px -6px rgba(0,0,0,.18); }
 thead .ds-acciones { z-index: 2; }
-.ds-grupo .ds-acciones { background: var(--ui-surface-sunken); }
 .ds-foco .ds-acciones { background: var(--ui-info-soft); }
 .ds-acciones .btn + .btn { margin-left: 2px; }
 .ds-borrar:hover { color: var(--ui-negative-ink); background: var(--ui-negative-soft); }
 .ds-wa { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, #25d366 18%, transparent); color: color-mix(in srgb, #128c4b 80%, var(--ui-ink)); text-decoration: none; }
-.ds-mapa-col { position: sticky; top: 8px; display: flex; flex-direction: column; gap: 8px; }
-.ds-mapa { height: min(62vh, 560px); border-radius: var(--r-control); overflow: hidden; background: var(--ui-surface-sunken); }
+.ds-mapa-col { flex: 0 0 clamp(320px, 38%, 640px); display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
+.ds-mapa { flex: 1 1 auto; min-height: 280px; border-radius: var(--r-control); overflow: hidden; background: var(--ui-surface-sunken); }
 .ds-ficha { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); margin: 0; }
 .ds-pin-wrap { background: none; border: 0; }
 .ds-pin { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--c, #6b7280); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
@@ -2271,12 +2307,10 @@ thead .ds-acciones { z-index: 2; }
 .ds-form fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .ds-form legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
 .ds-3 { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; }
-@media (max-width: 1680px) {
-  .ds-layout { grid-template-columns: minmax(0, 1fr); }
-  .ds-mapa-col { position: static; order: -1; }
-  .ds-mapa { height: 320px; }
-  .ds-tabla { max-height: none; }
-  .ds-mapa-col { scroll-margin-top: 12px; }
+@media (max-width: 860px) {
+  .ds-layout { flex-direction: column; }
+  .ds-mapa-col { order: -1; flex: none; overflow: visible; scroll-margin-top: 12px; }
+  .ds-mapa { flex: none; height: 320px; }
 }
 @media (max-width: 700px) {
   .ds-3 { grid-template-columns: 1fr 1fr; }
@@ -2288,4 +2322,97 @@ thead .ds-acciones { z-index: 2; }
   .ds-locmov { display: block; margin-left: 17px; }
   .ds-contacto { min-width: 110px; }
 }
-.ds-paginas { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-top: 1px solid var(--ui-line); background: var(--ui-surface); position: sticky; bottom: 0; }
+.ds-paginas { flex-wrap: wrap; gap: 8px; padding: 8px 2px 4px; }
+
+/* ---------- Tareas en equipo (tablero, panel y conversación; pedido de Rodrigo del 18/11/2026) ---------- */
+.estado-punto { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--ui-ink-3); }
+.estado-punto.en-curso { background: var(--ui-info); }
+.estado-punto.en-espera { background: var(--ui-warning); }
+.estado-punto.hecha { background: var(--ui-positive); }
+.estado-tarea { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: var(--r-pill); font-size: 12px; font-weight: 500;
+  background: var(--ui-surface-sunken); color: var(--ui-ink-2); white-space: nowrap; }
+.estado-tarea::before { content: ''; width: 6px; height: 6px; border-radius: 3px; background: var(--ui-ink-3); }
+.estado-tarea.en-curso { background: var(--ui-info-soft); color: var(--ui-info-ink); }
+.estado-tarea.en-curso::before { background: var(--ui-info); }
+.estado-tarea.en-espera { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.estado-tarea.en-espera::before { background: var(--ui-warning); }
+.estado-tarea.hecha { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+.estado-tarea.hecha::before { background: var(--ui-positive); }
+
+.tareas-tablero { display: flex; flex-direction: column; min-height: 0; }
+.board.tareas { min-height: calc(100vh - 220px); }
+.board.tareas.cargando { opacity: .7; }
+.tarea-col .col-head .t { gap: 8px; }
+.tarea-col.vencidas .col-head .t { color: var(--bad); }
+.tarea-col .col-body { gap: 6px; }
+.tarea-vacia { text-align: center; padding: 14px 0; border: 1px dashed var(--ui-line); border-radius: var(--r-panel); }
+.tarea-agregar { align-self: flex-start; color: var(--ui-ink-2); }
+.tarea-agregar-input { width: 100%; }
+.tarea-agrupar { gap: 6px; white-space: nowrap; color: var(--ui-ink-2); }
+.tarea-agrupar .input { width: 150px; }
+
+.tarea-card { cursor: pointer; gap: 6px; }
+.tarea-card.hecha .t { text-decoration: line-through; color: var(--ui-ink-3); }
+.tarea-card-t { display: flex; gap: 8px; align-items: flex-start; }
+.tarea-card-t .check-round { margin-top: 1px; }
+.tarea-card-t .t { padding-right: 0; }
+.tarea-card-rels { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; align-items: center; }
+.tarea-card-pie { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-3); flex-wrap: wrap; }
+.tarea-vence, .tarea-cuenta { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.tarea-cuenta { margin-left: 6px; }
+.tarea-card-pie .tarea-cuenta { margin-left: 0; }
+.tarea-cuenta.sin-leer { color: var(--ui-negative-ink); font-weight: 700; }
+.tarea-cuenta.sin-leer::after { content: ''; width: 6px; height: 6px; border-radius: 3px; background: var(--ui-negative); }
+.tarea-link { height: auto !important; padding: 0 !important; font-weight: 500; text-align: left; }
+
+.rel-chip { height: 22px; padding: 0 8px; font-size: 12px; gap: 4px; max-width: 220px; min-width: 0; }
+.rel-chip a { color: inherit; min-width: 0; }
+.rel-chip a:hover { text-decoration: underline; }
+.rel-chip.order { background: var(--ui-info-soft); color: var(--ui-info-ink); }
+.rel-chip.deal { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.rel-chip.company { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+
+.equipo-tarea { display: inline-flex; align-items: center; }
+.equipo-tarea > span { margin-left: -4px; border-radius: 50%; box-shadow: 0 0 0 2px var(--ui-surface); display: inline-grid; }
+.equipo-tarea > span:first-child { margin-left: 0; margin-right: 3px; }
+.equipo-tarea > span.principal { box-shadow: 0 0 0 1.5px var(--ui-surface), 0 0 0 3px var(--accent-ink); }
+.equipo-tarea .mas { width: 20px; height: 20px; border-radius: 50%; font-size: 9px; font-weight: 700; display: inline-grid; place-items: center;
+  background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
+
+/* El panel de la tarea: más ancho que una vista previa, con la conversación abajo. */
+.drawer:has(.tarea) { width: min(640px, 100%); }
+.tarea { display: flex; flex-direction: column; gap: 16px; }
+.tarea h3 { font-size: 13px; font-weight: 600; margin: 0 0 8px; display: flex; gap: 8px; align-items: baseline; }
+.tarea-titulo { font: inherit; font-size: 20px; font-weight: 600; line-height: 1.3; border: 1px solid transparent; border-radius: var(--r-control); padding: 4px 6px; margin: -4px -6px 0;
+  background: none; color: var(--ui-ink); resize: none; field-sizing: content; min-height: 1.3em; width: calc(100% + 12px); }
+.tarea-titulo:hover { border-color: var(--ui-line); }
+.tarea-titulo:focus { outline: none; border-color: var(--accent-ink); background: var(--ui-surface); }
+.tarea-titulo.hecha { text-decoration: line-through; color: var(--ui-ink-3); }
+.tarea-estados { align-self: flex-start; flex-wrap: wrap; }
+.tarea-estados button { gap: 6px; }
+.tarea-campos { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 8px 12px; margin: 0; align-items: center; }
+.tarea-campos dt { font-size: 12.5px; color: var(--ui-ink-2); }
+.tarea-campos dd { margin: 0; min-width: 0; }
+.tarea-campos dd > .input, .tarea-campos dd .select-field { max-width: 280px; }
+.tarea-colabs, .tarea-rels { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tarea-colabs .chip.colab { padding-left: 4px; }
+.tarea-colabs .sumar { width: 130px; }
+.tarea-relacionar { border: 1px solid var(--ui-line); border-radius: var(--r-panel); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.tarea-relacionar .seg { flex-wrap: wrap; }
+.tarea-desc { width: 100%; field-sizing: content; min-height: 70px; }
+.tarea-pasos .paso { display: flex; gap: 8px; align-items: center; padding: 2px 0; }
+.tarea-pasos .paso .input.bare { flex: 1; border-color: transparent; background: none; height: 28px; }
+.tarea-pasos .paso .input.bare:hover { border-color: var(--ui-line); }
+.tarea-pasos .paso.hecho .input.bare { text-decoration: line-through; color: var(--ui-ink-3); }
+.tarea-pasos .paso.nuevo { color: var(--ui-ink-3); padding-left: 3px; }
+.tarea-pasos .paso .btn.icon { opacity: 0; }
+.tarea-pasos .paso:hover .btn.icon, .tarea-pasos .paso:focus-within .btn.icon { opacity: 1; }
+.pasos-barra { height: 4px; border-radius: 2px; background: var(--ui-line); overflow: hidden; margin-bottom: 6px; }
+.pasos-barra i { display: block; height: 100%; background: var(--ui-positive); transition: width var(--dur-slow, .2s); }
+.tarea-conv { border-top: 1px solid var(--ui-line); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.tarea-conv-lista { display: flex; flex-direction: column; }
+.tarea-titulo-nuevo { font-size: 16px; font-weight: 600; height: 40px; }
+.tarea-nueva-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px 14px; }
+@media (max-width: 640px) {
+  .tarea-campos { grid-template-columns: 100px minmax(0, 1fr); }
+}

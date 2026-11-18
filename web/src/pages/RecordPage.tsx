@@ -3,13 +3,14 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando
 } from '../lib';
-import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
+import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
 import { Select, useFloating } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
+import { TareaPanel } from '../TareaPanel';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
@@ -546,20 +547,23 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         {a.type === 'task'
           ? <button className={`check-round${done ? ' on' : ''}`} onClick={toggle} aria-label={done ? 'Marcar pendiente' : 'Completar'}>{done && <Icon name="check" />}</button>
           : <span className="ic"><Icon name={a.type} /></span>}
-        <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· <UserChip id={a.owner_id} size="xs" />{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
+        <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· <UserChip id={a.owner_id} size="xs" />{a.colaboradores?.length ? ` +${a.colaboradores.length}` : ''}{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
+        {a.type === 'task' && !!a.comentarios && <span className={`tarea-cuenta${a.sin_leer ? ' sin-leer' : ' muted small'}`} title={a.sin_leer ? `${a.sin_leer} sin leer` : 'Comentarios'}><Icon name="chat" size={12} />{a.comentarios}</span>}
         <span className={`when${overdue ? ' overdue' : ''}`}>{a.type === 'task' ? `Vence ${fmtDate(a.due_at, true)}` : fmtDate(a.occurred_at, true)}</span>
         <button className="btn ghost sm" onClick={pin} title={a.meta?.pinned ? 'Desfijar' : 'Fijar arriba de todo'}>{a.meta?.pinned ? 'Desfijar' : 'Fijar'}</button>
         {/* Los mails vienen de Gmail: no se editan acá, se abren en su hilo (pedido de Rodrigo del 17/11/2026). */}
         {a.type === 'email'
           ? gmailUrl(a) && <a className="btn ghost sm" href={gmailUrl(a)!} target="_blank" rel="noopener noreferrer" title={a.meta?.gmail_id ? 'Abrir el hilo en Gmail' : 'Buscar este mail en Gmail'}><Icon name="external" size={13} />Ver en Gmail</a>
-          : <button className="btn ghost sm" onClick={() => setEdit(true)}>Editar</button>}
+          : <button className="btn ghost sm" onClick={() => setEdit(true)}>{a.type === 'task' ? 'Abrir' : 'Editar'}</button>}
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}
       {a.links.filter((l) => l.id !== currentId).length > 0 && (
         <div className="links">{a.links.filter((l) => l.id !== currentId).map((l) => <Link key={l.id} className="chip" to={recordUrl(l.type, l.id)}>{l.name}</Link>)}</div>
       )}
-      {edit && <EditActivity a={a} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); onChange(); }} />}
+      {edit && (a.type === 'task'
+        ? <TareaPanel id={a.id} onClose={() => { setEdit(false); onChange(); }} />
+        : <EditActivity a={a} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); onChange(); }} />)}
     </div>
   );
 }
@@ -609,12 +613,13 @@ function Composer({ type, record, associations, onClose, onSaved }: {
     ...(openDeals.length === 1 ? [openDeals[0].id] : []),
   ]));
   const [busy, setBusy] = useState(false);
+  const [colabs, setColabs] = useState<string[]>([]);
   const save = async () => {
     if (type === 'task' && !f.subject.trim()) { toast('La tarea necesita un título', true); return; }
     if (type !== 'task' && !f.body.trim() && !f.subject.trim()) { toast('Escribí algo para registrar', true); return; }
     setBusy(true);
     try {
-      await http('POST', '/activities', { ...f, type, links: [record.id, ...links], meta: f.meta });
+      await http('POST', '/activities', { ...f, type, links: [record.id, ...links], meta: f.meta, ...(type === 'task' ? { colaboradores: colabs.map(Number) } : {}) });
       toast(`${ACTIVITY_LABEL[type]} registrada`);
       onSaved();
     } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
@@ -647,6 +652,9 @@ function Composer({ type, record, associations, onClose, onSaved }: {
           <Select className="input" style={{ width: 190 }} value={f.owner_id} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })} aria-label="Responsable">
             {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
           </Select>
+          {/* Tareas en equipo: además del responsable, quienes colaboran (y conversan en la tarea). */}
+          {type === 'task' && <span style={{ width: 200 }}><MultiPick options={meta.users.filter((u) => u.active && !u.deleted_at && u.id !== f.owner_id).map((u) => ({ value: String(u.id), label: u.name }))}
+            values={colabs} onChange={setColabs} resumen="Sin colaboradores" /></span>}
         </div>
         {type === 'meeting' && <input className="input" placeholder="Lugar o link" value={f.meta?.location ?? ''} onChange={(e) => setF({ ...f, meta: { ...f.meta, location: e.target.value } })} />}
         <textarea className="input" autoFocus={type === 'note' || type === 'call' || type === 'whatsapp'} rows={5} placeholder={type === 'task' ? 'Detalle (opcional)' : 'Qué pasó…'} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />

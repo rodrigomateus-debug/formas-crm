@@ -12,6 +12,8 @@ import { BuscarDireccion, type Sugerencia } from './Direcciones';
 // contacto con su WhatsApp, los viajes, las empresas con varias sucursales juntas y el mapa: al tocar una dirección, el
 // mapa va a ese lugar (y si no está ubicado, se lo puede ubicar a mano arrastrando el pin).
 
+// Cuántos destinos (o empresas con sus sucursales) se ven de entrada: los más visitados.
+const TOPE = 100;
 export const TIPOS = [
   ['cliente', 'Cliente', '#2f6fdf'], ['proveedor', 'Proveedor', '#7b4fd6'], ['impresor', 'Impresor', '#d9731a'],
   ['taller', 'Taller', '#c2408a'], ['expreso', 'Expreso', '#14918a'], ['otro', 'Otro', '#6b7280'],
@@ -78,6 +80,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
   const [agrupando, setAgrupando] = useState<{ ids: number[]; nombre: string; grupo_id: number | null } | null>(null);
   const [verSugeridos, setVerSugeridos] = useState(false);
   const [descartados, setDescartados] = useState<Set<string>>(new Set());
+  const [verTodos, setVerTodos] = useState(false);   // la lista y el mapa con todos, no solo los más visitados
   const [ia, setIa] = useState<{ corriendo: boolean; corregidos: number; dudosos: number; pendientes: number; google: boolean } | null>(null);
   const frenar = useRef(false);
   const buscandoMapa = useRef(false);
@@ -128,19 +131,28 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
     ];
     return lista.sort((a, b) => orden(b.destinos) - orden(a.destinos) || (a.grupo?.nombre ?? a.destinos[0].nombre).localeCompare(b.grupo?.nombre ?? b.destinos[0].nombre));
   }, [datos, visibles]);
+  // Por defecto se ven los más visitados (pedido de Rodrigo del 18/11/2026): con los miles de destinos a la vez, la lista y
+  // el mapa (que vuelve a dibujar todos sus puntos en cada clic) se ponían lentos. Los bloques ya vienen con los más
+  // visitados primero; el buscador y los filtros siguen buscando en todos. El elegido se ve siempre, aunque no esté entre ellos.
+  const mostrados = useMemo(() => {
+    if (verTodos || bloques.length <= TOPE) return bloques;
+    const top = bloques.slice(0, TOPE);
+    const elegido = foco != null && !top.some((b) => b.destinos.some((d) => d.id === foco)) ? bloques.find((b) => b.destinos.some((d) => d.id === foco)) : null;
+    return elegido ? [...top, elegido] : top;
+  }, [bloques, verTodos, foco]);
+  const enMapa = useMemo(() => mostrados.flatMap((b) => b.destinos), [mostrados]);
   // De a 40 por página (un grupo cuenta como uno): dibujar miles de filas de una traba la página. La búsqueda y los
   // filtros buscan en todos.
   const POR_PAGINA = 40;
   const [pagina, setPagina] = useState(1);
-  useEffect(() => setPagina(1), [q, filtro, incompletos, revisar]);
-  const paginas = Math.max(1, Math.ceil(bloques.length / POR_PAGINA));
+  useEffect(() => setPagina(1), [q, filtro, incompletos, revisar, verTodos]);
+  const paginas = Math.max(1, Math.ceil(mostrados.length / POR_PAGINA));
   const pag = Math.min(pagina, paginas);
-  const enPagina = bloques.slice((pag - 1) * POR_PAGINA, pag * POR_PAGINA);
+  const enPagina = mostrados.slice((pag - 1) * POR_PAGINA, pag * POR_PAGINA);
   // Tocar un punto del mapa lleva a la página donde está ese destino.
-  const irA = (id: number) => { const i = bloques.findIndex((b) => b.destinos.some((d) => d.id === id)); if (i >= 0) setPagina(Math.floor(i / POR_PAGINA) + 1); };
+  const irA = (id: number) => { const i = mostrados.findIndex((b) => b.destinos.some((d) => d.id === id)); if (i >= 0) setPagina(Math.floor(i / POR_PAGINA) + 1); };
   useEffect(() => { document.querySelector('.ds-tabla')?.scrollTo({ top: 0 }); }, [pag]);
   const sugeridos = (datos?.sugeridos ?? []).filter((s) => !descartados.has(s.ids.join(',')));
-
   const completarIA = async () => {
     frenar.current = false;
     const acum = { corriendo: true, corregidos: 0, dudosos: 0, pendientes: 0, google: false };
@@ -183,6 +195,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
   if (!datos) return <Cargando />;
   const enfocado = foco != null ? porId.get(foco) ?? null : null;
   const pct = (n: number) => (datos.total ? Math.round((n / datos.total) * 100) : 0);
+  const filtrando = !!q.trim() || filtro !== 'todos' || incompletos || revisar;
   const conteo = (t: Filtro) => datos.destinos.filter((d) => (t === 'todos' ? true : t === 'sin_tipo' ? !d.tipo : d.tipo === t)).length;
 
   return (
@@ -249,6 +262,14 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
         </div>
       )}
 
+      {bloques.length > TOPE && (
+        <p className="small muted ds-nota ds-tope" role="status">
+          {verTodos ? `Se ven los ${visibles.length} destinos${filtrando ? ' que coinciden' : ''}: con tantos, la lista y el mapa van más lentos. `
+            : `Se ven los ${TOPE} más visitados de ${filtrando ? `los ${visibles.length} que coinciden` : `${visibles.length} destinos`}. El buscador encuentra cualquiera. `}
+          <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{verTodos ? 'Volver a los más visitados' : 'Ver todos'}</button>
+        </p>
+      )}
+
       <div className="ds-layout">
         <div className="ds-tabla table-wrap">
           <table className="grid">
@@ -271,7 +292,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
           </table>
           {paginas > 1 && (
             <nav className="ds-paginas" aria-label="Páginas">
-              <span className="small muted">{(pag - 1) * POR_PAGINA + 1}–{Math.min(pag * POR_PAGINA, bloques.length)} de {bloques.length}</span>
+              <span className="small muted">{(pag - 1) * POR_PAGINA + 1}–{Math.min(pag * POR_PAGINA, mostrados.length)} de {mostrados.length}</span>
               <span className="grow" />
               <button type="button" className="btn sm ghost" disabled={pag <= 1} onClick={() => setPagina(pag - 1)}>Anterior</button>
               <Select className="input sm" value={String(pag)} onChange={(e) => setPagina(Number(e.target.value))} aria-label="Página">
@@ -282,7 +303,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
           )}
         </div>
         <aside className="ds-mapa-col">
-          <MapaDestinos destinos={visibles} foco={enfocado} ubicando={ubicando} onElegir={(id) => { const d = porId.get(id); if (d) { enfocar(d, true); irA(id); document.getElementById(`ds-fila-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }}
+          <MapaDestinos destinos={enMapa} foco={enfocado} ubicando={ubicando} onElegir={(id) => { const d = porId.get(id); if (d) { enfocar(d, true); irA(id); document.getElementById(`ds-fila-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }}
             onMover={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
           {enfocado ? (
             <FichaMapa d={enfocado} organiza={organiza} ubicando={ubicando?.id === enfocado.id} onUbicar={(lat, lng) => setUbicando({ id: enfocado.id, lat, lng })}
@@ -316,36 +337,44 @@ function GrupoFilas({ grupo, destinos, organiza, sel, foco, onMarcar, onFoco, on
   const tipos = [...new Set(destinos.map((d) => d.tipo))];
   return (
     <>
-      <tr className="ds-grupo">
+      <tr className={`ds-grupo${abierto ? ' ds-abierto' : ''}`}>
         {organiza && <td className="ds-sel"><input type="checkbox" aria-label={`Elegir los destinos de ${grupo.nombre}`} checked={destinos.every((d) => sel.has(d.id))} onChange={(e) => onMarcar(destinos.map((d) => d.id), e.target.checked)} /></td>}
         <td colSpan={5} className="ds-grupo-celda">
-          <button type="button" className="ds-plegar" onClick={() => setAbierto(!abierto)} aria-expanded={abierto} aria-label={abierto ? 'Plegar' : 'Desplegar'}><Icon name={abierto ? 'down' : 'chevron'} size={14} /></button>
-          <button type="button" className="ds-grupo-nombre" onClick={organiza ? onGrupo : () => setAbierto(!abierto)}><Icon name="company" size={14} /><b>{lindo(grupo.nombre)}</b></button>
-          {tipos.length === 1 ? <TipoTag tipo={tipos[0]} /> : null}
-          <span className="muted small"> · {destinos.length} {destinos.length === 1 ? 'dirección' : 'direcciones'}</span>
+          <div className="ds-nivel">
+            <button type="button" className="ds-plegar ds-margen" onClick={() => setAbierto(!abierto)} aria-expanded={abierto}
+              aria-label={`${abierto ? 'Plegar' : 'Ver'} las direcciones de ${grupo.nombre}`} title={abierto ? 'Plegar sus direcciones' : 'Ver sus direcciones'}><Icon name="down" size={14} /></button>
+            <button type="button" className="ds-grupo-nombre" onClick={organiza ? onGrupo : () => setAbierto(!abierto)}><b>{lindo(grupo.nombre)}</b></button>
+            <button type="button" className="ds-cuantas" onClick={() => setAbierto(!abierto)}>{destinos.length} {destinos.length === 1 ? 'dirección' : 'direcciones'}</button>
+          </div>
+          <div className="ds-tags">{tipos.length === 1 ? <TipoTag tipo={tipos[0]} /> : <span className="muted small">Varios tipos</span>}</div>
         </td>
         <td className="numcell">{seis || ''}{total > seis && <span className="muted small"> / {total}</span>}</td>
         <td className="ds-acciones">{organiza && <button type="button" className="btn ghost sm icon" onClick={onGrupo} title="Editar la empresa" aria-label={`Editar la empresa ${grupo.nombre}`}><Icon name="edit" size={15} /></button>}</td>
       </tr>
-      {abierto && destinos.map((d) => <FilaDestino key={d.id} d={d} enGrupo organiza={organiza} sel={sel.has(d.id)} foco={foco === d.id} onMarcar={(on) => onMarcar([d.id], on)} onFoco={() => onFoco(d)} onEditar={() => onEditar(d)} onBorrar={() => onBorrar(d)} />)}
+      {abierto && destinos.map((d, i) => <FilaDestino key={d.id} d={d} enGrupo ultimo={i === destinos.length - 1} organiza={organiza} sel={sel.has(d.id)} foco={foco === d.id} onMarcar={(on) => onMarcar([d.id], on)} onFoco={() => onFoco(d)} onEditar={() => onEditar(d)} onBorrar={() => onBorrar(d)} />)}
     </>
   );
 }
 
-function FilaDestino({ d, enGrupo, organiza, sel, foco, onMarcar, onFoco, onEditar, onBorrar }: {
-  d: Destino; enGrupo?: boolean; organiza: boolean; sel: boolean; foco: boolean; onMarcar: (on: boolean) => void; onFoco: () => void; onEditar: () => void; onBorrar: () => void;
+// Un destino: suelto (al mismo nivel que una empresa con varias direcciones) o, `enGrupo`, una de las direcciones de una
+// empresa: va corrida a la derecha, colgada de la línea que baja desde su empresa (`ultimo` la corta).
+function FilaDestino({ d, enGrupo, ultimo, organiza, sel, foco, onMarcar, onFoco, onEditar, onBorrar }: {
+  d: Destino; enGrupo?: boolean; ultimo?: boolean; organiza: boolean; sel: boolean; foco: boolean; onMarcar: (on: boolean) => void; onFoco: () => void; onEditar: () => void; onBorrar: () => void;
 }) {
   const wa = linkWhatsapp(d);
   const faltan = d.faltan.filter((f) => f !== 'tipo' || !enGrupo);
   return (
-    <tr id={`ds-fila-${d.id}`} className={`${enGrupo ? 'ds-hijo' : ''}${foco ? ' ds-foco' : ''}`}>
+    <tr id={`ds-fila-${d.id}`} className={`${enGrupo ? `ds-hijo${ultimo ? ' ultimo' : ''}` : 'ds-suelto'}${foco ? ' ds-foco' : ''}`}>
       {organiza && <td className="ds-sel"><input type="checkbox" aria-label={`Elegir ${d.nombre}`} checked={sel} onChange={(e) => onMarcar(e.target.checked)} /></td>}
-      <td>
-        <button type="button" className="ds-nombre" onClick={d.puede_editar ? onEditar : onFoco} title={d.puede_editar ? 'Editar el destino' : 'Los destinos de la libreta los corrige Logística'}>
-          <b>{lindo(enGrupo && d.sucursal ? d.sucursal : d.nombre)}</b>
-          {!enGrupo && d.sucursal && <span className="muted"> · {d.sucursal}</span>}
-          {enGrupo && d.sucursal && <span className="muted small"> ({lindo(d.nombre)})</span>}
-        </button>
+      <td className="ds-td-nombre">
+        <div className="ds-nivel">
+          {!enGrupo && <span className="ds-margen" aria-hidden="true" />}
+          <button type="button" className="ds-nombre" onClick={d.puede_editar ? onEditar : onFoco} title={d.puede_editar ? 'Editar el destino' : 'Los destinos de la libreta los corrige Logística'}>
+            <b>{lindo(enGrupo && d.sucursal ? d.sucursal : d.nombre)}</b>
+            {!enGrupo && d.sucursal && <span className="muted"> · {d.sucursal}</span>}
+            {enGrupo && d.sucursal && <span className="muted small"> ({lindo(d.nombre)})</span>}
+          </button>
+        </div>
         <div className="ds-tags">
           {!enGrupo && <TipoTag tipo={d.tipo} origen={d.tipo_origen} />}
           {d.ia_estado === 'corregido' && <span className="cr-tag" title={`${d.ia_nota ?? ''}${d.ia_antes ? `\nAntes: ${textoDir(d.ia_antes) || '(vacío)'}` : ''}`}>Completado con IA</span>}

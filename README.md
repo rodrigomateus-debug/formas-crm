@@ -267,3 +267,22 @@ Cada corrida lee hasta unos 40 mails en total (el tope de consultas del plan gra
 bandeja que hace más que no se lee; lo que falta sigue en la próxima. Con token de administrador: `GET /hooks/gmail`
 (estado), `PUT /hooks/gmail` (configuración, por ejemplo `{"enabled": true, "users": ["alguien@formas.ar"]}`) y
 `POST /hooks/gmail/sync` (leer ahora).
+
+## Google Calendar
+
+Con la misma cuenta de servicio de `GOOGLE_SA_JSON` (código en `src/worker/calendar.ts`). Antes de prenderlo, en Google
+Workspace (Seguridad → Controles de API → Delegación de todo el dominio) hay que sumarle a esa cuenta el permiso
+`https://www.googleapis.com/auth/calendar.events` (y tener habilitada la Google Calendar API en su proyecto de Google Cloud).
+- **Registrar:** en Configuración → Integraciones → «Reuniones (Google Calendar)» se prende. Cada 10 minutos (junto con
+  Gmail) mira los calendarios del equipo: una reunión con invitados de afuera queda como actividad «Reunión» en sus
+  contactos, en su empresa (por el contacto) y en su negocio abierto. Los invitados que no son contactos se crean (con su
+  empresa por el dominio del mail, como con Gmail). Si la reunión se mueve se actualiza y si se cancela se archiva. La
+  misma reunión en varios calendarios del equipo se guarda una vez (por su iCalUID). Usa los dominios propios e
+  ignorados de la configuración de Gmail.
+- **Agendar:** en la ficha, «Reunión» → «Agendar en Google Calendar y mandar la invitación» la crea en el calendario de
+  quien la arma, con los invitados (los contactos con mail de la ficha y otros mails) y, si se pide, el link de Meet.
+- **Resumen:** si la reunión se hizo con «Tomar notas con Gemini» en Meet, Meet adjunta al evento el documento de notas;
+  la pasada del calendario lo lee por Drive (permiso `drive`, que la cuenta ya tiene) y guarda la sección «Resumen» en
+  la reunión. Claude lo carga con la herramienta `resumen_reunion` del conector (por id de la reunión, o por contacto,
+  empresa o negocio y día). En la ficha se ve como «Resumen (Gemini)» / «Resumen (Claude)».
+- Prueba: `test/calendar.test.mjs` (contra un Google simulado; ver `test/gmail-dev-vars.mjs`).

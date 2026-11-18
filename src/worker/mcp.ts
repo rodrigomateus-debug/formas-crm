@@ -347,6 +347,50 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'resumen_reunion',
+    description: 'Guarda el resumen breve de una reunión en su actividad «Reunión» del CRM (lo ve todo el equipo en la ficha del contacto, la empresa y el negocio). Usala después de resumir una reunión con un cliente (notas de Claude, de Gemini en Meet, una transcripción): 3 a 8 renglones con qué se habló, acuerdos y próximos pasos, en castellano. Se le pasa el id de la reunión o, si no lo sabés, el registro (contacto, empresa o negocio) y el día: busca la reunión de ese día; si no hay, la registra.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        resumen: { type: 'string', description: 'El resumen breve.' },
+        id: { type: 'integer', description: 'La actividad de la reunión, si se sabe.' },
+        record_id: { type: 'integer', description: 'Contacto, empresa o negocio de la reunión (si no se pasa id).' },
+        fecha: { type: 'string', description: 'Día de la reunión (ISO 8601); default hoy.' },
+        titulo: { type: 'string', description: 'Título, si hay que registrarla.' },
+        fuente: { type: 'string', description: 'De dónde sale el resumen: Claude (default), Gemini, transcripción…' },
+      },
+      required: ['resumen'],
+    },
+    run: async (a, ctx, env) => {
+      const db = env.DB;
+      const resumen = String(a.resumen ?? '').trim();
+      if (!resumen) throw new HttpError(400, 'Falta el resumen.');
+      const fuente = String(a.fuente ?? 'Claude');
+      let id = a.id ? Number(a.id) : null;
+      if (!id) {
+        if (!a.record_id) throw new HttpError(400, 'Pasá el id de la reunión o el registro (record_id) y el día.');
+        await assertVisible(db, new Meta(db), ctx.user, await getRow(db, Number(a.record_id)));
+        const dia = a.fecha ? new Date(String(a.fecha)) : new Date();
+        if (Number.isNaN(dia.getTime())) throw new HttpError(400, '"fecha" no es una fecha válida.');
+        // La reunión de ese día en el registro (o en sus contactos, si es una empresa o un negocio), la más cercana.
+        const r = await db.prepare(`SELECT a.id FROM activities a JOIN activity_links l ON l.activity_id = a.id
+            WHERE a.type = 'meeting' AND a.archived = 0 AND l.record_id = ?1 AND a.occurred_at BETWEEN ?2 AND ?3
+            ORDER BY abs(julianday(a.occurred_at) - julianday(?4)) LIMIT 1`)
+          .bind(Number(a.record_id), new Date(dia.getTime() - 86_400_000).toISOString(), new Date(dia.getTime() + 86_400_000).toISOString(), dia.toISOString()).first<{ id: number }>();
+        id = r?.id ?? null;
+        if (!id) {
+          const act = await createActivity(db, ctx, { type: 'meeting', subject: String(a.titulo ?? 'Reunión'), occurred_at: dia.toISOString(), links: [Number(a.record_id)],
+            meta: { resumen, resumen_de: fuente } });
+          return { id: act.id, creada: true, links: act.links };
+        }
+      }
+      const cur = await getActivity(db, id);
+      if (cur.type !== 'meeting') throw new HttpError(400, `La actividad ${id} no es una reunión.`);
+      const act = await updateActivity(db, ctx, id, { meta: { resumen, resumen_de: fuente } });
+      return { id: act.id, creada: false, subject: act.subject, occurred_at: act.occurred_at };
+    },
+  },
+  {
     name: 'preparar_reunion',
     description: 'Junta todo lo que hace falta para preparar una reunión o una llamada con un cliente: compras en Finnegans (estado del cliente, última compra, cuánto compra en US$ MEP, ritmo), saldo y vencido, contactos, negocios abiertos y ganados, pedidos y su estado de producción, tareas abiertas y la actividad reciente (mails, notas, llamadas, WhatsApp). Se le pasa el id de una empresa, un contacto o un negocio (usa su empresa principal). Con eso armá un resumen corto de la relación, los temas abiertos, los riesgos (deuda vencida, cliente en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.',
     readOnly: true,

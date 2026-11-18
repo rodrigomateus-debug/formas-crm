@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "formas-crm",
+  "name": "hub",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
@@ -23,7 +23,9 @@
     "ACCESS_TEAM_DOMAIN": "cold-mud-48f2.cloudflareaccess.com",
     // «Application Audience (AUD) Tag» de la aplicación de Access del CRM. No es secreto: va en cada redirección al login.
     "ACCESS_AUD": "aebdd096c8e7d18c6983122bb647d7f371a3388cbfe9eaf74ac4442a46df1a24",
-    "ADMIN_EMAIL": "rodrigo.mateus@formaspublicitarias.com"
+    "ADMIN_EMAIL": "rodrigo.mateus@formaspublicitarias.com",
+    // Dirección pública del Hub (links de los mails de avisos). Ver docs/DOMINIO.md.
+    "APP_URL": "https://hub.formas.workers.dev"
   },
   // :00, :10… ClickUp y Finnegans; :05, :15… Gmail (cada corrida tiene su propio tope de consultas). Ver index.ts.
   "triggers": { "crons": ["*/10 * * * *", "5-59/10 * * * *"] },

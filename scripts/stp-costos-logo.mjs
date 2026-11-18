@@ -9,7 +9,7 @@
 // Los manda al CRM en tandas a POST /hooks/productos/costos-logo (cada pedido entero en un envío). Corre después de las
 // fotos en .github/workflows/pedidos-totales.yml.
 //
-//   STPO_TOKEN=… CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… node scripts/stp-costos-logo.mjs
+//   STPO_TOKEN=… CRM_URL=https://hub.formas.workers.dev CRM_TOKEN=fcrm_… node scripts/stp-costos-logo.mjs
 //
 // EL REPO ES PÚBLICO: solo imprime cantidades (nunca la dirección del export, que lleva el token, ni datos de clientes).
 const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');

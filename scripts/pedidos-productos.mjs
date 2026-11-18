@@ -5,7 +5,7 @@
 // para el iconito de la tarjeta: POST /hooks/pedidos/remitos/pendientes, hasta 8 minutos más.
 // Corre después de los totales en .github/workflows/pedidos-totales.yml.
 //
-//   CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… node scripts/pedidos-productos.mjs
+//   CRM_URL=https://hub.formas.workers.dev CRM_TOKEN=fcrm_… node scripts/pedidos-productos.mjs
 //
 // EL REPO ES PÚBLICO: solo imprime cantidades.
 const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');

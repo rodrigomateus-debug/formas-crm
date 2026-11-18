@@ -2,7 +2,7 @@
 // La API de Finnegans no da el PDF: sale de Finnegans GO con la sesión iniciada (Sr2, el mismo PDF que «Previsualizar»).
 // Solo lee de Finnegans. Lo corre el workflow «Facturas de pedidos (PDF)» cada hora en horario de oficina.
 //
-//   CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… \
+//   CRM_URL=https://hub.formas.workers.dev CRM_TOKEN=fcrm_… \
 //   FINNEGANS_GO_USUARIO=… FINNEGANS_GO_PASSWORD=… [FINNEGANS_GO_ESPACIO_DE_TRABAJO=…] node scripts/facturas-pdf.mjs
 //
 // El token tiene que ser de un administrador del CRM. Nunca se imprimen las credenciales.

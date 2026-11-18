@@ -6,7 +6,7 @@
 // Las manda al CRM en tandas a POST /hooks/productos/imagenes. Corre después de los productos en
 // .github/workflows/pedidos-totales.yml.
 //
-//   STPO_TOKEN=… CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… node scripts/stp-imagenes.mjs
+//   STPO_TOKEN=… CRM_URL=https://hub.formas.workers.dev CRM_TOKEN=fcrm_… node scripts/stp-imagenes.mjs
 //
 // EL REPO ES PÚBLICO: solo imprime cantidades (nunca la dirección del export, que lleva el token, ni datos de clientes).
 const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');

@@ -46,6 +46,14 @@ Barra abajo: **Hoy · Clientes · ＋ · Ventas · Chat**. Arriba, el avatar (me
   archivos y fotos desde el teléfono) y **Detalle**: «Encargo para este pedido» (con la empresa como destino), artículos con
   su estado de producción, la entrega, los **logos de la empresa** (se suben desde ahí), factura y remitos, contactos y
   negocio.
+- **Tareas** (menú del avatar o «Todas las tareas» en Hoy): Hoy (las vencidas aparte, arriba) · Próximas (por día) ·
+  Hechas. Se tildan (con «Deshacer») y se pasan un día con un toque; al tocar una se abre el panel de siempre (estado,
+  responsable, colaboradores, vencimiento, relacionada con, descripción, pasos y comentarios), a pantalla completa. Las
+  tareas de Hoy también se abren así.
+- **Chat**: la bandeja de las conversaciones que sigue, Sin leer (si hay) · Todas, con el último mensaje, quién lo
+  escribió, las menciones y cuántos sin leer. Cada conversación se abre a pantalla completa (sin las barras), queda leída
+  al abrirla, el nombre arriba lleva a la ficha y el ojito la deja «no leída» para retomarla. En el celular, la ayuda del
+  cuadro de escribir no nombra el Ctrl+V.
 - En las hojas, los campos de lista corta (canal de contacto, motivo de pérdida…) se eligen con botones.
 - Menú del avatar: Tareas, Recorridos, Contactos, Pedidos, Notas de productos, tema, versión completa y cerrar sesión.
 
@@ -54,11 +62,12 @@ Barra abajo: **Hoy · Clientes · ＋ · Ventas · Chat**. Arriba, el avatar (me
 1. **Hecha**: el esqueleto, Hoy y Recorridos.
 2. **Hecha**: Clientes (lista, ficha y alta corta).
 3. **Hecha**: Ventas (negocios por etapa, alta y cambio de etapa; pedidos para consultar y conversar).
-4. Tareas y Chat a medida.
+4. **Hecha**: Tareas y Chat.
 
-Mientras tanto, Tareas y Chat abren las pantallas de siempre dentro del esqueleto del celular.
+Lo que no está en el celular (tableros, vistas, edición masiva, analíticas, configuración, la ficha completa) se abre con
+«Ver versión completa».
 
 ## Código
 
 `web/src/movil/`: `Movil.tsx` (esqueleto, `useModoMovil`, hojas, ＋, tarea rápida), `Hoy.tsx`, `RecorridosMovil.tsx`,
-`ClientesMovil.tsx`, `VentasMovil.tsx` y `movil.css`. `App.tsx` elige cuál dibujar. Los modales del escritorio ocupan toda la pantalla con `body.movil`.
+`ClientesMovil.tsx`, `VentasMovil.tsx`, `TareasChatMovil.tsx` y `movil.css`. `App.tsx` elige cuál dibujar. Los modales del escritorio ocupan toda la pantalla con `body.movil`.

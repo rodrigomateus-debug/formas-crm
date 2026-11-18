@@ -265,3 +265,41 @@ body.movil:has(.m-full) .toast { bottom: calc(84px + env(safe-area-inset-bottom)
 .m-art-estado { flex: none; max-width: 32%; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--r-pill); text-align: center;
   background: color-mix(in srgb, var(--c, var(--ui-ink-3)) 16%, transparent); color: var(--ui-ink); border: 1px solid color-mix(in srgb, var(--c, var(--ui-ink-3)) 45%, transparent); }
 .m-logos .panel { border-radius: var(--r-panel); }
+
+/* ---------- Tareas y Chat (TareasChatMovil.tsx) ---------- */
+
+.m-seg-3 { grid-template-columns: repeat(3, 1fr); }
+.m-tarea-txt { flex: 1; min-width: 0; padding: 4px 0; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-tarea-txt b { white-space: normal !important; }
+.m-check.on { background: var(--ok-fill); border-color: var(--ok-fill); color: var(--on-ok-fill); }
+.m-sec-cab h2.overdue { color: var(--ui-negative-ink); }
+.m-al-dia { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px 16px; text-align: center; }
+.m-al-dia > span { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+
+/* El panel de una tarea (el de siempre) ocupa toda la pantalla. */
+body.movil .drawer { width: 100%; padding-bottom: env(safe-area-inset-bottom); }
+body.movil .drawer-head { padding-top: calc(14px + env(safe-area-inset-top)); }
+
+/* La bandeja del chat */
+.m-conv-fila { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-conv-fila:first-child { border-top: 0; }
+.m-conv-fila:active { background: var(--row-hover); }
+.m-conv-fila .avatar { width: 40px; height: 40px; font-size: 14px; }
+.m-conv-fila small { display: block; font-size: 13px; color: var(--ui-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-conv-fila small em { font-style: normal; font-weight: 500; }
+.m-conv-fila.sin-leer b { font-weight: 700; }
+.m-conv-fila.sin-leer small { color: var(--ui-ink); }
+.m-mencion { color: var(--accent-ink); font-weight: 700; }
+.m-conv-lado { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.m-conv-lado small { font-size: 11px; }
+.m-badge-fila { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--ui-negative); color: var(--on-negative); }
+.m-badge-fila.mencion { background: var(--accent); color: var(--on-accent); }
+
+/* Una conversación abierta, a pantalla completa. */
+.m-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--ui-surface); }
+.m-chat-tit { color: inherit; text-decoration: none; min-width: 0; }
+.m-chat-tit b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-conv.m-conv-full { flex: 1 1 0; min-height: 0; height: auto; border: 0; border-radius: 0; }
+.m-conv-full .conv-head { padding-top: 6px; padding-bottom: 6px; }
+.m-chat .conv-foot, .m-chat .conv form:last-child { padding-bottom: env(safe-area-inset-bottom); }

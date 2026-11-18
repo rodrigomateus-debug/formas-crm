@@ -4,6 +4,8 @@ import { http, qs, useMeta, useToast, Icon, fmtDate, fmtMoney, recordUrl, stageO
 import { lindo } from '../pages/Cronograma';
 import { cuando, resumen, hoyIso, sumar, ESTADO, type Encargo } from '../pages/Recorridos';
 import { TareaRapida } from './Movil';
+import { FilaTarea } from './TareasChatMovil';
+import { TareaPanel } from '../TareaPanel';
 
 // Hoy (versión celular, perfil Ventas): lo que el vendedor tiene que hacer hoy, todo junto. Sus tareas de hoy y vencidas
 // (se tildan acá mismo), sus encargos al recorrido de los próximos días y los negocios que se le están enfriando.
@@ -17,6 +19,7 @@ export default function Hoy() {
   const [encargos, setEncargos] = useState<Encargo[] | null>(null);
   const [frios, setFrios] = useState<CrmRecord[] | null>(null);
   const [nueva, setNueva] = useState(false);
+  const [abierta, setAbierta] = useState<number | null>(null);
   const hoy = hoyIso();
 
   useEffect(() => {
@@ -68,21 +71,7 @@ export default function Hoy() {
           <span className="grow" /><button type="button" className="m-link" onClick={() => setNueva(true)}><Icon name="plus" size={14} />Nueva</button></div>
         {!tareas && <Cargando chico />}
         {tareas && !tareas.length && <div className="m-vacio">Nada pendiente para hoy.</div>}
-        {tareas?.map((t) => {
-          const vencida = t.due_at && Date.parse(t.due_at) < new Date().setHours(0, 0, 0, 0);
-          const link = t.links[0];
-          return (
-            <div key={t.id} className="m-item">
-              <button type="button" className="check-round m-check" onClick={() => completar(t)} aria-label={`Completar: ${t.subject}`} />
-              <div className="m-item-txt">
-                <b>{t.subject}</b>
-                <small className={vencida ? 'overdue' : 'muted'}>{vencida ? `Vencida · ${fmtDate(t.due_at)}` : fmtDate(t.due_at, true)}
-                  {link && <> · <Link to={recordUrl(link.type, link.id)}>{link.name}</Link></>}</small>
-              </div>
-              <button type="button" className="btn ghost sm" onClick={() => posponer(t)} aria-label={`Pasar a mañana: ${t.subject}`}>+1 día</button>
-            </div>
-          );
-        })}
+        {tareas?.map((t) => <FilaTarea key={t.id} t={t} onCheck={() => completar(t)} onPosponer={() => posponer(t)} onAbrir={() => setAbierta(t.id)} />)}
         {tareas && tareas.length > 0 && <Link to="/tasks" className="m-ver">Todas las tareas</Link>}
       </section>
 
@@ -110,6 +99,7 @@ export default function Hoy() {
           ))}
         </section>
       )}
+      {abierta && <TareaPanel id={abierta} onClose={() => { setAbierta(null); setVersion((v) => v + 1); }} onChange={() => setVersion((v) => v + 1)} />}
       {nueva && <TareaRapida onClose={() => setNueva(false)} onCreada={() => setVersion((v) => v + 1)} />}
     </div>
   );

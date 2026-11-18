@@ -7,19 +7,19 @@ import { Campanita } from '../Notificaciones';
 import ObjectIndex from '../pages/ObjectIndex';
 import RecordPage from '../pages/RecordPage';
 import './movil.css';
-import Tasks from '../pages/Tasks';
 import NotasProductosPage from '../pages/NotasProductos';
-import ConversacionesPage, { useNoLeidas } from '../pages/Conversacion';
+import { useNoLeidas } from '../pages/Conversacion';
 import Hoy from './Hoy';
 import { RecorridosMovil, EncargoAsistente } from './RecorridosMovil';
 import { ClientesLista, FichaCliente, AltaCliente } from './ClientesMovil';
 import { NegociosLista, FichaNegocio, AltaNegocio, PedidosLista, FichaPedido } from './VentasMovil';
+import { TareasMovil, ChatMovil, ChatAbierto } from './TareasChatMovil';
 
 // Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en una pantalla angosta, el perfil Ventas no ve el CRM de
 // escritorio achicado sino una app simple, con lo esencial para cargar desde la calle. Misma dirección, mismo login y la
 // misma API; lo que no está acá se abre con «Ver versión completa». Barra abajo: Hoy · Clientes · ＋ · Ventas · Chat.
 // Fase 1: el esqueleto, Hoy y Recorridos (encargo en tres pasos). Fase 2: Clientes (ClientesMovil.tsx). Fase 3: Ventas
-// (VentasMovil.tsx). Tareas y Chat abren, por ahora, las pantallas de siempre dentro de este esqueleto (docs/MOVIL.md).
+// (VentasMovil.tsx). Fase 4: Tareas y Chat (TareasChatMovil.tsx). Ver docs/MOVIL.md.
 
 const ANGOSTO = '(max-width: 760px)';
 const CLAVE_COMPLETA = 'crm-version-completa';
@@ -53,7 +53,8 @@ export default function AppMovil({ buscador }: { buscador: ReactNode }) {
   // Los modales del escritorio (crear, ficha de un encargo) ocupan toda la pantalla (styles.css, body.movil).
   useEffect(() => { document.body.classList.add('movil'); return () => document.body.classList.remove('movil'); }, []);
   const sinLeer = useNoLeidas();
-  const asistente = loc.pathname === '/recorridos/nuevo';
+  // A pantalla completa, sin las barras: el asistente del encargo y una conversación abierta.
+  const asistente = loc.pathname === '/recorridos/nuevo' || loc.pathname.startsWith('/conversaciones/');
   const activo = (rutas: string[]) => rutas.some((r) => loc.pathname === r || loc.pathname.startsWith(`${r}/`));
   return (
     <div className={`m-shell${asistente ? ' m-full' : ''}`}>
@@ -69,8 +70,9 @@ export default function AppMovil({ buscador }: { buscador: ReactNode }) {
           <Route path="/" element={<Hoy />} />
           <Route path="/recorridos" element={<RecorridosMovil />} />
           <Route path="/recorridos/nuevo" element={<EncargoAsistente />} />
-          <Route path="/tasks" element={<Tasks />} />
-          <Route path="/conversaciones" element={<ConversacionesPage />} />
+          <Route path="/tasks" element={<TareasMovil />} />
+          <Route path="/conversaciones" element={<ChatMovil />} />
+          <Route path="/conversaciones/:tipo/:id" element={<ChatAbierto />} />
           <Route path="/productos" element={<NotasProductosPage />} />
           <Route path="/companies" element={<ClientesLista key="company" tipo="company" />} />
           <Route path="/contacts" element={<ClientesLista key="contact" tipo="contact" />} />

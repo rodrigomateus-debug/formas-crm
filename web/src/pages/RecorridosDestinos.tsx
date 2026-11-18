@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { http, useMeta, useToast, Icon, fmtRelative, Cargando, whatsappUrl } from '../lib';
-import { Modal } from '../components';
+import { Link } from 'react-router-dom';
+import { http, useMeta, useToast, Icon, fmtRelative, Cargando, whatsappUrl, recordUrl } from '../lib';
+import { Avatar, Modal, RecordPicker } from '../components';
 import { Select } from '../Select';
 import { lindo } from './Cronograma';
 import { BuscarDireccion, type Sugerencia } from './Direcciones';
@@ -25,7 +26,7 @@ const FALTA: Record<string, string> = { direccion: 'dirección', localidad: 'loc
 
 interface DirIA { direccion: string | null; localidad: string | null; provincia: string | null; confianza?: number }
 export interface Destino {
-  id: number; nombre: string; sucursal: string | null; tipo: Tipo | null; tipo_origen: string | null; grupo_id: number | null; company_id: number | null; empresa: string | null;
+  id: number; nombre: string; sucursal: string | null; tipo: Tipo | null; tipo_origen: string | null; grupo_id: number | null; company_id: number | null; empresa: string | null; dominio?: string | null; empresa_origen?: string | null;
   direccion: string | null; localidad: string | null; provincia: string | null; codigo_postal: string | null; zona: string | null; completa: string; place_id: string | null;
   lat: number | null; lng: number | null; mapa: 'ok' | 'sin_buscar' | 'no_encontrado' | 'sin_direccion'; punto_manual: boolean;
   horario: string | null; contacto: string | null; telefono: string | null; whatsapp: string | null; email: string | null; observaciones: string | null;
@@ -33,7 +34,12 @@ export interface Destino {
   origen: string; editado: boolean; faltan: string[];
   ia_estado: 'corregido' | 'ok' | 'dudoso' | null; ia_nota: string | null; ia_antes: DirIA | null; ia_sugerida: DirIA | null; puede_editar: boolean; puede_borrar: boolean;
 }
-interface Grupo { id: number; nombre: string; tipo: Tipo | null; company_id: number | null; n: number }
+interface Grupo { id: number; nombre: string; tipo: Tipo | null; company_id: number | null; empresa?: string | null; dominio?: string | null; empresa_origen?: string | null; n: number }
+// La empresa del CRM de un destino o de un grupo (su logo sale del dominio).
+interface EmpresaCRM { id: number; nombre: string; dominio: string | null; origen?: string | null }
+const empresaDe = (x: { company_id: number | null; empresa?: string | null; dominio?: string | null; empresa_origen?: string | null }): EmpresaCRM | null =>
+  (x.company_id && x.empresa ? { id: x.company_id, nombre: x.empresa, dominio: x.dominio ?? null, origen: x.empresa_origen } : null);
+const ORIGEN_EMPRESA: Record<string, string> = { nombre: 'Se relacionó sola porque se llama igual', grupo: 'Es la empresa de su grupo', manual: 'Elegida a mano' };
 interface Datos {
   total: number; organiza: boolean; ia: boolean; maps: boolean; copia: { at: number; filas: number; error: string | null };
   resumen: { en_mapa: number; completos: number; sin_buscar: number; para_revisar: number };
@@ -108,7 +114,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
   const visibles = useMemo(() => {
     if (!datos) return [];
     const t = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const gnombre = new Map(datos.grupos.map((g) => [g.id, g.nombre]));
+    const gnombre = new Map(datos.grupos.map((g) => [g.id, `${g.nombre} ${g.empresa ?? ''}`]));
     return datos.destinos.filter((d) => {
       if (filtro === 'sin_tipo' ? d.tipo : filtro !== 'todos' && d.tipo !== filtro) return false;
       if (incompletos && !d.faltan.length) return false;
@@ -335,6 +341,9 @@ function GrupoFilas({ grupo, destinos, organiza, sel, foco, onMarcar, onFoco, on
   const [abierto, setAbierto] = useState(destinos.length <= 6);   // las empresas con muchas sucursales arrancan plegadas
   const seis = destinos.reduce((s, d) => s + d.viajes.seis, 0), total = destinos.reduce((s, d) => s + d.viajes.total, 0);
   const tipos = [...new Set(destinos.map((d) => d.tipo))];
+  // La empresa del CRM: la del grupo o, si no tiene, la de sus direcciones cuando todas son de la misma.
+  const deHijos = [...new Map(destinos.map(empresaDe).filter((e): e is EmpresaCRM => !!e).map((e) => [e.id, e])).values()];
+  const empresa = empresaDe(grupo) ?? (deHijos.length === 1 ? deHijos[0] : null);
   return (
     <>
       <tr className={`ds-grupo${abierto ? ' ds-abierto' : ''}`}>
@@ -343,16 +352,50 @@ function GrupoFilas({ grupo, destinos, organiza, sel, foco, onMarcar, onFoco, on
           <div className="ds-nivel">
             <button type="button" className="ds-plegar ds-margen" onClick={() => setAbierto(!abierto)} aria-expanded={abierto}
               aria-label={`${abierto ? 'Plegar' : 'Ver'} las direcciones de ${grupo.nombre}`} title={abierto ? 'Plegar sus direcciones' : 'Ver sus direcciones'}><Icon name="down" size={14} /></button>
+            <LogoDestino nombre={grupo.nombre} empresa={empresa} />
             <button type="button" className="ds-grupo-nombre" onClick={organiza ? onGrupo : () => setAbierto(!abierto)}><b>{lindo(grupo.nombre)}</b></button>
             <button type="button" className="ds-cuantas" onClick={() => setAbierto(!abierto)}>{destinos.length} {destinos.length === 1 ? 'dirección' : 'direcciones'}</button>
           </div>
-          <div className="ds-tags">{tipos.length === 1 ? <TipoTag tipo={tipos[0]} /> : <span className="muted small">Varios tipos</span>}</div>
+          <div className="ds-tags">{tipos.length === 1 ? <TipoTag tipo={tipos[0]} /> : <span className="muted small">Varios tipos</span>}{empresa && <LinkEmpresa empresa={empresa} />}</div>
         </td>
         <td className="numcell">{seis || ''}{total > seis && <span className="muted small"> / {total}</span>}</td>
         <td className="ds-acciones">{organiza && <button type="button" className="btn ghost sm icon" onClick={onGrupo} title="Editar la empresa" aria-label={`Editar la empresa ${grupo.nombre}`}><Icon name="edit" size={15} /></button>}</td>
       </tr>
       {abierto && destinos.map((d, i) => <FilaDestino key={d.id} d={d} enGrupo ultimo={i === destinos.length - 1} organiza={organiza} sel={sel.has(d.id)} foco={foco === d.id} onMarcar={(on) => onMarcar([d.id], on)} onFoco={() => onFoco(d)} onEditar={() => onEditar(d)} onBorrar={() => onBorrar(d)} />)}
     </>
+  );
+}
+
+// El logo de la empresa del CRM (el favicon de su dominio, como en el resto del Hub; sin dominio, sus iniciales). El
+// destino que no está relacionado con ninguna empresa lleva un pin gris, para que todos los nombres arranquen parejo.
+function LogoDestino({ nombre, empresa }: { nombre: string; empresa: EmpresaCRM | null }) {
+  if (!empresa) return <span className="ds-logo vacio" aria-hidden="true"><Icon name="pin" size={12} /></span>;
+  return <span className="ds-logo" title={`Empresa del CRM: ${empresa.nombre}`}><Avatar name={empresa.nombre || nombre} type="company" size="sm" domain={empresa.dominio} /></span>;
+}
+// El link a la empresa en el CRM.
+function LinkEmpresa({ empresa }: { empresa: EmpresaCRM }) {
+  return <Link className="ds-crm" to={recordUrl('company', empresa.id)} title={`Abrir ${empresa.nombre} en el CRM${empresa.origen && ORIGEN_EMPRESA[empresa.origen] ? ` · ${ORIGEN_EMPRESA[empresa.origen]}` : ''}`}>
+    <Icon name="company" size={11} /><span>{empresa.nombre}</span></Link>;
+}
+
+// Elegir (o quitar) la empresa del CRM de un destino o de un grupo. Es de Logística.
+function CampoEmpresa({ valor, onChange }: { valor: EmpresaCRM | null; onChange: (e: EmpresaCRM | null) => void }) {
+  const [buscando, setBuscando] = useState(false);
+  return (
+    <div className="field ds-campo-empresa">Empresa del CRM
+      {valor ? (
+        <div className="ds-empresa-elegida">
+          <Avatar name={valor.nombre} type="company" size="sm" domain={valor.dominio} />
+          <Link to={recordUrl('company', valor.id)} className="grow ellipsis" title="Abrir en el CRM">{valor.nombre}</Link>
+          <button type="button" className="btn sm ghost" onClick={() => { onChange(null); setBuscando(true); }}>Cambiar</button>
+          <button type="button" className="btn sm ghost" onClick={() => { onChange(null); setBuscando(false); }}>Quitar</button>
+        </div>
+      ) : buscando ? (
+        <RecordPicker type="company" placeholder="Buscar la empresa en el CRM…" onPick={(r) => { onChange({ id: r.id, nombre: r.name, dominio: r.props.domain ? String(r.props.domain) : null, origen: 'manual' }); setBuscando(false); }} />
+      ) : <button type="button" className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setBuscando(true)}><Icon name="company" size={13} />Relacionar con una empresa</button>}
+      {valor?.origen && valor.origen !== 'manual' && ORIGEN_EMPRESA[valor.origen] && <span className="small muted">{ORIGEN_EMPRESA[valor.origen]}: si no es, quitala o cambiala y queda fijo.</span>}
+      {!valor && !buscando && <span className="small muted">Con la empresa relacionada se ve su logo y se sabe si es cliente o proveedor.</span>}
+    </div>
   );
 }
 
@@ -363,12 +406,14 @@ function FilaDestino({ d, enGrupo, ultimo, organiza, sel, foco, onMarcar, onFoco
 }) {
   const wa = linkWhatsapp(d);
   const faltan = d.faltan.filter((f) => f !== 'tipo' || !enGrupo);
+  const empresa = empresaDe(d);
   return (
     <tr id={`ds-fila-${d.id}`} className={`${enGrupo ? `ds-hijo${ultimo ? ' ultimo' : ''}` : 'ds-suelto'}${foco ? ' ds-foco' : ''}`}>
       {organiza && <td className="ds-sel"><input type="checkbox" aria-label={`Elegir ${d.nombre}`} checked={sel} onChange={(e) => onMarcar(e.target.checked)} /></td>}
       <td className="ds-td-nombre">
         <div className="ds-nivel">
           {!enGrupo && <span className="ds-margen" aria-hidden="true" />}
+          {!enGrupo && <LogoDestino nombre={d.nombre} empresa={empresa} />}
           <button type="button" className="ds-nombre" onClick={d.puede_editar ? onEditar : onFoco} title={d.puede_editar ? 'Editar el destino' : 'Los destinos de la libreta los corrige Logística'}>
             <b>{lindo(enGrupo && d.sucursal ? d.sucursal : d.nombre)}</b>
             {!enGrupo && d.sucursal && <span className="muted"> · {d.sucursal}</span>}
@@ -377,6 +422,7 @@ function FilaDestino({ d, enGrupo, ultimo, organiza, sel, foco, onMarcar, onFoco
         </div>
         <div className="ds-tags">
           {!enGrupo && <TipoTag tipo={d.tipo} origen={d.tipo_origen} />}
+          {!enGrupo && empresa && <LinkEmpresa empresa={empresa} />}
           {d.ia_estado === 'corregido' && <span className="cr-tag" title={`${d.ia_nota ?? ''}${d.ia_antes ? `\nAntes: ${textoDir(d.ia_antes) || '(vacío)'}` : ''}`}>Completado con IA</span>}
           {d.ia_estado === 'dudoso' && <span className="cr-tag warn" title={`${d.ia_nota ?? ''}${d.ia_sugerida ? `\nSugerencia: ${textoDir(d.ia_sugerida)}` : ''}`}>Para revisar</span>}
           {faltan.length > 0 && <span className="ds-falta" title={`Falta: ${faltan.map((f) => FALTA[f]).join(', ')}`}>Falta {faltan.length === 1 ? FALTA[faltan[0]] : `${faltan.length} datos`}</span>}
@@ -518,6 +564,7 @@ function EditarDestino({ d, grupos, organiza, maps, onClose, onListo, onBorrar }
     contacto: d?.contacto ?? '', telefono: d?.telefono ?? '', whatsapp: d?.whatsapp ?? '', email: d?.email ?? '', horario: d?.horario ?? '', observaciones: d?.observaciones ?? '',
   });
   const [google, setGoogle] = useState<Sugerencia | null>(null);
+  const [empresa, setEmpresa] = useState<EmpresaCRM | null>(d ? empresaDe(d) : null);
   const [sesion] = useState(() => crypto.randomUUID());
   const [ocupado, setOcupado] = useState(false);
   const guardar = async (extra: Record<string, unknown> = {}) => {
@@ -526,6 +573,8 @@ function EditarDestino({ d, grupos, organiza, maps, onClose, onListo, onBorrar }
       const { grupo_id, ...resto } = f;
       const body: Record<string, unknown> = { ...resto, tipo: f.tipo || null, ...extra };
       if (organiza) body.grupo_id = grupo_id ? Number(grupo_id) : null;
+      // La empresa del CRM solo viaja si se tocó: lo que el Hub relacionó solo sigue marcado como deducido.
+      if (organiza && (empresa?.id ?? null) !== (d?.company_id ?? null)) body.company_id = empresa?.id ?? null;
       if (google) { body.place_id = google.place_id; body.sesion = sesion; }
       else if (d && f.direccion !== (d.direccion ?? '')) body.place_id = null;
       const r = await http<{ id: number }>(d ? 'PATCH' : 'POST', d ? `/recorridos/libreta/${d.id}` : '/recorridos/libreta', body);
@@ -559,7 +608,8 @@ function EditarDestino({ d, grupos, organiza, maps, onClose, onListo, onBorrar }
               </label>
             ) : <span />}
           </div>
-          {d?.empresa && <p className="small muted" style={{ margin: 0 }}>Es la empresa del CRM <b>{d.empresa}</b>.</p>}
+          {organiza ? <CampoEmpresa valor={empresa} onChange={setEmpresa} />
+            : d?.empresa && <p className="small muted" style={{ margin: 0 }}>Es la empresa del CRM <b>{d.empresa}</b>.</p>}
         </fieldset>
 
         <fieldset><legend>Dirección</legend>
@@ -667,12 +717,14 @@ function EditarGrupo({ g, destinos, onClose, onListo }: { g: Grupo; destinos: De
   const toast = useToast();
   const [nombre, setNombre] = useState(lindo(g.nombre));
   const [tipo, setTipo] = useState<string>(g.tipo ?? '');
+  const [empresa, setEmpresa] = useState<EmpresaCRM | null>(empresaDe(g));
   const hacer = async (fn: () => Promise<unknown>, ok: string) => { try { await fn(); toast(ok); onListo(); } catch (e) { toast((e as Error).message, true); } };
   return (
     <Modal title={lindo(g.nombre)} onClose={onClose} footer={<>
       <button type="button" className="btn ghost danger" onClick={() => hacer(() => http('POST', `/recorridos/grupos/${g.id}/sacar`, {}), 'Grupo deshecho: los destinos quedan sueltos.')}>Deshacer el grupo</button>
       <span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancelar</button>
-      <button type="button" className="btn primary" disabled={!nombre.trim()} onClick={() => hacer(() => http('PATCH', `/recorridos/grupos/${g.id}`, { nombre: nombre.trim(), ...(tipo !== (g.tipo ?? '') ? { tipo: tipo || null } : {}) }), 'Grupo guardado.')}>Guardar</button></>}>
+      <button type="button" className="btn primary" disabled={!nombre.trim()} onClick={() => hacer(() => http('PATCH', `/recorridos/grupos/${g.id}`, { nombre: nombre.trim(), ...(tipo !== (g.tipo ?? '') ? { tipo: tipo || null } : {}),
+        ...((empresa?.id ?? null) !== (g.company_id ?? null) ? { company_id: empresa?.id ?? null } : {}) }), 'Grupo guardado.')}>Guardar</button></>}>
       <div className="rc-form">
         <div className="rc-2">
           <label className="field">Nombre de la empresa<input className="input" value={nombre} onChange={(e) => setNombre(e.target.value)} /></label>
@@ -680,6 +732,7 @@ function EditarGrupo({ g, destinos, onClose, onListo }: { g: Grupo; destinos: De
             <Select className="input" value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo"><option value="">Dejar como están</option>
               {TIPOS.map((t) => <option key={t[0]} value={t[0]}>{t[1]}</option>)}</Select></label>
         </div>
+        <CampoEmpresa valor={empresa} onChange={setEmpresa} />
         <ul className="ds-lista">
           {destinos.map((d) => (
             <li key={d.id}><span className="grow"><b>{lindo(d.nombre)}</b>{d.sucursal && ` · ${d.sucursal}`} <span className="muted small">{d.completa}</span></span>

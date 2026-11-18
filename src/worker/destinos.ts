@@ -1,6 +1,6 @@
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
-import { norm } from './clickup';
+import { companyKey, norm } from './clickup';
 import { actualizarLugares, claveDireccion, direccionLugar, hoyBsAs, puedeEditarCronograma, sumarDias, ubicar } from './cronograma';
 
 // La base de destinos (pestaña Destinos de Recorridos), rediseñada el 18/11/2026 para que los destinos estén bien:
@@ -64,11 +64,61 @@ function raiz(nombre: string) {
   return palabras[0] ?? null;
 }
 
+// ---------- La empresa del CRM de cada destino ----------
+
+// El nombre para comparar un destino con una empresa del CRM: sin lo que va entre paréntesis («GADOR (DEPÓSITO)»), sin la
+// forma societaria («Gador S.A.») y, en el segundo intento, sin las palabras de lugar («Depósito Gador»).
+const DE_LUGAR = new Set(['deposito', 'depositos', 'oficina', 'oficinas', 'sucursal', 'planta', 'fabrica', 'showroom', 'administracion', 'recepcion', 'sede']);
+const claveEmpresa = (s: string) => companyKey(s.replace(/\([^)]*\)/g, ' ')).replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ').trim();
+const sinLugar = (k: string) => k.split(' ').filter((w) => !DE_LUGAR.has(w)).join(' ');
+const sirve = (k: string) => k.length >= 2 && !/^\d+$/.test(k);
+
+// Relaciona con su empresa del CRM los destinos (y los grupos) que todavía no tienen una: la que se llama igual. Si hay
+// varias con ese nombre, la que es cliente; si sigue habiendo varias, la que tiene dominio y, entre esas, la más vieja.
+// Las direcciones de un grupo ya relacionado toman la empresa del grupo. Lo que se eligió o se quitó a mano
+// (`empresa_origen = 'manual'`) no se toca.
+export async function vincularEmpresas(db: D1Database) {
+  const [lug, grp] = await db.batch([
+    db.prepare('SELECT id, nombre, grupo_id FROM lugares WHERE activo = 1 AND company_id IS NULL AND empresa_origen IS NULL'),
+    db.prepare('SELECT id, nombre, company_id, empresa_origen FROM destino_grupos'),
+  ]);
+  const lugares = lug.results as Array<{ id: number; nombre: string; grupo_id: number | null }>;
+  const grupos = grp.results as Array<{ id: number; nombre: string; company_id: number | null; empresa_origen: string | null }>;
+  const gruposSin = grupos.filter((g) => !g.company_id && !g.empresa_origen);
+  if (!lugares.length && !gruposSin.length) return;
+  const { results: empresas } = await db.prepare(`SELECT id, name, json_extract(props, '$.tipo_de_relacion') AS rel, NULLIF(json_extract(props, '$.domain'), '') AS dominio
+    FROM records WHERE object_type = 'company' AND archived = 0 ORDER BY id`).all<{ id: number; name: string; rel: string | null; dominio: string | null }>();
+  const porClave = new Map<string, typeof empresas>();
+  for (const e of empresas) { const k = claveEmpresa(e.name ?? ''); if (sirve(k)) porClave.set(k, [...(porClave.get(k) ?? []), e]); }
+  const elegir = (k: string) => {
+    let c = sirve(k) ? porClave.get(k) ?? [] : [];
+    if (c.length > 1) { const clientes = c.filter((e) => !e.rel || e.rel === 'cliente'); if (clientes.length) c = clientes; }
+    if (c.length > 1) { const conDominio = c.filter((e) => e.dominio); if (conDominio.length) c = conDominio; }
+    return c[0]?.id ?? null;
+  };
+  const buscar = (nombre: string) => { const k = claveEmpresa(nombre); return elegir(k) ?? (sinLugar(k) !== k ? elegir(sinLugar(k)) : null); };
+
+  const stmts: D1PreparedStatement[] = [];
+  const deGrupo = new Map(grupos.filter((g) => g.company_id).map((g) => [g.id, g.company_id!]));
+  for (const g of gruposSin) {
+    const id = buscar(g.nombre);
+    if (!id) continue;
+    deGrupo.set(g.id, id);
+    stmts.push(db.prepare("UPDATE destino_grupos SET company_id = ?, empresa_origen = 'nombre' WHERE id = ? AND company_id IS NULL AND empresa_origen IS NULL").bind(id, g.id));
+  }
+  for (const l of lugares) {
+    const delGrupo = l.grupo_id ? deGrupo.get(l.grupo_id) ?? null : null;
+    const id = delGrupo ?? buscar(l.nombre);
+    if (id) stmts.push(db.prepare('UPDATE lugares SET company_id = ?, empresa_origen = ? WHERE id = ? AND company_id IS NULL AND empresa_origen IS NULL').bind(id, delGrupo ? 'grupo' : 'nombre', l.id));
+  }
+  for (let i = 0; i < stmts.length; i += 80) await db.batch(stmts.slice(i, i + 80));
+}
+
 interface Fila {
   id: number; nombre: string; sucursal: string | null; direccion: string | null; localidad: string | null; provincia: string | null; codigo_postal: string | null; zona: string | null;
   horario: string | null; contacto: string | null; telefono: string | null; whatsapp: string | null; email: string | null; observaciones: string | null; company_id: number | null;
   origen: string; editado: number; created_by: number | null; tipo: string | null; tipo_origen: string | null; grupo_id: number | null; place_id: string | null;
-  ia_estado: string | null; ia_nota: string | null; ia_antes: string | null; ia_sugerida: string | null; empresa: string | null;
+  ia_estado: string | null; ia_nota: string | null; ia_antes: string | null; ia_sugerida: string | null; empresa: string | null; dominio: string | null; empresa_origen: string | null;
 }
 
 // ---------- La lista ----------
@@ -76,13 +126,16 @@ interface Fila {
 export async function listarDestinos(env: Env, user: User) {
   const db = env.DB;
   const cfg = await actualizarLugares(env, organiza(user));
+  await vincularEmpresas(db);
   await clasificar(db);
   const hoy = hoyBsAs(), desde = sumarDias(hoy, -182);
   const [lugares, viajes, grupos] = await db.batch([
-    db.prepare(`SELECT l.*, r.name AS empresa FROM lugares l LEFT JOIN records r ON r.id = l.company_id AND r.archived = 0 WHERE l.activo = 1 ORDER BY l.nombre LIMIT 5000`),
+    db.prepare(`SELECT l.*, r.name AS empresa, NULLIF(json_extract(r.props, '$.domain'), '') AS dominio FROM lugares l
+      LEFT JOIN records r ON r.id = l.company_id AND r.archived = 0 WHERE l.activo = 1 ORDER BY l.nombre LIMIT 5000`),
     db.prepare(`SELECT lugar_id, COUNT(*) AS total, SUM(fecha >= ?1) AS seis, MAX(fecha) AS ultimo FROM encargos
       WHERE lugar_id IS NOT NULL AND fecha <= ?2 AND estado NOT IN ('cancelado', 'no_se_pudo') GROUP BY lugar_id`).bind(desde, hoy),
-    db.prepare('SELECT * FROM destino_grupos ORDER BY nombre'),
+    db.prepare(`SELECT g.*, r.name AS empresa, NULLIF(json_extract(r.props, '$.domain'), '') AS dominio FROM destino_grupos g
+      LEFT JOIN records r ON r.id = g.company_id AND r.archived = 0 ORDER BY g.nombre`),
   ]);
   const proximos = (await db.prepare(`SELECT lugar_id, MIN(fecha) AS fecha FROM encargos WHERE lugar_id IS NOT NULL AND fecha > ? AND estado = 'pendiente' GROUP BY lugar_id`).bind(hoy)
     .all<{ lugar_id: number; fecha: string }>()).results;
@@ -114,7 +167,9 @@ export async function listarDestinos(env: Env, user: User) {
     if (!l.telefono?.trim() && !l.whatsapp?.trim()) faltan.push('contacto');
     if (!l.tipo) faltan.push('tipo');
     return {
-      id: l.id, nombre: l.nombre, sucursal: l.sucursal, tipo: l.tipo, tipo_origen: l.tipo_origen, grupo_id: l.grupo_id, company_id: l.company_id, empresa: l.empresa,
+      id: l.id, nombre: l.nombre, sucursal: l.sucursal, tipo: l.tipo, tipo_origen: l.tipo_origen, grupo_id: l.grupo_id,
+      // La empresa del CRM (si se archivó, como si no tuviera) y su dominio, de donde sale el logo.
+      company_id: l.empresa ? l.company_id : null, empresa: l.empresa, dominio: l.empresa ? l.dominio?.trim().toLowerCase() || null : null, empresa_origen: l.empresa ? l.empresa_origen : null,
       direccion: l.direccion, localidad: l.localidad, provincia: l.provincia, codigo_postal: l.codigo_postal, zona: l.zona, completa: dir, place_id: l.place_id,
       lat: mapa === 'ok' ? g!.lat : null, lng: mapa === 'ok' ? g!.lng : null, mapa, punto_manual: !!g?.manual,
       horario: l.horario, contacto: l.contacto, telefono: l.telefono, whatsapp: l.whatsapp, email: l.email, observaciones: l.observaciones,
@@ -136,7 +191,8 @@ export async function listarDestinos(env: Env, user: User) {
     const k = l.company_id ? `c${l.company_id}` : raiz(l.nombre) ? `n${raiz(l.nombre)}` : null;
     if (k) porClave.set(k, [...(porClave.get(k) ?? []), l]);
   }
-  const gruposLista = (grupos.results as Array<{ id: number; nombre: string; tipo: string | null; company_id: number | null }>);
+  const gruposLista = (grupos.results as Array<{ id: number; nombre: string; tipo: string | null; company_id: number | null; empresa: string | null; dominio: string | null; empresa_origen: string | null }>)
+    .map((g) => ({ ...g, company_id: g.empresa ? g.company_id : null, dominio: g.empresa ? g.dominio?.trim().toLowerCase() || null : null }));
   const sugeridos: Array<{ nombre: string; ids: number[]; grupo_id: number | null }> = [];
   for (const [k, ls] of porClave) {
     const existente = gruposLista.find((g) => (k.startsWith('c') && g.company_id === Number(k.slice(1))) || raiz(g.nombre) === k.slice(1));
@@ -196,7 +252,7 @@ export async function agrupar(db: D1Database, ctx: Ctx, b: { nombre?: unknown; g
 }
 
 // Cambiar el nombre o el tipo del grupo (el tipo pasa a todos sus destinos).
-export async function editarGrupo(db: D1Database, ctx: Ctx, id: number, b: { nombre?: unknown; tipo?: unknown }) {
+export async function editarGrupo(db: D1Database, ctx: Ctx, id: number, b: { nombre?: unknown; tipo?: unknown; company_id?: unknown }) {
   exigir(ctx);
   const stmts: D1PreparedStatement[] = [];
   if (b.nombre !== undefined) {
@@ -209,6 +265,16 @@ export async function editarGrupo(db: D1Database, ctx: Ctx, id: number, b: { nom
     stmts.push(db.prepare('UPDATE destino_grupos SET tipo = ?, updated_at = ? WHERE id = ?').bind(tipo, now(), id));
     if (tipo) stmts.push(db.prepare("UPDATE lugares SET tipo = ?, tipo_origen = 'manual' WHERE grupo_id = ?").bind(tipo, id));
   }
+  // La empresa del CRM del grupo, elegida (o quitada) a mano: pasa a sus direcciones, salvo las que tienen una puesta a mano.
+  if (b.company_id !== undefined) {
+    const empresa = Number(b.company_id) || null;
+    if (empresa && !(await db.prepare("SELECT 1 FROM records WHERE id = ? AND object_type = 'company' AND archived = 0").bind(empresa).first())) throw new HttpError(404, 'Esa empresa ya no está en el CRM.');
+    stmts.push(db.prepare("UPDATE destino_grupos SET company_id = ?, empresa_origen = 'manual', updated_at = ? WHERE id = ?").bind(empresa, now(), id));
+    stmts.push(empresa
+      ? db.prepare("UPDATE lugares SET company_id = ?, empresa_origen = 'grupo' WHERE grupo_id = ? AND (empresa_origen IS NULL OR empresa_origen != 'manual')").bind(empresa, id)
+      // Quitada: sus direcciones tampoco se vuelven a relacionar solas con esa empresa.
+      : db.prepare("UPDATE lugares SET company_id = NULL, empresa_origen = 'manual' WHERE grupo_id = ? AND empresa_origen IN ('grupo', 'nombre')").bind(id));
+  }
   if (stmts.length) await db.batch(stmts);
   return { ok: true };
 }
@@ -217,8 +283,10 @@ export async function editarGrupo(db: D1Database, ctx: Ctx, id: number, b: { nom
 export async function desagrupar(db: D1Database, ctx: Ctx, id: number, b: { ids?: unknown } = {}) {
   exigir(ctx);
   const lista = ids(b.ids);
-  if (lista.length) await db.prepare('UPDATE lugares SET grupo_id = NULL WHERE grupo_id = ? AND id IN (SELECT value FROM json_each(?))').bind(id, JSON.stringify(lista)).run();
-  else await db.prepare('UPDATE lugares SET grupo_id = NULL WHERE grupo_id = ?').bind(id).run();
+  // Las que tenían la empresa del CRM por ser del grupo la sueltan (el Hub la vuelve a buscar por su nombre).
+  const SUELTA = `grupo_id = NULL, company_id = CASE WHEN empresa_origen = 'grupo' THEN NULL ELSE company_id END, empresa_origen = CASE WHEN empresa_origen = 'grupo' THEN NULL ELSE empresa_origen END`;
+  if (lista.length) await db.prepare(`UPDATE lugares SET ${SUELTA} WHERE grupo_id = ? AND id IN (SELECT value FROM json_each(?))`).bind(id, JSON.stringify(lista)).run();
+  else await db.prepare(`UPDATE lugares SET ${SUELTA} WHERE grupo_id = ?`).bind(id).run();
   await limpiarGrupos(db);
   return { ok: true };
 }

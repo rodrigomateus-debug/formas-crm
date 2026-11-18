@@ -331,8 +331,25 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   if (google) { sets.push('place_id = ?'); vals.push(google.place_id); }
   else if (b.direccion !== undefined && b.place_id === null) sets.push('place_id = NULL');
   if (tipo !== undefined) { sets.push('tipo = ?', 'tipo_origen = ?'); vals.push(tipo, tipo ? 'manual' : null); }
-  if (b.grupo_id !== undefined) { if (!organiza(ctx.user)) throw new HttpError(403, 'Agrupar destinos es de Logística.'); sets.push('grupo_id = ?'); vals.push(Number(b.grupo_id) || null); }
-  if (b.company_id !== undefined && organiza(ctx.user)) { sets.push('company_id = ?'); vals.push(Number(b.company_id) || null); }
+  const empresaAMano = b.company_id !== undefined && organiza(ctx.user);
+  if (b.grupo_id !== undefined) {
+    if (!organiza(ctx.user)) throw new HttpError(403, 'Agrupar destinos es de Logística.');
+    const grupo = Number(b.grupo_id) || null;
+    sets.push('grupo_id = ?'); vals.push(grupo);
+    // Cambia de grupo: si tenía la empresa del CRM por el grupo anterior, la suelta (el Hub la vuelve a buscar sola).
+    // SQLite calcula todo el SET con los valores de antes, así que `grupo_id` y `empresa_origen` acá son los viejos.
+    if (!empresaAMano) {
+      sets.push("company_id = CASE WHEN empresa_origen = 'grupo' AND grupo_id IS NOT ? THEN NULL ELSE company_id END",
+        "empresa_origen = CASE WHEN empresa_origen = 'grupo' AND grupo_id IS NOT ? THEN NULL ELSE empresa_origen END");
+      vals.push(grupo, grupo);
+    }
+  }
+  // La empresa del CRM elegida (o quitada) a mano: no se vuelve a deducir.
+  if (empresaAMano) {
+    const empresa = Number(b.company_id) || null;
+    if (empresa && !(await db.prepare("SELECT 1 FROM records WHERE id = ? AND object_type = 'company' AND archived = 0").bind(empresa).first())) throw new HttpError(404, 'Esa empresa ya no está en el CRM.');
+    sets.push('company_id = ?', "empresa_origen = 'manual'"); vals.push(empresa);
+  }
   // Borrar (o recuperar) un destino: Logística cualquiera; los demás, los que cargaron ellos en el Hub (ya pasaron el control de arriba).
   if (b.activo !== undefined) { sets.push('activo = ?'); vals.push(b.activo ? 1 : 0); }
   if (!sets.length) return { id };

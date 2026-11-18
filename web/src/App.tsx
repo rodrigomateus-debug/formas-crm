@@ -12,6 +12,7 @@ import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
 import RecorridosPage from './pages/Recorridos';
+import AnaliticasPage, { analiticasDe } from './pages/Analiticas';
 import NotasProductosPage from './pages/NotasProductos';
 import ChoferesPage from './pages/Choferes';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
@@ -79,6 +80,12 @@ export default function App() {
         {logistica && <NavLink to="/choferes" className="nav-link"><Icon name="volante" />Choferes</NavLink>}
         {/* Notas de productos (notasproducto.ts): las ven todos; las escriben Producción y los administradores. */}
         <NavLink to="/productos" className="nav-link"><Icon name="alert" />Notas de productos</NavLink>
+        {/* Analíticas (pedido de Rodrigo del 18/11/2026): los números de cada área en una sola entrada, aparte de los módulos de
+            trabajo. Adentro, una pestaña por tema según el perfil (Analiticas.tsx); sin ninguna, no aparece. */}
+        {analiticasDe(meta.me).length > 0 && <>
+          <div className="nav-group nav-solo" aria-hidden="true" />
+          <NavLink to="/analiticas" className="nav-link"><Icon name="chart" />Analíticas</NavLink>
+        </>}
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
         <div className="nav-bottom">
           {meta.me.role === 'admin' && <NavLink to="/settings" className="nav-link"><Icon name="settings" />Configuración</NavLink>}
@@ -105,6 +112,9 @@ export default function App() {
           {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
           <Route path="/recorridos" element={<RecorridosPage />} />
+          {analiticasDe(meta.me).length > 0 && <Route path="/analiticas" element={<AnaliticasPage />} />}
+          {/* El link de antes de que existiera Analíticas. */}
+          <Route path="/rendimiento" element={<Navigate to="/analiticas" replace />} />
           <Route path="/productos" element={<NotasProductosPage />} />
           {(logistica || meta.me.role === 'admin') && <Route path="/choferes" element={<ChoferesPage />} />}
           <Route path="/settings/*" element={<Settings />} />

@@ -1,6 +1,7 @@
 import { aplicarAnulados, aplicarPedidos, avisoDeFinnegans, type PedidoFin } from './pedidosfin';
 import { Hono } from 'hono';
 import { hoyBsAs, marcarParada, pedidosDeParada, rutaDelChofer } from './cronograma';
+import { anotarEvento, anotarMarca, conMedicion } from './rendimiento';
 import type { Ctx, Env } from './env';
 import { HttpError } from './env';
 import { authenticate } from './auth';
@@ -418,12 +419,24 @@ hooks.get('/chofer/api/yo', async (c) => {
 // El recorrido del día de este chofer (cronograma.ts): el que Logística armó con su nombre.
 hooks.get('/chofer/api/ruta', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
-  return c.json(await rutaDelChofer(c.env, ctx.user, ctx.sourceDetail ?? ''));
+  const r = await rutaDelChofer(c.env, ctx.user, ctx.sourceDetail ?? '');
+  // Con si ya avisó que salió y que terminó cada recorrido (rendimiento.ts).
+  return c.json({ ...r, recorridos: await conMedicion(c.env.DB, r.fecha, ctx.sourceDetail ?? '', r.recorridos) });
 });
 // El chofer marca una parada: hecha, no se pudo (con el motivo) o la deja para más tarde.
 hooks.post('/chofer/api/ruta/parada', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
-  return c.json(await marcarParada(c.env, ctx, ctx.sourceDetail ?? '', await c.req.json(), (p) => c.executionCtx.waitUntil(p)));
+  const b = await c.req.json();
+  const r = await marcarParada(c.env, ctx, ctx.sourceDetail ?? '', b, (p) => c.executionCtx.waitUntil(p));
+  // Dónde estaba al marcarla y, la primera vez del día, la foto del plan (rendimiento.ts): atrás, sin frenar la marca.
+  c.executionCtx.waitUntil(anotarMarca(c.env, ctx.sourceDetail ?? '', b).catch((e) => console.error('rendimiento: marca', (e as Error).message)));
+  return c.json(r);
+});
+// El chofer sale o termina su recorrido: con el botón, o porque la app (abierta) vio que se alejó del punto de salida o
+// que volvió (rendimiento.ts).
+hooks.post('/chofer/api/ruta/evento', async (c) => {
+  const ctx = await chofer(c.env, c.req.raw);
+  return c.json(await anotarEvento(c.env, ctx.sourceDetail ?? '', await c.req.json()));
 });
 hooks.get('/chofer/api/remitos', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);

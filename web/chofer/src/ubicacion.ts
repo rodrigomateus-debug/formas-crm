@@ -14,11 +14,13 @@ async function permiso(): Promise<'granted' | 'denied' | 'prompt'> {
   }
 }
 
-export async function ubicacion(): Promise<Punto | null> {
+// `pedir`: el chofer tocó algo que la necesita («Salgo»): si nunca dio permiso, se le pregunta ahí.
+export async function ubicacion(pedir = false): Promise<Punto | null> {
   if (!('geolocation' in navigator)) return null;
   const estado = await permiso();
   if (estado === 'denied') return null;
-  if (estado === 'prompt') {
+  if (estado === 'prompt' && pedir) { try { localStorage.setItem(CLAVE, '1'); } catch { /* da igual */ } }
+  else if (estado === 'prompt') {
     let preguntada = true; // sin almacenamiento no se puede recordar: mejor no preguntar nunca que preguntar siempre
     try { preguntada = localStorage.getItem(CLAVE) === '1'; localStorage.setItem(CLAVE, '1'); } catch { /* queda en true */ }
     if (preguntada) return null;

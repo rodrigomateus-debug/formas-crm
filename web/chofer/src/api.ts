@@ -255,7 +255,25 @@ export type EncargoChofer = {
 type LugarChofer = { nombre: string; direccion: string; lat: number | null; lng: number | null };
 /** `fin`: dónde termina (null: en la última parada); `vuelve`: es el mismo lugar de donde sale. Sin `fin` (servidor de
     antes), vuelve. */
-export type RecorridoChofer = { n: number; salida: number; base: LugarChofer; fin?: LugarChofer | null; vuelve?: boolean; paradas: ParadaChofer[] };
+export type RecorridoChofer = { n: number; salida: number; base: LugarChofer; fin?: LugarChofer | null; vuelve?: boolean; paradas: ParadaChofer[];
+  /** Si ya avisó que salió y que terminó (un servidor viejo no lo manda). */
+  medicion?: MedicionRecorrido };
+export type MedicionRecorrido = { salida_at: string | null; llegada_at: string | null };
+/** El chofer sale o termina un recorrido: con el botón o porque la app vio que se movió (`gps`). `quitar`: se equivocó. */
+export type EventoRecorrido = { n: number; tipo: 'salida' | 'llegada'; origen: 'boton' | 'gps'; at: string; lat?: number; lng?: number; quitar?: boolean };
+export async function avisarEvento(ev: EventoRecorrido): Promise<MedicionRecorrido> {
+  if (!tokenEnMemoria) throw new LinkInvalido();
+  const corte = new AbortController();
+  const reloj = setTimeout(() => corte.abort(), 20_000);
+  let r: Response;
+  try {
+    r = await fetch(`${API}/ruta/evento`, { method: 'POST', headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' }, body: JSON.stringify(ev), signal: corte.signal });
+  } catch { throw new SinSenal(); } finally { clearTimeout(reloj); }
+  if (r.status === 401) throw new LinkInvalido();
+  if (reintentable(r.status)) throw new SinSenal();
+  if (!r.ok) throw new Rechazo(r.status);
+  try { return ((await r.json()) as { medicion: MedicionRecorrido }).medicion; } catch { throw new SinSenal(); }
+}
 
 /** El recorrido que Logística le armó a este chofer para hoy (vacío si todavía no le asignaron ninguno). */
 export async function pedirRuta(): Promise<RecorridoChofer[]> {
@@ -264,7 +282,7 @@ export async function pedirRuta(): Promise<RecorridoChofer[]> {
 }
 
 /** El chofer marca una parada: la hizo, no se pudo (con el motivo) o la deja para después. Sin `resultado`, lo borra. */
-export async function marcarParada(clave: string, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string): Promise<void> {
+export async function marcarParada(clave: string, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string, punto?: { lat: number; lng: number } | null): Promise<void> {
   if (!tokenEnMemoria) throw new LinkInvalido();
   const corte = new AbortController();
   const reloj = setTimeout(() => corte.abort(), 30_000);
@@ -272,7 +290,7 @@ export async function marcarParada(clave: string, resultado: 'hecho' | 'no_se_pu
   try {
     r = await fetch(`${API}/ruta/parada`, {
       method: 'POST', headers: { Authorization: `Bearer ${tokenEnMemoria}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clave, resultado, motivo, nota }), signal: corte.signal,
+      body: JSON.stringify({ clave, resultado, motivo, nota, ...(punto ? { lat: punto.lat, lng: punto.lng } : {}) }), signal: corte.signal,
     });
   } catch { throw new SinSenal(); } finally { clearTimeout(reloj); }
   if (r.status === 401) throw new LinkInvalido();

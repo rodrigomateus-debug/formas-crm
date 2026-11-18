@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { marcarParada, pedirRuta, SinSenal, type ItemChofer, type ParadaChofer, type RecorridoChofer } from './api';
+import { marcarParada, pedirRuta, SinSenal, type ItemChofer, type MedicionRecorrido, type ParadaChofer, type RecorridoChofer } from './api';
+import { CERCA_KM, LEJOS_KM, encolar, guardarJornada, jornadaGuardada, km, mandarPendientes, seguirUbicacion, ultimoFijo, ultimoPunto, type Fijo, type Jornada } from './jornada';
+import { conTope, ubicacion } from './ubicacion';
 import { hhmm, simular } from '../../src/ruta';
 import { Icono } from './iconos';
 import { telefono } from './instalar';
@@ -137,7 +139,20 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
   const [app, setApp] = useState<AppMapa | null>(appGuardada);
   const [eligiendo, setEligiendo] = useState<ParadaChofer | null>(null);   // la parada para la que se elige la app
   const [aviso, setAviso] = useState('');
-  const traer = useCallback(() => pedirRuta().then((r) => { setRecorridos(r); try { localStorage.setItem(CLAVE, JSON.stringify({ dia: hoy(), r })); } catch { /* sin almacenamiento */ } }, () => undefined), []);
+  // La salida y la llegada de cada recorrido (jornada.ts): lo que avisó el chofer con el botón o detectó la app.
+  const [jornada, setJornada] = useState<Jornada>(jornadaGuardada);
+  const ponerJornada = useCallback((cambio: (j: Jornada) => Jornada) => setJornada((j) => { const n = cambio(j); guardarJornada(n); return n; }), []);
+  const delServidor = useCallback((dichas: Record<number, MedicionRecorrido>) => ponerJornada((j) => {
+    const n = { ...j };
+    for (const [k, m] of Object.entries(dichas)) n[Number(k)] = { ...n[Number(k)], salida_at: m.salida_at, llegada_at: m.llegada_at };
+    return n;
+  }), [ponerJornada]);
+  // Primero sale lo que quedó esperando la señal; después se trae el recorrido, que dice lo que el servidor tiene anotado.
+  const traer = useCallback(() => mandarPendientes().catch(() => ({})).then(() => pedirRuta()).then((r) => {
+    setRecorridos(r);
+    try { localStorage.setItem(CLAVE, JSON.stringify({ dia: hoy(), r })); } catch { /* sin almacenamiento */ }
+    delServidor(Object.fromEntries(r.filter((x) => x.medicion).map((x) => [x.n, x.medicion!])));
+  }, () => undefined), [delServidor]);
   useEffect(() => {
     if (!enLinea) return;
     void traer();
@@ -152,12 +167,48 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
   const marcar = (p: ParadaChofer, resultado: 'hecho' | 'no_se_pudo' | 'salteada' | null, motivo?: string, nota?: string) => {
     setAviso('');
     cambiarParada(p.clave, (x) => optimista(x, resultado, motivo, nota));
-    marcarParada(p.clave, resultado, motivo, nota).then(() => traer(), (e) => {
+    marcarParada(p.clave, resultado, motivo, nota, resultado ? ultimoPunto() : null).then(() => traer(), (e) => {
       cambiarParada(p.clave, () => p);
       setAviso(`${p.nombre}: ${e instanceof SinSenal ? 'no se guardó porque no hay señal. Marcala de nuevo cuando vuelva.' : 'no se pudo guardar. Marcala de nuevo.'}`);
       void traer();
     });
   };
+  // Avisar la salida o la llegada: se ve en el momento y se manda atrás (sin señal, sale cuando vuelve). Con el botón se
+  // pide la ubicación (si nunca dio permiso, se le pregunta ahí), esperando poco para no frenar.
+  const avisar = useCallback((n: number, tipo: 'salida' | 'llegada', origen: 'boton' | 'gps', quitar = false) => {
+    const at = new Date().toISOString();
+    ponerJornada((j) => ({ ...j, [n]: { ...j[n], [`${tipo}_at`]: quitar ? null : at } }));
+    void (async () => {
+      const p = quitar ? null : ultimoPunto() ?? (origen === 'boton' ? await conTope(ubicacion(true), 4000) : null);
+      encolar({ n, tipo, origen, at, ...(p ? { lat: p.lat, lng: p.lng } : {}), ...(quitar ? { quitar: true } : {}) });
+      const dichas = await mandarPendientes().catch(() => ({}));
+      if (Object.keys(dichas).length) delServidor(dichas);
+    })();
+  }, [ponerJornada, delServidor]);
+  // Con la app abierta y permiso de ubicación: salió cuando se aleja del punto de salida (después de haber estado ahí) y
+  // llegó cuando está donde termina con todas las paradas resueltas. Si la app no estaba abierta, queda el botón.
+  const alDia = useRef({ recorridos, jornada });
+  alDia.current = { recorridos, jornada };
+  const mirar = useCallback((f: Fijo) => {
+    if (f.precision > 150) return;
+    for (const r of alDia.current.recorridos) {
+      if (!r.paradas.length) continue;
+      const j = alDia.current.jornada[r.n] ?? {};
+      const base = r.base.lat != null && r.base.lng != null ? { lat: r.base.lat, lng: r.base.lng } : null;
+      if (base && !j.salida_at && !j.llegada_at) {
+        const d = km(f, base);
+        if (d <= CERCA_KM && !j.estuvo) ponerJornada((x) => ({ ...x, [r.n]: { ...x[r.n], estuvo: true } }));
+        else if (d >= LEJOS_KM && j.estuvo) avisar(r.n, 'salida', 'gps');
+      }
+      const vuelve = r.fin === undefined || !!r.vuelve;
+      const fin = vuelve ? base : r.fin && r.fin.lat != null && r.fin.lng != null ? { lat: r.fin.lat, lng: r.fin.lng } : null;
+      const resueltas = r.paradas.every((p) => hechaP(p) || p.visita?.resultado === 'no_se_pudo');
+      if (fin && !j.llegada_at && resueltas && km(f, fin) <= CERCA_KM) avisar(r.n, 'llegada', 'gps');
+    }
+  }, [avisar, ponerJornada]);
+  useEffect(() => seguirUbicacion(mirar), [mirar]);
+  // El punto puede llegar antes que el recorrido (o que la marca de la última parada): se vuelve a mirar con el último.
+  useEffect(() => { const f = ultimoFijo(); if (f) mirar(f); }, [recorridos, mirar]);
   const conParadas = recorridos.filter((r) => r.paradas.length);
   if (!conParadas.length) return null;
   return (
@@ -178,6 +229,21 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
             <h2 id={`titulo-ruta-${r.n}`}>Tu recorrido de hoy <span className="cuenta">{hechas}/{r.paradas.length}</span></h2>
             {sinFoto > 0 && <p className="ruta-sin-foto" role="status">{sinFoto === 1 ? 'A una parada hecha le falta' : `A ${sinFoto} paradas hechas les falta`} la foto del remito: abrila y sacala.</p>}
             <p className="ruta-sale">Salís de {r.base.nombre} a las {hhmm(r.salida)} · {vuelve ? 'volvés' : r.fin ? `terminás en ${r.fin.nombre}` : 'terminás en la última parada'} cerca de las {hhmm(sim.fin)}</p>
+            {(() => {
+              // Salgo / Terminé (para medir cuánto tarda el recorrido). Lo que ya avisó se puede deshacer.
+              const j = jornada[r.n] ?? {};
+              const pend = r.paradas.filter((p) => !hechaP(p) && p.visita?.resultado !== 'no_se_pudo').length;
+              const hora = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' });
+              const terminar = () => { if (!pend || window.confirm(`Te ${pend === 1 ? 'queda 1 parada' : `quedan ${pend} paradas`} sin hacer. ¿Terminás el recorrido igual?`)) avisar(r.n, 'llegada', 'boton'); };
+              return (
+                <div className="ruta-jornada">
+                  {!j.salida_at && !j.llegada_at && <button type="button" className="boton chico principal" onClick={() => avisar(r.n, 'salida', 'boton')}>Salgo</button>}
+                  {j.salida_at && <p className="ruta-dicho">Saliste a las {hora(j.salida_at)}<button type="button" className="enlace" onClick={() => avisar(r.n, 'salida', 'boton', true)}>Deshacer</button></p>}
+                  {j.salida_at && !j.llegada_at && <button type="button" className={`boton chico${pend ? '' : ' principal'}`} onClick={terminar}>Terminé el recorrido</button>}
+                  {j.llegada_at && <p className="ruta-dicho">Terminaste a las {hora(j.llegada_at)}<button type="button" className="enlace" onClick={() => avisar(r.n, 'llegada', 'boton', true)}>Deshacer</button></p>}
+                </div>
+              );
+            })()}
             {todo && (
               <div className="ruta-todo">
                 <a className="boton chico" href={todo.url} target="_blank" rel="noreferrer"><Icono nombre="navegar" tamano={22} />

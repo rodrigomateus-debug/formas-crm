@@ -711,15 +711,15 @@ export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo
 // `a_mano`: alguien ordenó sus paradas en la Ruta del día. Si no, se ordena solo por el recorrido más corto.
 // `fin`: dónde termina (pedido de Rodrigo del 13/11/2026): 'igual' (vuelve a donde salió), el id de un depósito, 'ultima'
 // (en la última parada, sin volver) u 'otro' (`fin_otro`).
-type LugarRuta = { nombre: string; direccion: string; lat: number | null; lng: number | null };
-interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: LugarRuta | null; a_mano?: boolean; fin?: string; fin_otro?: LugarRuta | null }
-type BaseGeo = Base & { lat: number | null; lng: number | null };
+export type LugarRuta = { nombre: string; direccion: string; lat: number | null; lng: number | null };
+export interface RutaGuardada { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: LugarRuta | null; a_mano?: boolean; fin?: string; fin_otro?: LugarRuta | null }
+export type BaseGeo = Base & { lat: number | null; lng: number | null };
 const puntoDe = (p: { lat: number | null; lng: number | null } | null | undefined): Punto | null => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
 // De dónde sale un recorrido: un depósito de Formas o el otro lugar que se eligió.
-const lugarSalida = (r: RutaGuardada, bases: BaseGeo[]): LugarRuta => (r.base === 'otro' && r.base_otro ? r.base_otro : bases.find((b) => b.id === r.base) ?? bases[0]);
+export const lugarSalida = (r: RutaGuardada, bases: BaseGeo[]): LugarRuta => (r.base === 'otro' && r.base_otro ? r.base_otro : bases.find((b) => b.id === r.base) ?? bases[0]);
 const salidaDe = (r: RutaGuardada, bases: BaseGeo[]) => puntoDe(lugarSalida(r, bases));
 // Dónde termina: el lugar (null si termina en la última parada), y en el mapa.
-const lugarFin = (r: RutaGuardada, bases: BaseGeo[]): LugarRuta | null =>
+export const lugarFin = (r: RutaGuardada, bases: BaseGeo[]): LugarRuta | null =>
   r.fin === 'ultima' ? null : r.fin === 'otro' && r.fin_otro ? r.fin_otro : bases.find((b) => b.id === r.fin) ?? lugarSalida(r, bases);
 const destinoDe = (r: RutaGuardada, bases: BaseGeo[]): Destino => { const l = lugarFin(r, bases); return l ? puntoDe(l) : 'ultima'; };
 

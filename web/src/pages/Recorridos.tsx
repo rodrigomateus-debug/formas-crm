@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
-import { Modal, QuienPidio, alEsc } from '../components';
+import { InfoTip, Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
@@ -89,21 +89,25 @@ export default function RecorridosPage() {
   const ir = (cambios: Record<string, string | null>) => setSp((p) => { const n = new URLSearchParams(p); for (const [k, v] of Object.entries(cambios)) { if (v == null) n.delete(k); else n.set(k, v); } return n; }, { replace: true });
   const cambio = useCallback(() => setVersion((v) => v + 1), []);
   const puede = meta.me.role !== 'viewer';
+  // A la derecha de las pestañas: los botones de la pestaña Destinos (los pone DestinosTab con un portal).
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   return (
     <div className={`content rc-page${tab === 'destinos' ? ' list-fixed' : ''}`}>
       <div className="page-head">
-        <h1>Recorridos</h1>
+        <h1 className="rc-titulo">Recorridos <InfoTip label="Qué es Recorridos">Lo que necesitás que el chofer lleve o retire un día: muestras, un sobre, mercadería, un trámite. Elegí el destino y te decimos si ese día ya se va ahí.</InfoTip></h1>
         {puede && <button type="button" className="btn primary" onClick={() => setNuevo({})}><Icon name="plus" size={16} />Nuevo encargo</button>}
       </div>
-      <p className="rc-intro muted">Lo que necesitás que el chofer lleve o retire un día: muestras, un sobre, mercadería, un trámite. Elegí el destino y te decimos si ese día ya se va ahí.</p>
+      <div className="rc-tabs-fila">
       <div className="tabs" role="tablist">
         {([['agenda', 'Próximos días'], ['encargos', 'Encargos'], ['destinos', 'Destinos']] as const).map(([k, t]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={`tab${tab === k ? ' on' : ''}`} onClick={() => ir({ tab: k === 'agenda' ? null : k })}>{t}</button>
         ))}
       </div>
+      {tab === 'destinos' && <div className="rc-tab-acciones" ref={setSlot} />}
+      </div>
       {tab === 'agenda' && <Agenda version={version} puede={puede} onNuevo={(destino, fecha) => setNuevo({ destino, fecha })} onAbrir={(id) => ir({ encargo: String(id) })} />}
       {tab === 'encargos' && <ListaEncargos version={version} onAbrir={(id) => ir({ encargo: String(id) })} />}
-      {tab === 'destinos' && <DestinosTab admin={meta.me.role === 'admin' ? <AdminRecorridos /> : null} />}
+      {tab === 'destinos' && <DestinosTab slot={slot} admin={meta.me.role === 'admin' ? <AdminRecorridos abierto /> : null} />}
       {nuevo && <EncargoModal inicial={nuevo} onClose={() => { setNuevo(null); ir({ nuevo: null }); }} onListo={() => { setNuevo(null); ir({ nuevo: null }); cambio(); }} />}
       {abierto && <EncargoModal id={abierto} onClose={() => ir({ encargo: null })} onListo={() => { ir({ encargo: null }); cambio(); }} />}
     </div>
@@ -319,7 +323,8 @@ export function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: 
 }
 
 // Para los administradores: el número del remito de traslado y traer el historial de la planilla.
-function AdminRecorridos() {
+// Suelto (en la pestaña Destinos se abre en una ventana, con «abierto»: sin el desplegable).
+function AdminRecorridos({ abierto = false }: { abierto?: boolean }) {
   const toast = useToast();
   const { meta } = useMeta();
   const [cfg, setCfg] = useState<{ remito_pv: string; remito_ultimo: number } | null>(null);
@@ -339,8 +344,8 @@ function AdminRecorridos() {
   };
   if (!cfg) return null;
   return (
-    <details className="rc-admin">
-      <summary>Configuración (administradores)</summary>
+    <details className={`rc-admin${abierto ? ' rc-admin-suelto' : ''}`} open={abierto || undefined}>
+      {!abierto && <summary>Configuración (administradores)</summary>}
       <div className="rc-form">
         <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <label className="field">Último número de remito de traslado usado<input className="input" inputMode="numeric" value={ultimo} onChange={(e) => setUltimo(e.target.value.replace(/\D/g, ''))} style={{ width: 160 }} /></label>

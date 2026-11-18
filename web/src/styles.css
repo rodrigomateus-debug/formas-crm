@@ -138,6 +138,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-ink); w
 .nav-link .count { margin-left: auto; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, .55); }
 .nav-link.active .count { color: #fff; }
 .nav-group { flex: none; margin-top: 8px; border-top: 1px solid var(--ui-line-on-navy); padding: 14px 10px 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255, 255, 255, .45); }
+/* Una raya sola, sin rótulo: separa una entrada que no es de ningún grupo (Analíticas). */
+.nav-group.nav-solo { padding: 0; margin-bottom: 8px; }
 [data-theme="contrast"] .nav-group, [data-theme="contrast"] .nav-link .count { color: #fff; }
 .sidebar .nav-bottom { margin-top: auto; padding: 12px 0 8px; display: flex; flex-direction: column; gap: 2px; flex: none; }
 .sidebar .me-wrap { margin: 0 -10px; padding: 10px; border-top: 1px solid var(--ui-line-on-navy); position: relative; flex: none; }
@@ -2079,6 +2081,7 @@ span.oc-boton { display: inline-flex; align-items: center; height: 28px; padding
 span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 
 /* ---------- Rendimiento de los recorridos (Rendimiento.tsx) ---------- */
+.rd-cab h2 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
 .rd-que { max-width: 900px; margin: -8px 0 12px; font-size: 13px; }
 .rd-filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; }
 .rd-filtros .chip { cursor: pointer; border: 1px solid transparent; font: inherit; font-size: 12.5px; }

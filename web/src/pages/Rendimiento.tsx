@@ -1,7 +1,8 @@
 import { Fragment, useMemo, useState } from 'react';
 import { http, qs, useAsync, useToast, Icon, Cargando } from '../lib';
 
-// Rendimiento de los choferes (pedido de Rodrigo del 17/11/2026; src/worker/rendimiento.ts, docs/RENDIMIENTO.md): qué
+// Rendimiento de los choferes (pedido de Rodrigo del 17/11/2026; src/worker/rendimiento.ts, docs/RENDIMIENTO.md). Es la
+// pestaña «Recorridos» de Analíticas (Analiticas.tsx). Qué
 // recorrido hizo cada chofer cada día, en km y en tiempo. Arriba, el período y los totales; después, cada chofer con sus
 // promedios (propios y externos) y, abajo, día por día: a qué hora salió y volvió, los km que hizo contra los del plan y
 // las paradas. Un clic en un día lo abre: las paradas en el orden en que las hizo y, para Logística, corregir la hora.
@@ -62,7 +63,7 @@ function resumen(filas: Fila[]) {
 }
 const pct = (x: number | null) => (x == null ? '—' : `${x > 0 ? '+' : ''}${Math.round(x * 100)} %`);
 
-export default function RendimientoPage() {
+export function RendimientoPanel() {
   const toast = useToast();
   const hoy = hoyIso();
   const ps = useMemo(() => periodos(hoy), [hoy]);
@@ -104,9 +105,9 @@ export default function RendimientoPage() {
   };
 
   return (
-    <div className="content rd">
-      <div className="page-head">
-        <h1>Rendimiento <span className="muted">de los recorridos</span></h1>
+    <div className="rd">
+      <div className="page-head rd-cab">
+        <h2>Rendimiento de los recorridos</h2>
         <button type="button" className="btn" disabled={!!trayendo} onClick={() => medir([hoy])} title="Vuelve a medir los recorridos de hoy con lo que los choferes marcaron hasta ahora"><Icon name="refresh" size={15} />Medir hoy</button>
         <button type="button" className="btn" disabled={!filas.length} onClick={exportar} title="Descarga el día por día de este período en un CSV"><Icon name="download" size={15} />Exportar</button>
       </div>
@@ -141,9 +142,9 @@ export default function RendimientoPage() {
             <div className="table-wrap">
               <table className="grid rd-tabla">
                 <thead><tr>
-                  <th className="nosort">Chofer</th><th className="nosort">Vehículo</th><th className="nosort der">Días</th><th className="nosort der">Km</th><th className="nosort der">Km por día</th>
-                  <th className="nosort der" title="Horas en la calle, de la salida a la llegada, por día de reparto">Horas por día</th><th className="nosort der" title="Las que hizo; entre paréntesis, las que no se pudieron">Paradas</th><th className="nosort der">Km por parada</th>
-                  <th className="nosort der" title="Tiempo en la calle dividido las paradas que visitó: incluye el viaje">Tiempo por parada</th><th className="nosort der" title="Cuánto más (o menos) hizo que lo que daba el plan, en km">Contra el plan</th>
+                  <th className="nosort">Chofer</th><th className="nosort">Vehículo</th><th className="nosort der">Días</th><th className="nosort der">Km</th><th className="nosort der" title="Km por día de reparto">Km/día</th>
+                  <th className="nosort der" title="Horas en la calle, de la salida a la llegada, por día de reparto">Horas/día</th><th className="nosort der" title="Las que hizo; entre paréntesis, las que no se pudieron">Paradas</th><th className="nosort der" title="Km por cada parada que visitó">Km/parada</th>
+                  <th className="nosort der" title="Tiempo en la calle dividido las paradas que visitó: incluye el viaje">Tiempo/parada</th><th className="nosort der" title="Cuánto más (o menos) hizo que lo que daba el plan, en km">Vs. plan</th>
                 </tr></thead>
                 <tbody>
                   {porChofer.map((c) => (

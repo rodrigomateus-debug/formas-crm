@@ -1,8 +1,13 @@
 # Rendimiento de los choferes
 
 Pedido de Rodrigo del 17/11/2026: medir qué recorrido hace cada chofer cada día, en km y en tiempo, para después sacar
-promedios por chofer y costo por km. Está en la pantalla **Rendimiento** (`/rendimiento`, en el menú de Logística,
-Producción y los administradores).
+promedios por chofer y costo por km. Está en **Analíticas → Recorridos** (`/analiticas`, para Logística, Producción y
+los administradores).
+
+**Analíticas** (pedido de Rodrigo del 18/11/2026) es una sola entrada del menú, aparte de CRM y Operaciones, para los
+números de cada área: así los módulos de trabajo no se llenan de pantallas de reportes. Adentro hay una pestaña por tema
+y cada perfil ve las suyas (`ANALITICAS` en `web/src/pages/Analiticas.tsx`); a quien no le toca ninguna, la entrada no le
+aparece (hoy, el perfil Ventas). Lo que venga (costos, puntualidad, ventas) se suma ahí como pestaña nueva.
 
 ## Qué se mide
 
@@ -45,7 +50,7 @@ Los choferes están avisados. Si hiciera falta el recorrido exacto, la opción e
 - De la salida vale la primera que llega; de la llegada, la última.
 - Si Logística le pasa el recorrido a otro chofer durante el día, lo anotado del primero no le queda al segundo.
 
-## La pantalla Rendimiento
+## La pestaña Recorridos
 
 - **Período**: esta semana, la pasada, este mes, el pasado o los últimos 90 días. Y todos, solo los **vehículos de
   Formas** o solo los **externos**.
@@ -76,7 +81,7 @@ Los choferes están avisados. Si hiciera falta el recorrido exacto, la opción e
 | La medición, los avisos de la app, el cierre nocturno, la corrección y la consulta | `src/worker/rendimiento.ts` |
 | Avisos de la app (`POST /hooks/chofer/api/ruta/evento`), el punto con la marca y lo ya avisado en `/ruta` | `src/worker/hooks.ts` |
 | API `/api/rendimiento…` | `src/worker/api.ts` |
-| Pantalla | `web/src/pages/Rendimiento.tsx` |
+| Pantalla | `web/src/pages/Analiticas.tsx` (la entrada y las pestañas) y `web/src/pages/Rendimiento.tsx` (la pestaña Recorridos) |
 | App del chofer: botones, detección por GPS y cola sin señal | `web/chofer/src/jornada.ts`, `web/chofer/src/Ruta.tsx` |
 | Prueba de punta a punta (servicio de rutas simulado) | `test/rendimiento.test.mjs` |
 

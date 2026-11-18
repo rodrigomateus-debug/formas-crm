@@ -3,6 +3,7 @@ import { HttpError } from './env';
 import { createRecord, updateRecord, normDomain, normPhone, normLinkedin, emailDomain, rowToRecord, type Props, type RecordRow } from './records';
 import { associate, primaryCompanyId } from './associations';
 import { createActivity, type ActivityInput } from './activities';
+import { esVentas } from './alcance';
 
 // Alta "inteligente" para integraciones (Darwin, Zapier, formularios, Claude): busca antes de crear,
 // completa solo lo vacío y asocia contacto ↔ empresa ↔ negocio.
@@ -68,6 +69,9 @@ export async function autoAssociateCompany(db: D1Database, ctx: Ctx, contact: Re
   const dom = emailDomain(props.email);
   if (!dom) return null;
   let company = await findCompany(db, { domain: dom });
+  // Perfil Ventas: la empresa de ese dominio es de otra vendedora; no se asocia (si no, quedaría a la vista y a mano de
+  // quien cargó el contacto). El contacto queda sin empresa y el aviso de duplicado lo da la pantalla.
+  if (company && esVentas(ctx.user) && company.owner_id != null && Number(company.owner_id) !== ctx.user.id) return null;
   if (!company) {
     const guess = dom.split('.')[0];
     company = await createRecord(db, ctx, 'company', { name: guess.charAt(0).toUpperCase() + guess.slice(1), domain: dom, owner_id: props.owner_id ?? null }, { strict: false, skipDedupe: true });

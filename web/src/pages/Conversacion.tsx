@@ -270,6 +270,8 @@ function useUsuariosMencionables(meta: Meta) {
 const sinTildes = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // Una imagen elegida para el próximo mensaje: se achica y se sube enseguida (se ve la miniatura mientras tanto).
+// En el celular no hay Ctrl+V: la ayuda del cuadro no lo nombra (el clip sigue para adjuntar fotos y archivos).
+const TACTIL = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 // Un archivo elegido para el próximo mensaje: se sube enseguida (las imágenes, achicadas) y se ve mientras tanto.
 interface Pendiente { tmp: string; url: string | null; nombre: string; size: number; adj?: Adjunto; error?: string }
 const ARCHIVO_MAX = 20 * 1024 * 1024;
@@ -408,7 +410,7 @@ export function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar,
             title="Adjuntar archivos: fotos, PDF, planillas, documentos… (también podés pegar una captura con Ctrl+V o arrastrarlos acá)"
             aria-label="Adjuntar archivos"><Icon name="clip" size={18} /></button>
         </>}
-        <textarea ref={ta} className="input" rows={1} value={texto} placeholder={placeholder ?? (subirA ? 'Escribí un comentario… (@ para mencionar, Ctrl+V para pegar una captura)' : 'Escribí un comentario… (@ para mencionar)')}
+        <textarea ref={ta} className="input" rows={1} value={texto} placeholder={placeholder ?? (subirA && !TACTIL ? 'Escribí un comentario… (@ para mencionar, Ctrl+V para pegar una captura)' : 'Escribí un comentario… (@ para mencionar)')}
           onChange={(e) => { setTexto(e.target.value); mirar(e.target.value, e.target.selectionStart); }}
           onClick={(e) => mirar(texto, e.currentTarget.selectionStart)}
           onPaste={(e) => {

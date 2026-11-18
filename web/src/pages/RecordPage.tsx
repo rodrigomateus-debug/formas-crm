@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando
+  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
 } from '../lib';
 import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
@@ -105,18 +105,6 @@ function RestoreButton({ type, id, onDone }: { type: ObjectType; id: number; onD
 
 // ---------- Columna izquierda: cabecera y propiedades ----------
 
-const KEY_PROPS: Record<ObjectType, string[]> = {
-  contact: ['email', 'phone', 'mobilephone', 'jobtitle', 'owner_id', 'lifecyclestage', 'hs_lead_status', 'origen_del_contacto', 'tipo_de_origen'],
-  company: ['domain', 'phone', 'owner_id', 'industry', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'objetivo_economico_anual', 'cuit'],
-  deal: ['amount', 'closedate', 'pipeline', 'dealstage', 'owner_id', 'producto', 'cantidad', 'tipo_de_producto', 'origen_del_negocio', 'hs_next_step'],
-  order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'hs_billing_address_email', 'hs_billing_address_phone'],
-};
-
-// «Acerca de» de cada objeto: lo elegido en «Elegir datos» o, si nadie eligió, lo de siempre.
-function keyPropsFor(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType) {
-  const chosen = meta.key_props?.[type];
-  return chosen?.length ? chosen : KEY_PROPS[type];
-}
 
 function KeyPropsModal({ type, onClose }: { type: ObjectType; onClose: () => void }) {
   const { meta, reload } = useMeta();

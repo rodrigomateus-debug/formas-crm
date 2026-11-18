@@ -1,4 +1,6 @@
 # Mientras convivan HubSpot y el CRM: trae a la noche lo que cambió en HubSpot en los últimos 2 días.
+# Además deja 1 a 1 con su HubSpot a los vendedores que ya prueban el CRM (OWNERS_1A1, ids de propietario de HubSpot):
+# todo lo suyo, lo que se sacó o borró allá, y un control de totales (artefacto «control-1a1»).
 # Se apaga el día del corte (borrar este archivo o desactivar el workflow).
 name: Sincronizar desde HubSpot
 
@@ -8,8 +10,13 @@ on:
       since:
         description: 'Desde (AAAA-MM-DD). Vacío = últimos 2 días. "todo" = migración completa.'
         required: false
-  schedule:
-    - cron: '17 6 * * *'
+      owner:
+        description: 'Solo el 1 a 1 de estos vendedores (id de propietario de HubSpot o mail, separados por coma). Vacío = la sincronización de siempre.'
+        required: false
+
+env:
+  # Mili Formosa (Corporate): primera prueba con el CRM.
+  OWNERS_1A1: '494686419'
 
 jobs:
   sync:
@@ -21,6 +28,7 @@ jobs:
         with:
           node-version: 22
       - name: Migrar
+        if: github.event.inputs.owner == ''
         env:
           HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
           CRM_URL: ${{ vars.CRM_URL }}
@@ -29,3 +37,17 @@ jobs:
           SINCE="${{ github.event.inputs.since }}"
           if [ "$SINCE" = "todo" ]; then node scripts/migrate-hubspot.mjs
           else node scripts/migrate-hubspot.mjs --since="${SINCE:-$(date -u -d '2 days ago' +%F)}"; fi
+      - name: 1 a 1 por vendedor
+        if: always()
+        env:
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}
+          OWNER_INPUT: ${{ github.event.inputs.owner }}
+        run: node scripts/migrate-hubspot.mjs --owner="${OWNER_INPUT:-$OWNERS_1A1}" --report=control-1a1.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: control-1a1
+          path: control-1a1*.json
+          if-no-files-found: ignore

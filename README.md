@@ -115,7 +115,22 @@ Con `--limit=50` es una prueba corta. Después, la corrida completa (sin `--limi
 HUBSPOT_TOKEN=pat-… CRM_URL=https://<crm> CRM_TOKEN=fcrm_… node scripts/migrate-hubspot.mjs --since=2026-11-01
 ```
 
-Es repetible: no duplica y no pisa lo que ya se editó en el CRM. Trae propietarios (con su equipo), pipelines,
+**1 a 1 con el HubSpot de un vendedor** (para quien ya prueba el CRM; hoy Mili Formosa, propietario 494686419):
+
+```bash
+HUBSPOT_TOKEN=pat-… CRM_URL=https://<crm> CRM_TOKEN=fcrm_… node scripts/migrate-hubspot.mjs --owner=494686419 --report=control.json
+```
+
+Trae todos sus contactos, empresas, negocios y pedidos (y los registros de otros asociados a los suyos), deja sus
+asociaciones exactamente como en HubSpot, todas las actividades suyas o de sus registros (aunque las haya cargado otro), y
+archiva lo que ya no está allá; lo que pasó a otro vendedor queda con el otro. Acá HubSpot manda: pisa lo editado en el CRM,
+salvo lo que es solo del CRM (tipo de relación, compras y saldos de Finnegans, lo de ClickUp). Al final compara los totales
+de los dos lados y, si no dan igual, termina con error. El workflow «Sincronizar desde HubSpot» lo corre todas las noches
+para los de `OWNERS_1A1` y deja el control como artefacto; a mano, con el campo «owner».
+
+Es repetible: no duplica y no pisa lo que ya se editó en el CRM. Las propiedades de HubSpot se aplican encima de las del
+registro (lo que es solo del CRM no se pierde) y lo que se vació en HubSpot se vacía. Con `--since` también trae las
+asociaciones de lo que cambió y recalcula la última y próxima actividad solo de lo tocado. Trae propietarios (con su equipo), pipelines,
 propiedades (crea las custom que falten y suma opciones nuevas), contactos, empresas, negocios, pedidos, asociaciones
 con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, tareas y WhatsApp.
 

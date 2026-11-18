@@ -62,7 +62,7 @@ const ESQUEMA = {
 const INSTRUCCIONES = `Sos parte del Hub de Formas Publicitarias, una empresa de Buenos Aires. Te paso destinos de la libreta de Logística (proveedores, impresores, talleres, depósitos, oficinas de clientes, expresos), casi todos en el AMBA (CABA y conurbano), algunos en el interior. Algunos tienen la dirección incompleta: sin localidad, sin provincia, con abreviaturas o errores de tipeo, o con la localidad metida en la dirección.
 Para cada uno devolvé:
 - direccion: solo calle y altura, prolija («Av. del Libertador 1855», «Nicaragua 1651»). Mantené piso, oficina o local si los tenía. NUNCA inventes una calle ni una altura que no estén en los datos; si no hay altura, dejala sin altura.
-- localidad: la localidad o ciudad («Vicente López», «Sarandí», «Rosario»). Si es en la Ciudad de Buenos Aires, «CABA».
+- localidad: la localidad o ciudad («Vicente López», «Sarandí», «Rosario»). En la Ciudad de Buenos Aires, el barrio si está en los datos («Flores», «Puerto Madero»); si no, «CABA».
 - provincia: «Ciudad Autónoma de Buenos Aires», «Buenos Aires», «Santa Fe», etc.
 - confianza: de 0 a 100, cuán seguro estás de que esa calle, esa altura, esa localidad y esa provincia son las del lugar (no si la dirección está bien escrita). Una calle que existe en varias localidades y sin otra pista no pasa de 60. Sin altura, no pasa de 50. Poné 90 o más solo si de verdad no tenés dudas (la localidad o la zona lo confirman, o la calle y altura son inconfundibles).
 - motivo: una frase corta en castellano rioplatense para Logística: qué completaste o por qué no estás seguro («Agregué Sarandí, Buenos Aires: Nicaragua al 1600 está en Sarandí y la zona es Sur», «Hay calle Mitre en muchas localidades y no hay zona»).

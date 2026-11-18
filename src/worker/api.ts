@@ -13,6 +13,7 @@ import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
+import { agendarReunion, calendarConfig, DEFAULT_CALENDAR, syncCalendars, type NuevaReunion } from './calendar';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
@@ -2110,6 +2111,39 @@ api.put('/gmail', async (c) => {
 api.post('/gmail/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   return c.json(await syncAll(c.env));
+});
+
+// ---------- Google Calendar (calendar.ts) ----------
+
+api.get('/calendar', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const db = c.env.DB;
+  const { results } = await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'calendar_state:%' OR key = 'calendar_last_run'").all<{ key: string; value: string }>();
+  return c.json({
+    config: await calendarConfig(db), defaults: DEFAULT_CALENDAR, has_credentials: !!c.env.GOOGLE_SA_JSON,
+    state: Object.fromEntries(results.map((r) => [r.key.replace('calendar_state:', ''), JSON.parse(r.value)])),
+  });
+});
+
+api.put('/calendar', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const cfg = { ...(await calendarConfig(c.env.DB)), ...(await c.req.json()) };
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('calendar', ?)").bind(JSON.stringify(cfg)).run();
+  return c.json(cfg);
+});
+
+api.post('/calendar/sync', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await syncCalendars(c.env));
+});
+
+// Para la ficha: si se puede agendar en Google Calendar.
+api.get('/calendar/estado', async (c) => c.json({ agendar: !!c.env.GOOGLE_SA_JSON }));
+
+api.post('/calendar/reunion', async (c) => {
+  const ctx = c.get('ctx');
+  requireRole(ctx, 'admin', 'manager', 'member');
+  return c.json(await agendarReunion(c.env, ctx, await c.req.json<NuevaReunion>()));
 });
 
 // ---------- Avisos a otros sistemas ----------

@@ -549,6 +549,21 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
             : <button className="btn ghost sm" onClick={() => setEdit(true)}>{a.type === 'task' ? 'Abrir' : 'Editar'}</button>}
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
+      {/* Reuniones de Google Calendar (calendar.ts): hasta qué hora, dónde, el Meet y el evento. */}
+      {a.type === 'meeting' && (a.meta?.end_at || a.meta?.location || a.meta?.meet || a.meta?.html_link) && (
+        <div className="small muted row wrap" style={{ marginTop: 4, gap: 10 }}>
+          {a.meta.end_at && <span>Hasta {fmtDate(a.meta.end_at, true)}</span>}
+          {a.meta.location && <span>{a.meta.location}</span>}
+          {a.meta.meet && <a href={a.meta.meet} target="_blank" rel="noopener noreferrer"><Icon name="external" size={12} /> Unirse por Meet</a>}
+          {a.meta.html_link && <a href={a.meta.html_link} target="_blank" rel="noopener noreferrer"><Icon name="external" size={12} /> Ver en Calendar</a>}
+        </div>
+      )}
+      {/* Resumen de la reunión (Gemini en Meet, leído por calendar.ts; o Claude, por el conector). */}
+      {a.type === 'meeting' && a.meta?.resumen && (
+        <div className="tl-resumen"><b>Resumen{a.meta.resumen_de ? ` (${a.meta.resumen_de})` : ''}</b>
+          {a.meta.notas_url && <> · <a href={a.meta.notas_url} target="_blank" rel="noopener noreferrer">Ver notas completas</a></>}
+          <div>{a.meta.resumen}</div></div>
+      )}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}
       {a.links.filter((l) => l.id !== currentId).length > 0 && (
         <div className="links">{a.links.filter((l) => l.id !== currentId).map((l) => <Link key={l.id} className="chip" to={recordUrl(l.type, l.id)}>{l.name}</Link>)}</div>
@@ -595,8 +610,19 @@ function Composer({ type, record, associations, onClose, onSaved }: {
   const tomorrow = new Date(now.getTime() + 86_400_000); tomorrow.setHours(10, 0, 0, 0);
   const [f, setF] = useState<Record<string, any>>({
     subject: '', body: '', direction: type === 'email' || type === 'whatsapp' ? 'out' : undefined, outcome: type === 'call' ? 'Conectada' : undefined,
-    occurred_at: now.toISOString(), due_at: tomorrow.toISOString(), owner_id: meta.me.id, priority: 'none', task_type: 'todo',
+    occurred_at: type === 'meeting' ? tomorrow.toISOString() : now.toISOString(), due_at: tomorrow.toISOString(), owner_id: meta.me.id, priority: 'none', task_type: 'todo',
   });
+  // Reunión: además de registrarla, agendarla en Google Calendar de quien la crea, con invitaciones y Meet (calendar.ts).
+  const cal = useAsync(() => (type === 'meeting' ? http<{ agendar: boolean }>('GET', '/calendar/estado') : Promise.resolve({ agendar: false })), [type]);
+  const puedeAgendar = type === 'meeting' && !!cal.data?.agendar;
+  const [agendar, setAgendar] = useState(true);
+  const enCalendar = puedeAgendar && agendar;
+  const [duracion, setDuracion] = useState(60);
+  const [meet, setMeet] = useState(true);
+  const conMail = [...(record.type === 'contact' ? [record] : []), ...(associations?.contact ?? [])]
+    .filter((c, i, l) => c.props.email && l.findIndex((x) => x.id === c.id) === i);
+  const [invitados, setInvitados] = useState<Set<string>>(() => new Set(conMail.slice(0, record.type === 'contact' ? 1 : 3).map((c) => String(c.props.email).toLowerCase())));
+  const [otros, setOtros] = useState('');
   // Registros asociados que también reciben la actividad (como en HubSpot al registrar).
   const related = [...(associations?.company ?? []), ...(associations?.deal ?? []), ...(associations?.contact ?? [])];
   const openDeals = (associations?.deal ?? []).filter((d) => !stageOf(meta, d.props.dealstage)?.stage.is_closed);
@@ -609,6 +635,20 @@ function Composer({ type, record, associations, onClose, onSaved }: {
   const save = async () => {
     if (type === 'task' && !f.subject.trim()) { toast('La tarea necesita un título', true); return; }
     if (type !== 'task' && !f.body.trim() && !f.subject.trim()) { toast('Escribí algo para registrar', true); return; }
+    if (enCalendar) {
+      const mails = [...invitados, ...otros.split(/[,;\s]+/).map((x) => x.trim().toLowerCase()).filter(Boolean)];
+      if (!f.subject.trim()) { toast('Ponele un título a la reunión', true); return; }
+      if (!mails.length) { toast('Elegí al menos un invitado', true); return; }
+      setBusy(true);
+      try {
+        const fin = new Date(new Date(f.occurred_at).getTime() + duracion * 60_000).toISOString();
+        const r = await http<{ meet: string | null }>('POST', '/calendar/reunion', { subject: f.subject, body: f.body, start: f.occurred_at, end: fin, attendees: mails, meet,
+          location: f.meta?.location, links: [record.id, ...links] });
+        toast(`Reunión agendada: les llegó la invitación${r.meet ? ' con el link de Meet' : ''}`);
+        onSaved();
+      } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+      return;
+    }
     setBusy(true);
     try {
       await http('POST', '/activities', { ...f, type, links: [record.id, ...links], meta: f.meta, ...(type === 'task' ? { colaboradores: colabs.map(Number) } : {}) });
@@ -618,7 +658,7 @@ function Composer({ type, record, associations, onClose, onSaved }: {
   };
   return (
     <div className="panel composer">
-      <div className="panel-head"><h3>{type === 'task' ? 'Crear tarea' : `Registrar ${ACTIVITY_LABEL[type].toLowerCase()}`}</h3><button className="btn ghost sm" onClick={onClose}>Cancelar</button></div>
+      <div className="panel-head"><h3>{type === 'task' ? 'Crear tarea' : enCalendar ? 'Agendar reunión' : `Registrar ${ACTIVITY_LABEL[type].toLowerCase()}`}</h3><button className="btn ghost sm" onClick={onClose}>Cancelar</button></div>
       <div className="panel-body">
         {(type === 'task' || type === 'email' || type === 'meeting') && (
           <input className="input" autoFocus placeholder={type === 'task' ? 'Título de la tarea' : type === 'email' ? 'Asunto' : 'Título de la reunión'} value={f.subject} onChange={(e) => setF({ ...f, subject: e.target.value })} />
@@ -641,15 +681,36 @@ function Composer({ type, record, associations, onClose, onSaved }: {
           </> : (
             <label className="row small">{type === 'meeting' ? 'Empieza' : 'Fecha'}<input className="input" style={{ width: 210 }} type="datetime-local" value={toLocalInput(f.occurred_at)} onChange={(e) => setF({ ...f, occurred_at: new Date(e.target.value).toISOString() })} /></label>
           )}
-          <Select className="input" style={{ width: 190 }} value={f.owner_id} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })} aria-label="Responsable">
+          {/* Agendada en Calendar, es de quien la crea (va a su calendario). */}
+          {!enCalendar && <Select className="input" style={{ width: 190 }} value={f.owner_id} onChange={(e) => setF({ ...f, owner_id: Number(e.target.value) })} aria-label="Responsable">
             {meta.users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
-          </Select>
+          </Select>}
           {/* Tareas en equipo: además del responsable, quienes colaboran (y conversan en la tarea). */}
           {type === 'task' && <span style={{ width: 200 }}><MultiPick options={meta.users.filter((u) => u.active && !u.deleted_at && u.id !== f.owner_id).map((u) => ({ value: String(u.id), label: u.name }))}
             values={colabs} onChange={setColabs} resumen="Sin colaboradores" /></span>}
         </div>
-        {type === 'meeting' && <input className="input" placeholder="Lugar o link" value={f.meta?.location ?? ''} onChange={(e) => setF({ ...f, meta: { ...f.meta, location: e.target.value } })} />}
-        <textarea className="input" autoFocus={type === 'note' || type === 'call' || type === 'whatsapp'} rows={5} placeholder={type === 'task' ? 'Detalle (opcional)' : 'Qué pasó…'} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />
+        {puedeAgendar && (
+          <label className="row small"><input type="checkbox" checked={agendar} onChange={(e) => setAgendar(e.target.checked)} />Agendar en Google Calendar y mandar la invitación</label>
+        )}
+        {enCalendar && <>
+          <div className="row wrap small">
+            <label className="row small">Dura<Select className="input" style={{ width: 120 }} value={String(duracion)} onChange={(e) => setDuracion(Number(e.target.value))}>
+              {([[15, '15 min'], [30, '30 min'], [45, '45 min'], [60, '1 hora'], [90, '1 hora y media'], [120, '2 horas']] as const).map(([m, t]) => <option key={m} value={String(m)}>{t}</option>)}</Select></label>
+            <label className="row small"><input type="checkbox" checked={meet} onChange={(e) => setMeet(e.target.checked)} />Con link de Google Meet</label>
+          </div>
+          <div className="row wrap small">
+            <span className="muted">Invitados:</span>
+            {conMail.map((c) => { const m = String(c.props.email).toLowerCase(); return (
+              <label key={c.id} className={`chip${invitados.has(m) ? ' on' : ''}`} title={m}>
+                <input type="checkbox" style={{ display: 'none' }} checked={invitados.has(m)} onChange={() => { const s = new Set(invitados); s.has(m) ? s.delete(m) : s.add(m); setInvitados(s); }} />
+                {c.name}
+              </label>
+            ); })}
+            <input className="input" style={{ flex: '1 1 220px' }} placeholder={conMail.length ? 'Otros mails (separados por coma)' : 'Mails de los invitados (separados por coma)'} value={otros} onChange={(e) => setOtros(e.target.value)} />
+          </div>
+        </>}
+        {type === 'meeting' && <input className="input" placeholder={enCalendar && meet ? 'Lugar (opcional: el link de Meet va solo)' : 'Lugar o link'} value={f.meta?.location ?? ''} onChange={(e) => setF({ ...f, meta: { ...f.meta, location: e.target.value } })} />}
+        <textarea className="input" autoFocus={type === 'note' || type === 'call' || type === 'whatsapp'} rows={5} placeholder={type === 'task' ? 'Detalle (opcional)' : enCalendar ? 'Descripción para la invitación (opcional)' : 'Qué pasó…'} value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} />
         {related.length > 0 && (
           <div className="row wrap small">
             <span className="muted">También asociar a:</span>
@@ -661,7 +722,7 @@ function Composer({ type, record, associations, onClose, onSaved }: {
             ))}
           </div>
         )}
-        <div className="row"><span className="grow" /><button className="btn primary" disabled={busy} onClick={save}>{type === 'task' ? 'Crear tarea' : 'Registrar'}</button></div>
+        <div className="row"><span className="grow" /><button className="btn primary" disabled={busy} onClick={save}>{type === 'task' ? 'Crear tarea' : enCalendar ? 'Agendar y enviar invitación' : 'Registrar'}</button></div>
       </div>
     </div>
   );

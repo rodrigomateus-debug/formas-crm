@@ -10,6 +10,7 @@ import { hooks } from './hooks';
 import { handleMcp } from './mcp';
 import { migrate } from './migrate';
 import { syncAll } from './gmail';
+import { syncCalendars } from './calendar';
 import { correrAvisos } from './avisos';
 import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
@@ -124,6 +125,7 @@ export default {
         const horaUtc = new Date(event.scheduledTime).getUTCHours();
         if (horaUtc >= 3 && horaUtc < 9) await safe(() => resumirPendientes(env, { budget: b, max: 15 }));
         await safe(() => syncAll(env, b));
+        await safe(() => syncCalendars(env, b));   // reuniones de Google Calendar (calendar.ts)
       }
       else {
         // Facturas: siempre las que avisó el informe de cada hora; el barrido de todos los pedidos, solo de 3 a 4 de la mañana

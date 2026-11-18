@@ -495,6 +495,7 @@ function Integrations() {
       <Pedidos />
       <BocetosDrive />
       <Gmail />
+      <Calendario />
       <DarwinActividad />
       <OutboundHooks />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">
@@ -628,6 +629,45 @@ function Gmail() {
           {last?.at && <span className="small muted">Última pasada: {fmtDate(last.at, true)}</span>}
         </div>
         {last?.out?.some((o) => o.error) && <div className="small" style={{ color: 'var(--bad)' }}>{last.out.filter((o) => o.error).map((o) => `${o.mailbox}: ${o.error}`).join(' · ')}</div>}
+      </div>
+    </div>
+  );
+}
+
+interface CalendarStatus {
+  config: { enabled: boolean; create_contacts: boolean; users: string[] | 'all' };
+  has_credentials: boolean;
+  state: Record<string, { at?: string; out?: Array<{ calendar?: string; error?: string; nuevas?: number; skipped?: string }> }>;
+}
+
+// Google Calendar (calendar.ts): las reuniones con gente de afuera quedan como actividad; desde la ficha se agendan.
+function Calendario() {
+  const toast = useToast();
+  const st = useAsync(() => http<CalendarStatus>('GET', '/calendar'), []);
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const cfg = st.data.config;
+  const save = async (patch: Partial<CalendarStatus['config']>) => {
+    try { await http('PUT', '/calendar', patch); st.reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
+  };
+  const last = st.data.state.calendar_last_run;
+  return (
+    <div className="panel"><div className="panel-head"><h2>Reuniones (Google Calendar)</h2>
+      {st.data.has_credentials ? <span className={`tag ${cfg.enabled ? 'ok' : ''}`}>{cfg.enabled ? 'Activo' : 'Apagado'}</span> : <span className="tag warn">Falta la cuenta de servicio</span>}</div>
+      <div className="panel-body stack">
+        <p style={{ margin: 0 }}>Cada 10 minutos mira los calendarios del equipo: las reuniones con invitados de afuera quedan como actividad «Reunión» en sus contactos, su empresa y su negocio abierto. Si se mueven, se actualizan; si se cancelan, se archivan. Desde la ficha, «Reunión» la agenda en el calendario de quien la crea y manda la invitación (con Meet).</p>
+        <p className="small muted" style={{ margin: 0 }}>Usa la misma cuenta de servicio que Gmail y sus dominios propios e ignorados. En Google Workspace (Seguridad → Control de API → Delegación de todo el dominio) hay que sumarle el permiso https://www.googleapis.com/auth/calendar.events.</p>
+        <label className="row"><input type="checkbox" checked={cfg.enabled} disabled={!st.data.has_credentials} onChange={(e) => save({ enabled: e.target.checked })} />Registrar las reuniones automáticamente</label>
+        <label className="row"><input type="checkbox" checked={cfg.create_contacts} onChange={(e) => save({ create_contacts: e.target.checked })} />Crear el contacto (y su empresa) cuando un invitado no está en el CRM</label>
+        <div className="row">
+          <button className="btn" disabled={busy || !st.data.has_credentials || !cfg.enabled} onClick={async () => {
+            setBusy(true);
+            try { const r = await http<Array<{ nuevas?: number; error?: string }>>('POST', '/calendar/sync'); toast(`Listo: ${r.reduce((n, x) => n + (x.nuevas ?? 0), 0)} reuniones nuevas`); st.reload(); }
+            catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+          }}>Sincronizar ahora</button>
+          {last?.at && <span className="small muted">Última pasada: {fmtDate(last.at, true)}</span>}
+        </div>
+        {last?.out?.some((o) => o.error) && <div className="small" style={{ color: 'var(--bad)' }}>{last.out.filter((o) => o.error).map((o) => `${o.calendar}: ${o.error}`).join(' · ')}</div>}
       </div>
     </div>
   );

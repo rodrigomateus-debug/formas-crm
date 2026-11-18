@@ -2446,3 +2446,6 @@ thead .ds-acciones { z-index: 2; }
 .info-tip-globo p { margin: 0; }
 .info-tip-globo p + p { margin-top: 6px; }
 .ds-mapa-tope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }
+/* Resumen de una reunión en la línea de tiempo (RecordPage, ActivityItem). */
+.tl-resumen { margin-top: 6px; padding: 8px 10px; border-radius: var(--r-control); background: var(--accent-soft); font-size: 13px; line-height: 1.45; }
+.tl-resumen > div { white-space: pre-line; margin-top: 4px; color: var(--ui-ink); }

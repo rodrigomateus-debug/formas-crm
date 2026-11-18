@@ -25,6 +25,7 @@ export interface Env {
   // Solo para pruebas: otras URLs de Google.
   GOOGLE_TOKEN_URL?: string;
   GMAIL_API_URL?: string;
+  CALENDAR_API_URL?: string;   // tests: un Google Calendar falso
   DRIVE_API_URL?: string;          // Drive simulado en las pruebas
   GOOGLE_USERINFO_URL?: string;    // perfil de Google (foto de los usuarios) simulado en las pruebas
   BOCETOS_DRIVE_FOLDER?: string;   // carpeta (o unidad compartida) de los bocetos, si no está en Configuración

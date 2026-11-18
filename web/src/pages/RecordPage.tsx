@@ -536,7 +536,9 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
       <div className="h">
         {a.type === 'task'
           ? <button className={`check-round${done ? ' on' : ''}`} onClick={toggle} aria-label={done ? 'Marcar pendiente' : 'Completar'}>{done && <Icon name="check" />}</button>
-          : <span className="ic"><Icon name={a.type} /></span>}
+          : a.meta?.darwin
+            ? <span className="ic darwin-ic"><img src="/darwin.png" alt="Darwin" width={16} height={16} /></span>
+            : <span className="ic"><Icon name={a.type} /></span>}
         <span className="subj grow ellipsis"><b>{title}</b> <span className="muted">· <UserChip id={a.owner_id} size="xs" />{a.colaboradores?.length ? ` +${a.colaboradores.length}` : ''}{a.source !== 'crm' ? ` · ${a.source}` : ''}</span></span>
         {a.type === 'task' && !!a.comentarios && <span className={`tarea-cuenta${a.sin_leer ? ' sin-leer' : ' muted small'}`} title={a.sin_leer ? `${a.sin_leer} sin leer` : 'Comentarios'}><Icon name="chat" size={12} />{a.comentarios}</span>}
         <span className={`when${overdue ? ' overdue' : ''}`}>{a.type === 'task' ? `Vence ${fmtDate(a.due_at, true)}` : fmtDate(a.occurred_at, true)}</span>
@@ -545,7 +547,7 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         {a.type === 'email'
           ? gmailUrl(a) && <a className="btn ghost sm" href={gmailUrl(a)!} target="_blank" rel="noopener noreferrer" title={a.meta?.gmail_id ? 'Abrir el hilo en Gmail' : 'Buscar este mail en Gmail'}><Icon name="external" size={13} />Ver en Gmail</a>
           : a.meta?.darwin
-            ? typeof a.meta.link === 'string' && <a className="btn ghost sm" href={a.meta.link} target="_blank" rel="noopener noreferrer" title="Abrir la conversación en Darwin"><Icon name="external" size={13} />Darwin</a>
+            ? typeof a.meta.link === 'string' && <a className="btn ghost sm" href={a.meta.link} target="_blank" rel="noopener noreferrer" title="Abrir la conversación en Darwin"><img src="/darwin.png" alt="" width={13} height={13} />Darwin</a>
             : <button className="btn ghost sm" onClick={() => setEdit(true)}>{a.type === 'task' ? 'Abrir' : 'Editar'}</button>}
       </div>
       {a.type === 'email' && (a.meta.from || a.meta.to) && <div className="small muted" style={{ marginTop: 4 }}>De {a.meta.from} · Para {a.meta.to}{a.meta.cc ? ` · CC ${a.meta.cc}` : ''}</div>}
@@ -563,6 +565,13 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
         <div className="tl-resumen"><b>Resumen{a.meta.resumen_de ? ` (${a.meta.resumen_de})` : ''}</b>
           {a.meta.notas_url && <> · <a href={a.meta.notas_url} target="_blank" rel="noopener noreferrer">Ver notas completas</a></>}
           <div>{a.meta.resumen}</div></div>
+      )}
+      {/* Resumen del día de Darwin (darwin.ts): que se vea que lo escribió la IA a partir de la conversación en Darwin. */}
+      {a.meta?.darwin && (
+        <div className="darwin-sello">
+          <span className="tag ia"><Icon name="spark" size={12} />Hecho con IA</span>
+          <span className="darwin-de"><img src="/darwin.png" alt="" width={14} height={14} />De la conversación en Darwin{a.meta.atendio ? ` · atendió ${a.meta.atendio}` : ''}</span>
+        </div>
       )}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}
       {a.links.filter((l) => l.id !== currentId).length > 0 && (

@@ -2467,3 +2467,10 @@ thead .ds-acciones { z-index: 2; }
 @media (max-width: 720px) { .dir-embudos { grid-template-columns: 1fr; } }
 .dir-alerta { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px; background: var(--ui-negative-soft, var(--warn-soft)); color: var(--ui-negative-ink, var(--warn)); text-decoration: none; font-size: 13px; }
 .dir-alerta:hover { text-decoration: underline; }
+
+/* Resumen del día de Darwin (RecordPage → ActivityItem): el logo de Darwin y el sello «Hecho con IA». */
+.tl-item .ic.darwin-ic { background: #fff; border: 1px solid var(--ui-border, rgba(0,0,0,.08)); }
+.tl-item .ic.darwin-ic img { display: block; }
+.darwin-sello { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 12px; color: var(--muted, #667); }
+.darwin-sello .darwin-de { display: inline-flex; align-items: center; gap: 5px; }
+.tag.ia { background: color-mix(in srgb, #3d5af1 12%, transparent); color: #3d5af1; font-weight: 600; }

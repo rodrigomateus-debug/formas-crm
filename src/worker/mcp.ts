@@ -3,6 +3,7 @@ import { assertType, HttpError, OBJECT_TYPES } from './env';
 import { Meta } from './meta';
 import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor, updateRecord, type Filter } from './records';
 import { associate, associationsOf, dissociate, primaryCompanyId } from './associations';
+import { limpiarGrupales } from './calendar';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
@@ -345,6 +346,15 @@ const TOOLS: Tool[] = [
          WHERE c.record_id = ? ${a.property ? 'AND c.prop = ?' : ''} ORDER BY c.changed_at DESC LIMIT 200`,
       ).bind(...(a.property ? [Number(a.id), a.property] : [Number(a.id)])).all();
       return results;
+    },
+  },
+  {
+    name: 'calendario_limpiar_grupales',
+    description: 'Solo administradores. Archiva las reuniones del calendario que son grupales (más de 3 empresas de afuera: boards, eventos, webinars) y los contactos y empresas que creó el calendario y quedaron sin nada. Con aplicar=false (default) solo lista qué archivaría. Se puede restaurar.',
+    inputSchema: { type: 'object', properties: { aplicar: { type: 'boolean' } } },
+    run: async (a, ctx, env) => {
+      if (ctx.user.role !== 'admin') throw new HttpError(403, 'Solo para administradores.');
+      return limpiarGrupales(env, { ...ctx, source: 'calendar' }, a.aplicar === true);
     },
   },
   {

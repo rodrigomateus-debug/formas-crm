@@ -114,7 +114,7 @@ function ListaConsultas() {
                       c.entrega ? `entrega: ${c.entrega}` : ''].filter(Boolean).join(' · ')}
                   </td>
                   <td className="small">{c.atendio ?? ''}</td>
-                  <td>{c.link && <a className="btn ghost sm" href={c.link} target="_blank" rel="noopener noreferrer" title="Abrir la conversación en Darwin"><Icon name="external" size={13} />Darwin</a>}</td>
+                  <td>{c.link && <a className="btn ghost sm" href={c.link} target="_blank" rel="noopener noreferrer" title="Abrir la conversación en Darwin"><img src="/darwin.png" alt="" width={13} height={13} />Darwin</a>}</td>
                 </tr>
               ))}
             </tbody>
@@ -154,7 +154,7 @@ function SinRespuesta() {
                   <td>{p.asignada_a ?? ''}</td>
                   <td title={fmtDate(p.ultima_respuesta_cliente, true)}>{fmtRelative(p.ultima_respuesta_cliente)}</td>
                   <td>{p.ultima_actividad_equipo ? fmtRelative(p.ultima_actividad_equipo) : 'nunca'}</td>
-                  <td>{p.link && <a className="btn ghost sm" href={p.link} target="_blank" rel="noopener noreferrer"><Icon name="external" size={13} />Darwin</a>}</td>
+                  <td>{p.link && <a className="btn ghost sm" href={p.link} target="_blank" rel="noopener noreferrer"><img src="/darwin.png" alt="" width={13} height={13} />Darwin</a>}</td>
                 </tr>
               ))}
             </tbody>

@@ -2,7 +2,7 @@ import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { createActivity, updateActivity, type ActivityRow } from './activities';
 import { findContact, upsertContact } from './upsert';
-import { updateRecord, type Props, type RecordRow } from './records';
+import { archiveRecords, updateRecord, type Props, type RecordRow } from './records';
 import { Budget, OutOfBudget } from './budget';
 import { serviceToken } from './google';
 import { gmailConfig, openDealOf, personName } from './gmail';
@@ -24,9 +24,12 @@ export interface CalendarConfig {
   create_contacts: boolean;
   users: string[] | 'all';
   lookback_days: number;
+  // Más empresas de afuera que esto en una reunión (un board, un evento, un webinar): no es una reunión con un cliente y no
+  // se registra. Cada mail personal (gmail, hotmail…) cuenta como una empresa.
+  max_empresas: number;
 }
 
-export const DEFAULT_CALENDAR: CalendarConfig = { enabled: false, create_contacts: true, users: 'all', lookback_days: 30 };
+export const DEFAULT_CALENDAR: CalendarConfig = { enabled: false, create_contacts: true, users: 'all', lookback_days: 30, max_empresas: 3 };
 
 export async function calendarConfig(db: D1Database): Promise<CalendarConfig> {
   const row = await db.prepare("SELECT value FROM settings WHERE key = 'calendar'").first<{ value: string }>();
@@ -95,6 +98,19 @@ function metaDe(e: GEvent, user: User, externos: string[]) {
   };
 }
 
+// La descripción del evento sin el texto de la invitación de Teams, Zoom o Meet (links, códigos, teléfonos), ni HTML.
+export function limpiarDescripcion(d: string) {
+  let t = d.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  const corte = t.search(/\n?\s*(_{8,}|-::~:~::|Reuni[oó]n de Microsoft Teams|Microsoft Teams meeting|Join Zoom Meeting|Unirse a la reuni[oó]n Zoom|Únase a la reunión de Zoom|Unirse con Google Meet|Join with Google Meet)/i);
+  if (corte >= 0) t = t.slice(0, corte);
+  t = t.split('\n').map((l) => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return t.length > 1500 ? `${t.slice(0, 1500)}…` : t;
+}
+
+// Las empresas de afuera de una reunión: los dominios, y cada mail personal (gmail, hotmail…) como una aparte.
+const PERSONALES = /@(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|me|msn|aol|proton(mail)?)\.[a-z.]+$/;
+export const empresasDe = (mails: string[]) => new Set(mails.map((m) => (PERSONALES.test(m) ? m : m.split('@')[1])));
+
 // Registra (o actualiza) una reunión del calendario. Devuelve qué hizo.
 export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: CalendarConfig, f?: Awaited<ReturnType<typeof filtros>>): Promise<'nueva' | 'actualizada' | 'archivada' | null> {
   const db = env.DB;
@@ -111,8 +127,9 @@ export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: Cale
   const externos = (e.attendees ?? []).filter((a) => a.email && !a.resource && a.responseStatus !== 'declined')
     .map((a) => ({ email: a.email!.toLowerCase(), name: a.displayName ?? '' }))
     .filter((a) => !f!.internal(a.email) && !f!.ignored(a.email));
-  if (!externos.length) {
-    // Ya no tiene invitados de afuera (los sacaron): si la había registrado el calendario, se archiva.
+  const empresas = empresasDe(externos.map((a) => a.email));
+  if (!externos.length || empresas.size > (cfg.max_empresas ?? 3)) {
+    // Sin invitados de afuera (o ya no los tiene), o una reunión grupal: si la había registrado el calendario, se archiva.
     if (prev && !prev.archived && prev.source === 'calendar') { await updateActivity(db, ctx, prev.id, { archived: true }); return 'archivada'; }
     return null;
   }
@@ -132,7 +149,7 @@ export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: Cale
   if (!contactos.length) return null;
   const links = contactos.map((c) => c.id);
   for (const c of contactos) { const d = await openDealOf(db, c.id); if (d) links.push(d); }
-  const datos = { subject: e.summary ?? 'Reunión', body: e.description ?? '', occurred_at: inicio, meta: metaDe(e, user, externos.map((a) => a.email)) as Record<string, unknown> };
+  const datos = { subject: e.summary ?? 'Reunión', body: limpiarDescripcion(e.description ?? ''), occurred_at: inicio, meta: metaDe(e, user, externos.map((a) => a.email)) as Record<string, unknown> };
   // Notas de Gemini adjuntas: se leen una vez (si ya hay resumen de esas notas, no se vuelven a pedir).
   const notas = (e.attachments ?? []).find(esNotas);
   const prevMeta = prev ? JSON.parse(prev.meta || '{}') as Record<string, unknown> : {};
@@ -246,4 +263,49 @@ export async function agendarReunion(env: Env, ctx: Ctx, r: NuevaReunion) {
     meta: metaDe(e, ctx.user, invitados),
   });
   return { activity: act, html_link: e.htmlLink ?? null, meet: linkMeet(e) };
+}
+
+// ---------- Limpieza de reuniones grupales ----------
+// Para lo que se registró antes de la regla de max_empresas (18/11/2026): archiva las reuniones del calendario con más
+// empresas de afuera que el máximo y, después, los contactos y empresas que creó el calendario y quedaron sin nada (sin
+// otra actividad, negocio ni pedido). Con aplicar=false solo dice qué haría. Todo se puede restaurar.
+export async function limpiarGrupales(env: Env, ctx: Ctx, aplicar: boolean) {
+  const db = env.DB;
+  const cfg = await calendarConfig(db);
+  const { results: reus } = await db.prepare("SELECT id, subject, occurred_at, meta FROM activities WHERE type = 'meeting' AND source = 'calendar' AND archived = 0")
+    .all<{ id: number; subject: string; occurred_at: string; meta: string }>();
+  const grupales = reus.filter((r) => {
+    const ext = String(JSON.parse(r.meta || '{}').externos ?? '').split(';').filter(Boolean);
+    return empresasDe(ext).size > (cfg.max_empresas ?? 3);
+  });
+  const fuera = JSON.stringify(grupales.map((r) => r.id));
+  // Lo que le queda a un registro sin esas reuniones: actividades, negocios, pedidos (y, a una empresa, contactos).
+  const queda = (tipo: string) => db.prepare(`SELECT r.id, r.name,
+      (SELECT COUNT(*) FROM activity_links l JOIN activities a ON a.id = l.activity_id AND a.archived = 0
+        WHERE l.record_id = r.id AND a.id NOT IN (SELECT value FROM json_each(?1))) AS acts,
+      (SELECT COUNT(*) FROM associations x JOIN records o ON o.id = x.to_id AND o.archived = 0 WHERE x.from_id = r.id AND x.to_type IN ('deal', 'order')) AS negocios,
+      (SELECT COUNT(*) FROM associations x JOIN records o ON o.id = x.to_id AND o.archived = 0 AND o.source != 'calendar'
+        WHERE x.from_id = r.id AND x.to_type = 'contact') AS contactos
+    FROM records r WHERE r.object_type = ?2 AND r.source = 'calendar' AND r.archived = 0`).bind(fuera, tipo)
+    .all<{ id: number; name: string; acts: number; negocios: number; contactos: number }>();
+  const contactos = (await queda('contact')).results.filter((r) => !r.acts && !r.negocios);
+  const sale = new Set(contactos.map((c) => c.id));
+  const empresas = [];
+  for (const e of (await queda('company')).results) {
+    if (e.acts || e.negocios || e.contactos) continue;
+    // Sus contactos del calendario: todos tienen que estar saliendo.
+    const { results } = await db.prepare("SELECT x.to_id AS id FROM associations x JOIN records o ON o.id = x.to_id AND o.archived = 0 WHERE x.from_id = ? AND x.to_type = 'contact'")
+      .bind(e.id).all<{ id: number }>();
+    if (results.every((c) => sale.has(c.id))) empresas.push(e);
+  }
+  if (aplicar) {
+    for (const r of grupales) await updateActivity(db, ctx, r.id, { archived: true });
+    await archiveRecords(db, ctx, [...contactos.map((c) => c.id), ...empresas.map((e) => e.id)]);
+  }
+  return {
+    aplicado: aplicar,
+    reuniones: grupales.map((r) => `${r.occurred_at.slice(0, 10)} ${r.subject}`),
+    contactos: contactos.map((c) => c.name),
+    empresas: empresas.map((e) => e.name),
+  };
 }

@@ -51,9 +51,13 @@ test('calendario: las reuniones con gente de afuera quedan en el contacto y su e
   if (!st.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba (ver encabezado)'); return; }
   const contacto = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Compras', email: cliente } });
   eventos.push(
-    { id: `e1${run}`, iCalUID: `e1${run}@google.com`, status: 'confirmed', summary: 'Presentación de productos', description: 'Llevar muestras',
+    { id: `e1${run}`, iCalUID: `e1${run}@google.com`, status: 'confirmed', summary: 'Presentación de productos',
+      description: 'Llevar muestras<br><br>________________________________________________________________________________<br>Reunión de Microsoft Teams<br>Unirse: https://teams.microsoft.com/meet/123',
       start: { dateTime: enHora(24) }, end: { dateTime: enHora(25) }, organizer: { email: me, self: true },
-      attendees: [{ email: me, self: true, responseStatus: 'accepted' }, { email: cliente }, { email: nuevo, displayName: 'Ana López' }, { email: 'colega@formas.ar' }] },
+      attendees: [{ email: me, self: true, responseStatus: 'accepted' }, { email: cliente }, { email: nuevo, displayName: 'López, Ana,AR-Santa Fe, Firmat' }, { email: 'colega@formas.ar' }] },
+    // Grupal (un board con gente de muchas empresas): no se registra ni crea contactos.
+    { id: `e4${run}`, iCalUID: `e4${run}@google.com`, status: 'confirmed', summary: 'Reunión Board', start: { dateTime: enHora(5) }, end: { dateTime: enHora(6) },
+      attendees: [{ email: me }, ...['a.com.ar', 'b.com', 'c.mx', 'd.com.br'].map((d) => ({ email: `socio@board-${run}-${d}` }))] },
     // Solo gente de adentro: no se registra.
     { id: `e2${run}`, iCalUID: `e2${run}@google.com`, status: 'confirmed', summary: 'Reunión interna', start: { dateTime: enHora(2) }, end: { dateTime: enHora(3) },
       attendees: [{ email: me }, { email: 'colega@formaspublicitarias.com' }] },
@@ -68,6 +72,8 @@ test('calendario: las reuniones con gente de afuera quedan en el contacto y su e
   assert.equal(tl.activities.length, 1);
   const r = tl.activities[0];
   assert.equal(r.subject, 'Presentación de productos');
+  assert.equal(r.body, 'Llevar muestras', 'sin el texto de la invitación de Teams');
+  assert.equal((await api('GET', `/records/contact?q=${encodeURIComponent(`board-${run}`)}`)).total, 0, 'la reunión grupal no crea contactos');
   assert.ok(r.links.some((l) => l.type === 'company'), 'también en la empresa (por el dominio)');
   const ana = (await api('GET', `/records/contact?q=${encodeURIComponent(nuevo)}`)).results[0];
   assert.ok(ana, 'el invitado que no era contacto se crea');
@@ -142,4 +148,29 @@ test('calendario: el resumen de Gemini (notas adjuntas) y el de Claude (conector
   const r2 = (await api('GET', `/records/contact/${contacto.id}/timeline?types=meeting`)).activities[0];
   assert.equal(r2.meta.resumen, 'Quedamos en mandar la cotización el lunes.');
   assert.equal(r2.meta.resumen_de, 'Claude');
+});
+
+test('calendario: la limpieza archiva lo grupal que se registró antes de la regla, y sus contactos y empresas nuevas', async (t) => {
+  const st = await api('GET', '/calendar');
+  if (!st.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba'); return; }
+  const cliente = `ventas@cliente-limpia-${run}.com.ar`;
+  const existente = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Ventas', email: cliente } });
+  eventos.push({ id: `e5${run}`, iCalUID: `e5${run}@google.com`, status: 'confirmed', summary: 'Evento grande', start: { dateTime: enHora(10) }, end: { dateTime: enHora(11) },
+    attendees: [{ email: me }, { email: cliente }, ...['a.com.ar', 'b.com', 'c.mx', 'd.com.br'].map((d) => ({ email: `socio@limpia-${run}-${d}` }))] });
+  await api('PUT', '/calendar', { enabled: true, users: [me], max_empresas: 10 });   // como antes de la regla
+  await api('POST', '/calendar/sync');
+  await api('PUT', '/calendar', { enabled: false, max_empresas: 3 });
+  assert.equal((await api('GET', `/records/contact?q=${encodeURIComponent(`limpia-${run}`)}`)).total, 5, 'el existente y 4 creados');
+  const tok = await (await fetch(`${CRM}/api/tokens`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: `Claude limpia ${run}`, source: 'mcp' }) })).json();
+  const rpc = async (args) => JSON.parse((await (await fetch(`${CRM}/mcp/${tok.token}`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'calendario_limpiar_grupales', arguments: args } }) })).json()).result.content[0].text);
+  const prueba = await rpc({});
+  assert.equal(prueba.aplicado, false);
+  assert.ok(prueba.reuniones.some((r) => r.endsWith('Evento grande')));
+  assert.equal(prueba.contactos.filter((c) => c.includes(`limpia-${run}`)).length, 4, 'solo los que creó el calendario');
+  assert.equal((await api('GET', `/records/contact?q=${encodeURIComponent(`limpia-${run}`)}`)).total, 5, 'sin aplicar no cambia nada');
+  await rpc({ aplicar: true });
+  const quedan = await api('GET', `/records/contact?q=${encodeURIComponent(`limpia-${run}`)}`);
+  assert.deepEqual(quedan.results.map((r) => r.id), [existente.id], 'el contacto que ya estaba queda');
+  assert.equal((await api('GET', `/records/contact/${existente.id}/timeline?types=meeting`)).activities.length, 0, 'la reunión grupal se archivó');
 });

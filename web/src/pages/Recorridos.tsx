@@ -38,8 +38,8 @@ interface Base { id: string; nombre: string }
 
 const D = (iso: string) => new Date(`${iso}T12:00:00`);
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const sumar = (dia: string, n: number) => { const d = D(dia); d.setDate(d.getDate() + n); return iso(d); };
-const hoyIso = () => iso(new Date());
+export const sumar = (dia: string, n: number) => { const d = D(dia); d.setDate(d.getDate() + n); return iso(d); };
+export const hoyIso = () => iso(new Date());
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const corto = (dia: string) => `${DIAS[D(dia).getDay()].slice(0, 3)} ${D(dia).getDate()}/${D(dia).getMonth() + 1}`;
 // «Hoy», «Mañana», «El lunes 17/11».
@@ -50,7 +50,7 @@ export function cuando(dia: string, hoy = hoyIso()) {
   return `El ${DIAS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
 }
 // El primer día hábil después de hoy: lo que se carga es, en general, para el día siguiente.
-function proximoHabil(desde = hoyIso()) { let d = sumar(desde, 1); while ([0, 6].includes(D(d).getDay())) d = sumar(d, 1); return d; }
+export function proximoHabil(desde = hoyIso()) { let d = sumar(desde, 1); while ([0, 6].includes(D(d).getDay())) d = sumar(d, 1); return d; }
 
 const num = new Intl.NumberFormat('es-AR');
 export const itemTexto = (i: ItemEnc) => [i.cant != null ? num.format(i.cant) : '', i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ');
@@ -246,7 +246,7 @@ export const resumen = (e: Pick<Encargo, 'llevar' | 'retirar' | 'notas'>) => [
 
 // ---------- La lista de encargos ----------
 
-function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: number) => void }) {
+export function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: number) => void }) {
   const { meta } = useMeta();
   const toast = useToast();
   const organiza = meta.me.role === 'admin' || (meta.me.role !== 'viewer' && ['logistica', 'produccion'].includes(meta.me.profile));
@@ -379,10 +379,10 @@ function AdminRecorridos() {
 interface DiaDestino { fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number; cerca: Cerca | null }
 interface InfoDestino { destino: DestinoOpcion; lugar: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null; localidad: string | null } | null;
   dias: DiaDestino[]; habitual: Habitual | null; ultimos: Encargo[] }
-interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; generales?: DestinoOpcion[]; bases: Base[]; organiza: boolean }
+export interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; generales?: DestinoOpcion[]; bases: Base[]; organiza: boolean }
 // En la pantalla la cantidad es el texto que se escribe («2,5»); el servidor la pasa a número.
-type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
-const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
+export type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
+export const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
 
 export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; inicial?: { destino?: DestinoOpcion | null; fecha?: string }; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
@@ -499,7 +499,7 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
   );
 }
 
-function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable: boolean; onCambiar: () => void }) {
+export function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable: boolean; onCambiar: () => void }) {
   return (
     <div className="rc-elegido">
       <LogoLugar nombre={d.nombre} dominio={d.dominio} grande />
@@ -510,7 +510,7 @@ function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable
 }
 
 // Elegir el destino: tus frecuentes y los de tus pedidos (con cuándo ya se va), o buscar en toda la base, o una dirección.
-function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (d: DestinoOpcion) => void }) {
+export function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (d: DestinoOpcion) => void }) {
   const [q, setQ] = useState('');
   const [res, setRes] = useState<DestinoOpcion[] | null>(null);
   const [otro, setOtro] = useState(false);
@@ -611,7 +611,7 @@ const Radar = () => (
 );
 
 // Los próximos días hábiles para ese destino: cuáles ya tienen viaje ahí y cuáles son los de siempre.
-function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpcion; fecha: string; editable: boolean; onFecha: (f: string) => void }) {
+export function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpcion; fecha: string; editable: boolean; onFecha: (f: string) => void }) {
   const [info, setInfo] = useState<InfoDestino | null>(null);
   useEffect(() => {
     let vivo = true;
@@ -667,7 +667,7 @@ function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpci
   );
 }
 
-function Items({ titulo, ayuda, items, onChange, editable }: { titulo: string; ayuda: string; items: ItemForm[]; onChange: (x: ItemForm[]) => void; editable: boolean }) {
+export function Items({ titulo, ayuda, items, onChange, editable }: { titulo: string; ayuda: string; items: ItemForm[]; onChange: (x: ItemForm[]) => void; editable: boolean }) {
   const set = (i: number, k: keyof ItemForm, v: string) => onChange(items.map((x, j) => (j === i ? { ...x, [k]: k === 'cant' ? (v.replace(/[^\d.,]/g, '') || null) : v || (k === 'pdv' ? null : '') } : x)));
   return (
     <div className="rc-items">

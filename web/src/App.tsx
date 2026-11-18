@@ -19,6 +19,7 @@ import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
 import { Campanita } from './Notificaciones';
+import AppMovil, { useModoMovil, usarVersionCompleta } from './movil/Movil';
 
 // Pantalla con la que abre cada perfil (pedido de Rodrigo del 16/11/2026); el resto, Inicio.
 const PANTALLA_INICIAL: Record<string, string> = { produccion: '/produccion', logistica: '/cronograma' };
@@ -54,6 +55,9 @@ export default function App() {
 
   // Mensajes sin leer en las conversaciones que sigue (y si lo mencionaron).
   const sinLeer = useNoLeidas();
+  // Versión celular (movil/Movil.tsx): perfil Ventas en una pantalla angosta.
+  const modo = useModoMovil(meta.me);
+  if (modo.movil) return <AppMovil buscador={<GlobalSearch corto />} />;
   return (
     <div className="shell">
       <nav className={`sidebar${menu ? ' open' : ''}`} aria-label="Menú principal">
@@ -102,6 +106,7 @@ export default function App() {
           <span className="grow" />
           {/* Notificaciones (Notificaciones.tsx): menciones, respuestas, asignaciones y faltantes de entrega. */}
           <Campanita />
+          {modo.puedeVolver && <button type="button" className="btn" onClick={() => usarVersionCompleta(false)}>Versión celular</button>}
           <CreateMenu />
         </header>
         <Routes>
@@ -133,7 +138,7 @@ export default function App() {
 type Encontrado = CrmRecord & { ajeno?: boolean };
 const RELACION_MARCA: Record<string, string> = { proveedor: 'Proveedor', equipo: 'Equipo Formas', otro: 'Otro' };
 
-function GlobalSearch() {
+function GlobalSearch({ corto }: { corto?: boolean }) {
   const [q, setQ] = useState('');
   const dq = useDebounced(q, 200);
   const [open, setOpen] = useState(false);
@@ -160,7 +165,7 @@ function GlobalSearch() {
   return (
     <div className="gsearch" ref={ref}>
       <div className="search"><Icon name="search" />
-        <input ref={input} className="input" placeholder={esOperaciones(useMeta().meta.me) ? 'Buscar pedidos, clientes, proveedores… (Ctrl+K)' : 'Buscar contactos, empresas, negocios… (Ctrl+K)'} value={q}
+        <input ref={input} className="input" placeholder={corto ? 'Buscar clientes, negocios…' : esOperaciones(useMeta().meta.me) ? 'Buscar pedidos, clientes, proveedores… (Ctrl+K)' : 'Buscar contactos, empresas, negocios… (Ctrl+K)'} value={q}
           onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
           onKeyDown={(e) => { if (e.key === 'Enter' && primero) go(primero[0], primero[1]); }} />
       </div>

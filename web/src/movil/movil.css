@@ -1,0 +1,140 @@
+/* Versión celular del Hub (Movil.tsx). Mismos tokens que el escritorio (styles.css), así sigue el tema de cada uno.
+   Como el escritorio, la pantalla no se desplaza entera: arriba la barra, abajo las pestañas y, en el medio, lo que
+   corresponde se desplaza solo. Todo lo que se toca mide 44px o más. */
+
+.m-shell { display: flex; flex-direction: column; height: 100dvh; background: var(--ui-canvas); }
+.m-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.m-main > .content { padding: 16px 16px 32px; }
+
+/* Arriba: tu avatar (abre el menú), el buscador y la campanita. */
+.m-top { flex: none; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; background: var(--ui-surface); border-bottom: 1px solid var(--ui-line); }
+.m-yo { flex: none; padding: 0; border: 0; background: none; border-radius: 50%; width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+.m-yo .avatar { width: 34px; height: 34px; }
+.m-buscar { flex: 1; min-width: 0; }
+.m-buscar .gsearch { width: 100%; position: static; }
+.m-buscar .gsearch .popover { position: fixed; left: 8px; right: 8px; top: calc(56px + env(safe-area-inset-top)); max-height: 70dvh; overflow: auto; }
+
+/* Abajo: las cinco pestañas, con el ＋ en el medio. */
+.m-tabs { flex: none; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--ui-surface); border-top: 1px solid var(--ui-line); padding-bottom: env(safe-area-inset-bottom); }
+.m-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; color: var(--text-3);
+  font: 500 11px/1.2 var(--font); text-decoration: none; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.m-tab.active { color: var(--accent-ink); }
+.m-tab.active svg { stroke-width: 2.2; }
+.m-mas-btn { width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-float); transform: translateY(-8px); }
+.m-mas:active .m-mas-btn { transform: translateY(-8px) scale(.94); }
+.m-badge { position: absolute; top: 6px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ui-negative); color: var(--on-negative); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.m-badge.mencion { background: var(--accent); color: var(--on-accent); }
+
+/* Páginas propias de la versión celular. */
+.m-pag { flex: 1; overflow: auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px; }
+.m-pag > * { flex-shrink: 0; }
+.m-pag h1 { font-size: 24px; margin: 0; }
+.m-saludo p { margin: 2px 0 0; }
+.m-pag-cab { display: flex; align-items: center; gap: 8px; }
+
+.m-cta { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; border-radius: var(--r-panel); border: 0; cursor: pointer;
+  background: var(--ui-surface-navy); color: var(--ui-ink-on-navy-strong); font: inherit; }
+.m-cta b { display: block; font-size: 15px; }
+.m-cta small { display: block; color: var(--ui-ink-on-navy); font-size: 12px; margin-top: 2px; }
+.m-cta > span:nth-child(2) { flex: 1; min-width: 0; }
+.m-cta > svg:last-child { transform: rotate(180deg); opacity: .7; flex: none; }
+.m-cta-ico { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-surface-navy-2); color: var(--formas-green); }
+
+.m-sec { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); overflow: hidden; }
+.m-sec-cab { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+.m-sec-cab h2 { font-size: 15px; margin: 0; }
+.m-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-pill); }
+.m-pill.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.m-link { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 6px 0; color: var(--accent-ink); font: 500 13px var(--font); cursor: pointer; text-decoration: none; }
+.m-vacio { padding: 6px 14px 16px; color: var(--text-3); font-size: 13px; }
+.m-ver { display: block; padding: 12px 14px; border-top: 1px solid var(--ui-line); font-size: 13px; font-weight: 500; color: var(--accent-ink); text-decoration: none; }
+
+.m-item { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--ui-line); color: inherit; text-decoration: none; }
+.m-sec-cab + .m-item, .m-sec-cab + .cargando + .m-item { border-top: 0; }
+.m-item-link:active { background: var(--row-hover); }
+.m-item-txt { flex: 1; min-width: 0; }
+.m-item-txt b { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.m-item-txt small { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-item-txt small a { color: inherit; text-decoration: underline; text-decoration-color: var(--ui-line-strong); }
+.m-check { width: 26px; height: 26px; }
+.m-fecha { flex: none; width: 64px; font-size: 12px; color: var(--ui-ink-2); }
+.m-fecha b { font-weight: 600; }
+
+/* Botones y formularios cómodos con el dedo; 16px en los campos para que el iPhone no haga zoom. */
+.btn.m-grande { width: 100%; height: 48px; font-size: 15px; justify-content: center; }
+body.movil .input, body.movil select, body.movil textarea { font-size: 16px; }
+body.movil .input:not(textarea) { min-height: 44px; }
+body.movil .input.sm { min-height: 40px; }
+.m-form { display: flex; flex-direction: column; gap: 14px; }
+.m-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.m-chips .chip { min-height: 38px; padding: 0 14px; font-size: 14px; }
+.m-sub { margin: 16px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+
+/* Hoja que sube desde abajo (＋, el menú del avatar, la tarea rápida). */
+.m-hoja-fondo { position: fixed; inset: 0; z-index: 70; background: var(--scrim); display: flex; align-items: flex-end; animation: fade-in var(--dur) var(--ease); }
+.m-hoja { width: 100%; max-height: 88dvh; display: flex; flex-direction: column; background: var(--ui-surface); border-radius: 16px 16px 0 0; box-shadow: var(--shadow-float);
+  padding-bottom: env(safe-area-inset-bottom); animation: m-subir var(--dur-slow) var(--ease-out); }
+.m-hoja-cab { position: relative; display: flex; align-items: center; gap: 8px; padding: 18px 12px 6px 18px; }
+.m-hoja-cab h2 { flex: 1; margin: 0; font-size: 17px; }
+.m-hoja-asa { position: absolute; top: 7px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--ui-line-strong); }
+.m-hoja-cuerpo { overflow: auto; padding: 6px 18px 18px; }
+@keyframes m-subir { from { transform: translateY(100%); } to { transform: none; } }
+
+.m-ops { display: flex; flex-direction: column; gap: 4px; }
+.m-op { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 4px; text-align: left; background: none; border: 0; border-radius: var(--r-control); cursor: pointer; font: inherit; color: inherit; }
+.m-op:active { background: var(--row-hover); }
+.m-op b { display: block; font-size: 15px; font-weight: 500; }
+.m-op small { display: block; font-size: 12px; color: var(--text-3); }
+.m-op-ico { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+
+.m-lista-menu { display: flex; flex-direction: column; }
+.m-lista-menu > button, .m-lista-menu > a { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 4px; background: none; border: 0; border-bottom: 1px solid var(--ui-line);
+  font: 400 15px var(--font); color: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.m-lista-menu > :last-child { border-bottom: 0; }
+.m-lista-menu svg { color: var(--ui-ink-2); }
+
+/* Recorridos: la lista de encargos, sin la barra de filtros apretada. */
+.m-rc-lista .toolbar { flex-wrap: wrap; gap: 8px; }
+.m-rc-lista .toolbar .row { flex-wrap: wrap; }
+
+/* El asistente del encargo: a pantalla completa, un paso por pantalla, el botón para seguir siempre abajo a mano. */
+.m-shell.m-full .m-main { background: var(--ui-surface); }
+.m-asis { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--ui-surface); }
+.m-asis-cab { position: relative; flex: none; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 8px 10px; border-bottom: 1px solid var(--ui-line); }
+.m-asis-tit { flex: 1; min-width: 0; text-align: center; }
+.m-asis-tit b { display: block; font-size: 15px; }
+.m-asis-tit small { display: block; font-size: 12px; color: var(--text-3); }
+.m-asis-barra { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--ui-surface-sunken); }
+.m-asis-barra i { display: block; height: 100%; background: var(--accent); transition: width var(--dur-slow) var(--ease-out); }
+.m-asis-cuerpo { flex: 1; overflow: auto; padding: 16px; }
+.m-asis-cuerpo .rc-paso { display: flex; flex-direction: column; gap: 14px; }
+.m-asis-cuerpo .rc-paso h3 { margin: 4px 0 0; font-size: 17px; }
+.m-asis-pie { flex: none; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--ui-line); background: var(--ui-surface); }
+.m-asis-resumen { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.m-asis-resumen span { color: var(--ui-ink-2); }
+.m-asis-resumen .m-link { margin-left: auto; padding: 0; }
+.m-switch { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; }
+.m-switch input { width: 20px; height: 20px; }
+.m-mas-datos { border: 1px solid var(--ui-line); border-radius: var(--r-control); padding: 0 12px; }
+.m-mas-datos summary { min-height: 44px; display: flex; align-items: center; font-size: 13px; color: var(--ui-ink-2); cursor: pointer; }
+.m-mas-datos[open] { padding-bottom: 12px; }
+.m-mas-datos[open] > :not(summary) + :not(summary), .m-mas-datos[open] > summary + * { margin-top: 10px; }
+
+/* Las piezas del encargo de escritorio, acomodadas al ancho del celular. */
+.m-asis .rc-sug-grid { grid-template-columns: 1fr; }
+.m-asis .rc-tira { margin: 0 -16px; padding: 0 16px 4px; scroll-padding-inline: 16px; scroll-snap-type: x proximity; }
+.m-asis .rc-d { width: 70px; min-height: 64px; scroll-snap-align: start; }
+.m-asis .rc-item { grid-template-columns: 76px minmax(0, 1fr) 40px; grid-template-areas: "que que que" "cant pdv x"; row-gap: 6px; padding-bottom: 10px; border-bottom: 1px dashed var(--ui-line); }
+.m-asis .rc-item > :nth-child(1) { grid-area: cant; }
+.m-asis .rc-item > :nth-child(2) { grid-area: que; }
+.m-asis .rc-item > :nth-child(3) { grid-area: pdv; max-width: 120px; }
+.m-asis .rc-item > :nth-child(4) { grid-area: x; }
+.m-asis .rc-2 { grid-template-columns: 1fr; }
+
+/* Los modales del escritorio (crear un registro, abrir un encargo) ocupan toda la pantalla. */
+body.movil .overlay.center { padding: 0; align-items: stretch; }
+body.movil .modal, body.movil .modal.wide { width: 100%; max-height: none; height: 100dvh; border-radius: 0; }
+body.movil .modal-head { padding-top: calc(12px + env(safe-area-inset-top)); }
+body.movil .modal-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+body.movil .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+body.movil:has(.m-full) .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }

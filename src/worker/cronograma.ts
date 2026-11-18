@@ -1273,18 +1273,21 @@ export async function guardarExpreso(db: D1Database, ctx: Ctx, b: { clave?: unkn
 
 // ---------- La libreta de direcciones ----------
 
-export interface Lugar { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
+export interface Lugar { id: number; nombre: string; direccion: string | null; localidad: string | null; provincia?: string | null; zona: string | null; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export const infoLugar = (l: Lugar): LugarInfo => ({ nombre: l.nombre, horario: l.horario, telefono: l.telefono, contacto: l.contacto, observaciones: l.observaciones, coordinacion: l.coordinacion });
 
 // La dirección completa de un lugar: la calle, la localidad y, si es del conurbano, la provincia.
-export function direccionLugar(l: { direccion: string | null; localidad: string | null; zona: string | null }) {
+// La provincia, si la tiene (la completa la IA o se carga a mano), va al final; si no, se deduce de la zona.
+export function direccionLugar(l: { direccion: string | null; localidad: string | null; zona: string | null; provincia?: string | null }) {
   const dir = String(l.direccion ?? '').replace(/\s+/g, ' ').trim();
   const loc = String(l.localidad ?? '').replace(/\s+/g, ' ').trim(), zona = norm(String(l.zona ?? ''));
+  const prov = String(l.provincia ?? '').replace(/\s+/g, ' ').trim();
   const partes = [dir];
   if (loc && !norm(dir).includes(norm(loc))) partes.push(loc);
-  const caba = zona === 'caba' || norm(loc) === 'caba';
+  const caba = zona === 'caba' || norm(loc) === 'caba' || /ciudad autonoma|^caba$|capital federal/.test(norm(prov));
   if (caba && !/\bcaba\b/i.test(partes.join(' '))) partes.push('CABA');
-  else if (!caba && ['norte', 'oeste', 'sur', 'noroeste'].includes(zona)) partes.push('Buenos Aires');
+  else if (!caba && prov && !norm(partes.join(' ')).includes(norm(prov))) partes.push(prov);
+  else if (!caba && !prov && ['norte', 'oeste', 'sur', 'noroeste'].includes(zona)) partes.push('Buenos Aires');
   return partes.filter(Boolean).join(', ');
 }
 // Calle y altura, para reconocer la misma dirección escrita distinto: sin localidad, artículos, piso ni puntuación

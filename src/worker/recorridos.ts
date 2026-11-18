@@ -9,7 +9,8 @@ import {
   esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, ubicar, lugaresPara, lugaresPorId, mismoSitio, movimientos, puedeEditarCronograma, reindexarLugares, sumarDias, unicoLugar,
   type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio,
 } from './cronograma';
-import { direccionesDePedidos } from './direcciones';
+import { direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
+import { esTipo } from './destinos';
 import { zonaDe, type Zona } from '../../web/src/zonas';
 
 // Recorridos (pedido de Rodrigo del 13/11/2026): reemplaza la planilla «Recorridos» de Logística. Vendedoras, backoffice,
@@ -97,10 +98,10 @@ async function resolverDestino(env: Env, ctx: Ctx, d: DestinoInput) {
   const lugar = d.guardar && nombre && direccion ? await crearLugar(db, ctx, { nombre, direccion }) : null;
   return { lugar_id: lugar, company_id: null, destino: nombre ?? direccion!, direccion };
 }
-async function crearLugar(db: D1Database, ctx: Ctx, l: { nombre: string; direccion: string; company_id?: number | null; localidad?: string | null; horario?: string | null; contacto?: string | null; telefono?: string | null; observaciones?: string | null }) {
-  const r = await db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, horario, contacto, telefono, observaciones, clave_dir, origen, activo, company_id, created_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'hub', 1, ?, ?, ?) RETURNING id`)
-    .bind(l.nombre.slice(0, 160), l.direccion.slice(0, 300), l.localidad ?? null, l.horario ?? null, l.contacto ?? null, l.telefono ?? null, l.observaciones ?? null,
+async function crearLugar(db: D1Database, ctx: Ctx, l: { nombre: string; direccion: string; company_id?: number | null; localidad?: string | null; provincia?: string | null; horario?: string | null; contacto?: string | null; telefono?: string | null; observaciones?: string | null }) {
+  const r = await db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, provincia, horario, contacto, telefono, observaciones, clave_dir, origen, activo, company_id, created_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'hub', 1, ?, ?, ?) RETURNING id`)
+    .bind(l.nombre.slice(0, 160), l.direccion.slice(0, 300), l.localidad ?? null, l.provincia ?? null, l.horario ?? null, l.contacto ?? null, l.telefono ?? null, l.observaciones ?? null,
       claveCalle(l.direccion) || null, l.company_id ?? null, ctx.user.id, now()).first<{ id: number }>();
   await reindexarLugares(db, [r!.id]);
   return r!.id;
@@ -293,10 +294,30 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   exigirPedir(ctx);
   const db = env.DB;
   const nombre = texto(b.nombre, 160), direccion = texto(b.direccion, 300);
-  const campos = { localidad: texto(b.localidad, 80), horario: texto(b.horario, 160), contacto: texto(b.contacto, 160), telefono: texto(b.telefono, 60), observaciones: texto(b.observaciones, 600) };
+  const campos = { localidad: texto(b.localidad, 80), provincia: texto(b.provincia, 80), codigo_postal: texto(b.codigo_postal, 12), sucursal: texto(b.sucursal, 120),
+    horario: texto(b.horario, 160), contacto: texto(b.contacto, 160), telefono: texto(b.telefono, 60), whatsapp: texto(b.whatsapp, 60), email: texto(b.email, 160),
+    observaciones: texto(b.observaciones, 600) };
+  if (campos.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(campos.email)) throw new HttpError(400, 'El mail no parece válido.');
+  // Elegida de Google Maps: el servidor le vuelve a pedir el lugar a Google (calle y altura, localidad, provincia, CP y el punto).
+  let google: Awaited<ReturnType<typeof lugarGoogle>> | null = null;
+  const placeId = typeof b.place_id === 'string' && b.place_id ? b.place_id : null;
+  if (placeId) {
+    const previo = id != null ? await db.prepare('SELECT place_id FROM lugares WHERE id = ?').bind(id).first<{ place_id: string | null }>() : null;
+    if (previo?.place_id !== placeId) google = await lugarGoogle(env, placeId, typeof b.sesion === 'string' ? b.sesion : undefined);
+  }
+  const dirFinal = google ? (google.calle || google.direccion.split(',')[0]) : direccion;
+  if (google) { campos.localidad = google.localidad ?? campos.localidad; campos.provincia = google.provincia ?? campos.provincia; campos.codigo_postal = google.codigo_postal ?? campos.codigo_postal; }
+  const tipo = b.tipo === undefined ? undefined : esTipo(b.tipo) ? b.tipo : null;
   if (id == null) {
-    if (!nombre || !direccion) throw new HttpError(400, 'El destino necesita el nombre y la dirección.');
-    const nuevo = await crearLugar(db, ctx, { nombre, direccion, ...campos, company_id: organiza(ctx.user) ? Number(b.company_id) || null : null });
+    if (!nombre || !dirFinal) throw new HttpError(400, 'El destino necesita el nombre y la dirección.');
+    const nuevo = await crearLugar(db, ctx, { nombre, direccion: dirFinal, ...campos, company_id: organiza(ctx.user) ? Number(b.company_id) || null : null });
+    const extra: string[] = [], vals: unknown[] = [];
+    for (const k of ['codigo_postal', 'sucursal', 'whatsapp', 'email'] as const) if (campos[k]) { extra.push(`${k} = ?`); vals.push(campos[k]); }
+    if (tipo) { extra.push("tipo = ?", "tipo_origen = 'manual'"); vals.push(tipo); }
+    if (google) { extra.push('place_id = ?'); vals.push(google.place_id); }
+    if (organiza(ctx.user) && Number(b.grupo_id)) { extra.push('grupo_id = ?'); vals.push(Number(b.grupo_id)); }
+    if (extra.length) await db.prepare(`UPDATE lugares SET ${extra.join(', ')} WHERE id = ?`).bind(...vals, nuevo).run();
+    if (google) await puntoDeGoogle(db, nuevo, google);
     return { id: nuevo };
   }
   const l = await db.prepare('SELECT id, origen, created_by FROM lugares WHERE id = ?').bind(id).first<{ id: number; origen: string; created_by: number | null }>();
@@ -305,32 +326,32 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   if (!organiza(ctx.user) && !(l.origen === 'hub' && l.created_by === ctx.user.id)) throw new HttpError(403, 'Los destinos de la libreta los corrige Logística. Si algo está mal, avisale.');
   const sets: string[] = [], vals: unknown[] = [];
   if (b.nombre !== undefined) { if (!nombre) throw new HttpError(400, 'El nombre no puede quedar vacío.'); sets.push('nombre = ?'); vals.push(nombre); }
-  if (b.direccion !== undefined) { sets.push('direccion = ?', 'clave_dir = ?'); vals.push(direccion, direccion ? claveCalle(direccion) || null : null); }
-  for (const k of Object.keys(campos) as Array<keyof typeof campos>) if (b[k] !== undefined) { sets.push(`${k} = ?`); vals.push(campos[k]); }
+  if (b.direccion !== undefined || google) { sets.push('direccion = ?', 'clave_dir = ?'); vals.push(dirFinal, dirFinal ? claveCalle(dirFinal) || null : null); }
+  for (const k of Object.keys(campos) as Array<keyof typeof campos>) if (b[k] !== undefined || (google && ['localidad', 'provincia', 'codigo_postal'].includes(k))) { sets.push(`${k} = ?`); vals.push(campos[k]); }
+  if (google) { sets.push('place_id = ?'); vals.push(google.place_id); }
+  else if (b.direccion !== undefined && b.place_id === null) sets.push('place_id = NULL');
+  if (tipo !== undefined) { sets.push('tipo = ?', 'tipo_origen = ?'); vals.push(tipo, tipo ? 'manual' : null); }
+  if (b.grupo_id !== undefined) { if (!organiza(ctx.user)) throw new HttpError(403, 'Agrupar destinos es de Logística.'); sets.push('grupo_id = ?'); vals.push(Number(b.grupo_id) || null); }
   if (b.company_id !== undefined && organiza(ctx.user)) { sets.push('company_id = ?'); vals.push(Number(b.company_id) || null); }
   if (b.activo !== undefined) { if (!organiza(ctx.user)) throw new HttpError(403, 'Sacar un destino de la libreta es de Logística.'); sets.push('activo = ?'); vals.push(b.activo ? 1 : 0); }
   if (!sets.length) return { id };
+  // Corregido a mano: lo que había dicho la IA ya no vale (si quedó incompleto, la IA lo vuelve a mirar).
+  if (b.direccion !== undefined || b.localidad !== undefined || b.provincia !== undefined || google) sets.push('ia_estado = NULL', 'ia_nota = NULL', 'ia_sugerida = NULL');
   await db.prepare(`UPDATE lugares SET ${sets.join(', ')}, editado = 1, updated_at = ? WHERE id = ?`).bind(...vals, now(), id).run();
+  if (google) await puntoDeGoogle(db, id, google);
+  if (b.grupo_id !== undefined) await db.prepare('DELETE FROM destino_grupos WHERE id NOT IN (SELECT grupo_id FROM lugares WHERE grupo_id IS NOT NULL)').run();
   await reindexarLugares(db, [id]);
   return { id };
 }
 
-// La libreta para la pestaña «Destinos»: buscar, con cuántas veces se fue a cada uno en los últimos 6 meses.
-export async function listarDestinos(env: Env, user: User, q: string) {
-  const db = env.DB;
-  const cfg = await actualizarLugares(env, organiza(user));
-  const t = norm(q).replace(/[%_]/g, ' ').trim();
-  const desde = sumarDias(hoyBsAs(), -182);
-  const { results } = await db.prepare(`SELECT l.*, (SELECT COUNT(*) FROM encargos e WHERE e.lugar_id = l.id AND e.fecha >= ?2 AND e.estado <> 'cancelado') AS veces
-    FROM lugares l WHERE l.activo = 1 ${t ? "AND (lower(l.nombre) LIKE ?1 OR lower(COALESCE(l.direccion, '')) LIKE ?1 OR lower(COALESCE(l.localidad, '')) LIKE ?1)" : ''}
-    ORDER BY veces DESC, l.nombre LIMIT 100`).bind(`%${t}%`, desde).all<Lugar & { company_id: number | null; origen: string; editado: number; veces: number; localidad: string | null; zona: string | null; telefono: string | null; created_by: number | null }>();
-  const total = await db.prepare('SELECT COUNT(*) AS n FROM lugares WHERE activo = 1').first<{ n: number }>();
-  return {
-    total: total?.n ?? 0, copia: { at: cfg.at, filas: cfg.filas, error: cfg.error ?? null },
-    destinos: results.map((l) => ({ id: l.id, nombre: l.nombre, direccion: l.direccion, localidad: l.localidad, zona: l.zona, horario: l.horario, contacto: l.contacto,
-      telefono: l.telefono, observaciones: l.observaciones, company_id: l.company_id, origen: l.origen, editado: !!l.editado, veces: l.veces,
-      puede_editar: organiza(user) || (l.origen === 'hub' && l.created_by === user.id) })),
-  };
+// El punto de Google del destino va al mapa (el de la ruta del cronograma), salvo que alguien lo haya corrido a mano.
+async function puntoDeGoogle(db: D1Database, id: number, g: { lat: number | null; lng: number | null }) {
+  if (g.lat == null || g.lng == null) return;
+  const l = await db.prepare('SELECT direccion, localidad, provincia, zona FROM lugares WHERE id = ?').bind(id).first<{ direccion: string | null; localidad: string | null; provincia: string | null; zona: string | null }>();
+  const dir = l ? direccionLugar(l) : '', clave = claveDireccion(dir);
+  if (!clave) return;
+  await db.prepare(`INSERT INTO geocodigos (clave, direccion, lat, lng, ok, manual, at) VALUES (?, ?, ?, ?, 1, 0, ?)
+    ON CONFLICT (clave) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, ok = 1, at = excluded.at WHERE geocodigos.manual = 0`).bind(clave, dir, g.lat, g.lng, now()).run();
 }
 
 // ---------- Cuándo se va a cada lugar ----------

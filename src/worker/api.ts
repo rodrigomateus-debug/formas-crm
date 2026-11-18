@@ -15,6 +15,8 @@ import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
+import { completarDestinos } from './destinosia';
+import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
 import { asignarChofer, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
@@ -36,7 +38,7 @@ import { Budget } from './budget';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
-import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarDestinos, listarEncargos,
+import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
 
@@ -1457,7 +1459,15 @@ api.get('/recorridos/agenda', async (c) => c.json(await agenda(c.env, c.get('ctx
 api.get('/recorridos/sugerencias', async (c) => c.json(await sugerenciasRecorrido(c.env, c.get('ctx').user, (p) => c.executionCtx.waitUntil(p))));
 api.get('/recorridos/destinos', async (c) => c.json(await buscarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
 api.get('/recorridos/destino', async (c) => c.json(await diasDelDestino(c.env, c.get('ctx').user, c.req.query(), (p) => c.executionCtx.waitUntil(p))));
-api.get('/recorridos/libreta', async (c) => c.json(await listarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
+api.get('/recorridos/libreta', async (c) => c.json(await listarDestinos(c.env, c.get('ctx').user)));
+// Buscar en el mapa las direcciones de la libreta que todavía no se buscaron (de a pocas; la pantalla repite).
+api.post('/recorridos/libreta/mapa', async (c) => c.json(await ubicarDestinos(c.env)));
+// Empresas con varias sucursales: juntar destinos, cambiar el grupo, deshacerlo.
+api.post('/recorridos/grupos', async (c) => c.json(await agrupar(c.env.DB, c.get('ctx'), await c.req.json())));
+api.patch('/recorridos/grupos/:id', async (c) => c.json(await editarGrupo(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
+api.post('/recorridos/grupos/:id/sacar', async (c) => c.json(await desagrupar(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json().catch(() => ({})))));
+// Completar con IA las direcciones de la libreta (localidad, provincia, el punto en el mapa): solo lo que está ≥ 90 % seguro.
+api.post('/recorridos/libreta/ia', async (c) => c.json(await completarDestinos(c.env, c.get('ctx'), await c.req.json().catch(() => ({})))));
 api.post('/recorridos/libreta', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), null, await c.req.json())));
 api.patch('/recorridos/libreta/:id', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 api.get('/recorridos/encargos', async (c) => {

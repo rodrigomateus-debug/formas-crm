@@ -7,6 +7,7 @@ import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
 import { marcaProveedor } from '../proveedores';
 import { ZONAS, nombreZona, type Zona } from '../zonas';
+import { DestinosTab } from './RecorridosDestinos';
 
 // Recorridos (pedido de Rodrigo del 13/11/2026; src/worker/recorridos.ts, docs/RECORRIDOS.md): reemplaza la planilla
 // «Recorridos» de Logística. Cualquiera carga un encargo al recorrido de un día —llevar o retirar muestras, un sobre,
@@ -102,7 +103,7 @@ export default function RecorridosPage() {
       </div>
       {tab === 'agenda' && <Agenda version={version} puede={puede} onNuevo={(destino, fecha) => setNuevo({ destino, fecha })} onAbrir={(id) => ir({ encargo: String(id) })} />}
       {tab === 'encargos' && <ListaEncargos version={version} onAbrir={(id) => ir({ encargo: String(id) })} />}
-      {tab === 'destinos' && <Destinos />}
+      {tab === 'destinos' && <DestinosTab admin={meta.me.role === 'admin' ? <AdminRecorridos /> : null} />}
       {nuevo && <EncargoModal inicial={nuevo} onClose={() => { setNuevo(null); ir({ nuevo: null }); }} onListo={() => { setNuevo(null); ir({ nuevo: null }); cambio(); }} />}
       {abierto && <EncargoModal id={abierto} onClose={() => ir({ encargo: null })} onListo={() => { ir({ encargo: null }); cambio(); }} />}
     </div>
@@ -314,94 +315,6 @@ function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: nu
         ))}
       </div>
     </>
-  );
-}
-
-// ---------- Destinos ----------
-
-interface DestinoFila { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; contacto: string | null;
-  telefono: string | null; observaciones: string | null; company_id: number | null; origen: string; editado: boolean; veces: number; puede_editar: boolean }
-function Destinos() {
-  const { meta } = useMeta();
-  const toast = useToast();
-  const [q, setQ] = useState('');
-  const [datos, setDatos] = useState<{ total: number; copia: { at: number; filas: number; error: string | null }; destinos: DestinoFila[] } | null>(null);
-  const [editando, setEditando] = useState<DestinoFila | 'nuevo' | null>(null);
-  const [v, setV] = useState(0);
-  useEffect(() => {
-    let vivo = true;
-    const t = window.setTimeout(() => http<NonNullable<typeof datos>>('GET', `/recorridos/libreta${qs({ q })}`).then((d) => { if (vivo) setDatos(d); }, (e) => toast((e as Error).message, true)), q ? 250 : 0);
-    return () => { vivo = false; window.clearTimeout(t); };
-  }, [q, v, toast]);
-  const organiza = meta.me.role === 'admin' || (meta.me.role !== 'viewer' && ['logistica', 'produccion'].includes(meta.me.profile));
-  const actualizar = async () => {
-    try { const r = await http<{ filas: number; error: string | null }>('POST', '/cronograma/lugares/actualizar'); toast(r.error ? `No se pudo traer la planilla: ${r.error}` : `Listo: ${r.filas} destinos de la planilla.`, !!r.error); setV((x) => x + 1); }
-    catch (e) { toast((e as Error).message, true); }
-  };
-  return (
-    <>
-      <div className="toolbar">
-        <div className="search" style={{ minWidth: 220, flex: '0 1 320px' }}><Icon name="search" />
-          <input className="input" placeholder="Buscar por nombre, calle o localidad" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destinos" />
-        </div>
-        <span className="grow" />
-        {meta.me.role !== 'viewer' && <button type="button" className="btn sm" onClick={() => setEditando('nuevo')}><Icon name="plus" size={14} />Nuevo destino</button>}
-      </div>
-      {datos && (
-        <p className="muted small rc-intro">Una sola base de destinos para el Hub: la libreta de Logística (que se sigue copiando de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá),
-          los destinos nuevos que se cargan con los encargos y las empresas del CRM. {datos.total} destinos.
-          {datos.copia.at > 0 && ` Última copia de la planilla: ${fmtRelative(new Date(datos.copia.at).toISOString())}.`}{datos.copia.error ? ` (${datos.copia.error})` : ''}
-          {organiza && <> <button type="button" className="cr-link" onClick={actualizar}>Traer la planilla ahora</button></>}</p>
-      )}
-      {!datos && <Cargando />}
-      {datos && (
-        <div className="table-wrap rc-tabla">
-          <table className="grid">
-            <thead><tr><th className="nosort">Destino</th><th className="nosort">Dirección</th><th className="nosort">Horario</th><th className="nosort">Contacto</th><th className="nosort numcol">Viajes (6 meses)</th></tr></thead>
-            <tbody>
-              {datos.destinos.map((d) => (
-                <tr key={d.id} onClick={() => d.puede_editar && setEditando(d)} style={d.puede_editar ? undefined : { cursor: 'default' }} title={d.puede_editar ? undefined : 'Los destinos de la libreta los corrige Logística'}>
-                  <td><b>{lindo(d.nombre)}</b>{d.origen === 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }}>Nuevo en el Hub</span>}{d.editado && d.origen !== 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }} title="Lo que se corrigió acá la planilla ya no lo pisa">Corregido</span>}</td>
-                  <td>{[d.direccion, d.localidad].filter(Boolean).join(', ')}</td>
-                  <td>{d.horario}</td>
-                  <td>{[d.contacto, d.telefono].filter(Boolean).join(' · ')}</td>
-                  <td className="numcell">{d.veces || ''}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      {editando && <EditarDestino d={editando === 'nuevo' ? null : editando} puedeSacar={organiza} onClose={() => setEditando(null)} onListo={() => { setEditando(null); setV((x) => x + 1); }} />}
-      {meta.me.role === 'admin' && <AdminRecorridos />}
-    </>
-  );
-}
-
-function EditarDestino({ d, puedeSacar, onClose, onListo }: { d: DestinoFila | null; puedeSacar: boolean; onClose: () => void; onListo: () => void }) {
-  const toast = useToast();
-  const [f, setF] = useState({ nombre: d?.nombre ?? '', direccion: d?.direccion ?? '', localidad: d?.localidad ?? '', horario: d?.horario ?? '', contacto: d?.contacto ?? '', telefono: d?.telefono ?? '', observaciones: d?.observaciones ?? '' });
-  const [ocupado, setOcupado] = useState(false);
-  const guardar = async (extra: Record<string, unknown> = {}) => {
-    setOcupado(true);
-    try { await http(d ? 'PATCH' : 'POST', d ? `/recorridos/libreta/${d.id}` : '/recorridos/libreta', { ...f, ...extra }); toast(extra.activo === false ? 'Destino sacado de la libreta.' : 'Destino guardado.'); onListo(); }
-    catch (e) { toast((e as Error).message, true); setOcupado(false); }
-  };
-  const campo = (k: keyof typeof f, label: string, ph = '') => <label className="field">{label}<input className="input" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} placeholder={ph} /></label>;
-  return (
-    <Modal title={d ? lindo(d.nombre) : 'Nuevo destino'} onClose={onClose} footer={<>
-      {d && puedeSacar && <button type="button" className="btn ghost danger" disabled={ocupado} onClick={() => guardar({ activo: false })}>Sacar de la libreta</button>}
-      <span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancelar</button>
-      <button type="button" className="btn primary" disabled={ocupado || !f.nombre.trim() || !f.direccion.trim()} onClick={() => guardar()}>Guardar</button></>}>
-      <div className="rc-form">
-        {campo('nombre', 'Nombre', 'IMPREFAS, Nestlé (Vicente López)…')}
-        {campo('direccion', 'Dirección', 'Calle y altura')}
-        <div className="rc-2">{campo('localidad', 'Localidad')}{campo('horario', 'Horario de atención', '9 a 13')}</div>
-        <div className="rc-2">{campo('contacto', 'Contacto')}{campo('telefono', 'Teléfono')}</div>
-        {campo('observaciones', 'Observaciones para el chofer', 'Tocar timbre 2, entrar por el portón gris…')}
-        {d && d.origen !== 'hub' && <p className="muted small">Viene de la planilla DESTINOS. Lo que cambies acá queda en el Hub y la copia de la planilla ya no lo pisa.</p>}
-      </div>
-    </Modal>
   );
 }
 

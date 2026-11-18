@@ -26,7 +26,7 @@ const PLACES = (env: Env) => env.GOOGLE_PLACES_API_URL ?? 'https://places.google
 export const mapsConfigurado = (env: Env) => !!env.GOOGLE_MAPS_API_KEY;
 
 export interface Sugerencia { place_id: string; texto: string; principal: string; secundario: string }
-export interface Lugar { place_id: string; direccion: string; lat: number | null; lng: number | null; precisa: boolean; localidad: string | null; provincia: string | null; codigo_postal: string | null }
+export interface Lugar { place_id: string; direccion: string; calle: string | null; lat: number | null; lng: number | null; precisa: boolean; localidad: string | null; provincia: string | null; codigo_postal: string | null }
 
 async function google<T>(env: Env, path: string, init: RequestInit & { campos?: string } = {}): Promise<T> {
   if (!env.GOOGLE_MAPS_API_KEY) throw new HttpError(503, 'Falta conectar Google Maps (GOOGLE_MAPS_API_KEY): la dirección se puede cargar a mano, sin validar.');
@@ -64,6 +64,8 @@ export async function lugar(env: Env, placeId: string, sesion?: string): Promise
   return {
     place_id: r.id ?? placeId,
     direccion: r.formattedAddress ?? '',
+    // Solo calle y altura («Nicaragua 1651»), para guardarla en partes (los destinos de Recorridos).
+    calle: [comp('route'), comp('street_number')].filter(Boolean).join(' ') || null,
     lat: r.location?.latitude ?? null, lng: r.location?.longitude ?? null,
     // Con altura: Google la ubica en un número de la calle (o es un edificio o local puntual), no en una calle, barrio o ciudad.
     precisa: !!comp('street_number') || tipos.some((t) => ['street_address', 'premise', 'subpremise'].includes(t)),

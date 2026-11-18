@@ -189,3 +189,85 @@ API (todo con la sesión del Hub):
 - Avisar al cliente por WhatsApp cuando sale el encargo.
 - Sugerir la parada siguiente de un circuito («si va a Lavita, también pasa por Novatampo»: juntos 49 veces).
 - Que Claude pueda cargar encargos desde el conector.
+
+## Completar las direcciones con IA
+
+Pedido de Rodrigo del 18/11/2026: muchos destinos de la libreta no tenían la localidad o la provincia, o no aparecían en
+el mapa. En la pestaña **Destinos**, Logística (y quien edita el cronograma) tiene **«Completar direcciones con IA»**:
+
+- Claude revisa los destinos a los que les falta la localidad, la provincia o el punto en el mapa (de a 15, hasta
+  terminar; se puede frenar) y propone la dirección prolija (calle y altura), la localidad y la provincia, con cuán seguro
+  está. **Nunca inventa** una calle ni una altura que no estén en los datos.
+- **Solo se corrige lo que está al menos 90 % seguro.** Con Google Maps conectado, además Google tiene que ubicarlo en la
+  misma altura, localidad y provincia; entonces su punto va al mapa de la ruta. Sin Google Maps, el punto se busca solo al
+  abrir la ruta, como siempre.
+- Lo demás queda **«Para revisar»** (con la sugerencia, el porcentaje y el motivo): en el destino, «Usar la sugerencia»
+  la carga en el formulario para confirmarla o corregirla. Hay un filtro «Solo los N para revisar».
+- Lo corregido dice **«Completado con IA»**, queda como corregido en el Hub (la copia de la planilla ya no lo pisa) y
+  guarda cómo estaba: en el destino, «Volver a como estaba».
+- Cada destino se revisa una vez; si alguien lo cambia, se vuelve a mirar la próxima vez.
+- Los destinos ahora tienen **provincia** (se ve en la tabla y se carga en el formulario); la dirección completa que va
+  al mapa y al chofer la incluye.
+
+Código: `src/worker/destinosia.ts` (`POST /api/recorridos/libreta/ia`), migración `0078_destinos_ia.sql`, prueba
+`test/destinos-ia.test.mjs`.
+
+## La pestaña Destinos, rediseñada
+
+Pedido de Rodrigo del 18/11/2026: que la pestaña esté enfocada en que los destinos estén bien.
+
+**Cómo está armada la base** (`src/worker/destinos.ts`, migración `0079_destinos_rediseno.sql`), siguiendo lo que se usa
+para este tipo de libretas de direcciones, para que esté completa pero se pueda mantener cuando crezca:
+
+- **Empresa y sucursales por separado.** Cada destino es *una dirección*; los de una misma empresa (casa central,
+  depósito, planta, otra sucursal) se juntan en un **grupo** (`destino_grupos`). Así no se duplica la empresa, y cada
+  sucursal tiene su dirección, su horario y su contacto.
+- **La dirección en partes**: calle y altura, localidad, provincia y código postal (no un solo texto), más el lugar de
+  Google Maps (`place_id`) y el punto en el mapa (el mismo de la ruta del cronograma, `geocodigos`).
+- **Un tipo por destino** (cliente, proveedor, impresor, taller, expreso, otro) y **de dónde salió** (`tipo_origen`): a
+  mano, por la empresa del CRM y su «Tipo de relación», porque es un expreso del cronograma, por el nombre («imprenta»,
+  «serigrafía», «transporte», «taller»…) o por la IA (≥ 90 %). Lo que se pone a mano no lo pisa nada.
+- **Contacto por destino**: nombre, teléfono, WhatsApp (si es otro número que el teléfono) y mail.
+- **Qué le falta a cada uno** (dirección, localidad, provincia, mapa, teléfono o WhatsApp, tipo) y el % de completos.
+- Los ids no cambian nunca, los que se sacan quedan inactivos (los encargos viejos los siguen nombrando) y la copia de la
+  planilla no pisa lo corregido en el Hub.
+
+**La pantalla** (`web/src/pages/RecorridosDestinos.tsx`):
+
+- Arriba, el estado de la base: cuántos destinos, % en el mapa, % completos, empresas con sucursales y cuántos quedaron
+  «para revisar» de la IA (se tocan para filtrarlos).
+- Filtros por tipo (con su color, el mismo de los puntos del mapa), «Solo incompletos» y buscador (nombre, calle,
+  localidad, contacto, empresa).
+- La tabla: destino (con su tipo y lo que le falta), **dirección, localidad y provincia en columnas separadas**, contacto
+  con el botón **WhatsApp** (abre el chat con esa persona, con un saludo de Formas), teléfono y mail, y **viajes**: en los
+  últimos 6 meses / en total, el último y si ya hay uno previsto («va el 21/11»). Los grupos se ven como una empresa con
+  sus direcciones abajo (se pliegan).
+- **El mapa**: todos los destinos con un punto del color de su tipo. Al tocar una dirección, el mapa va a ese lugar y
+  muestra la ficha con **«Ver en Google Maps»** (cada dirección tiene además su link «Maps» en la tabla), WhatsApp y
+  Editar. Si no está ubicada, Logística la ubica a mano arrastrando el pin («Ubicar a mano» / «Corregir el punto»), y
+  queda también para la ruta del cronograma. Las direcciones que nunca se buscaron se buscan solas, de fondo. En
+  pantallas anchas el mapa queda al costado; en las demás, arriba.
+- **Agrupar sucursales**: se eligen destinos en la tabla y «Agrupar como una empresa» (una nueva o sumar a una que ya
+  está, con el tipo para todas). El Hub **sugiere** qué juntar (la misma empresa del CRM, o el mismo nombre como «ZECAT
+  OFICINA» y «ZECAT (DEPÓSITO)»): «Agrupar» o «No son la misma». Al tocar el nombre del grupo se le cambia el nombre o el
+  tipo, se saca una dirección o se deshace.
+- **Editar un destino**: qué es (nombre, sucursal o sector, tipo, empresa), dirección (se puede elegir de **Google Maps**
+  y el Hub completa localidad, provincia, CP y el punto), contacto y lo que necesita saber el chofer.
+
+Quién puede: Logística, Producción y los administradores corrigen todo, agrupan y ubican en el mapa; los demás, los
+destinos que cargaron ellos. Prueba: `test/destinos.test.mjs`.
+
+## La primera corrida (18/11/2026)
+
+Sobre los 2.471 destinos de la planilla DESTINOS, Claude revisó uno por uno y se cargó solo lo que pasó los controles
+(migración `0080_destinos_primera_corrida.sql`, que se aplica sola al publicar; reconoce cada destino por su clave de la
+planilla y no toca lo que ya se corrigió en el Hub):
+
+- **Se carga** si Claude está al menos 90 % seguro y el mapa (OpenStreetMap, el mismo buscador del Hub) lo ubica en esa
+  calle, localidad y provincia; o si está 80-89 % y el mapa lo encuentra en esa misma altura exacta (dos fuentes que
+  coinciden); o con 95 % o más aunque el mapa no lo encuentre. Además: no puede aparecer una altura que no estaba en la
+  planilla, la provincia tiene que coincidir con la zona y la calle tiene que ser la misma.
+- Resultado: **1.160 destinos completados** (dirección prolija, localidad, provincia, CP si estaba y el punto en el mapa),
+  **1.311 «Para revisar»** con la sugerencia y el motivo (sin altura, sin localidad, o que el mapa no confirmó), **627
+  con tipo** (473 clientes, 68 expresos, 36 impresores, 24 proveedores, 17 talleres, 9 otros) y **259 empresas con sus
+  sucursales agrupadas** (994 direcciones: YPF, Nestlé, Adare, Opessa, Puma, L'Oréal, Quilmes, Telefónica…).

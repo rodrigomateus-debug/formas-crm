@@ -14,7 +14,7 @@ import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Reco
 // recorrido más corto»; se reparten en varios recorridos (uno por chofer) y cada uno sale de un depósito. Los tiempos
 // son los de un día de tránsito moderado según la hora (ruta.ts); todavía no usan el tránsito del momento.
 
-interface Parada {
+export interface Parada {
   clave: string; nombre: string; direccion: string | null; origen: 'pedido' | 'finnegans' | 'ultima_entrega' | 'empresa' | 'libreta' | 'expreso' | null;
   lat: number | null; lng: number | null; punto_manual: boolean; horario: [number, number] | null; horario_texto: string | null;
   expreso?: { nombre: string; guia: string | null; cliente: string } | null;   // no va directo: se lleva a este expreso
@@ -29,17 +29,17 @@ interface Parada {
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
 }
-const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontró la dirección', rechazo: 'No lo quisieron recibir', no_listo: 'No estaba listo', otro: 'No se pudo' };
+export const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontró la dirección', rechazo: 'No lo quisieron recibir', no_listo: 'No estaba listo', otro: 'No se pudo' };
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 // `a_mano`: alguien movió sus paradas. Si no, se ordena solo por el recorrido más corto (igual que en el servidor y en la
 // app del chofer): así quedan los que se arman eligiendo el chofer desde las tarjetas de la semana.
 // `fin`: dónde termina (pedido de Rodrigo del 13/11/2026): 'igual' (vuelve a donde sale), el id de un depósito, 'ultima'
 // (en la última parada, sin volver) u 'otro' (`fin_otro`).
 type LugarElegido = { nombre: string; direccion: string; lat?: number | null; lng?: number | null };
-interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: LugarElegido | null; a_mano?: boolean; fin?: string; fin_otro?: LugarElegido | null }
+export interface Recorrido { n: number; chofer: string | null; base: string; salida: number; orden: string[]; base_otro?: LugarElegido | null; a_mano?: boolean; fin?: string; fin_otro?: LugarElegido | null }
 interface BaseGeo { id: string; nombre: string; direccion: string; lat: number | null; lng: number | null }
 // `retiran`: las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido); `parcial`: el resto del pedido se envía.
-interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
+export interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
   choferes: string[]; con_link?: string[]; expresos?: Array<{ id: number; nombre: string; direccion: string | null }>; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
 interface Real extends TramosReales { linea: Array<[number, number]> }
 
@@ -53,7 +53,7 @@ const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
 
 // Una parada está hecha cuando están hechos sus movimientos de ClickUp y sus encargos (una sin nada para hacer, no).
-const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.length + (p.encargos?.length ?? 0) > 0 && p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
+export const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.length + (p.encargos?.length ?? 0) > 0 && p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
 // La dirección como viene de las fichas y los pedidos («domingo prat 2260, 1603 villa rosa, VILLA ROSA PILAR»): cada parte
 // toda en minúscula o toda en mayúscula pasa a «Domingo Prat 2260»; las que ya vienen bien escritas quedan como están.
 const SIGLAS = new Set(['caba', 'cp', 'pb', 'gba', 'pba', 'amba', 'sa', 'srl', 'ruta', 'km']);

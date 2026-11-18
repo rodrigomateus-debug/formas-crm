@@ -97,9 +97,9 @@ function conMarcas(texto: string, menciones: Array<{ id: number; name: string }>
   // Las marcas provisorias (para no volver a reemplazar adentro de una ya puesta).
   return out.replace(/\u0000(\d+)\u0001/g, (_, id: string) => `@[${unicas.find((m) => m.id === Number(id))!.name}](${id})`);
 }
-const textoPlano = (body: string) => body.replace(MENCION, '@$1');
+export const textoPlano = (body: string) => body.replace(MENCION, '@$1');
 
-function Cuerpo({ body, meId }: { body: string; meId: number }) {
+export function Cuerpo({ body, meId }: { body: string; meId: number }) {
   const partes: ReactNode[] = [];
   let i = 0;
   const conLinks = (s: string, k: string) => {
@@ -284,7 +284,7 @@ async function medidas(f: File): Promise<{ ancho?: number; alto?: number }> {
   try { const b = await createImageBitmap(f); const m = { ancho: b.width, alto: b.height }; b.close(); return m; } catch { return {}; }
 }
 
-function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCancelar, placeholder, autoFocus, subirA, registrarSoltar }: {
+export function Escribir({ inicial, respondiendo, onCancelarRespuesta, onEnviar, onCancelar, placeholder, autoFocus, subirA, registrarSoltar }: {
   inicial?: string; respondiendo?: ReactNode; onCancelarRespuesta?: () => void; onEnviar: (body: string, adjuntos: number[]) => Promise<boolean>; onCancelar?: () => void;
   placeholder?: string; autoFocus?: boolean;
   // Adónde se suben las imágenes (sin esto, como al editar, no se adjunta nada) y cómo el panel le pasa lo que se suelta encima.

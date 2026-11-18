@@ -47,7 +47,9 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
   switch (n.kind) {
     case 'mencion': return { titulo: <><b>{quien}</b> te mencionó en {reg}</>, detalle: n.texto, icono: 'at', destino: `${aReg}?conversacion=1&mensaje=${n.mensaje_id ?? ''}` };
     case 'respuesta': return { titulo: <><b>{quien}</b> te respondió en {reg}</>, detalle: n.texto, icono: 'reply', destino: `${aReg}?conversacion=1&mensaje=${n.mensaje_id ?? ''}` };
-    case 'tarea': return { titulo: <><b>{quien}</b> te asignó una tarea</>, detalle: n.subject, icono: 'task', destino: '/tasks' };
+    case 'tarea': return { titulo: n.texto === 'colaborador' ? <><b>{quien}</b> te sumó a una tarea</> : <><b>{quien}</b> te asignó una tarea</>, detalle: n.subject, icono: 'task', destino: `/tasks?tarea=${n.activity_id ?? ''}` };
+    case 'tarea_mencion': return { titulo: <><b>{quien}</b> te mencionó en la tarea <b>{n.subject ?? ''}</b></>, detalle: n.texto, icono: 'at', destino: `/tasks?tarea=${n.activity_id ?? ''}` };
+    case 'tarea_comentario': return { titulo: <><b>{quien}</b> comentó en la tarea <b>{n.subject ?? ''}</b></>, detalle: n.texto, icono: 'chat', destino: `/tasks?tarea=${n.activity_id ?? ''}` };
     case 'encargo': return { titulo: <>Tu encargo a <b>{n.encargo_destino ?? 'un destino'}</b>{n.encargo_fecha ? ` (${Number(n.encargo_fecha.slice(8))}/${Number(n.encargo_fecha.slice(5, 7))})` : ''}</>, detalle: n.texto, icono: 'route', destino: `/recorridos?tab=encargos&encargo=${n.encargo_id ?? ''}` };
     // Entró un pedido con un producto que tiene notas de Producción (notasproducto.ts): el texto dice cuál y qué pasa.
     case 'producto': return { titulo: <>Ojo con un producto de {reg}</>, detalle: n.texto, icono: 'alert', destino: aReg };

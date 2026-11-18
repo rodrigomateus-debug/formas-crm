@@ -47,6 +47,8 @@ export interface Activity {
   direction: string | null; status: string | null; outcome: string | null; due_at: string | null; completed_at: string | null; priority: string | null;
   task_type: string | null; meta: Record<string, any>; links: Array<{ id: number; type: ObjectType; name: string }>; source: string; created_by: number | null;
   thread_id?: string | null; external_id?: string | null;
+  // Tareas (tareas.ts): colaboradores además del responsable, y su conversación (cuántos comentarios y sin leer).
+  colaboradores?: number[]; comentarios?: number; sin_leer?: number;
 }
 export interface Filter { prop: string; op: string; value?: unknown; values?: unknown[]; high?: unknown }
 

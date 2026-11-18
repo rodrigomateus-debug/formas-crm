@@ -31,7 +31,7 @@ export function RecorridosMovil() {
 }
 
 // El encargo abierto (el modal de siempre, a pantalla completa): se cierra también con el botón Atrás.
-function EncargoAbierto(props: { id: number; onClose: () => void; onListo: () => void }) {
+export function EncargoAbierto(props: { id: number; onClose: () => void; onListo: () => void }) {
   useCerrarConAtras(props.onClose);
   return <EncargoModal {...props} />;
 }

@@ -399,3 +399,128 @@ body.movil .drawer-head { padding-top: calc(14px + env(safe-area-inset-top)); }
 
 /* Con el texto del sistema agrandado: los renglones secundarios bajan de línea en vez de cortarse. */
 .m-item-txt small { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* ---------- Logística (LogisticaMovil.tsx) ---------- */
+
+.m-pill.aviso { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.m-pill.ok { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+.m-pill { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Cómo va cada chofer: nombre, paradas hechas y una barra de avance. */
+.m-chofer-ico { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.m-barra { display: block; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--ui-surface-sunken); overflow: hidden; }
+.m-barra i { display: block; height: 100%; background: var(--ui-positive); border-radius: 3px; }
+.m-chofer-alertas { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.m-resolver-ico { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.m-resolver-ico.aviso { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.m-resolver-ico.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.m-item-link > svg:last-child { transform: rotate(180deg); color: var(--text-3); flex: none; }
+
+/* Día: la semana en una tira (con lo pendiente de cada día) y el día elegido. */
+.m-semana { display: flex; align-items: center; gap: 2px; margin: 0 -8px; }
+.m-semana > .btn { flex: none; width: 36px; height: 44px; }
+.m-semana .m-sig svg { transform: rotate(180deg); }
+.m-semana-dias { flex: 1; min-width: 0; display: flex; gap: 4px; }
+.m-semana-dia { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0; border-radius: 10px; border: 1px solid transparent;
+  background: none; font: inherit; color: var(--ui-ink-2); cursor: pointer; }
+.m-semana-dia small { font-size: 11px; }
+.m-semana-dia b { font-size: 17px; color: var(--ui-ink); }
+.m-semana-n { min-height: 16px; font-size: 11px; font-weight: 600; color: var(--accent-ink); }
+.m-semana-dia.hoy small { color: var(--accent-ink); font-weight: 600; }
+.m-semana-dia.mal .m-semana-n { color: var(--ui-negative-ink); }
+.m-semana-dia.on { background: var(--accent); border-color: var(--accent); }
+.m-semana-dia.on small, .m-semana-dia.on b, .m-semana-dia.on .m-semana-n { color: var(--on-accent); }
+.m-dia-tit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-dia-tit h1 { font-size: 22px; }
+.m-nota { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 14px; }
+
+/* Una tarjeta del día: hecho a la izquierda (44×44), qué y dónde, y las acciones abajo. */
+.m-mov { display: flex; gap: 4px; padding: 8px 14px 10px 4px; border-top: 1px solid var(--ui-line); }
+.m-sec-cab + .m-mov { border-top: 0; }
+.m-mov.hecho { background: var(--ui-surface-sunken); }
+.m-mov-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.m-mov-tit { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-mov-tit:disabled { cursor: default; }
+.m-mov-tit b { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; font-weight: 600; }
+.m-mov-tit small { display: block; font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.m-mov-arts { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ui-ink-2); }
+.m-mov-avisos { display: flex; flex-wrap: wrap; gap: 6px; }
+.m-mov-acc { display: flex; flex-wrap: wrap; gap: 8px; }
+.m-mov-acc .btn { min-height: 40px; }
+.m-hecho { background: var(--ui-surface-sunken); }
+
+/* La ruta del día: el recorrido elegido y sus paradas en orden. */
+.m-ruta-cab { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-panel); background: var(--ui-surface); border: 1px solid var(--ui-line); }
+.m-paradas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-radius: var(--r-panel); background: var(--ui-surface); border: 1px solid var(--ui-line); overflow: hidden; }
+.m-parada { display: flex; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--ui-line); }
+.m-parada:first-child { border-top: 0; }
+.m-parada.hecha { background: var(--ui-surface-sunken); }
+.m-parada.mal { box-shadow: inset 3px 0 0 var(--ui-negative); }
+.m-parada-n { flex: none; width: 30px; height: 30px; margin-top: 2px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  background: var(--accent); color: var(--on-accent); }
+.m-parada.hecha .m-parada-n { background: var(--ok-fill); color: var(--on-ok-fill); }
+.m-parada-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.m-parada-det { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.m-nota-pie { margin: 0; text-align: center; }
+
+/* Entregas: cada remito con su foto grande arriba y las decisiones abajo. */
+.m-remito { display: flex; flex-direction: column; }
+.m-remito-foto { display: block; width: 100%; max-height: 280px; overflow: hidden; padding: 0; border: 0; background: var(--image-well); cursor: zoom-in; }
+.m-remito-foto img { display: block; width: 100%; height: 280px; object-fit: cover; object-position: top; }
+.m-remito-pdf { display: flex; align-items: center; justify-content: center; gap: 8px; height: 96px; color: var(--accent-ink); font-weight: 500; background: var(--ui-surface-sunken); }
+.m-remito-cuerpo { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; }
+.m-remito-cab { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+.m-remito-cab b { font-size: 16px; }
+.m-remito-acc { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.m-remito-acc > .btn { min-height: 46px; justify-content: center; white-space: normal; text-align: center; }
+.m-remito-sec { display: flex; gap: 8px; justify-content: center; }
+.m-fallo.chico.m-motivo { margin: 0; }
+.m-buscar-pedido { display: flex; flex-direction: column; gap: 6px; }
+.m-op-pedido { min-height: 44px; padding: 0 12px; text-align: left; border: 1px solid var(--ui-line); border-radius: var(--r-control); background: var(--ui-surface); font: 400 15px var(--font); color: var(--ui-ink); cursor: pointer; }
+
+/* Choferes: el panel de siempre, a lo ancho. */
+.m-choferes .ch-crear { display: flex; flex-direction: column; gap: 8px; }
+.m-choferes .ch-crear .btn { min-height: 44px; justify-content: center; }
+.m-choferes .ch-cab { flex-wrap: wrap; }
+.m-choferes .ch-acceso .row .btn { min-height: 40px; }
+.m-choferes .codigo-chofer { font-size: 28px; }
+
+/* ---------- Producción (ProduccionMovil.tsx) ---------- */
+
+.m-personas { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.m-personas .avatar-stack { display: inline-flex; }
+.m-personas .avatar-stack .avatar + .avatar { margin-left: -6px; box-shadow: 0 0 0 2px var(--ui-surface); }
+.m-pdv { align-items: flex-start; }
+.m-pdv .m-item-txt b { white-space: normal; }
+.m-pdv-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.m-pdv-lado { flex: none; max-width: 35%; padding-top: 2px; }
+
+/* Lo que entra y sale hoy: un número grande por carril. */
+.m-carriles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; padding: 0 14px 14px; }
+.m-carril { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); color: inherit; text-decoration: none; }
+.m-carril b { font-size: 22px; line-height: 1.1; }
+.m-carril span { font-size: 13px; font-weight: 500; }
+.m-carril small { font-size: 12px; color: var(--ui-warning-ink); }
+.m-carril small.muted { color: var(--text-3); }
+
+/* Un artículo del PDV: se toca para editarlo. */
+.m-art { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-sec-cab + .m-art { border-top: 0; }
+.m-art:active { background: var(--row-hover); }
+.m-art.cerrado { opacity: .65; }
+.m-art .m-item-txt { display: flex; flex-direction: column; gap: 4px; }
+.m-art-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-art-pie .st-pec { max-width: 100%; }
+.m-art-fechas { white-space: normal; }
+
+/* Los estados del artículo, con los colores de ClickUp, como botones. */
+.m-estados { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.m-estado { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 44px; min-width: 0; padding: 0 6px; border-radius: var(--r-control);
+  border: 1px solid var(--ui-line); background: var(--ui-surface); cursor: pointer; font: inherit; }
+.m-estado.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.m-estado:disabled { cursor: default; opacity: .7; }
+.m-estado .st-pec { font-size: 13px; min-width: 0; max-width: 100%; }
+.m-estado > svg { flex: none; }
+.m-datos-hoja { border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; }
+.m-opciones-largas { max-height: 50vh; overflow: auto; }

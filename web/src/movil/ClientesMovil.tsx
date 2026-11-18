@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useDebounced, Icon, Cargando, fmtRelative, fmtMoney, formatValue, propOf, recordUrl, stageOf, whatsappUrl, ACTIVITY_LABEL, keyPropsFor, userOf,
+  http, qs, useMeta, useToast, useDebounced, Icon, Cargando, fmtRelative, fmtMoney, formatValue, propOf, recordUrl, stageOf, whatsappUrl, ACTIVITY_LABEL, keyPropsFor, userOf, esOperaciones,
   type Activity, type CrmRecord, type ObjectType, type Property,
 } from '../lib';
 import { Avatar, PropertyInput } from '../components';
@@ -210,7 +210,7 @@ export function FichaCliente({ tipo }: { tipo: Tipo }) {
         </section>
       )}
 
-      <section className="m-sec" aria-label="Negocios">
+      {!esOperaciones(meta.me) && <section className="m-sec" aria-label="Negocios">
         <div className="m-sec-cab"><h2>Negocios</h2><span className="muted small">{negocios.length || ''}</span><span className="grow" />
           {puede && <button type="button" className="m-link" onClick={() => setHoja('negocio')} aria-label="Nuevo negocio"><Icon name="plus" size={14} />Nuevo</button>}</div>
         {!negocios.length && <div className="m-vacio">Sin negocios.</div>}
@@ -223,7 +223,7 @@ export function FichaCliente({ tipo }: { tipo: Tipo }) {
             </Link>
           );
         })}
-      </section>
+      </section>}
 
       <Datos tipo={tipo} record={r} claves={keyPropsFor(meta, tipo)} todos={todos} onTodos={() => setTodos(!todos)} onEditar={(p) => setHoja({ editar: p })} onCambio={cambio} />
 

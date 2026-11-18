@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
-import { Modal, QuienPidio, alEsc } from '../components';
+import { InfoTip, Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
@@ -94,10 +94,9 @@ export default function RecorridosPage() {
   return (
     <div className={`content rc-page${tab === 'destinos' ? ' list-fixed' : ''}`}>
       <div className="page-head">
-        <h1>Recorridos</h1>
+        <h1 className="rc-titulo">Recorridos <InfoTip label="Qué es Recorridos">Lo que necesitás que el chofer lleve o retire un día: muestras, un sobre, mercadería, un trámite. Elegí el destino y te decimos si ese día ya se va ahí.</InfoTip></h1>
         {puede && <button type="button" className="btn primary" onClick={() => setNuevo({})}><Icon name="plus" size={16} />Nuevo encargo</button>}
       </div>
-      <p className="rc-intro muted">Lo que necesitás que el chofer lleve o retire un día: muestras, un sobre, mercadería, un trámite. Elegí el destino y te decimos si ese día ya se va ahí.</p>
       <div className="rc-tabs-fila">
       <div className="tabs" role="tablist">
         {([['agenda', 'Próximos días'], ['encargos', 'Encargos'], ['destinos', 'Destinos']] as const).map(([k, t]) => (

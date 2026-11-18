@@ -1837,7 +1837,7 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 
 /* ---------- Recorridos (pages/Recorridos.tsx): los encargos al recorrido y la base de destinos ---------- */
 .rc-page .page-head { margin-bottom: 4px; }
-.rc-intro { margin: 0 0 12px; max-width: 760px; }
+.rc-titulo { display: inline-flex; align-items: center; gap: 8px; }
 .rc-ia { padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
 .rc-ia.warn { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .rc-estado { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: var(--r-pill); padding: 1px 7px; margin-right: 6px;
@@ -2426,3 +2426,15 @@ thead .ds-acciones { z-index: 2; }
 @media (max-width: 640px) {
   .tarea-campos { grid-template-columns: 100px minmax(0, 1fr); }
 }
+
+/* La «i» informativa (InfoTip, components.tsx). */
+.info-tip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--ui-ink-3); background: transparent; color: var(--ui-ink-2); font: 600 10px/1 Georgia, serif; font-style: italic; cursor: help; vertical-align: middle; }
+.info-tip:hover, .info-tip.on, .info-tip:focus-visible { border-color: var(--accent-ink); color: var(--accent-ink); background: var(--accent-soft); }
+.info-tip::before { content: ''; position: absolute; width: 32px; height: 32px; }   /* área de toque más grande en el celular */
+.info-tip { position: relative; }
+.info-tip-globo { position: fixed; z-index: 1000; transform: translateX(-50%); max-width: min(300px, calc(100vw - 24px)); padding: 8px 10px; border-radius: var(--r-control);
+  background: var(--ui-ink); color: var(--ui-surface); font-size: 12.5px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.2); pointer-events: none; }
+.info-tip-globo.arriba { transform: translate(-50%, -100%); }
+.info-tip-globo p { margin: 0; }
+.info-tip-globo p + p { margin-top: 6px; }

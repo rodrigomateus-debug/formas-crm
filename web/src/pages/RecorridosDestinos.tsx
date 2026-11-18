@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Link } from 'react-router-dom';
 import { http, useMeta, useToast, Icon, fmtRelative, Cargando, whatsappUrl, recordUrl } from '../lib';
-import { Avatar, Modal, RecordPicker } from '../components';
+import { Avatar, InfoTip, Modal, RecordPicker } from '../components';
 import { Select } from '../Select';
 import { lindo } from './Cronograma';
 import { BuscarDireccion, type Sugerencia } from './Direcciones';
@@ -241,18 +241,19 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
       </>; return slot ? createPortal(b, slot) : <div className="row ds-acciones-top">{b}</div>; })()}
       {/* El resumen, en un renglón: los números, «para revisar», «solo incompletos», las empresas por agrupar y el tope. */}
       <div className="ds-resumen small muted">
-        <span title="Con el punto en el mapa"><b>{datos.total}</b> destinos · <b>{pct(datos.resumen.en_mapa)} %</b> en el mapa</span>
-        <span title="Con dirección, localidad, provincia, mapa, teléfono y tipo">· <b>{pct(datos.resumen.completos)} %</b> completos</span>
-        <span>· <b>{datos.grupos.length}</b> con sucursales</span>
+        <span><b>{datos.total}</b> destinos · <b>{pct(datos.resumen.en_mapa)} %</b> en el mapa · <b>{pct(datos.resumen.completos)} %</b> completos · <b>{datos.grupos.length}</b> con sucursales</span>
+        <InfoTip label="Qué significan los números">
+          <p><b>En el mapa:</b> con el punto ubicado. <b>Completos:</b> con dirección, localidad, provincia, mapa, teléfono y tipo. <b>Con sucursales:</b> empresas con varias direcciones agrupadas.</p>
+          <p>Tocá una dirección para verla en el mapa.{bloques.length > TOPE && !verTodos ? ` Se ven los ${TOPE} más visitados; el buscador encuentra cualquiera.` : ''}</p>
+        </InfoTip>
         {datos.resumen.para_revisar > 0 && <button type="button" className={`ds-resumen-btn${revisar ? ' on' : ''}`} aria-pressed={revisar} onClick={() => setRevisar(!revisar)}><b>{datos.resumen.para_revisar}</b> para revisar</button>}
         <label className="row ds-check"><input type="checkbox" checked={incompletos} onChange={(e) => setIncompletos(e.target.checked)} />Solo incompletos</label>
         {organiza && sugeridos.length > 0 && (
           <button type="button" className="cr-link" onClick={() => setVerSugeridos(!verSugeridos)}>
-            <Icon name="merge" size={13} /> {sugeridos.length} {sugeridos.length === 1 ? 'empresa' : 'empresas'} con direcciones sueltas{verSugeridos ? ' (ocultar)' : ''}</button>
+            <Icon name="merge" size={13} /> {sugeridos.length} por agrupar{verSugeridos ? ' (ocultar)' : ''}</button>
         )}
         {bloques.length > TOPE && (
-          <span role="status">· {verTodos ? `Se ven los ${visibles.length}` : `Se ven los ${TOPE} más visitados de ${visibles.length}`}.{' '}
-            <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{verTodos ? 'Ver los más visitados' : 'Ver todos'}</button></span>
+          <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{verTodos ? `Ver los ${TOPE} más visitados` : `Ver los ${visibles.length}`}</button>
         )}
       </div>
       {ia && (
@@ -310,14 +311,16 @@ export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLEle
           {enfocado ? (
             <FichaMapa d={enfocado} organiza={organiza} ubicando={ubicando?.id === enfocado.id} onUbicar={(lat, lng) => setUbicando({ id: enfocado.id, lat, lng })}
               onGuardar={guardarPunto} onCancelar={() => setUbicando(null)} onEditar={() => setEditando(enfocado)} />
-          ) : <p className="small muted ds-ficha">Tocá una dirección para verla en el mapa. {datos.resumen.sin_buscar > 0 && `Buscando ${datos.resumen.sin_buscar} direcciones en el mapa…`}</p>}
+          ) : datos.resumen.sin_buscar > 0 ? <p className="small muted ds-ficha">Buscando {datos.resumen.sin_buscar} direcciones en el mapa…</p> : null}
         </aside>}
       </div>
       <nav className="ds-paginas" aria-label="Páginas">
         <span className="small muted ds-pag-cuenta">{mostrados.length ? `${(pag - 1) * POR_PAGINA + 1}–${Math.min(pag * POR_PAGINA, mostrados.length)} de ${mostrados.length}` : 'Sin destinos'}</span>
-        <span className="small muted ds-copia" title={`La libreta de Logística se sigue copiando de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.${datos.copia.error ? ` Último error: ${datos.copia.error}` : ''}`}>
-          · Planilla DESTINOS{datos.copia.at > 0 ? `: copiada ${fmtRelative(new Date(datos.copia.at).toISOString())}` : ''}{datos.copia.error ? ' (con error)' : ''}
-          {organiza && <> · <button type="button" className="cr-link" onClick={traerPlanilla}>Traer ahora</button></>}</span>
+        <InfoTip label="Planilla DESTINOS">
+          <p>La libreta de Logística se copia de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.</p>
+          {datos.copia.at > 0 && <p>Última copia: {fmtRelative(new Date(datos.copia.at).toISOString())}.{datos.copia.error ? ` Error: ${datos.copia.error}` : ''}</p>}
+        </InfoTip>
+        {organiza && <button type="button" className="cr-link small" onClick={traerPlanilla}>Traer planilla</button>}
         <span className="grow" />
         {paginas > 1 && <Paginas pag={pag} paginas={paginas} onIr={setPagina} />}
       </nav>

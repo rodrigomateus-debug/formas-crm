@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, faltanObligatorias, UNIDADES, type UnidadKey,
   userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney,
@@ -842,5 +843,39 @@ export function OcLinks({ ocs, vacio }: { ocs?: OcRef[] | null; vacio?: ReactNod
           : <span key={o.nombre ?? o.numero} className="oc-link" title={title}>{o.numero}</span>;
       })}
     </span>
+  );
+}
+
+// La «i» informativa: el texto de ayuda queda escondido y se ve al pasar el mouse o al tocarla (celular). Se dibuja
+// fuera de la página (portal, posición fija), así ninguna tabla ni barra con scroll la corta.
+export function InfoTip({ children, label = 'Más información' }: { children: ReactNode; label?: string }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ x: number; y: number; arriba: boolean } | null>(null);
+  const [fijo, setFijo] = useState(false);   // abierta con clic: no se cierra al sacar el mouse
+  const abrir = () => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r) return;
+    const arriba = r.bottom + 160 > window.innerHeight && r.top > 160;
+    setPos({ x: Math.min(Math.max(r.left + r.width / 2, 150), window.innerWidth - 150), y: arriba ? r.top - 8 : r.bottom + 8, arriba });
+  };
+  const cerrar = () => { setPos(null); setFijo(false); };
+  useEffect(() => {
+    if (!pos) return;
+    const fuera = (e: Event) => { if (!btn.current?.contains(e.target as Node)) cerrar(); };
+    const tecla = (e: KeyboardEvent) => { if (e.key === 'Escape') cerrar(); };
+    document.addEventListener('pointerdown', fuera);
+    window.addEventListener('scroll', cerrar, true);
+    window.addEventListener('keydown', tecla);
+    return () => { document.removeEventListener('pointerdown', fuera); window.removeEventListener('scroll', cerrar, true); window.removeEventListener('keydown', tecla); };
+  }, [pos]);
+  return (
+    <>
+      <button ref={btn} type="button" className={`info-tip${pos ? ' on' : ''}`} aria-label={label} aria-expanded={!!pos}
+        onMouseEnter={() => { if (!fijo) abrir(); }} onMouseLeave={() => { if (!fijo) setPos(null); }}
+        onFocus={() => { if (!pos) abrir(); }} onBlur={() => { if (!fijo) setPos(null); }}
+        onClick={(e) => { e.stopPropagation(); if (fijo) cerrar(); else { setFijo(true); abrir(); } }}>i</button>
+      {pos && createPortal(
+        <div role="tooltip" className={`info-tip-globo${pos.arriba ? ' arriba' : ''}`} style={{ left: pos.x, top: pos.y }}>{children}</div>, document.body)}
+    </>
   );
 }

@@ -1838,7 +1838,7 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 /* ---------- Recorridos (pages/Recorridos.tsx): los encargos al recorrido y la base de destinos ---------- */
 .rc-page .page-head { margin-bottom: 4px; }
 .rc-intro { margin: 0 0 12px; max-width: 760px; }
-.rc-ia { padding: 8px 10px; border-radius: var(--r-2, 8px); background: var(--ui-surface-sunken); }
+.rc-ia { padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
 .rc-ia.warn { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .rc-estado { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: var(--r-pill); padding: 1px 7px; margin-right: 6px;
   background: var(--ui-info-soft); color: var(--ui-info-ink); }
@@ -2208,3 +2208,77 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .rd-corregir { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 8px; }
 .rd-corregir label { display: grid; gap: 4px; font-size: 12px; color: var(--ui-ink-2); }
 @media (max-width: 800px) { .rd-det { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Recorridos → Destinos (RecorridosDestinos.tsx): la base de destinos con el mapa ---------- */
+.ds-resumen { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.ds-resumen > div, .ds-resumen-btn { display: flex; flex-direction: column; gap: 2px; min-width: 110px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.ds-resumen b { font-size: 18px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ds-resumen span { font-size: 12px; color: var(--ui-ink-2); }
+.ds-resumen-btn { border: 1px solid transparent; cursor: pointer; text-align: left; font: inherit; color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
+.ds-resumen-btn span { color: inherit; }
+.ds-resumen-btn.on { border-color: currentColor; }
+.ds-toolbar { flex-wrap: wrap; gap: 8px; }
+.ds-check { gap: 6px; white-space: nowrap; }
+.ds-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.ds-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink); font: inherit; font-size: 13px; cursor: pointer; }
+.ds-chip i { width: 8px; height: 8px; border-radius: 4px; background: var(--c); }
+.ds-chip span { color: var(--ui-ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ds-chip.on { background: var(--ui-ink); color: var(--ui-surface); border-color: var(--ui-ink); }
+.ds-chip.on span { color: inherit; opacity: .75; }
+.ds-nota { margin: 8px 0; }
+.ds-sugeridos { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.ds-sugeridos ul, .ds-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ds-sugeridos li, .ds-lista li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--ui-line); }
+.ds-seleccion { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface); box-shadow: 0 2px 10px rgba(0,0,0,.12); }
+.ds-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 30%); gap: 16px; align-items: start; }
+.ds-locmov { display: none; }
+.ds-tabla { max-height: calc(100vh - 220px); overflow: auto; }
+.ds-tabla td { vertical-align: top; }
+.ds-sel { width: 28px; }
+.ds-grupo td { background: var(--ui-surface-sunken); }
+.ds-grupo-nombre, .ds-nombre, .ds-dir, .ds-plegar { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.ds-grupo-nombre { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; }
+.ds-plegar { margin-right: 4px; color: var(--ui-ink-2); vertical-align: middle; }
+.ds-hijo td:nth-child(2) { padding-left: 28px; }
+.ds-hijo td:first-child.ds-sel + td { padding-left: 28px; }
+.ds-foco td { background: var(--ui-info-soft); }
+.ds-nombre:hover b, .ds-grupo-nombre:hover b { text-decoration: underline; }
+.ds-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.ds-tipo { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; line-height: 1.35; padding: 1px 7px; border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--c) 16%, transparent); color: color-mix(in srgb, var(--c) 75%, var(--ui-ink)); }
+.ds-tipo.vacio { background: transparent; border: 1px dashed var(--ui-line-strong); color: var(--ui-ink-2); font-weight: 500; }
+.ds-falta { font-size: 11px; color: var(--ui-warning-ink); }
+.ds-dir { display: inline-flex; align-items: flex-start; gap: 4px; }
+.ds-dir:hover span:first-of-type { text-decoration: underline; }
+.ds-dir svg { flex: none; margin-top: 3px; color: var(--ui-ink-2); }
+.ds-sinmapa { font-size: 10.5px; padding: 0 5px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); white-space: nowrap; align-self: center; }
+.ds-gmaps { display: flex; width: max-content; align-items: center; gap: 3px; margin: 2px 0 0 17px; font-size: 11.5px; }
+.ds-contacto { min-width: 140px; max-width: 220px; }
+.ds-wa { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, #25d366 18%, transparent); color: color-mix(in srgb, #128c4b 80%, var(--ui-ink)); text-decoration: none; }
+.ds-mapa-col { position: sticky; top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.ds-mapa { height: min(62vh, 560px); border-radius: var(--r-control); overflow: hidden; background: var(--ui-surface-sunken); }
+.ds-ficha { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); margin: 0; }
+.ds-pin-wrap { background: none; border: 0; }
+.ds-pin { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--c, #6b7280); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.ds-pin.on { border-width: 3px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, #6b7280) 35%, transparent), 0 1px 6px rgba(0,0,0,.4); }
+.ds-pin.ubicando { --c: #f07d14; cursor: grab; }
+.ds-form fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.ds-form legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
+.ds-3 { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; }
+@media (max-width: 1680px) {
+  .ds-layout { grid-template-columns: minmax(0, 1fr); }
+  .ds-mapa-col { position: static; order: -1; }
+  .ds-mapa { height: 320px; }
+  .ds-tabla { max-height: none; }
+  .ds-mapa-col { scroll-margin-top: 12px; }
+}
+@media (max-width: 700px) {
+  .ds-3 { grid-template-columns: 1fr 1fr; }
+  .ds-resumen { gap: 6px; }
+  .ds-resumen > div, .ds-resumen-btn { min-width: 0; flex: 1 1 28%; padding: 6px 8px; }
+  .ds-resumen b { font-size: 15px; }
+  .ds-resumen span { font-size: 11px; }
+  .ds-col-loc { display: none; }
+  .ds-locmov { display: block; margin-left: 17px; }
+  .ds-contacto { min-width: 110px; }
+}

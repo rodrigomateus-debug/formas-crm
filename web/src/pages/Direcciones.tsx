@@ -15,7 +15,7 @@ interface Producto { clave: string; nombre: string; codigo: string | null; total
 interface Base { id: string; nombre: string; direccion: string }
 interface Datos { direcciones: Direccion[]; cantidades: Array<{ direccion_id: number; clave: string; cantidad: number }>; productos: Producto[]; varias: boolean;
   sugerida: string | null; maps: boolean; sin_repartir: number; bases: Base[] }
-interface Sugerencia { place_id: string; texto: string; principal: string; secundario: string }
+export interface Sugerencia { place_id: string; texto: string; principal: string; secundario: string }
 
 const cant = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
@@ -244,8 +244,8 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
 }
 
 // Buscador de direcciones con las sugerencias de Google Maps (las pide el servidor, con la clave de Google).
-function BuscarDireccion({ valor, validada, sesion, maps, sugerida, onTexto, onElegir }: {
-  valor: string; validada: boolean; sesion: string; maps: boolean; sugerida: string | null; onTexto: (t: string) => void; onElegir: (s: Sugerencia) => void;
+export function BuscarDireccion({ valor, validada, sesion, maps, sugerida, onTexto, onElegir, etiqueta = 'Dirección de entrega' }: {
+  valor: string; validada: boolean; sesion: string; maps: boolean; sugerida: string | null; onTexto: (t: string) => void; onElegir: (s: Sugerencia) => void; etiqueta?: string;
 }) {
   const [abierto, setAbierto] = useState(false);
   const [lista, setLista] = useState<Sugerencia[]>([]);
@@ -274,7 +274,7 @@ function BuscarDireccion({ valor, validada, sesion, maps, sugerida, onTexto, onE
     <div className="buscar-direccion" ref={ref}>
       <div className={`search${validada ? ' validada' : ''}`}>
         <Icon name={validada ? 'check' : 'pin'} />
-        <input className="input" autoFocus={!valor} placeholder="Calle y número, localidad…" value={valor} aria-label="Dirección de entrega" role="combobox" aria-expanded={mostrar} aria-autocomplete="list"
+        <input className="input" autoFocus={!valor} placeholder="Calle y número, localidad…" value={valor} aria-label={etiqueta} role="combobox" aria-expanded={mostrar} aria-autocomplete="list"
           onChange={(e) => { onTexto(e.target.value); setAbierto(true); }} onFocus={() => setAbierto(true)}
           onKeyDown={(e) => {
             if (!mostrar) return;

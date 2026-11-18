@@ -211,3 +211,48 @@ el mapa. En la pestaña **Destinos**, Logística (y quien edita el cronograma) t
 
 Código: `src/worker/destinosia.ts` (`POST /api/recorridos/libreta/ia`), migración `0078_destinos_ia.sql`, prueba
 `test/destinos-ia.test.mjs`.
+
+## La pestaña Destinos, rediseñada
+
+Pedido de Rodrigo del 18/11/2026: que la pestaña esté enfocada en que los destinos estén bien.
+
+**Cómo está armada la base** (`src/worker/destinos.ts`, migración `0079_destinos_rediseno.sql`), siguiendo lo que se usa
+para este tipo de libretas de direcciones, para que esté completa pero se pueda mantener cuando crezca:
+
+- **Empresa y sucursales por separado.** Cada destino es *una dirección*; los de una misma empresa (casa central,
+  depósito, planta, otra sucursal) se juntan en un **grupo** (`destino_grupos`). Así no se duplica la empresa, y cada
+  sucursal tiene su dirección, su horario y su contacto.
+- **La dirección en partes**: calle y altura, localidad, provincia y código postal (no un solo texto), más el lugar de
+  Google Maps (`place_id`) y el punto en el mapa (el mismo de la ruta del cronograma, `geocodigos`).
+- **Un tipo por destino** (cliente, proveedor, impresor, taller, expreso, otro) y **de dónde salió** (`tipo_origen`): a
+  mano, por la empresa del CRM y su «Tipo de relación», porque es un expreso del cronograma, por el nombre («imprenta»,
+  «serigrafía», «transporte», «taller»…) o por la IA (≥ 90 %). Lo que se pone a mano no lo pisa nada.
+- **Contacto por destino**: nombre, teléfono, WhatsApp (si es otro número que el teléfono) y mail.
+- **Qué le falta a cada uno** (dirección, localidad, provincia, mapa, teléfono o WhatsApp, tipo) y el % de completos.
+- Los ids no cambian nunca, los que se sacan quedan inactivos (los encargos viejos los siguen nombrando) y la copia de la
+  planilla no pisa lo corregido en el Hub.
+
+**La pantalla** (`web/src/pages/RecorridosDestinos.tsx`):
+
+- Arriba, el estado de la base: cuántos destinos, % en el mapa, % completos, empresas con sucursales y cuántos quedaron
+  «para revisar» de la IA (se tocan para filtrarlos).
+- Filtros por tipo (con su color, el mismo de los puntos del mapa), «Solo incompletos» y buscador (nombre, calle,
+  localidad, contacto, empresa).
+- La tabla: destino (con su tipo y lo que le falta), **dirección, localidad y provincia en columnas separadas**, contacto
+  con el botón **WhatsApp** (abre el chat con esa persona, con un saludo de Formas), teléfono y mail, y **viajes**: en los
+  últimos 6 meses / en total, el último y si ya hay uno previsto («va el 21/11»). Los grupos se ven como una empresa con
+  sus direcciones abajo (se pliegan).
+- **El mapa**: todos los destinos con un punto del color de su tipo. Al tocar una dirección, el mapa va a ese lugar y
+  muestra la ficha con **«Ver en Google Maps»** (cada dirección tiene además su link «Maps» en la tabla), WhatsApp y
+  Editar. Si no está ubicada, Logística la ubica a mano arrastrando el pin («Ubicar a mano» / «Corregir el punto»), y
+  queda también para la ruta del cronograma. Las direcciones que nunca se buscaron se buscan solas, de fondo. En
+  pantallas anchas el mapa queda al costado; en las demás, arriba.
+- **Agrupar sucursales**: se eligen destinos en la tabla y «Agrupar como una empresa» (una nueva o sumar a una que ya
+  está, con el tipo para todas). El Hub **sugiere** qué juntar (la misma empresa del CRM, o el mismo nombre como «ZECAT
+  OFICINA» y «ZECAT (DEPÓSITO)»): «Agrupar» o «No son la misma». Al tocar el nombre del grupo se le cambia el nombre o el
+  tipo, se saca una dirección o se deshace.
+- **Editar un destino**: qué es (nombre, sucursal o sector, tipo, empresa), dirección (se puede elegir de **Google Maps**
+  y el Hub completa localidad, provincia, CP y el punto), contacto y lo que necesita saber el chofer.
+
+Quién puede: Logística, Producción y los administradores corrigen todo, agrupan y ubican en el mapa; los demás, los
+destinos que cargaron ellos. Prueba: `test/destinos.test.mjs`.

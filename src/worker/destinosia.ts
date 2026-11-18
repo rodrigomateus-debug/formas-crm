@@ -24,8 +24,8 @@ const POR_VEZ = 15;
 const PLACES = (env: Env) => env.GOOGLE_PLACES_API_URL ?? 'https://places.googleapis.com/v1';
 
 interface FilaLugar { id: number; nombre: string; direccion: string | null; localidad: string | null; provincia: string | null; zona: string | null;
-  observaciones: string | null; editado: number; ia_firma: string | null }
-interface Propuesta { id: number; direccion: string; localidad: string; provincia: string; confianza: number; motivo: string }
+  observaciones: string | null; editado: number; ia_firma: string | null; tipo: string | null; empresa: string | null }
+interface Propuesta { id: number; direccion: string; localidad: string; provincia: string; confianza: number; motivo: string; tipo: string; tipo_confianza: number }
 
 const firmaDe = (l: { nombre: string; direccion: string | null; localidad: string | null; provincia: string | null }) =>
   norm([l.nombre, l.direccion ?? '', l.localidad ?? '', l.provincia ?? ''].join('|'));
@@ -33,8 +33,8 @@ const vacio = (s: string | null | undefined) => !String(s ?? '').trim();
 
 // Los que hay que revisar: les falta la localidad, la provincia o el punto en el mapa, y no se revisaron así como están.
 async function pendientes(db: D1Database, ids?: number[]) {
-  const { results } = await db.prepare(`SELECT id, nombre, direccion, localidad, provincia, zona, observaciones, editado, ia_firma FROM lugares
-    WHERE activo = 1 ${ids?.length ? 'AND id IN (SELECT value FROM json_each(?))' : ''} ORDER BY id`).bind(...(ids?.length ? [JSON.stringify(ids)] : [])).all<FilaLugar>();
+  const { results } = await db.prepare(`SELECT l.id, l.nombre, l.direccion, l.localidad, l.provincia, l.zona, l.observaciones, l.editado, l.ia_firma, l.tipo, r.name AS empresa
+    FROM lugares l LEFT JOIN records r ON r.id = l.company_id WHERE l.activo = 1 ${ids?.length ? 'AND l.id IN (SELECT value FROM json_each(?))' : ''} ORDER BY l.id`).bind(...(ids?.length ? [JSON.stringify(ids)] : [])).all<FilaLugar>();
   const sinRevisar = results.filter((l) => l.ia_firma !== firmaDe(l));
   const claves = [...new Set(sinRevisar.map((l) => claveDireccion(direccionLugar(l))).filter(Boolean))];
   const enMapa = new Set<string>();
@@ -43,7 +43,7 @@ async function pendientes(db: D1Database, ids?: number[]) {
     for (const x of g) enMapa.add(x.clave);
   }
   // Pedido a mano (ids): se revisan aunque estén completos.
-  return sinRevisar.filter((l) => ids?.length || vacio(l.localidad) || vacio(l.provincia) || vacio(l.direccion) || !enMapa.has(claveDireccion(direccionLugar(l))));
+  return sinRevisar.filter((l) => ids?.length || !l.tipo || vacio(l.localidad) || vacio(l.provincia) || vacio(l.direccion) || !enMapa.has(claveDireccion(direccionLugar(l))));
 }
 
 const ESQUEMA = {
@@ -52,8 +52,9 @@ const ESQUEMA = {
     destinos: {
       type: 'array',
       items: {
-        type: 'object', additionalProperties: false, required: ['id', 'direccion', 'localidad', 'provincia', 'confianza', 'motivo'],
-        properties: { id: { type: 'integer' }, direccion: { type: 'string' }, localidad: { type: 'string' }, provincia: { type: 'string' }, confianza: { type: 'integer' }, motivo: { type: 'string' } },
+        type: 'object', additionalProperties: false, required: ['id', 'direccion', 'localidad', 'provincia', 'confianza', 'motivo', 'tipo', 'tipo_confianza'],
+        properties: { id: { type: 'integer' }, direccion: { type: 'string' }, localidad: { type: 'string' }, provincia: { type: 'string' }, confianza: { type: 'integer' }, motivo: { type: 'string' },
+          tipo: { type: 'string', enum: ['cliente', 'proveedor', 'impresor', 'taller', 'expreso', 'otro', ''] }, tipo_confianza: { type: 'integer' } },
       },
     },
   },
@@ -65,10 +66,12 @@ Para cada uno devolvé:
 - provincia: «Ciudad Autónoma de Buenos Aires», «Buenos Aires», «Santa Fe», etc.
 - confianza: de 0 a 100, cuán seguro estás de que esa calle, esa altura, esa localidad y esa provincia son las del lugar (no si la dirección está bien escrita). Una calle que existe en varias localidades y sin otra pista no pasa de 60. Sin altura, no pasa de 50. Poné 90 o más solo si de verdad no tenés dudas (la localidad o la zona lo confirman, o la calle y altura son inconfundibles).
 - motivo: una frase corta en castellano rioplatense para Logística: qué completaste o por qué no estás seguro («Agregué Sarandí, Buenos Aires: Nicaragua al 1600 está en Sarandí y la zona es Sur», «Hay calle Mitre en muchas localidades y no hay zona»).
+- tipo: qué es el lugar para Formas: «cliente» (una empresa a la que le vendemos: se le entregan pedidos o muestras), «proveedor» (nos vende productos o insumos), «impresor» (imprenta, serigrafía, bordado, sublimación, grabado: personaliza la mercadería), «taller» (costura, confección), «expreso» (transporte o expreso al que se le lleva mercadería para el interior), «otro». Si no lo sabés, cadena vacía.
+- tipo_confianza: de 0 a 100, cuán seguro estás del tipo. 90 o más solo si el nombre, la empresa o las observaciones lo dejan claro.
 Devolvé un elemento por cada destino, con su mismo id.`;
 
 async function preguntarAClaude(env: Env, lugares: FilaLugar[]): Promise<Propuesta[]> {
-  const datos = lugares.map((l) => ({ id: l.id, nombre: l.nombre, direccion: l.direccion ?? '', localidad: l.localidad ?? '', provincia: l.provincia ?? '', zona: l.zona ?? '',
+  const datos = lugares.map((l) => ({ id: l.id, nombre: l.nombre, empresa_del_crm: l.empresa ?? '', direccion: l.direccion ?? '', localidad: l.localidad ?? '', provincia: l.provincia ?? '', zona: l.zona ?? '',
     observaciones: (l.observaciones ?? '').slice(0, 200) }));
   const res = await new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL || undefined, maxRetries: 1, timeout: 90_000 }).beta.messages.create({
     model: MODELO, max_tokens: 8000,
@@ -144,6 +147,10 @@ export async function completarDestinos(env: Env, ctx: Ctx, b: { ids?: unknown }
     const nueva = { direccion: recorte(p.direccion, 300) ?? l.direccion, localidad: recorte(p.localidad, 80), provincia: recorte(p.provincia, 80) };
     const conf = Math.max(0, Math.min(100, Math.round(Number(p.confianza) || 0)));
     const motivo = recorte(String(p.motivo ?? ''), 300) ?? '';
+    // El tipo, si no tenía y Claude está seguro.
+    if (!l.tipo && p.tipo && Number(p.tipo_confianza) >= UMBRAL && ['cliente', 'proveedor', 'impresor', 'taller', 'expreso', 'otro'].includes(p.tipo)) {
+      stmts.push(db.prepare("UPDATE lugares SET tipo = ?, tipo_origen = 'ia' WHERE id = ? AND tipo IS NULL").bind(p.tipo, l.id));
+    }
     const igual = norm(nueva.direccion ?? '') === norm(l.direccion ?? '') && norm(nueva.localidad ?? '') === norm(l.localidad ?? '') && norm(nueva.provincia ?? '') === norm(l.provincia ?? '');
     let estado: 'corregido' | 'ok' | 'dudoso' = conf >= UMBRAL ? (igual ? 'ok' : 'corregido') : 'dudoso';
     let nota = motivo;

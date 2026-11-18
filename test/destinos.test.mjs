@@ -1,4 +1,5 @@
-// Destinos completados con IA (src/worker/destinosia.ts): Claude propone la dirección, la localidad y la provincia de
+// Destinos (src/worker/destinos.ts): tipos, empresas con varias sucursales, la lista con el mapa y la dirección elegida de
+// Google. Y completados con IA (src/worker/destinosia.ts): Claude propone la dirección, la localidad y la provincia de
 // cada destino de la libreta y solo se corrige lo que está al menos 90 % seguro y Google Maps ubica en el mismo lugar.
 // Claude simulado en el puerto 8797 y Google Maps en el 8793 (ver .dev.vars.example).
 import { test, before, after } from 'node:test';
@@ -43,6 +44,11 @@ before(async () => {
     let body = '';
     for await (const ch of req) body += ch;
     res.setHeader('content-type', 'application/json');
+    if (req.url.startsWith('/places/places/ChIJ_zecat_pilar')) {
+      return res.end(JSON.stringify({ id: 'ChIJ_zecat_pilar', formattedAddress: 'Ruta 8 Km 50 1234, B1629 Pilar, Provincia de Buenos Aires, Argentina', location: { latitude: -34.45, longitude: -58.91 },
+        types: ['street_address'], addressComponents: [{ longText: 'Ruta 8 Km 50', types: ['route'] }, { longText: '1234', types: ['street_number'] }, { longText: 'Pilar', types: ['locality'] },
+          { longText: 'Provincia de Buenos Aires', types: ['administrative_area_level_1'] }, { longText: 'B1629', types: ['postal_code'] }] }));
+    }
     if (!req.url.startsWith('/places/places:searchText')) { res.statusCode = 404; return res.end('{}'); }
     const q = JSON.parse(body).textQuery.toLowerCase();
     const g = Object.entries(GOOGLE).find(([k]) => q.includes(k))?.[1];
@@ -90,4 +96,55 @@ test('destinos: la IA completa solo lo que está ≥ 90 % seguro y Google confir
   const t2 = (await call('GET', `/recorridos/libreta?q=${RUN}`)).data.destinos.find((d) => d.id === ids[`Taller ${RUN}`]);
   assert.equal(t2.ia_estado, null);
   assert.equal(t2.provincia, 'Buenos Aires');
+});
+
+test('destinos: tipo, sucursales agrupadas, contacto y la dirección elegida de Google Maps', async () => {
+  const crear = async (b) => { const r = await call('POST', '/recorridos/libreta', b); assert.equal(r.status, 200, JSON.stringify(r.data)); return r.data.id; };
+  const ofi = await crear({ nombre: `ZTK${RUN} Oficina`, direccion: 'Av. Corrientes 1234', localidad: 'CABA', provincia: 'Ciudad Autónoma de Buenos Aires', contacto: 'Marcela', whatsapp: '11 5555-1234' });
+  const dep = await crear({ nombre: `ZTK${RUN} Deposito`, direccion: 'x', place_id: 'ChIJ_zecat_pilar', sucursal: 'Depósito Pilar', tipo: 'proveedor' });
+  const imp = await crear({ nombre: `Imprenta Sol ${RUN}`, direccion: 'Mitre 10', localidad: 'Avellaneda' });
+
+  let l = (await call('GET', '/recorridos/libreta')).data;
+  const d = (id) => l.destinos.find((x) => x.id === id);
+  // Elegida de Google: calle y altura, localidad, provincia y CP en partes, con el punto en el mapa.
+  assert.equal(d(dep).direccion, 'Ruta 8 Km 50 1234');
+  assert.equal(d(dep).localidad, 'Pilar');
+  assert.equal(d(dep).provincia, 'Provincia de Buenos Aires');
+  assert.equal(d(dep).codigo_postal, 'B1629');
+  assert.equal(d(dep).mapa, 'ok');
+  assert.equal(d(dep).lat, -34.45);
+  assert.equal(d(dep).tipo, 'proveedor');
+  assert.equal(d(dep).tipo_origen, 'manual');
+  // El tipo por el nombre; lo que falta, a la vista.
+  assert.equal(d(imp).tipo, 'impresor');
+  assert.equal(d(imp).tipo_origen, 'nombre');
+  assert.ok(d(imp).faltan.includes('provincia') && d(imp).faltan.includes('contacto'));
+  assert.equal(d(ofi).whatsapp, '11 5555-1234');
+  assert.deepEqual(d(ofi).viajes, { seis: 0, total: 0, ultimo: null, proximo: null });
+  // Sugiere juntar las dos de ZTK (mismo nombre).
+  const sug = l.sugeridos.find((s) => s.ids.includes(ofi));
+  assert.ok(sug && sug.ids.includes(dep), JSON.stringify(l.sugeridos));
+
+  // Agrupar como una empresa: el tipo del grupo pasa a sus direcciones.
+  const g = await call('POST', '/recorridos/grupos', { nombre: `ZTK ${RUN}`, ids: [ofi, dep], tipo: 'proveedor' });
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(ofi).grupo_id, g.data.grupo_id);
+  assert.equal(d(ofi).tipo, 'proveedor');
+  assert.equal(l.grupos.find((x) => x.id === g.data.grupo_id).n, 2);
+  assert.ok(!l.sugeridos.some((s) => s.ids.includes(ofi)), 'lo agrupado ya no se sugiere');
+
+  // Un viaje hecho cuenta.
+  const enc = await call('POST', '/recorridos/encargos', { fecha: '2026-11-02', destino: { lugar_id: ofi }, llevar: [{ que: 'Muestras' }] });
+  assert.equal(enc.status, 200, JSON.stringify(enc.data));
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(ofi).viajes.total, 1);
+  assert.equal(d(ofi).viajes.ultimo, '2026-11-02');
+
+  // Sacar uno del grupo deja al otro solo; deshacerlo borra el grupo.
+  await call('POST', `/recorridos/grupos/${g.data.grupo_id}/sacar`, { ids: [dep] });
+  await call('POST', `/recorridos/grupos/${g.data.grupo_id}/sacar`, {});
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(ofi).grupo_id, null);
+  assert.ok(!l.grupos.some((x) => x.id === g.data.grupo_id));
 });

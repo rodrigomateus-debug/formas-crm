@@ -157,3 +157,66 @@ test('destinos: tipo, sucursales agrupadas, contacto y la dirección elegida de 
   const e = (await call('GET', `/recorridos/encargos/${enc.data.id}`)).data;
   assert.equal(e.lugar_id ?? e.encargo?.lugar_id, ofi);
 });
+
+test('destinos: se relacionan solos con su empresa del CRM (por el nombre) y lo hecho a mano queda', async () => {
+  const empresa = async (props) => { const r = await call('POST', '/records/company', { props }); assert.ok(r.status < 300, JSON.stringify(r.data)); return r.data.id; };
+  const crear = async (b) => { const r = await call('POST', '/recorridos/libreta', b); assert.equal(r.status, 200, JSON.stringify(r.data)); return r.data.id; };
+  // Dos empresas que se llaman igual: gana la que es cliente (la otra es proveedor).
+  const prov = await empresa({ name: `Gdr${RUN}`, tipo_de_relacion: 'proveedor' });
+  const cliente = await empresa({ name: `GDR${RUN} S.A.`, domain: `gdr-${RUN}.com.ar` });
+  const otra = await empresa({ name: `Otra ${RUN} SRL`, domain: `otra-${RUN}.com.ar` });
+  assert.notEqual(prov, cliente);
+
+  const igual = await crear({ nombre: `GDR${RUN}`, direccion: 'Darwin 429', localidad: 'CABA' });
+  const conParentesis = await crear({ nombre: `Gdr${RUN} (DEPÓSITO)`, direccion: 'Av. Juan B. Justo 2500', localidad: 'CABA' });
+  const conLugar = await crear({ nombre: `Depósito gdr${RUN}`, direccion: 'Ruta 8 km 60', localidad: 'Pilar' });
+  const pilar = await crear({ nombre: `Planta Pilar ${RUN}`, direccion: 'Ruta 8 km 61', localidad: 'Pilar' });
+  const nada = await crear({ nombre: `Casa de Juan ${RUN}`, direccion: 'Mitre 1', localidad: 'CABA' });
+
+  let l = (await call('GET', '/recorridos/libreta')).data;
+  const d = (id) => l.destinos.find((x) => x.id === id);
+  for (const id of [igual, conParentesis, conLugar]) {
+    assert.equal(d(id).company_id, cliente, `${d(id).nombre}: la empresa cliente`);
+    assert.equal(d(id).empresa, `GDR${RUN} S.A.`);
+    assert.equal(d(id).dominio, `gdr-${RUN}.com.ar`, 'el dominio, para el logo');
+    assert.equal(d(id).empresa_origen, 'nombre');
+    assert.equal(d(id).tipo, 'cliente', 'y con la empresa, el tipo');
+  }
+  assert.equal(d(pilar).company_id ?? null, null);
+  assert.equal(d(nada).company_id ?? null, null);
+
+  // Un grupo que se llama como la empresa queda relacionado, y sus direcciones (aunque se llamen distinto) también.
+  const g = (await call('POST', '/recorridos/grupos', { nombre: `gdr${RUN}`, ids: [igual, pilar] })).data.grupo_id;
+  l = (await call('GET', '/recorridos/libreta')).data;
+  const grupo = () => l.grupos.find((x) => x.id === g);
+  assert.equal(grupo().company_id, cliente);
+  assert.equal(grupo().dominio, `gdr-${RUN}.com.ar`);
+  assert.equal(d(pilar).company_id, cliente);
+  assert.equal(d(pilar).empresa_origen, 'grupo');
+
+  // Quitada a mano: no se vuelve a relacionar sola.
+  let r = await call('PATCH', `/recorridos/libreta/${conLugar}`, { company_id: null });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(conLugar).company_id ?? null, null, 'lo que se quitó a mano no vuelve');
+  // Elegida a mano: queda esa.
+  r = await call('PATCH', `/recorridos/libreta/${nada}`, { company_id: otra });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(nada).company_id, otra);
+  assert.equal(d(nada).empresa_origen, 'manual');
+  assert.equal((await call('PATCH', `/recorridos/libreta/${nada}`, { company_id: 999999999 })).status, 404);
+
+  // Cambiar la empresa del grupo pasa a sus direcciones; sacar una del grupo le suelta la que tenía por el grupo.
+  r = await call('PATCH', `/recorridos/grupos/${g}`, { company_id: otra });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(grupo().company_id, otra);
+  assert.equal(d(igual).company_id, otra);
+  assert.equal(d(pilar).company_id, otra);
+  await call('POST', `/recorridos/grupos/${g}/sacar`, { ids: [pilar] });
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(pilar).grupo_id ?? null, null);
+  assert.equal(d(pilar).company_id ?? null, null, 'fuera del grupo ya no es de esa empresa');
+  assert.equal(d(igual).company_id, otra, 'la que sigue en el grupo, sí');
+});

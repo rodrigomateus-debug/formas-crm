@@ -113,7 +113,7 @@ const KEY_PROPS: Record<ObjectType, string[]> = {
 };
 
 // «Acerca de» de cada objeto: lo elegido en «Elegir datos» o, si nadie eligió, lo de siempre.
-function keyPropsFor(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType) {
+export function keyPropsFor(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType) {
   const chosen = meta.key_props?.[type];
   return chosen?.length ? chosen : KEY_PROPS[type];
 }

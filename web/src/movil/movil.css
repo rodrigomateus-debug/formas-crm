@@ -138,3 +138,79 @@ body.movil .modal-head { padding-top: calc(12px + env(safe-area-inset-top)); }
 body.movil .modal-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
 body.movil .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
 body.movil:has(.m-full) .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+/* ---------- Clientes (ClientesMovil.tsx) ---------- */
+
+/* Empresas | Contactos: un control segmentado. */
+.m-seg { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: var(--ui-surface-sunken); }
+.m-seg-op { display: grid; place-items: center; min-height: 38px; border-radius: 8px; font: 500 14px var(--font); color: var(--ui-ink-2); text-decoration: none; }
+.m-seg-op.active { background: var(--ui-surface); color: var(--ui-ink); box-shadow: 0 1px 2px rgba(18, 20, 58, .12); }
+.m-fila { display: flex; align-items: center; gap: 8px; }
+.m-vacio-solo { padding: 24px 4px; text-align: center; }
+
+.m-item-cuerpo { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; min-height: 44px; }
+.m-item-cuerpo:active { opacity: .7; }
+.m-ico-btn { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--accent-ink); background: var(--accent-soft); }
+.m-ico-btn.wa { color: #1c8a4a; background: rgba(37, 211, 102, .12); }
+[data-theme="dark"] .m-ico-btn.wa { color: #6fd07f; }
+
+/* La ficha */
+.m-ficha-cab { display: flex; align-items: center; gap: 14px; }
+.m-ficha-cab .avatar { flex: none; }
+.m-ficha-tit { min-width: 0; }
+.m-ficha-tit h1 { font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.m-ficha-tit p { margin: 4px 0 0; font-size: 13px; }
+.m-ficha-tit a { color: inherit; text-decoration: underline; text-decoration-color: var(--ui-line-strong); }
+
+.m-acciones { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.m-accion { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 2px; border-radius: var(--r-panel); background: var(--ui-surface); border: 1px solid var(--ui-line);
+  font: 500 12px var(--font); color: var(--ui-ink); text-decoration: none; }
+.m-accion > span { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.m-accion.wa > span { color: #1c8a4a; background: rgba(37, 211, 102, .12); }
+[data-theme="dark"] .m-accion.wa > span { color: #6fd07f; }
+.m-accion:active { background: var(--row-hover); }
+.m-accion.off { color: var(--text-3); opacity: .55; }
+.m-accion.off > span { background: var(--ui-surface-sunken); color: var(--text-3); }
+
+.m-rapidas { display: flex; gap: 8px; }
+.m-rapidas .btn { flex: 1; height: 42px; justify-content: center; }
+
+.m-datos { margin: 0; }
+.m-dato { display: flex; align-items: baseline; gap: 12px; width: 100%; min-height: 48px; padding: 10px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-dato:first-child { border-top: 0; }
+.m-dato:not(:disabled):active { background: var(--row-hover); }
+.m-dato:disabled { cursor: default; }
+.m-dato dt { flex: none; width: 40%; font-size: 12px; color: var(--text-3); }
+.m-dato dd { flex: 1; min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.m-dato dd.muted { color: var(--accent-ink); font-size: 13px; }
+.m-dato:disabled dd.muted { color: var(--text-3); }
+
+.m-act { display: flex; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--ui-line); }
+.m-sec-cab + .m-act { border-top: 0; }
+.m-act-ico { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
+.m-act-ico.t-call, .m-act-ico.t-whatsapp { color: var(--ui-positive-ink); background: var(--ui-positive-soft); }
+.m-act-ico.t-email { color: var(--ui-info-ink); background: var(--ui-info-soft); }
+.m-act-ico.t-task { color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
+.m-act .m-item-txt b { white-space: normal; }
+.m-act-txt { margin: 2px 0; font-size: 13px; color: var(--ui-ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tachada { text-decoration: line-through; color: var(--text-3); }
+
+/* Formularios cortos de las hojas */
+.m-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.m-form .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ui-ink-2); }
+.m-elegida { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.m-elegida .m-link { margin-left: auto; padding: 0; }
+.m-opciones { display: flex; flex-direction: column; border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; }
+.m-opciones button { min-height: 44px; padding: 0 12px; text-align: left; background: var(--ui-surface); border: 0; border-top: 1px solid var(--ui-line); font: 400 15px var(--font); color: var(--ui-ink); cursor: pointer; }
+.m-opciones button:first-child { border-top: 0; }
+.chip.sm { min-height: 32px; padding: 0 10px; font-size: 13px; }
+.m-sec > .m-item:first-child { border-top: 0; }
+
+/* En el celular no hay «pasar el mouse»: los links no se subrayan al tocarlos. */
+.m-shell a:hover { text-decoration: none; }
+/* Los avisos del día («Mañana ya van…») en párrafo, con el punto adelante, no en columnas. */
+.m-asis .rc-pista .rc-va { display: block; font-size: 14px; }
+.m-asis .rc-pista .rc-va i { margin-right: 6px; vertical-align: 1px; }
+.m-asis .rc-mejor { display: block; }
+.m-asis .rc-mejor .cr-link { display: inline-flex; margin-left: 4px; }

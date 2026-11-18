@@ -12,12 +12,13 @@ import NotasProductosPage from '../pages/NotasProductos';
 import ConversacionesPage, { useNoLeidas } from '../pages/Conversacion';
 import Hoy from './Hoy';
 import { RecorridosMovil, EncargoAsistente } from './RecorridosMovil';
+import { ClientesLista, FichaCliente, AltaCliente } from './ClientesMovil';
 
 // Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en una pantalla angosta, el perfil Ventas no ve el CRM de
 // escritorio achicado sino una app simple, con lo esencial para cargar desde la calle. Misma dirección, mismo login y la
 // misma API; lo que no está acá se abre con «Ver versión completa». Barra abajo: Hoy · Clientes · ＋ · Ventas · Chat.
-// Fase 1: el esqueleto, Hoy y Recorridos (encargo en tres pasos). Clientes, Ventas, Tareas y Chat abren, por ahora, las
-// pantallas de siempre dentro de este esqueleto.
+// Fase 1: el esqueleto, Hoy y Recorridos (encargo en tres pasos). Fase 2: Clientes (ClientesMovil.tsx). Ventas, Tareas y
+// Chat abren, por ahora, las pantallas de siempre dentro de este esqueleto (docs/MOVIL.md).
 
 const ANGOSTO = '(max-width: 760px)';
 const CLAVE_COMPLETA = 'crm-version-completa';
@@ -70,6 +71,10 @@ export default function AppMovil({ buscador }: { buscador: ReactNode }) {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/conversaciones" element={<ConversacionesPage />} />
           <Route path="/productos" element={<NotasProductosPage />} />
+          <Route path="/companies" element={<ClientesLista key="company" tipo="company" />} />
+          <Route path="/contacts" element={<ClientesLista key="contact" tipo="contact" />} />
+          <Route path="/companies/:id" element={<FichaCliente key="company" tipo="company" />} />
+          <Route path="/contacts/:id" element={<FichaCliente key="contact" tipo="contact" />} />
           <Route path="/:objectPath" element={<ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />
         </Routes>
@@ -120,6 +125,7 @@ function MenuCrear({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [tipo, setTipo] = useState<ObjectType | null>(null);
   const [tarea, setTarea] = useState(false);
+  if (tipo === 'company' || tipo === 'contact') return <AltaCliente tipo={tipo} onClose={onClose} />;
   if (tipo) return <CreateRecord type={tipo} onClose={onClose} />;
   if (tarea) return <TareaRapida onClose={onClose} />;
   const op = (icono: string, titulo: string, sub: string, fn: () => void) => (
@@ -142,7 +148,7 @@ function MenuCrear({ onClose }: { onClose: () => void }) {
 const DIA = 86_400_000;
 function a10(dias: number) { const d = new Date(Date.now() + dias * DIA); d.setHours(10, 0, 0, 0); return d; }
 function lunesQueViene() { const d = new Date(); const n = ((8 - d.getDay()) % 7) || 7; return a10(n); }
-export function TareaRapida({ onClose, onCreada }: { onClose: () => void; onCreada?: () => void }) {
+export function TareaRapida({ onClose, onCreada, linkId, sobre }: { onClose: () => void; onCreada?: () => void; linkId?: number; sobre?: string }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [texto, setTexto] = useState('');
@@ -153,14 +159,14 @@ export function TareaRapida({ onClose, onCreada }: { onClose: () => void; onCrea
     if (!texto.trim()) return;
     setOcupado(true);
     try {
-      await http('POST', '/activities', { type: 'task', subject: texto.trim(), owner_id: meta.me.id, due_at: opciones[cuando][1].toISOString(), status: 'NOT_STARTED', priority: 'none', task_type: 'todo' });
+      await http('POST', '/activities', { type: 'task', subject: texto.trim(), owner_id: meta.me.id, due_at: opciones[cuando][1].toISOString(), status: 'NOT_STARTED', priority: 'none', task_type: 'todo', ...(linkId ? { links: [linkId] } : {}) });
       toast(`Tarea para ${opciones[cuando][0].toLowerCase()}.`);
       onCreada?.();
       onClose();
     } catch (e) { toast((e as Error).message, true); setOcupado(false); }
   }
   return (
-    <Hoja titulo="Nueva tarea" onClose={onClose}>
+    <Hoja titulo={sobre ? `Tarea sobre ${sobre}` : 'Nueva tarea'} onClose={onClose}>
       <form className="m-form" onSubmit={(e) => { e.preventDefault(); crear(); }}>
         <input className="input" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Llamar a…, mandar la cotización…" aria-label="Qué hay que hacer" maxLength={300} />
         <div className="m-chips" role="group" aria-label="Para cuándo">

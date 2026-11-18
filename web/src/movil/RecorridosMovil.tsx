@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { http, useToast, Icon } from '../lib';
 import { lindo } from '../pages/Cronograma';
 import {
@@ -34,9 +34,11 @@ const PASOS = ['¿A dónde?', '¿Qué día?', '¿Qué hay que hacer?'];
 export function EncargoAsistente() {
   const navigate = useNavigate();
   const toast = useToast();
-  const [paso, setPaso] = useState(0);
+  // Desde la ficha de un cliente («Encargo»): el destino ya elegido, se arranca en el día.
+  const desde = (useLocation().state as { destino?: DestinoOpcion } | null)?.destino ?? null;
+  const [paso, setPaso] = useState(desde ? 1 : 0);
   const [sug, setSug] = useState<Sugerencias | null>(null);
-  const [destino, setDestino] = useState<DestinoOpcion | null>(null);
+  const [destino, setDestino] = useState<DestinoOpcion | null>(desde);
   const [fecha, setFecha] = useState(proximoHabil());
   const [llevar, setLlevar] = useState<ItemForm[]>([vacio()]);
   const [retirar, setRetirar] = useState<ItemForm[]>([vacio()]);
@@ -54,7 +56,7 @@ export function EncargoAsistente() {
     setExtra((x) => ({ ...x, record_id: x.record_id ?? d.record_id ?? null, contacto: x.contacto || (d.contacto && /[a-z]/i.test(d.contacto) ? d.contacto : '') }));
     setPaso(1);
   };
-  const atras = () => (paso === 0 ? navigate(-1) : setPaso(paso - 1));
+  const atras = () => (paso === 0 || (desde && paso === 1) ? navigate(-1) : setPaso(paso - 1));
   const hayAlgo = [...llevar, ...retirar].some((i) => i.que.trim() || i.pdv) || !!extra.notas.trim();
 
   async function guardar() {
@@ -68,7 +70,7 @@ export function EncargoAsistente() {
         destino: { lugar_id: destino.lugar_id, company_id: destino.company_id, nombre: destino.nombre, direccion: destino.direccion, guardar: destino.tipo === 'suelto' && !!(destino as DestinoOpcion & { guardar?: boolean }).guardar },
       });
       toast(`Listo: ${lindo(r.destino)}, ${cuando(r.fecha).toLowerCase()}. Logística lo ve en el cronograma.`);
-      navigate('/recorridos', { replace: true });
+      if (desde) navigate(-1); else navigate('/recorridos', { replace: true });
     } catch (e) { setError((e as Error).message); setOcupado(false); }
   }
 
@@ -76,7 +78,7 @@ export function EncargoAsistente() {
   return (
     <div className="m-asis">
       <header className="m-asis-cab">
-        <button type="button" className="btn ghost icon" onClick={atras} aria-label={paso === 0 ? 'Salir' : 'Paso anterior'}><Icon name={paso === 0 ? 'x' : 'chevron'} size={22} /></button>
+        <button type="button" className="btn ghost icon" onClick={atras} aria-label={paso === 0 || (desde && paso === 1) ? 'Salir' : 'Paso anterior'}><Icon name={paso === 0 || (desde && paso === 1) ? 'x' : 'chevron'} size={22} /></button>
         <div className="m-asis-tit"><b>Nuevo encargo</b><small>Paso {paso + 1} de 3 · {PASOS[paso]}</small></div>
         <span style={{ width: 36 }} />
         <div className="m-asis-barra" aria-hidden="true"><i style={{ width: `${((paso + 1) / 3) * 100}%` }} /></div>

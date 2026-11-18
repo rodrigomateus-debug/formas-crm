@@ -19,7 +19,7 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
 import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
-import { asignarChofer, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { asignarChofer, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
@@ -1285,6 +1285,22 @@ api.get('/choferes/:id/link', async (c) => {
   if (!codigo) { codigo = await codigoNuevo(c.env.DB); await c.env.DB.prepare('UPDATE api_tokens SET codigo = ? WHERE id = ?').bind(codigo, id).run(); }
   return c.json({ nombre: t.name, link: linkChofer(c.req.url, t.chofer_token), codigo, app: appChofer(c.req.url) });
 });
+// El link y el código del chofer que se eligió en la Ruta del día, por su nombre (el recorrido se le asigna por nombre).
+// `existe: false` si todavía no tiene: la pantalla ofrece crearlo ahí mismo (POST /choferes).
+api.get('/choferes/por-nombre', async (c) => {
+  logistica(c.get('ctx'));
+  const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const nombre = igual(String(c.req.query('nombre') ?? ''));
+  if (nombre.length < 2) throw new HttpError(400, 'Falta el nombre del chofer.');
+  const activos = (await c.env.DB.prepare("SELECT id, name, chofer_token, codigo FROM api_tokens WHERE source = 'chofer' AND revoked = 0 ORDER BY id DESC")
+    .all<{ id: number; name: string; chofer_token: string | null; codigo: string | null }>()).results;
+  const t = activos.find((a) => igual(a.name) === nombre);
+  if (!t) return c.json({ existe: false });
+  if (!t.chofer_token) return c.json({ existe: true, id: t.id, nombre: t.name, perdido: true });
+  let codigo = t.codigo;
+  if (!codigo) { codigo = await codigoNuevo(c.env.DB); await c.env.DB.prepare('UPDATE api_tokens SET codigo = ? WHERE id = ?').bind(codigo, t.id).run(); }
+  return c.json({ existe: true, id: t.id, nombre: t.name, link: linkChofer(c.req.url, t.chofer_token), codigo, app: appChofer(c.req.url) });
+});
 api.delete('/choferes/:id', async (c) => {
   logistica(c.get('ctx'));
   await c.env.DB.prepare("UPDATE api_tokens SET revoked = 1, chofer_token = NULL, codigo = NULL WHERE id = ? AND source = 'chofer'").bind(Number(c.req.param('id'))).run();
@@ -1603,6 +1619,11 @@ api.put('/cronograma/feriados', async (c) => c.json(await guardarFeriado(c.env.D
 api.get('/cronograma/ruta', async (c) => {
   const ctx = c.get('ctx');
   return c.json(await rutaDelDia(c.env, ctx.user, String(c.req.query('fecha') ?? ''), { buscar: puedeEditarCronograma(ctx.user) && !ctx.realUser }));
+});
+// La dirección de cada parada de la semana, para las tarjetas (y si está ubicada en el mapa).
+api.get('/cronograma/direcciones', async (c) => {
+  const ctx = c.get('ctx');
+  return c.json(await direccionesSemana(c.env, ctx.user, { desde: c.req.query('desde'), hasta: c.req.query('hasta') }, puedeEditarCronograma(ctx.user) && !ctx.realUser));
 });
 api.put('/cronograma/ruta', async (c) => c.json(await guardarRutas(c.env.DB, c.get('ctx'), await c.req.json())));
 // El chofer de una tarjeta de la semana: su parada pasa al recorrido de ese chofer ese día.

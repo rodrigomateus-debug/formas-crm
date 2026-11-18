@@ -42,6 +42,14 @@ parada del mismo lugar en la ruta del día.
   vacío se saca. Se ve en la Ruta del día y en la app del chofer. Los ingresos no llevan chofer (no son un viaje) y lo que
   retira el cliente en Formas dice «Retira en …». En las tarjetas hechas y para quien solo mira, el chofer aparece sin
   desplegable. Un día sin recorridos guardados está todo «Sin chofer».
+- **Dirección en la tarjeta** (pedido de Rodrigo del 18/11/2026): en cada tarjeta que es parada de la ruta (entregas,
+  retiros, egresos y encargos), la dirección en una línea, la misma que usa la Ruta del día. Con el **tilde verde** si está
+  ubicada en el mapa; en **naranja** si falta, no se encontró o todavía no se ubicó. Un clic la corrige ahí mismo, con el
+  buscador de la libreta (en el pedido o en la ficha de la empresa, igual que «Corregir dirección» de la ruta). La de un
+  expreso o la de un encargo sin parada de ClickUp se cambia desde su lugar. Un pedido que va a varias direcciones muestra
+  la primera y «+N». Llega aparte de la semana para no demorarla (`GET /api/cronograma/direcciones?desde&hasta`,
+  `direccionesSemana`); para quien edita, el servidor busca en el mapa unas pocas que faltan y la pantalla vuelve a pedir
+  mientras tanto (la ruedita).
 - **Hecho**: el círculo. Queda quién y cuándo, y **el artículo cambia de estado en ClickUp**:
 
   | Se marca | El artículo pasa a |
@@ -128,6 +136,10 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
 
 ### Choferes, expresos y de dónde sale
 
+- **El link del chofer** (pedido de Rodrigo del 18/11/2026): abajo de la barra del recorrido, cuando tiene un chofer (no
+  un expreso), su link y su código, con «Copiar link» y «Mandar por WhatsApp» (el mensaje ya dice de qué día es el
+  recorrido). Si ese chofer todavía no tiene link, «Crear su link» lo crea ahí mismo con su nombre (el mismo que en
+  Choferes). `GET /api/choferes/por-nombre?nombre=` (solo Logística y administradores).
 - **Lista de choferes y expresos.** El desplegable «Chofer» de cada recorrido (y el de cada tarjeta de la semana) tiene
   los choferes, los expresos (transportes de terceros) y «+ Agregar chofer o expreso…». Todos los desplegables del
   cronograma (Chofer, Sale de, Expreso) son el del Hub (`web/src/Select.tsx`), no la lista del navegador. Del expreso se guarda además su dirección, que es a donde se le lleva la

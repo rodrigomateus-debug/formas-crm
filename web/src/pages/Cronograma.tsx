@@ -8,6 +8,7 @@ import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
 import { EncargoModal, ESTADO as ESTADO_ENC, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
+import { EditarDireccion, lindaDireccion } from './DireccionParada';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. Cada día con
 // sus entregas, ingresos, retiros y egresos, armados solos con las fechas de cada artículo en ClickUp. Arrastrar una
@@ -35,6 +36,13 @@ export interface Vista {
   hoy: string; desde: string; hasta: string; movimientos: Mov[]; notas: Nota[]; feriados: Record<string, string>; dias: Record<string, DiaResumen>;
   sin_fecha: SinFecha[]; puede_editar: boolean; choferes?: string[]; expresos?: string[];
   encargos?: Encargo[];   // lo que pidió alguien al recorrido de cada día (Recorridos)
+}
+
+// La dirección de cada parada de la semana (GET /cronograma/direcciones), por `fecha|clave de la parada`: la misma que usa
+// la Ruta del día y si está ubicada en el mapa (pedido de Rodrigo del 18/11/2026).
+export interface DirParada {
+  direccion: string | null; origen: string | null; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
+  nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
 }
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
@@ -120,6 +128,13 @@ export default function CronogramaPage() {
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
   const arrastre = useRef<{ ids: string[]; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
   const pedido = useRef(0);
+  // Las direcciones de las paradas de la semana: llegan después de la semana (no la demoran) y, mientras el servidor
+  // busca en el mapa las que faltan, se vuelven a pedir.
+  const [dirs, setDirs] = useState<Record<string, DirParada>>({});
+  const [buscandoDirs, setBuscandoDirs] = useState(false);   // el servidor sigue buscando en el mapa: la ruedita gira
+  const [corrigiendo, setCorrigiendo] = useState<{ k: string; d: DirParada } | null>(null);
+  const pedidoDirs = useRef(0);
+  const sondeoDirs = useRef<number>();
 
   const ir = (cambios: Record<string, string | null>) => setSp((p) => { const n = new URLSearchParams(p); for (const [k, v] of Object.entries(cambios)) { if (v == null) n.delete(k); else n.set(k, v); } return n; }, { replace: true });
   const dia = (() => { const d = sp.get('dia'); return d && d >= semana && d <= sumar(semana, 6) ? d : datos && datos.hoy >= semana && datos.hoy <= sumar(semana, 4) ? datos.hoy : semana; })();
@@ -132,6 +147,20 @@ export default function CronogramaPage() {
     } catch (e) { if (n === pedido.current) setError((e as Error).message); }
   }, [semana, centro]);
   useEffect(() => { void cargar(); }, [cargar]);
+  const cargarDirs = useCallback(async (intento = 0) => {
+    const n = ++pedidoDirs.current;
+    window.clearTimeout(sondeoDirs.current);
+    try {
+      const r = await http<{ direcciones: Record<string, DirParada>; buscando: number }>('GET', `/cronograma/direcciones${qs({ desde: semana, hasta: sumar(semana, 6) })}`);
+      if (n !== pedidoDirs.current) return;
+      setDirs(r.direcciones);
+      setBuscandoDirs(r.buscando > 0 && intento < 10);
+      if (r.buscando > 0 && intento < 10) sondeoDirs.current = window.setTimeout(() => { if (n === pedidoDirs.current) void cargarDirs(intento + 1); }, 2500);
+    } catch { /* sin direcciones: las tarjetas se ven igual */ }
+  }, [semana]);
+  // Se piden cuando llega (o cambia) la semana: un chofer, un día o una dirección nuevos cambian las paradas.
+  useEffect(() => { if (datos?.desde === semana && vista === 'semana') void cargarDirs(); }, [datos, semana, vista, cargarDirs]);
+  useEffect(() => () => { pedidoDirs.current++; window.clearTimeout(sondeoDirs.current); }, []);
   // Lo que cambian en ClickUp llega cada 10 minutos: la pantalla se pone al día sola.
   useEffect(() => { const t = window.setInterval(() => { if (!document.hidden && !arrastre.current) void cargar(); }, 120_000); return () => window.clearInterval(t); }, [cargar]);
 
@@ -264,6 +293,7 @@ export default function CronogramaPage() {
                             <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
                               <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
                               {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []} onChofer={(c) => asignar(t, c)}
+                                dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
                                 onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
                                 onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
                                 onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
@@ -274,6 +304,7 @@ export default function CronogramaPage() {
                           <div className="cr-carril cr-k-X">
                             <h3>Encargos <span className="num">{encDia.length}</span></h3>
                             {encDia.map((e) => <TarjetaEncargo key={e.id} e={e} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []}
+                              dir={e.parada ? dirs[`${e.fecha}|${e.parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
                               onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })}
                               onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
                               onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />)}
@@ -296,6 +327,12 @@ export default function CronogramaPage() {
         <Suspense fallback={<div className="empty plain">Cargando el mapa…</div>}>
           <CronogramaRuta fecha={dia} semana={semana} hoy={datos?.hoy ?? hoyIso()} resumen={datos?.dias ?? {}} onFecha={(d) => ir({ dia: d })} onAbrir={setPreview} onCambio={cargar} />
         </Suspense>
+      )}
+      {corrigiendo && (
+        <Modal title={`Dirección de ${lindo(corrigiendo.d.nombre)}`} onClose={() => setCorrigiendo(null)}>
+          <EditarDireccion p={{ nombre: corrigiendo.d.nombre, direccion: corrigiendo.d.direccion, horario_texto: corrigiendo.d.horario, company_id: corrigiendo.d.company_id }}
+            pedidos={corrigiendo.d.record_ids} onListo={() => { setCorrigiendo(null); void cargarDirs(); }} />
+        </Modal>
       )}
       {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); }} />}
       {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
@@ -398,8 +435,9 @@ const ROL: Record<Tipo, { nombre: string; icono: string }> = {
 };
 const TOPE = 3;
 
-function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onAbrir, onMover, onArrastrar }: {
+function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar }: {
   t: Tarjeta; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
+  dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
 }) {
   const toast = useToast();
@@ -432,6 +470,7 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
         {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
+      {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
       {prods.length > 0 && (
         <div className="cr-t-prods">
           {ver.map((m) => <div key={m.id} className={m.hecho && !t.hecho ? 'ok' : ''}><b className="num">{m.cantidad != null ? num.format(m.cantidad) : ''}</b><span>{m.articulo}</span></div>)}
@@ -467,8 +506,9 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, onChofer, onMarcar, onA
 
 // Un encargo (Recorridos): a dónde, quién lo pidió y qué se deja o se retira. Se arrastra a otro día, se le elige el
 // chofer y se marca hecho como las demás tarjetas; un clic lo abre.
-function TarjetaEncargo({ e, hoy, puede, choferes, expresos, onAbrir, onChofer, onMover, onMarcar, onArrastrar }: {
+function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar }: {
   e: Encargo; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onAbrir: () => void; onChofer: (c: string) => void; onMover: (f: string) => void;
+  dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onArrastrar: (on: boolean) => void;
 }) {
   const hecho = e.estado === 'hecho', atrasado = !hecho && e.fecha < hoy;
@@ -481,6 +521,7 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, onAbrir, onChofer, 
       <div className="cr-t-rol"><Icon name="route" size={11} />Encargo</div>
       <div className="cr-t-quien"><span>{lindo(e.destino)}</span></div>
       <div className="cr-t-pidio"><QuienPidio id={e.user_id} name={e.quien} corto /></div>
+      {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !hecho} onCorregir={() => onDir(`${e.fecha}|${e.parada}`, dir)} />}
       {lineas.length > 0 && (
         <div className="cr-t-prods">
           {lineas.map(([que, i], k) => <div key={k}><b>{que}</b><span>{itemTexto(i)}</span></div>)}
@@ -511,6 +552,37 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, onAbrir, onChofer, 
       {!puede && hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
   );
+}
+
+// La dirección de la parada, en una línea (pedido de Rodrigo del 18/11/2026): con el tilde verde si está ubicada en el
+// mapa y en naranja si falta o no se encontró. Un clic la corrige ahí mismo (en el pedido o en la ficha de la empresa,
+// igual que en la Ruta del día). La de un expreso o un encargo sin empresa se cambia desde su lugar, no desde acá.
+// Una que todavía no se buscó en el mapa: la ruedita mientras el servidor la busca; si no la buscó (quien solo mira no
+// dispara la búsqueda, o el buscador no contesta), queda en naranja como sin ubicar.
+const ESTADO_DIR: Record<DirParada['estado'], string> = {
+  ok: 'Ubicada en el mapa', no_encontrada: 'No se encontró en el mapa: corregila', buscando: 'Todavía sin ubicar en el mapa', sin_direccion: 'Falta la dirección',
+};
+function LineaDireccion({ d: d0, buscando, puede, onCorregir }: { d: DirParada; buscando: boolean; puede: boolean; onCorregir: () => void }) {
+  const ubicando = d0.estado === 'buscando' && buscando;
+  const d = d0.estado === 'buscando' && !buscando ? { ...d0, estado: 'no_encontrada' as const } : d0;
+  const editable = puede && !d.expreso && d.origen !== 'encargo' && (d.record_ids.length > 0 || !!d.company_id);
+  const falta = d.estado === 'no_encontrada' || d.estado === 'sin_direccion';
+  const texto = d.direccion ? lindaDireccion(d.direccion) : 'Sin dirección';
+  const titulo = `${d.direccion ? lindaDireccion(d.direccion) : 'Sin dirección'}${d.otras ? ` (y ${d.otras} dirección${d.otras === 1 ? '' : 'es'} más)` : ''} · ${ubicando ? 'Buscándola en el mapa…' : ESTADO_DIR[d0.estado]}${editable ? ' · clic para corregirla' : ''}`;
+  const contenido = (
+    <>
+      <Icon name="pin" size={11} />
+      <span className="cr-t-dir-txt">{texto}</span>
+      {d.otras > 0 && <span className="cr-t-dir-mas num">+{d.otras}</span>}
+      {d.estado === 'ok' ? <span className="cr-t-dir-ok" aria-label="Ubicada en el mapa"><Icon name="check" size={10} /></span>
+        : ubicando ? <span className="cr-t-dir-busca" aria-label="Buscándola en el mapa" />
+          : <span className="cr-t-dir-falta" aria-label={ESTADO_DIR[d0.estado]}><Icon name="alert" size={11} /></span>}
+    </>
+  );
+  const cls = `cr-t-dir ${falta ? 'falta' : d.estado}`;
+  return editable
+    ? <button type="button" className={cls} title={titulo} aria-label={`Dirección: ${titulo}`} onClick={onCorregir}>{contenido}</button>
+    : <div className={cls} title={titulo}>{contenido}</div>;
 }
 
 // Notas sueltas del día: lo que no es de un artículo («llevar el sobre a Matienzo»).

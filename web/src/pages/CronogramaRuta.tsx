@@ -8,6 +8,7 @@ import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
+import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -54,19 +55,6 @@ const punto = (p: { lat: number | null; lng: number | null } | undefined | null)
 
 // Una parada está hecha cuando están hechos sus movimientos de ClickUp y sus encargos (una sin nada para hacer, no).
 export const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.length + (p.encargos?.length ?? 0) > 0 && p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
-// La dirección como viene de las fichas y los pedidos («domingo prat 2260, 1603 villa rosa, VILLA ROSA PILAR»): cada parte
-// toda en minúscula o toda en mayúscula pasa a «Domingo Prat 2260»; las que ya vienen bien escritas quedan como están.
-const SIGLAS = new Set(['caba', 'cp', 'pb', 'gba', 'pba', 'amba', 'sa', 'srl', 'ruta', 'km']);
-const MENORES = new Set(['de', 'del', 'la', 'las', 'los', 'el', 'y', 'e']);
-function lindaDireccion(d: string) {
-  const vistas = new Set<string>();
-  return d.split(',').map((x) => x.replace(/\s+/g, ' ').trim()).filter((x) => {
-    const k = x.toLowerCase();
-    if (!x || vistas.has(k)) return false;
-    vistas.add(k); return true;
-  }).map((x) => (/[a-záéíóúñ]/.test(x) && /[A-ZÁÉÍÓÚÑ]/.test(x) ? x : x.toLowerCase().split(' ').map((w, i) =>
-    SIGLAS.has(w) && w !== 'ruta' && w !== 'km' ? w.toUpperCase() : i > 0 && MENORES.has(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)).join(' '))).join(', ');
-}
 // De dónde salió la dirección, cuando no es la del pedido: se dice en la tarjeta si es una suposición.
 const ORIGEN_DUDOSO: Partial<Record<NonNullable<Parada['origen']>, string>> = { ultima_entrega: 'de la última entrega', libreta: 'de la libreta' };
 
@@ -379,6 +367,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
         {puede && rutas.length > 1 && <button type="button" className="btn sm ghost danger" onClick={() => { cambiar((rs) => { const fuera = rs[act.i].orden, q = rs.filter((_, i) => i !== act.i); q[0] = { ...q[0], orden: [...q[0].orden, ...fuera] }; return q; }); setActiva(0); }}>Quitar este recorrido</button>}
       </div>
 
+      {/* El link de la app del chofer elegido, para copiarlo o mandarlo por WhatsApp (los expresos no tienen app). */}
+      {puede && act.r.chofer && !(datos.expresos ?? []).some((x) => x.nombre === act.r.chofer) && <LinkChofer chofer={act.r.chofer} cuando={fecha === hoy ? 'hoy' : diaLargo(fecha).toLowerCase()} />}
       {panel === 'chofer' && puede && <NuevoTransportista onCancelar={() => setPanel(null)} onListo={(nombre) => { setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, chofer: nombre } : r))); void cargar(); }} />}
       {panel === 'salida' && puede && <OtroLugar onCancelar={() => setPanel(null)} onElegir={(l) => { setPanel(null); void guardarYa(rutas.map((r, i) => (i === act.i ? { ...r, base: 'otro', base_otro: l } : r))); }} />}
       {panel === 'fin' && puede && <OtroLugar titulo="Dónde termina este recorrido" onCancelar={() => setPanel(null)} onElegir={(l) => { setPanel(null); void guardarYa(rutas.map((r, i) => (i === act.i ? { ...r, fin: 'otro', fin_otro: l } : r))); }} />}
@@ -717,51 +707,6 @@ function Libreta({ puede, onCambio }: { puede: boolean; onCambio: () => void }) 
   return (
     <span className="cr-libreta-pie">Libreta de direcciones: {e.filas ? `${e.filas} lugares` : 'sin copiar todavía'}{e.at && e.filas ? `, copiada el ${new Date(e.at).toLocaleDateString('es-AR', { day: 'numeric', month: 'numeric' })}` : ''}{e.error ? ` (${e.error})` : ''}
       {puede && <button type="button" className="cr-link" disabled={ocupado} onClick={actualizar}>{ocupado ? 'Actualizando…' : 'Actualizar'}</button>}</span>
-  );
-}
-
-// Corregir la dirección de la parada: la de entrega de sus pedidos, o la de la empresa (con su horario de recepción).
-function EditarDireccion({ p, pedidos, onListo }: { p: Parada; pedidos: number[]; onListo: () => void }) {
-  const toast = useToast();
-  const [direccion, setDireccion] = useState(p.direccion ?? '');
-  const [horario, setHorario] = useState(p.horario_texto ?? '');
-  const [guardando, setGuardando] = useState(false);
-  const esEntrega = pedidos.length > 0;
-  // La libreta: al abrir, los lugares de ese cliente o proveedor; al escribir, lo que coincida.
-  const [buscar, setBuscar] = useState('');
-  const [lugares, setLugares] = useState<Array<{ id: number; nombre: string; direccion: string; horario: string | null }>>([]);
-  useEffect(() => {
-    let vivo = true;
-    const t = window.setTimeout(() => { http<{ lugares: typeof lugares }>('GET', `/cronograma/lugares${qs({ q: buscar, de: p.nombre })}`).then((r) => { if (vivo) setLugares(r.lugares); }, () => undefined); }, buscar ? 250 : 0);
-    return () => { vivo = false; window.clearTimeout(t); };
-  }, [buscar, p.nombre]);
-  async function guardar(e: React.FormEvent) {
-    e.preventDefault();
-    setGuardando(true);
-    try {
-      if (esEntrega) { for (const id of pedidos) await http('PUT', '/cronograma/direccion', { record_id: id, direccion }); }
-      if (p.company_id && (!esEntrega || horario !== (p.horario_texto ?? ''))) await http('PUT', '/cronograma/direccion', { company_id: p.company_id, ...(esEntrega ? {} : { direccion }), horario });
-      toast(esEntrega ? 'Dirección de entrega guardada en el pedido.' : 'Dirección guardada en la ficha de la empresa.');
-      onListo();
-    } catch (err) { toast((err as Error).message, true); setGuardando(false); }
-  }
-  return (
-    <form className="cr-editar" onKeyDown={alEsc(onListo)} onSubmit={guardar}>
-      <label>{esEntrega ? 'Dirección de entrega de este pedido' : 'Dirección de la empresa'}
-        <input className="input sm" autoFocus value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" /></label>
-      <label>Buscar en la libreta de direcciones
-        <input className="input sm" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar, calle o localidad" /></label>
-      {lugares.length > 0 && (
-        <ul className="cr-lugares">
-          {lugares.map((l) => (
-            <li key={l.id}><button type="button" onClick={() => { setDireccion(l.direccion); if (p.company_id && !horario && l.horario && /\d\s*(a|-|hasta)\s*\d/i.test(l.horario)) setHorario(l.horario); }}>
-              <b>{l.nombre}</b><span>{l.direccion}{l.horario ? ` · ${l.horario}` : ''}</span></button></li>
-          ))}
-        </ul>
-      )}
-      {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
-      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando || !direccion.trim()}>Guardar</button></div>
-    </form>
   );
 }
 

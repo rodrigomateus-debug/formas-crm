@@ -359,7 +359,12 @@ export async function resumirPendientes(env: Env, opts: { budget?: Budget; hasta
 // ---------- 3. Lo que se ve en el CRM ----------
 
 export interface FiltroConsultas { q?: string; tipo?: string; categoria?: string; desde?: string; hasta?: string; min_cantidad?: string | number; ocasion?: string;
-  sin_venta?: string | boolean; contact_id?: string | number; company_id?: string | number; owner_id?: string | number; limit?: string | number; offset?: string | number }
+  sin_venta?: string | boolean; contact_id?: string | number; company_id?: string | number; owner_id?: string | number; limit?: string | number; offset?: string | number;
+  analitica?: string | boolean }
+
+// Hubo venta después de la consulta: el contacto tiene un negocio ganado cerrado ese día o después.
+const VENDIO = `EXISTS (SELECT 1 FROM associations ga JOIN records gd ON gd.id = ga.to_id JOIN stages gs ON gs.id = gd.stage_id
+  WHERE ga.from_id = c.contact_id AND ga.to_type = 'deal' AND gd.archived = 0 AND gs.is_won = 1 AND substr(COALESCE(gd.close_date, gd.updated_at), 1, 10) >= c.dia)`;
 
 // «Quién consultó por botellas»: por tipo o categoría, texto libre (producto, personalización, cliente), fechas, cantidad mínima,
 // y «sin venta» (el contacto no tiene un negocio ganado después de la consulta). Ventas ve las de sus clientes.
@@ -381,10 +386,7 @@ export async function buscarConsultas(db: D1Database, user: User, f: FiltroConsu
       OR lower(COALESCE(c.personalizacion, '')) LIKE ? OR lower(ct.name) LIKE ? OR lower(COALESCE(co.name, '')) LIKE ?)`);
     b.push(q, q, q, q, q, q);
   }
-  if (f.sin_venta === true || f.sin_venta === '1' || f.sin_venta === 'true') {
-    w.push(`NOT EXISTS (SELECT 1 FROM associations ga JOIN records gd ON gd.id = ga.to_id JOIN stages gs ON gs.id = gd.stage_id
-      WHERE ga.from_id = c.contact_id AND ga.to_type = 'deal' AND gd.archived = 0 AND gs.is_won = 1 AND substr(COALESCE(gd.close_date, gd.updated_at), 1, 10) >= c.dia)`);
-  }
+  if (f.sin_venta === true || f.sin_venta === '1' || f.sin_venta === 'true') w.push(`NOT ${VENDIO}`);
   const where = w.join(' AND ');
   const limit = Math.min(500, Math.max(1, Number(f.limit) || 100));
   const offset = Math.max(0, Number(f.offset) || 0);
@@ -394,8 +396,22 @@ export async function buscarConsultas(db: D1Database, user: User, f: FiltroConsu
   const total = (await db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT c.contact_id) AS clientes, SUM(c.cantidad) AS unidades ${desde}`).bind(...b)
     .first<{ n: number; clientes: number; unidades: number | null }>())!;
   const { results: porTipo } = await db.prepare(`SELECT c.tipo, COUNT(*) AS n ${desde} GROUP BY c.tipo ORDER BY n DESC LIMIT 12`).bind(...b).all<{ tipo: string; n: number }>();
-  return { consultas: results.map((r) => ({ ...r, pidio_muestra: !!r.pidio_muestra, pidio_boceto: !!r.pidio_boceto }) as Record<string, unknown>), total: total.n, clientes: total.clientes,
+  const base = { consultas: results.map((r) => ({ ...r, pidio_muestra: !!r.pidio_muestra, pidio_boceto: !!r.pidio_boceto }) as Record<string, unknown>), total: total.n, clientes: total.clientes,
     unidades: total.unidades ?? 0, por_tipo: porTipo, catalogo: CATALOGO, ocasiones: OCASIONES.filter(Boolean) };
+  if (!(f.analitica === true || f.analitica === '1' || f.analitica === 'true')) return base;
+  // Analíticas → Consultas: por categoría, por semana (desde el lunes) y cuántos clientes compraron después, por vendedora y por categoría.
+  const grupo = async (col: string, orden = 'n DESC') => (await db.prepare(`SELECT ${col} AS clave, COUNT(*) AS n, COUNT(DISTINCT c.contact_id) AS clientes,
+      COUNT(DISTINCT CASE WHEN ${VENDIO} THEN c.contact_id END) AS con_venta, SUM(c.cantidad) AS unidades ${desde} GROUP BY 1 ORDER BY ${orden} LIMIT 20`)
+    .bind(...b).all<{ clave: string | null; n: number; clientes: number; con_venta: number; unidades: number | null }>()).results;
+  const ventas = (await db.prepare(`SELECT COUNT(DISTINCT CASE WHEN ${VENDIO} THEN c.contact_id END) AS n ${desde}`).bind(...b).first<{ n: number }>())?.n ?? 0;
+  return {
+    ...base,
+    con_venta: ventas,
+    por_categoria: await grupo('c.categoria'),
+    por_vendedora: await grupo("COALESCE(c.atendio, 'Maru')"),
+    // Las últimas 12 semanas con consultas, de la más vieja a la más nueva.
+    por_semana: (await grupo("date(c.dia, '-' || ((CAST(strftime('%w', c.dia) AS INTEGER) + 6) % 7) || ' days')", 'clave DESC')).slice(0, 12).reverse(),
+  };
 }
 
 // Conversaciones que Maru ya pasó a una vendedora donde el cliente escribió después de la última respuesta del equipo y no

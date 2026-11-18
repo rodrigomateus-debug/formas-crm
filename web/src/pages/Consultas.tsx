@@ -6,7 +6,10 @@ import { Select } from '../Select';
 // Consultas de los clientes por WhatsApp (pedido de Rodrigo del 18/11/2026; src/worker/darwin.ts). A la madrugada el Hub resume
 // el día de cada conversación de Darwin (Maru y cada vendedora) y guarda cada producto consultado con datos fijos: así se
 // encuentra «quién consultó por botellas», «más de 100 unidades para fin de año» o «consultó y no compró».
-// Pestaña «Sin respuesta»: lo que Maru ya pasó a una vendedora donde el cliente escribió y nadie le contestó.
+// - Analíticas → «Consultas por WhatsApp» (ConsultasPanel): los números (lo más consultado, por semana, cuántos compraron
+//   después, por vendedora) y el buscador con el listado.
+// - Inicio (SinRespuestaInicio): los clientes que escribieron y nadie les contestó, para la vendedora.
+// - La ficha del contacto y de la empresa (ConsultasCard): sus últimas consultas.
 
 interface Fila {
   id: number; dia: string; contact_id: number; contacto: string; company_id: number | null; empresa: string | null; deal_id: number | null; atendio: string | null;
@@ -14,28 +17,101 @@ interface Fila {
   fecha_necesaria: string | null; ocasion: string | null; personalizacion: string | null; pidio_muestra: boolean; pidio_boceto: boolean; objecion: string | null;
   competidor: string | null; entrega: string | null; link: string | null;
 }
-interface Datos { consultas: Fila[]; total: number; clientes: number; unidades: number; por_tipo: Array<{ tipo: string; n: number }>; catalogo: Record<string, string[]>; ocasiones: string[] }
+interface Grupo { clave: string | null; n: number; clientes: number; con_venta: number; unidades: number | null }
+interface Datos { consultas: Fila[]; total: number; clientes: number; unidades: number; por_tipo: Array<{ tipo: string; n: number }>; catalogo: Record<string, string[]>; ocasiones: string[];
+  con_venta?: number; por_categoria?: Grupo[]; por_vendedora?: Grupo[]; por_semana?: Grupo[] }
 interface Pendiente { conversation_id: string; titulo: string | null; link: string | null; asignada_a: string | null; ultima_respuesta_cliente: string; ultima_actividad_equipo: string | null; contact_id: number | null; contacto: string | null }
 
 const n = (v: number) => v.toLocaleString('es-AR');
 const pesos = (v: number | null) => (v == null ? '' : `$ ${Math.round(v).toLocaleString('es-AR')}`);
 
-export default function ConsultasPage() {
-  const [sp, setSp] = useSearchParams();
-  const pestana = sp.get('ver') === 'sin-respuesta' ? 'sin-respuesta' : 'consultas';
-  const ir = (v: string) => setSp((p) => { const x = new URLSearchParams(p); if (v === 'consultas') x.delete('ver'); else x.set('ver', v); return x; }, { replace: true });
+const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)} %` : '–');
+
+// La pestaña de Analíticas.
+export function ConsultasPanel() {
   return (
-    <div className="content">
-      <div className="page-head"><h1>Consultas</h1></div>
-      <p className="muted" style={{ marginTop: -8, marginBottom: 12, maxWidth: 780 }}>
+    <>
+      <p className="muted" style={{ margin: '0 0 12px', maxWidth: 780 }}>
         Lo que los clientes consultan por WhatsApp, con Maru y con cada vendedora. Cada noche el Hub lee el día en Darwin, deja un resumen en el contacto y anota acá cada producto que pidieron.
       </p>
-      <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
-        <button type="button" role="tab" aria-selected={pestana === 'consultas'} className={`tab${pestana === 'consultas' ? ' on' : ''}`} onClick={() => ir('consultas')}>Consultas</button>
-        <button type="button" role="tab" aria-selected={pestana === 'sin-respuesta'} className={`tab${pestana === 'sin-respuesta' ? ' on' : ''}`} onClick={() => ir('sin-respuesta')}>Sin respuesta</button>
-      </div>
-      {pestana === 'consultas' ? <ListaConsultas /> : <SinRespuesta />}
+      <ListaConsultas />
+    </>
+  );
+}
+
+// Una barra horizontal por fila (un solo color: la serie es una sola). El número va en texto, al lado.
+function Barras({ filas, onElegir }: { filas: Array<{ etiqueta: string; n: number; detalle?: string }>; onElegir?: (etiqueta: string) => void }) {
+  const max = Math.max(1, ...filas.map((f) => f.n));
+  return (
+    <div className="cq-barras">
+      {filas.map((f) => (
+        <button key={f.etiqueta} type="button" className="cq-barra" onClick={() => onElegir?.(f.etiqueta)} disabled={!onElegir}
+          title={`${f.etiqueta}: ${n(f.n)} ${f.n === 1 ? 'consulta' : 'consultas'}${f.detalle ? ` · ${f.detalle}` : ''}`}>
+          <span className="cq-et ellipsis">{f.etiqueta}</span>
+          <span className="cq-pista"><i style={{ width: `${(f.n / max) * 100}%` }} /></span>
+          <span className="cq-val num">{n(f.n)}</span>
+        </button>
+      ))}
     </div>
+  );
+}
+
+// Consultas por semana: columnas, la más nueva a la derecha.
+function Semanas({ filas }: { filas: Grupo[] }) {
+  const max = Math.max(1, ...filas.map((f) => f.n));
+  const corta = (d: string | null) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '');
+  return (
+    <div className="cq-semanas" role="img" aria-label={`Consultas por semana: ${filas.map((f) => `semana del ${corta(f.clave)}, ${f.n}`).join('; ')}`}>
+      {filas.map((f) => (
+        <div key={f.clave} className="cq-col" title={`Semana del ${corta(f.clave)}: ${n(f.n)} consultas de ${n(f.clientes)} clientes`}>
+          <span className="cq-col-val num">{n(f.n)}</span>
+          <span className="cq-col-pista"><i style={{ height: `${(f.n / max) * 100}%` }} /></span>
+          <span className="cq-col-et">{corta(f.clave)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Analitica({ d, poner }: { d: Datos; poner: (k: string, v: string) => void }) {
+  return (
+    <>
+      <div className="kpis">
+        <div className="panel kpi"><div className="label">Consultas</div><div className="value">{n(d.total)}</div></div>
+        <div className="panel kpi"><div className="label">Clientes que consultaron</div><div className="value">{n(d.clientes)}</div></div>
+        <div className="panel kpi"><div className="label">Unidades pedidas</div><div className="value">{n(d.unidades)}</div></div>
+        <div className="panel kpi"><div className="label">Compraron después</div><div className="value">{pct(d.con_venta ?? 0, d.clientes)}</div>
+          <div className="small muted">{n(d.con_venta ?? 0)} de {n(d.clientes)} clientes</div></div>
+      </div>
+      <div className="grid-2" style={{ marginBottom: 16 }}>
+        <div className="panel">
+          <div className="panel-head"><h2>Lo más consultado</h2></div>
+          <div className="panel-body"><Barras filas={d.por_tipo.map((t) => ({ etiqueta: t.tipo, n: t.n }))} onElegir={(t) => poner('tipo', t)} /></div>
+        </div>
+        <div className="panel">
+          <div className="panel-head"><h2>Por categoría</h2></div>
+          <div className="panel-body"><Barras filas={(d.por_categoria ?? []).map((g) => ({ etiqueta: g.clave ?? 'Otro', n: g.n, detalle: `${pct(g.con_venta, g.clientes)} compró después` }))}
+            onElegir={(c) => poner('categoria', c)} /></div>
+        </div>
+        <div className="panel">
+          <div className="panel-head"><h2>Consultas por semana</h2></div>
+          <div className="panel-body">{(d.por_semana ?? []).length ? <Semanas filas={d.por_semana!} /> : <div className="muted small">Sin datos.</div>}</div>
+        </div>
+        <div className="panel">
+          <div className="panel-head"><h2>Quién atendió y cuántos compraron</h2></div>
+          <div className="panel-body" style={{ overflowX: 'auto' }}>
+            <table className="grid">
+              <thead><tr><th>Atendió</th><th className="num">Consultas</th><th className="num">Clientes</th><th className="num">Compraron</th></tr></thead>
+              <tbody>{(d.por_vendedora ?? []).map((g) => (
+                <tr key={g.clave ?? '-'}><td>{g.clave}</td><td className="num">{n(g.n)}</td><td className="num">{n(g.clientes)}</td>
+                  <td className="num">{n(g.con_venta)} <span className="muted small">({pct(g.con_venta, g.clientes)})</span></td></tr>
+              ))}</tbody>
+            </table>
+            <p className="small muted" style={{ margin: '8px 0 0' }}>«Compraron» cuenta los clientes con un negocio ganado cerrado el día de la consulta o después.</p>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -46,17 +122,17 @@ function ListaConsultas() {
   const f = { categoria: sp.get('categoria') ?? '', tipo: sp.get('tipo') ?? '', desde: sp.get('desde') ?? '', hasta: sp.get('hasta') ?? '', min_cantidad: sp.get('min') ?? '',
     ocasion: sp.get('ocasion') ?? '', sin_venta: sp.get('sin_venta') === '1', contact_id: sp.get('contact_id') ?? '', company_id: sp.get('company_id') ?? '' };
   const poner = (k: string, v: string) => setSp((p) => { const x = new URLSearchParams(p); if (v) x.set(k, v); else x.delete(k); if (k === 'categoria') x.delete('tipo'); return x; }, { replace: true });
+  const deUno = f.contact_id || f.company_id;
   const [datos, setDatos] = useState<Datos | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     http<Datos>('GET', `/consultas${qs({ q: q || undefined, categoria: f.categoria || undefined, tipo: f.tipo || undefined, desde: f.desde || undefined, hasta: f.hasta || undefined,
       min_cantidad: f.min_cantidad || undefined, ocasion: f.ocasion || undefined, sin_venta: f.sin_venta ? 1 : undefined, contact_id: f.contact_id || undefined,
-      company_id: f.company_id || undefined, limit: 300 })}`)
+      company_id: f.company_id || undefined, analitica: deUno ? undefined : 1, limit: 300 })}`)
       .then((d) => { setDatos(d); setError(''); }, (e) => setError((e as Error).message));
   }, [q, f.categoria, f.tipo, f.desde, f.hasta, f.min_cantidad, f.ocasion, f.sin_venta, f.contact_id, f.company_id]); // eslint-disable-line react-hooks/exhaustive-deps
   const tipos = f.categoria ? datos?.catalogo[f.categoria] ?? [] : Object.values(datos?.catalogo ?? {}).flat();
   const filtrado = !!(q || f.categoria || f.tipo || f.desde || f.hasta || f.min_cantidad || f.ocasion || f.sin_venta || f.contact_id || f.company_id);
-  const deUno = f.contact_id || f.company_id;
   return (
     <>
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>
@@ -82,6 +158,7 @@ function ListaConsultas() {
         <button type="button" className="link-btn" onClick={() => { poner('contact_id', ''); poner('company_id', ''); }}>Ver todas</button></p>}
       {error && <div className="tag bad">{error}</div>}
       {!datos && !error && <Cargando />}
+      {datos?.por_categoria && datos.total > 0 && <Analitica d={datos} poner={poner} />}
       {datos && (
         <p className="small muted" style={{ margin: '4px 0 10px' }}>
           {n(datos.total)} {datos.total === 1 ? 'consulta' : 'consultas'} de {n(datos.clientes)} {datos.clientes === 1 ? 'cliente' : 'clientes'}
@@ -125,43 +202,37 @@ function ListaConsultas() {
   );
 }
 
-function SinRespuesta() {
+// En Inicio: los clientes que escribieron y nadie les contestó (Maru ya les pasó la conversación). La vendedora ve los suyos.
+export function SinRespuestaInicio() {
   const [horas, setHoras] = useState(24);
+  const [todos, setTodos] = useState(false);
   const [datos, setDatos] = useState<{ pendientes: Pendiente[] } | null>(null);
-  const [error, setError] = useState('');
   useEffect(() => {
-    http<{ pendientes: Pendiente[] }>('GET', `/darwin/pendientes${qs({ horas })}`).then((d) => { setDatos(d); setError(''); }, (e) => setError((e as Error).message));
+    http<{ pendientes: Pendiente[] }>('GET', `/darwin/pendientes${qs({ horas })}`).then(setDatos, () => setDatos({ pendientes: [] }));
   }, [horas]);
+  const lista = datos?.pendientes ?? [];
+  const ver = todos ? lista : lista.slice(0, 6);
   return (
-    <>
-      <div className="toolbar">
-        <span className="small muted">Conversaciones que Maru pasó a una vendedora donde el cliente escribió y nadie le contestó hace más de</span>
-        <Select className="input bar-select" value={String(horas)} onChange={(e) => setHoras(Number(e.target.value))} aria-label="Horas sin respuesta">
-          {[4, 12, 24, 48, 72].map((h) => <option key={h} value={h}>{h} horas</option>)}
+    <div className="panel">
+      <div className="panel-head">
+        <h2 className="grow" title="Clientes que escribieron por WhatsApp y nadie del equipo les contestó">Esperan respuesta {lista.length > 0 && <span className="tag warn">{lista.length}</span>}</h2>
+        <Select className="input bar-select" style={{ width: 120 }} value={String(horas)} onChange={(e) => setHoras(Number(e.target.value))} aria-label="Sin respuesta hace más de">
+          {[4, 12, 24, 48, 72].map((h) => <option key={h} value={h}>+{h} h</option>)}
         </Select>
       </div>
-      {error && <div className="tag bad">{error}</div>}
-      {!datos && !error && <Cargando />}
-      {datos && !datos.pendientes.length && <div className="panel"><div className="panel-body muted">No hay clientes esperando respuesta.</div></div>}
-      {datos && datos.pendientes.length > 0 && (
-        <div className="panel" style={{ overflowX: 'auto' }}>
-          <table className="grid">
-            <thead><tr><th>Cliente</th><th>Vendedora</th><th>Escribió</th><th>Última respuesta del equipo</th><th /></tr></thead>
-            <tbody>
-              {datos.pendientes.map((p) => (
-                <tr key={p.conversation_id}>
-                  <td>{p.contact_id ? <Link to={recordUrl('contact', p.contact_id)}>{p.contacto ?? p.titulo}</Link> : (p.titulo ?? p.conversation_id)}</td>
-                  <td>{p.asignada_a ?? ''}</td>
-                  <td title={fmtDate(p.ultima_respuesta_cliente, true)}>{fmtRelative(p.ultima_respuesta_cliente)}</td>
-                  <td>{p.ultima_actividad_equipo ? fmtRelative(p.ultima_actividad_equipo) : 'nunca'}</td>
-                  <td>{p.link && <a className="btn ghost sm" href={p.link} target="_blank" rel="noopener noreferrer"><img src="/darwin.png" alt="" width={13} height={13} />Darwin</a>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </>
+      {!datos ? <Cargando chico /> : !lista.length ? <div className="empty">Nadie espera respuesta.</div> : <>
+        {ver.map((p) => (
+          <div key={p.conversation_id} className="assoc-item">
+            <div className="grow" style={{ minWidth: 0 }}>
+              {p.contact_id ? <Link className="ellipsis" style={{ display: 'block' }} to={recordUrl('contact', p.contact_id)}>{p.contacto ?? p.titulo}</Link> : <span className="ellipsis" style={{ display: 'block' }}>{p.titulo ?? p.conversation_id}</span>}
+              <div className="small muted">Escribió {fmtRelative(p.ultima_respuesta_cliente)}{p.asignada_a ? ` · ${p.asignada_a}` : ''}</div>
+            </div>
+            {p.link && <a className="btn ghost sm" href={p.link} target="_blank" rel="noopener noreferrer" title="Abrir la conversación en Darwin"><img src="/darwin.png" alt="" width={13} height={13} />Darwin</a>}
+          </div>
+        ))}
+        {lista.length > 6 && <div className="panel-body"><button type="button" className="btn sm ghost" onClick={() => setTodos(!todos)}>{todos ? 'Ver menos' : `Ver todos (${lista.length})`}</button></div>}
+      </>}
+    </div>
   );
 }
 
@@ -173,7 +244,7 @@ export function ConsultasCard({ type, id }: { type: 'contact' | 'company'; id: n
   if (!datos?.total) return null;
   return (
     <div className="panel assoc-card">
-      <div className="panel-head"><h3>Consultas por WhatsApp <span className="muted small">({datos.total})</span></h3><Link className="btn sm ghost" to={`/consultas${qs({ [clave]: id })}`}>Ver todas</Link></div>
+      <div className="panel-head"><h3>Consultas por WhatsApp <span className="muted small">({datos.total})</span></h3><Link className="btn sm ghost" to={`/analiticas${qs({ t: 'consultas', [clave]: id })}`}>Ver todas</Link></div>
       <div className="panel-body stack" style={{ paddingTop: 0, gap: 6 }}>
         {datos.consultas.map((c) => (
           <div key={c.id} className="small">

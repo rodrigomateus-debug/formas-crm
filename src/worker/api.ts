@@ -41,7 +41,7 @@ import { Budget } from './budget';
 import { resumenDireccion } from './direccion';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
-import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
@@ -1326,16 +1326,18 @@ api.post('/referidos', async (c) => {
 // propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Ver una empresa ajena porque
 // está asociada a lo suyo no la habilita a editarla ni a quedársela: se la pide a un administrador (docs/PERFILES.md).
 // Es la misma regla que ya tenía Claude para todos (soloLoSuyo en mcp.ts).
-async function soloLoSuyoVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, rec: { name: string; owner_id: number | null }, props?: Record<string, unknown>) {
+async function soloLoSuyoVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, rec: { id?: number; name: string; owner_id: number | null }, props?: Record<string, unknown>) {
   const user = c.get('ctx').user;
   if (!esVentas(user)) return;
-  if (rec.owner_id != null && Number(rec.owner_id) !== user.id) {
+  // Gerenta (alcance.ts): también lo de su equipo y su unidad, y lo puede asignar a cualquiera del equipo.
+  if (!(await esSuyo(c.env.DB, user, rec))) {
     const de = (await c.env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(rec.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
     throw new HttpError(403, `«${rec.name}» es de ${de}: lo puede cambiar ella o un administrador.`);
   }
   const owner = props?.owner_id;
-  if (owner != null && owner !== '' && Number(owner) !== user.id) {
-    throw new HttpError(403, 'Como propietario solo podés ponerte a vos. Para pasárselo a otra persona, pedíselo a un administrador.');
+  if (owner != null && owner !== '' && !(await esDeSuEquipo(c.env.DB, user, owner))) {
+    throw new HttpError(403, gerenciaDe(user) ? 'Como propietario podés poner a alguien de tu equipo. Para pasárselo a otra persona, pedíselo a un administrador.'
+      : 'Como propietario solo podés ponerte a vos. Para pasárselo a otra persona, pedíselo a un administrador.');
   }
 }
 
@@ -1945,7 +1947,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; pipelines?: string[] | null }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -1958,6 +1960,12 @@ api.patch('/users/:id', async (c) => {
   }
   // Dirección: Inicio con los resultados de todo el equipo (direccion.ts).
   if (b.direccion !== undefined) await c.env.DB.prepare('UPDATE users SET direccion = ? WHERE id = ?').bind(b.direccion ? 1 : 0, cur.id).run();
+  // Gerencia (alcance.ts): el equipo que gerencia (ve y edita lo de ese equipo), o null.
+  if (b.gerencia_team !== undefined) {
+    const t = b.gerencia_team == null ? null : Number(b.gerencia_team);
+    if (t != null && !(await c.env.DB.prepare('SELECT 1 FROM teams WHERE id = ?').bind(t).first())) throw new HttpError(400, 'No existe ese equipo.');
+    await c.env.DB.prepare('UPDATE users SET gerencia_team = ? WHERE id = ?').bind(t, cur.id).run();
+  }
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();

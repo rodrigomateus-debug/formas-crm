@@ -9,7 +9,8 @@ import { UNIDADES } from './records';
 // - ganado por vendedora con los pedidos de esos negocios (cantidad y total sin IVA), para ver si está todo cargado;
 // - embudo de cada pipeline que tuvo algún negocio creado en los últimos 90 días: de los negocios creados en el período,
 //   cuántos y cuánto monto pasaron por cada etapa (por el historial de etapas) y el porcentaje de conversión;
-// - motivos de pérdida, ranking por empresa y negocios abiertos sin actividad hace 14 días.
+// - motivos de pérdida, ranking por empresa y negocios abiertos sin actividad hace 14 días;
+// - pedidos sin negocio (no debería haber ninguno): los del período, por vendedora, y cuántos hay en total.
 
 const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';   // etapa «Anulado» de pedidos (montos.ts)
 const DIA = /^\d{4}-\d{2}-\d{2}$/;
@@ -38,6 +39,21 @@ export async function resumenDireccion(db: D1Database, ctx: Ctx, q: Record<strin
   const hace90 = new Date(Date.now() - 90 * 86_400_000).toISOString();
   const hace14 = new Date(Date.now() - 14 * 86_400_000).toISOString();
   const empresa = "(SELECT a.to_id FROM associations a WHERE a.from_id = r.id AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at LIMIT 1)";
+
+  // Pedidos sin negocio (no debería haber): pedidos no anulados, sin ningún negocio asociado. Mismos filtros, por el
+  // propietario del pedido y la unidad de negocio del pedido.
+  const pedUnidad = (q.unidades ?? '').split(',').filter((k) => UNIDADES[k]).flatMap((k) => UNIDADES[k].pedido);
+  const fo = `o.object_type = 'order' AND o.archived = 0 AND COALESCE(json_extract(o.props, '$.hs_pipeline_stage'), '') != ?
+    AND NOT EXISTS (SELECT 1 FROM associations a WHERE (a.from_id = o.id AND a.to_type = 'deal') OR (a.to_id = o.id AND a.from_type = 'deal'))${owner ? ' AND o.owner_id = ?' : ''}${pedUnidad.length
+    ? ` AND UPPER(COALESCE(json_extract(o.props, '$.unidad_de_negocio'), '')) IN (${pedUnidad.map(() => '?').join(', ')})` : ''}`;
+  const fob = [ANULADO, ...(owner ? [owner] : []), ...pedUnidad];
+  const [sueltos, sueltosPorDuenio, sueltosHist] = await db.batch([
+    db.prepare(`SELECT o.id, o.name, o.owner_id, o.amount, o.created_at, json_extract(o.props, '$.pedido_finnegans') AS pedido FROM records o
+      WHERE ${fo} AND o.created_at >= ? AND o.created_at < ? ORDER BY o.created_at DESC LIMIT 15`).bind(...fob, ci, cf),
+    db.prepare(`SELECT o.owner_id, COUNT(*) AS n, COALESCE(SUM(o.amount), 0) AS monto FROM records o
+      WHERE ${fo} AND o.created_at >= ? AND o.created_at < ? GROUP BY o.owner_id ORDER BY n DESC`).bind(...fob, ci, cf),
+    db.prepare(`SELECT COUNT(*) AS n FROM records o WHERE ${fo}`).bind(...fob),
+  ]);
 
   const [kpis, abiertos, ganado, perdidos, etapas, pipes, cohorte, empresas, quietos, quietosN] = await db.batch([
     db.prepare(`SELECT
@@ -119,6 +135,7 @@ export async function resumenDireccion(db: D1Database, ctx: Ctx, q: Record<strin
     desde, hasta, hoy,
     kpis: { ...(kpis.results[0] as Record<string, number | null>), abiertos: (abiertos.results[0] as { n: number }).n, abiertos_monto: (abiertos.results[0] as { monto: number }).monto },
     ganado: ganado.results, perdidos: perdidos.results, embudos, empresas: empresas.results,
+    sin_negocio: { negocios: sueltos.results, por_duenio: sueltosPorDuenio.results, historico: (sueltosHist.results[0] as { n: number }).n },
     quietos: { total: (quietosN.results[0] as { n: number }).n, monto: (quietosN.results[0] as { monto: number }).monto, negocios: quietos.results },
   };
 }

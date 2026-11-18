@@ -3,6 +3,7 @@ import { HttpError } from './env';
 import type { RecordRow } from './records';
 import type { Meta } from './meta';
 import { assertDealVisible } from './pipelines';
+import { UNIDADES } from './records';
 
 // Perfil Ventas (perfil «comercial» que no es administrador). Pedido de Rodrigo del 12/11/2026: qué ve una vendedora.
 //
@@ -39,6 +40,40 @@ export const nombrePerfil = (u: User) => (esLogistica(u) ? 'Logística' : esProd
 // Perfiles que no ven todo el CRM (cada uno con su regla, abajo).
 export const restringido = (u: User) => esVentas(u) || esOperaciones(u);
 
+// Gerencia (pedido de Rodrigo del 18/11/2026: «Wanda es la gerenta, debería poder ver y editar todo lo que corresponde a
+// Corporate»). Una vendedora con `gerencia_team` (Configuración → Usuarios → Gerencia de) ve y edita como si fuera suyo lo de
+// ese equipo: los registros cuyo propietario es del equipo (equipo principal o extra), los negocios de los pipelines del
+// equipo y los pedidos de su unidad de negocio; y puede asignárselos a cualquiera del equipo. Lo demás, como Ventas.
+export const gerenciaDe = (u: User) => (esVentas(u) && u.gerencia_team ? Number(u.gerencia_team) : null);
+// Los ids de usuario que «son suyos»: ella y, si es gerenta, los del equipo (subconsulta SQL).
+function propios(user: User) {
+  const id = Number(user.id), t = gerenciaDe(user);
+  if (!Number.isInteger(id) || (t != null && !Number.isInteger(t))) throw new HttpError(500, 'Usuario inválido.');
+  return t == null ? `(${id})` : `(SELECT gu.id FROM users gu WHERE gu.id = ${id} OR gu.team_id = ${t}
+    OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(gu.extra_teams) THEN gu.extra_teams ELSE '[]' END) WHERE value = ${t}))`;
+}
+// Lo de la unidad que no depende del propietario: negocios de los pipelines del equipo y pedidos de la unidad.
+function deLaUnidad(al: string, user: User) {
+  const t = gerenciaDe(user);
+  if (t == null) return '0';
+  const ped = (Object.values(UNIDADES).find((u) => u.team === t)?.pedido ?? []).map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+  return `((${al}.object_type = 'deal' AND ${al}.pipeline_id IN (SELECT id FROM pipelines WHERE team_id = ${t}))${ped
+    ? ` OR (${al}.object_type = 'order' AND UPPER(COALESCE(json_extract(${al}.props, '$.unidad_de_negocio'), '')) IN (${ped}))` : ''})`;
+}
+// ¿Lo puede editar como suyo? (propietario ella o de su equipo, o de la unidad que gerencia). Sin propietario, también.
+export async function esSuyo(db: D1Database, user: User, row: { id?: number; owner_id: number | null }) {
+  if (row.owner_id == null || Number(row.owner_id) === user.id) return true;
+  if (gerenciaDe(user) == null) return false;
+  if (await esDeSuEquipo(db, user, row.owner_id)) return true;
+  return row.id != null && !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${deLaUnidad('r', user)}`).bind(row.id).first());
+}
+// ¿Ese usuario es ella o de su equipo? (para asignar propietario).
+export async function esDeSuEquipo(db: D1Database, user: User, ownerId: unknown) {
+  if (ownerId == null || ownerId === '' || Number(ownerId) === user.id) return true;
+  if (gerenciaDe(user) == null) return false;
+  return !!(await db.prepare(`SELECT 1 WHERE ? IN ${propios(user)}`).bind(Number(ownerId)).first());
+}
+
 // Condición SQL «el registro `al` lo ve la vendedora». El id va escrito en la consulta (es un entero de la base, no un
 // dato del pedido): así sirve igual en consultas con ? que con ?1, ?2… La subconsulta no depende de la fila: SQLite la
 // arma una sola vez (sus registros y lo asociado a ellos), que es poco aunque la lista sea de miles.
@@ -50,11 +85,12 @@ export function visibleSql(al: string, user: User) {
       OR EXISTS (SELECT 1 FROM associations pa WHERE pa.to_id = ${al}.id AND pa.from_type = 'order'))))`;
   }
   if (!esVentas(user)) return '1';
-  const id = Number(user.id);
-  if (!Number.isInteger(id)) throw new HttpError(500, 'Usuario inválido.');
-  return `(${al}.owner_id = ${id} OR ${al}.owner_id IS NULL OR ${al}.id IN (SELECT va.to_id FROM associations va
+  const mios = propios(user);
+  const unidad = gerenciaDe(user) == null ? '' : ` OR ${deLaUnidad(al, user)} OR ${al}.id IN (SELECT ua.to_id FROM associations ua
+    WHERE ua.to_type != 'deal' AND (ua.to_type != 'order' OR ua.from_type = 'deal') AND ua.from_id IN (SELECT uo.id FROM records uo WHERE ${deLaUnidad('uo', user)}))`;
+  return `(${al}.owner_id IN ${mios} OR ${al}.owner_id IS NULL${unidad} OR ${al}.id IN (SELECT va.to_id FROM associations va
     WHERE va.to_type != 'deal' AND (va.to_type != 'order' OR va.from_type = 'deal')
-      AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order') AND vo.owner_id = ${id})))`;
+      AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order') AND vo.owner_id IN ${mios})))`;
 }
 
 // Lo mismo para una actividad (nota, mail, tarea…) `al`: la ve si es suya (la tiene asignada o la cargó ella) o si está en
@@ -81,7 +117,7 @@ export async function puedeVer(db: D1Database, user: User, row: Pick<RecordRow, 
     return !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${visibleSql('r', user)}`).bind(row.id).first());
   }
   if (!esVentas(user) || row.owner_id == null || Number(row.owner_id) === user.id) return true;
-  if (row.object_type === 'deal') return false;
+  if (row.object_type === 'deal' && gerenciaDe(user) == null) return false;
   return !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${visibleSql('r', user)}`).bind(row.id).first());
 }
 

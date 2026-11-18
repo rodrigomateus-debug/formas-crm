@@ -2,6 +2,8 @@ import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { companyKey, norm } from './clickup';
 import { actualizarLugares, claveDireccion, direccionLugar, hoyBsAs, puedeEditarCronograma, sumarDias, ubicar } from './cronograma';
+import { firmaDe } from './destinosia';
+import { normalizarUbicacion } from '../../web/src/localidades';
 
 // La base de destinos (pestaña Destinos de Recorridos), rediseñada el 18/11/2026 para que los destinos estén bien:
 //
@@ -123,9 +125,43 @@ interface Fila {
 
 // ---------- La lista ----------
 
+// ---------- Localidad y provincia, como en el listado ----------
+
+// Deja la localidad y la provincia de toda la libreta escritas como en el listado de Georef (web/src/localidades.ts):
+// «SARANDI» → Sarandí, «ONCE» → Balvanera, «Cdad. Autónoma de Buenos Aires» → CABA, la provincia que falta por la
+// localidad o la zona. Corre una vez (pedido de Rodrigo del 18/11/2026: «las que ya existen adaptalas»); lo que entra
+// después ya entra normalizado (la copia de la planilla, lo que se guarda a mano, lo de la IA). Como el punto del mapa
+// se guarda por la dirección completa, se lo pasa a la dirección nueva; y lo que la IA ya revisó no vuelve a revisarse.
+const VERSION_LOCALIDADES = '1';
+export async function normalizarLibreta(db: D1Database, forzar = false) {
+  if (!forzar) {
+    const r = await db.prepare("SELECT value FROM settings WHERE key = 'localidades_normalizadas'").first<{ value: string }>();
+    if (r?.value === VERSION_LOCALIDADES) return 0;
+  }
+  const { results } = await db.prepare('SELECT id, nombre, direccion, localidad, provincia, zona, ia_firma FROM lugares')
+    .all<{ id: number; nombre: string; direccion: string | null; localidad: string | null; provincia: string | null; zona: string | null; ia_firma: string | null }>();
+  const stmts: D1PreparedStatement[] = [];
+  for (const l of results) {
+    const n = normalizarUbicacion(l);
+    if ((n.localidad ?? null) === (l.localidad ?? null) && (n.provincia ?? null) === (l.provincia ?? null)) continue;
+    const nuevo = { ...l, ...n };
+    const firma = l.ia_firma && l.ia_firma === firmaDe(l) ? firmaDe(nuevo) : l.ia_firma;
+    stmts.push(db.prepare('UPDATE lugares SET localidad = ?, provincia = ?, ia_firma = ? WHERE id = ?').bind(n.localidad, n.provincia, firma, l.id));
+    if (l.direccion) {
+      const antes = claveDireccion(direccionLugar(l)), ahora = claveDireccion(direccionLugar(nuevo));
+      if (antes !== ahora) stmts.push(db.prepare(`INSERT INTO geocodigos (clave, direccion, lat, lng, ok, manual, at) SELECT ?, ?, lat, lng, ok, manual, at FROM geocodigos
+        WHERE clave = ? AND ok = 1 ON CONFLICT (clave) DO NOTHING`).bind(ahora, direccionLugar(nuevo), antes));
+    }
+  }
+  stmts.push(db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('localidades_normalizadas', ?)").bind(VERSION_LOCALIDADES));
+  for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
+  return stmts.length - 1;
+}
+
 export async function listarDestinos(env: Env, user: User) {
   const db = env.DB;
   const cfg = await actualizarLugares(env, organiza(user));
+  await normalizarLibreta(db);
   await vincularEmpresas(db);
   await clasificar(db);
   const hoy = hoyBsAs(), desde = sumarDias(hoy, -182);

@@ -7,6 +7,7 @@ import { Avatar, Modal, RecordPicker } from '../components';
 import { Select } from '../Select';
 import { lindo } from './Cronograma';
 import { BuscarDireccion, type Sugerencia } from './Direcciones';
+import { CABA, PROVINCIAS, localidadesDe, normalizarUbicacion } from '../localidades';
 
 // La pestaña Destinos de Recorridos (rediseñada el 18/11/2026, ver docs/RECORRIDOS.md): la base de destinos con la
 // dirección en partes (calle y altura, localidad, provincia), el tipo (cliente, proveedor, impresor, taller, expreso), el
@@ -561,13 +562,20 @@ function FichaMapa({ d, organiza, ubicando, onUbicar, onGuardar, onCancelar, onE
 
 // ---------- Editar un destino ----------
 
+// La localidad y la provincia como en el listado (normalizarUbicacion): así el formulario muestra la provincia elegida en
+// la lista y la localidad de esa provincia.
+const ubic = (x: { localidad?: string | null; provincia?: string | null; zona?: string | null } | null) => {
+  const n = normalizarUbicacion(x ?? {});
+  return { localidad: n.localidad ?? '', provincia: n.provincia ?? '' };
+};
+
 function EditarDestino({ d, grupos, organiza, maps, onClose, onListo, onBorrar }: {
   d: Destino | null; grupos: Grupo[]; organiza: boolean; maps: boolean; onClose: () => void; onListo: (id: number | null) => void; onBorrar: (d: Destino) => void;
 }) {
   const toast = useToast();
   const [f, setF] = useState({
     nombre: d?.nombre ?? '', sucursal: d?.sucursal ?? '', tipo: (d?.tipo ?? '') as string, grupo_id: d?.grupo_id ? String(d.grupo_id) : '',
-    direccion: d?.direccion ?? '', localidad: d?.localidad ?? '', provincia: d?.provincia ?? '', codigo_postal: d?.codigo_postal ?? '',
+    direccion: d?.direccion ?? '', ...ubic(d), codigo_postal: d?.codigo_postal ?? '',
     contacto: d?.contacto ?? '', telefono: d?.telefono ?? '', whatsapp: d?.whatsapp ?? '', email: d?.email ?? '', horario: d?.horario ?? '', observaciones: d?.observaciones ?? '',
   });
   const [google, setGoogle] = useState<Sugerencia | null>(null);
@@ -626,16 +634,32 @@ function EditarDestino({ d, grupos, organiza, maps, onClose, onListo, onBorrar }
               onElegir={(s) => { setGoogle(s); setF({ ...f, direccion: s.principal, localidad: '', provincia: '', codigo_postal: '' }); }} />
           </label>
           {google ? <p className="small ok-text" style={{ margin: 0 }}>Elegida de Google Maps: al guardar se completan la localidad, la provincia, el código postal y el punto en el mapa ({google.secundario}).</p> : (
-            <div className="ds-3">{campo('localidad', 'Localidad', 'Sarandí, CABA…')}{campo('provincia', 'Provincia', 'Buenos Aires')}{campo('codigo_postal', 'CP', 'B1872', { style: { maxWidth: 110 } })}</div>
+            <div className="ds-3">
+              <label className="field">Provincia
+                <Select className="input" value={f.provincia} aria-label="Provincia"
+                  onChange={(e) => { const p = e.target.value; setF({ ...f, provincia: p, localidad: localidadesDe(p).includes(f.localidad) ? f.localidad : '' }); }}>
+                  <option value="">Elegí la provincia</option>
+                  {f.provincia && !PROVINCIAS.includes(f.provincia) && <option value={f.provincia}>{f.provincia}</option>}
+                  {PROVINCIAS.map((p) => <option key={p} value={p}>{p === CABA ? 'CABA (Ciudad Autónoma de Buenos Aires)' : p}</option>)}
+                </Select>
+              </label>
+              <label className="field">{f.provincia === CABA ? 'Barrio' : 'Localidad'}
+                <input className="input" list="ds-localidades" value={f.localidad} onChange={(e) => setF({ ...f, localidad: e.target.value })} disabled={!f.provincia}
+                  placeholder={!f.provincia ? 'Primero la provincia' : f.provincia === CABA ? 'Palermo, Balvanera… o CABA' : 'Escribí y elegí de la lista'} autoComplete="off" />
+                <datalist id="ds-localidades">{localidadesDe(f.provincia).map((l) => <option key={l} value={l} />)}</datalist>
+                {f.localidad && f.provincia && !localidadesDe(f.provincia).includes(f.localidad) && <span className="small muted">No está en el listado de {f.provincia === CABA ? 'barrios' : 'localidades'}: revisá cómo se escribe.</span>}
+              </label>
+              {campo('codigo_postal', 'CP', 'B1872', { style: { maxWidth: 110 } })}
+            </div>
           )}
           {d?.ia_estado === 'dudoso' && d.ia_sugerida && (
             <div className="rc-ia warn small"><b>La IA no está segura{d.ia_sugerida.confianza != null ? ` (${d.ia_sugerida.confianza} %)` : ''}:</b> {textoDir(d.ia_sugerida)}.
               {d.ia_nota && <span className="muted"> {d.ia_nota}</span>}{' '}
-              <button type="button" className="cr-link" onClick={() => { setGoogle(null); setF({ ...f, direccion: d.ia_sugerida!.direccion ?? f.direccion, localidad: d.ia_sugerida!.localidad ?? '', provincia: d.ia_sugerida!.provincia ?? '' }); }}>Usar la sugerencia</button></div>
+              <button type="button" className="cr-link" onClick={() => { setGoogle(null); setF({ ...f, direccion: d.ia_sugerida!.direccion ?? f.direccion, ...ubic({ ...d.ia_sugerida!, zona: d.zona }) }); }}>Usar la sugerencia</button></div>
           )}
           {d?.ia_estado === 'corregido' && d.ia_antes && (
             <div className="rc-ia small"><b>Completado con IA.</b>{d.ia_nota && <span className="muted"> {d.ia_nota}</span>} Antes: {textoDir(d.ia_antes) || '(vacío)'}.{' '}
-              <button type="button" className="cr-link" onClick={() => { setGoogle(null); setF({ ...f, direccion: d.ia_antes!.direccion ?? '', localidad: d.ia_antes!.localidad ?? '', provincia: d.ia_antes!.provincia ?? '' }); }}>Volver a como estaba</button></div>
+              <button type="button" className="cr-link" onClick={() => { setGoogle(null); setF({ ...f, direccion: d.ia_antes!.direccion ?? '', ...ubic({ ...d.ia_antes!, zona: d.zona }) }); }}>Volver a como estaba</button></div>
           )}
         </fieldset>
 

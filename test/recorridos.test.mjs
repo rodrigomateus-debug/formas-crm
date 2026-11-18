@@ -111,7 +111,7 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   const buscar = async (q) => (await api('GET', `/recorridos/destinos?q=${encodeURIComponent(q)}`)).data.destinos;
   const imprefas = (await buscar(`imprefas ${RUN}`)).find((d) => d.tipo === 'lugar');
   assert.ok(imprefas, 'el lugar de la planilla está en la base de destinos');
-  assert.match(imprefas.direccion, /San Andres/i);
+  assert.match(imprefas.direccion, /San Andr[eé]s/i);
   assert.equal((await buscar(`ceramica ${RUN}`)).filter((d) => d.tipo === 'lugar').length, 1, 'la fila repetida de la planilla es un solo lugar');
   // Corregido en el Hub: la próxima copia no lo pisa. Y el id no cambia.
   assert.equal((await api('PATCH', `/recorridos/libreta/${imprefas.lugar_id}`, { horario: '7 a 15', observaciones: 'Portón verde' })).status, 200);

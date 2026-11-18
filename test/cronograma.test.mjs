@@ -474,7 +474,7 @@ test('cronograma: la libreta de direcciones se copia de la planilla y completa l
   // Buscar un lugar para una parada: por calle, y los de ese proveedor aunque no se escriba nada.
   let b = (await api('GET', '/cronograma/lugares?q=ingenieros')).data.lugares;
   const zecat = b.find((l) => l.nombre === `ZECAT ${RUN} (DEPOSITO)`);
-  assert.equal(zecat.direccion, `JOSE INGENIEROS ${PDV}, RICARDO ROJAS, Buenos Aires`);
+  assert.equal(zecat.direccion, `JOSE INGENIEROS ${PDV}, Ricardo Rojas, Buenos Aires`);
   b = (await api('GET', `/cronograma/lugares?de=${encodeURIComponent(`ZECAT ${RUN}`)}`)).data.lugares;
   assert.deepEqual(b.map((l) => l.nombre), [`ZECAT ${RUN} (DEPOSITO)`]);
   // El cliente «Nestle … S.A.» no se llama igual que «Nestle … SARANDI»: se ofrece para elegir, pero no se usa solo.
@@ -485,7 +485,7 @@ test('cronograma: la libreta de direcciones se copia de la planilla y completa l
   let r = (await api('GET', '/cronograma/ruta?fecha=2026-11-17')).data;
   for (let i = 0; i < 6 && r.buscando > 0; i++) r = (await api('GET', '/cronograma/ruta?fecha=2026-11-17')).data;
   const prov = r.paradas.find((p) => p.movimientos.some((m) => m.npdv === PDV && m.tipo === 'retiro_proveedor'));
-  assert.equal(prov.direccion, `JOSE INGENIEROS ${PDV}, RICARDO ROJAS, Buenos Aires`);
+  assert.equal(prov.direccion, `JOSE INGENIEROS ${PDV}, Ricardo Rojas, Buenos Aires`);
   assert.equal(prov.origen, 'libreta');
   assert.deepEqual(prov.horario, [540, 1020]);
   assert.equal(prov.lugar.contacto, 'NATALIA');

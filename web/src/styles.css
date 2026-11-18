@@ -2476,3 +2476,19 @@ thead .ds-acciones { z-index: 2; }
 .tag.ia { background: color-mix(in srgb, #3d5af1 12%, transparent); color: #3d5af1; font-weight: 600; }
 .inicio-pestanas { display: flex; gap: 8px; padding: 16px var(--gutter) 0; flex: none; }
 .inicio-pestanas + .content { padding-top: 12px; }
+
+/* Analíticas → Consultas por WhatsApp (Consultas.tsx): barras de un solo color, el número en texto al lado. */
+.cq-barras { display: flex; flex-direction: column; gap: 4px; }
+.cq-barra { display: grid; grid-template-columns: minmax(90px, 34%) 1fr 44px; align-items: center; gap: 10px; padding: 4px 2px; border: 0; background: none;
+  font: inherit; font-size: 13px; color: var(--text, inherit); text-align: left; border-radius: 6px; cursor: pointer; }
+.cq-barra:disabled { cursor: default; }
+.cq-barra:not(:disabled):hover { background: var(--sunken); }
+.cq-pista { height: 10px; }
+.cq-pista i { display: block; height: 10px; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--viz-1); }
+.cq-val { text-align: right; color: var(--muted, inherit); }
+.cq-semanas { display: flex; align-items: stretch; gap: 6px; height: 170px; }
+.cq-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.cq-col-val { font-size: 11px; color: var(--muted, inherit); }
+.cq-col-pista { flex: 1; width: 100%; max-width: 28px; display: flex; align-items: flex-end; }
+.cq-col-pista i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--viz-1); }
+.cq-col-et { font-size: 11px; color: var(--muted, inherit); white-space: nowrap; }

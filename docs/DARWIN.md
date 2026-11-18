@@ -85,8 +85,10 @@ faltaban permisos). Si se retoman, se hacen con un aviso del CRM sobre pedidos e
 
 Pedido del 18/11/2026: que el CRM se entere de lo que pasa en las conversaciones **después** de que Maru las pasa a una
 vendedora, con un resumen por día en el contacto y los datos duros de lo que consultó cada cliente («quién consultó por
-botellas»). Código: `src/worker/darwin.ts`; pantalla: **Consultas** (menú CRM) y la tarjeta «Consultas por WhatsApp» en la
-ficha del contacto y de la empresa; para Claude, las herramientas `buscar_consultas` y `pendientes_de_respuesta` del MCP.
+botellas»). Código: `src/worker/darwin.ts`; pantalla: **Analíticas → «Consultas por WhatsApp»** (los números: lo más consultado, por
+categoría, por semana, quién atendió y cuántos compraron después, y el buscador con el listado), **Inicio → «Esperan
+respuesta»** (los clientes sin contestar, para la vendedora) y la tarjeta «Consultas por WhatsApp» en la ficha del contacto y
+de la empresa (el link viejo `/consultas` lleva a Analíticas); para Claude, las herramientas `buscar_consultas` y `pendientes_de_respuesta` del MCP.
 
 **De dónde salen los datos.** La API REST de Darwin (`api.getdarwin.ai`, spec revisada el 18/11/2026) **no tiene un
 endpoint para leer mensajes ni para listar las conversaciones**: `GET /v1/sessions?id=<teléfono>` da las sesiones de un
@@ -132,11 +134,11 @@ Reglas:
 - Sin `ANTHROPIC_API_KEY` los eventos se guardan igual y se resumen cuando esté. «Resumir ahora» a mano:
   `POST /api/darwin/resumir` (administradores). Estado: `GET /api/darwin/estado`.
 
-**Sin respuesta.** La pestaña «Sin respuesta» de Consultas lista las conversaciones que Maru ya pasó a una vendedora donde el
+**Sin respuesta.** El recuadro «Esperan respuesta» del Inicio lista las conversaciones que Maru ya pasó a una vendedora donde el
 cliente escribió (`session.replied`) después de la última respuesta del equipo (`lastHumanActivityAt`) y nadie le contestó en
 las últimas 4, 12, 24, 48 o 72 horas. El perfil Ventas ve las suyas. **A confirmar con eventos reales**: `session.replied`
 existe en los workflows de Darwin pero no figura en la lista de eventos de `POST /v1/webhook`; si con `session.*` no llega,
-esta pestaña queda vacía y hay que mandarlo con un workflow (disparador `darwin-event` `session.replied` → `http-request` a la
+este recuadro queda vacío y hay que mandarlo con un workflow (disparador `darwin-event` `session.replied` → `http-request` a la
 misma URL, con `eventType`, `timestamp` y `data`).
 
 **Los mensajes uno por uno (Claude).** La API de Darwin no da los mensajes, pero el conector de Darwin en Claude sí
@@ -145,7 +147,7 @@ misma URL, con `eventType`, `timestamp` y `data`).
 con la herramienta `cargar_conversacion_darwin` del conector «Formas Hub» (solo administradores). Cada mensaje se guarda una
 vez (`darwin_mensajes`, por su id de WhatsApp), con quién lo escribió: `human` es el cliente, `user` alguien del equipo (desde el
 inbox o el WhatsApp del celular), el resto Maru. El resumen del día usa esos mensajes como fuente principal (hasta ~15.000
-caracteres por conversación y día; si son más, los últimos) y la pestaña «Sin respuesta» sale de ellos: el último mensaje del
+caracteres por conversación y día; si son más, los últimos) y el recuadro «Esperan respuesta» sale de ellos: el último mensaje del
 cliente contra el último del equipo. Si la tarea no corrió, el resumen sale igual de los eventos.
 
 **Ícono del conector.** El MCP declara el ícono del Hub (`serverInfo.icons`, `hub-192.png`) y `/favicon.ico` devuelve ese

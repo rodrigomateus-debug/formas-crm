@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom';
 import { useMeta, esOperaciones, type User } from '../lib';
 import { RendimientoPanel } from './Rendimiento';
+import { ConsultasPanel } from './Consultas';
 
 // Analíticas (pedido de Rodrigo del 18/11/2026): una sola entrada en el menú para los números de cada área, así los
 // módulos de trabajo (CRM, Operaciones) no se llenan de pantallas de reportes. Adentro, una pestaña por tema; cada perfil
@@ -9,6 +10,8 @@ import { RendimientoPanel } from './Rendimiento';
 
 type Tema = { k: string; nombre: string; puede: (u: User) => boolean; panel: () => JSX.Element };
 const ANALITICAS: Tema[] = [
+  // Lo que consultan los clientes por WhatsApp (darwin.ts): la parte comercial y los administradores. Ventas ve lo de sus clientes.
+  { k: 'consultas', nombre: 'Consultas por WhatsApp', puede: (u) => !esOperaciones(u), panel: () => <ConsultasPanel /> },
   // Km y tiempo de cada recorrido, por chofer: Logística, Producción y los administradores (lo mismo que pide el servidor).
   { k: 'recorridos', nombre: 'Recorridos', puede: (u) => u.role !== 'viewer' && (u.role === 'admin' || esOperaciones(u)), panel: () => <RendimientoPanel /> },
 ];

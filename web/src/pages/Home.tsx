@@ -6,6 +6,7 @@ import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 import InicioDireccion from './InicioDireccion';
 import InicioProduccion from './InicioProduccion';
+import { SinRespuestaInicio } from './Consultas';
 
 interface Dash {
   open: Array<{ pipeline_id: string; stage_id: string; n: number; amount: number }>;
@@ -93,6 +94,8 @@ function InicioEquipo() {
           )) : <div className="empty">Nada pendiente para hoy.</div>}
         </div>
         {!prod && <>
+        {/* Los clientes que escribieron por WhatsApp y nadie les contestó (Consultas.tsx, darwin.ts). */}
+        <SinRespuestaInicio />
         <div className="panel">
           <div className="panel-head"><h2>Negocios sin actividad hace 14 días</h2><span className="muted small">{stale.data?.total ?? ''}</span></div>
           {stale.data?.results.length ? stale.data.results.map((r) => (

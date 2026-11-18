@@ -5,6 +5,7 @@ import { http, qs, useMeta, useAsync, fmtMoney, recordUrl, stageOf } from '../li
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 import { usePeriodo, corto, pct, plural } from './Periodo';
+import { SinRespuestaInicio } from './Consultas';
 
 // Inicio de Dirección (pedido de Rodrigo del 18/11/2026; src/worker/direccion.ts). Para los usuarios marcados «Dirección»:
 // resultados de todo el equipo en el período elegido, sin tareas. Arriba los números del período; después ganado por
@@ -142,6 +143,8 @@ export default function InicioDireccion() {
       </div>
 
       <div className="grid-2" style={{ marginTop: 16 }}>
+        {/* Los clientes que escribieron por WhatsApp y nadie les contestó (Consultas.tsx, darwin.ts). */}
+        <SinRespuestaInicio />
         <div className="panel">
           <div className="panel-head"><h2>Motivos de pérdida</h2><span className="small muted">{plural(perdidos, 'negocio', 'negocios')} · {fmtMoney(k?.perdidos_monto ?? 0) || '$ 0'}</span></div>
           <div className="panel-body">

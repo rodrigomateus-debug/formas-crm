@@ -258,3 +258,16 @@ test('el conector del Hub tiene su ícono (claude.ai lo muestra)', async () => {
   assert.equal(fav.status, 200);
   assert.equal(fav.headers.get('content-type'), 'image/png');
 });
+
+test('Analíticas → Consultas: por categoría, por semana, por vendedora y cuántos compraron después', async () => {
+  const r = await api('GET', `/consultas?analitica=1&q=${RUN}`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const drink = r.data.por_categoria.find((g) => g.clave === 'Drinkware');
+  assert.ok(drink && drink.n >= 1, JSON.stringify(r.data.por_categoria));
+  assert.ok(r.data.por_vendedora.some((g) => g.clave === 'Rodrigo Mateus'));
+  assert.ok(r.data.por_semana.length >= 1);
+  assert.match(r.data.por_semana[0].clave, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(r.data.con_venta, 0, 'todavía no compró nadie');
+  const sin = await api('GET', `/consultas?q=${RUN}`);
+  assert.equal(sin.data.por_categoria, undefined, 'sin analitica=1 no hace las cuentas');
+});

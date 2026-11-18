@@ -535,8 +535,9 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
   const unidades = q.unidades?.length ? q.unidades.map((u) => u.toUpperCase()) : cfg.unidades;
   const desde = Date.now() - 30 * 86_400_000;
   // Los PDV abiertos (con algún artículo que no está entregado ni anulado); con «ver entregados», también los de los
-  // últimos 30 días.
+  // últimos 30 días. Si el pedido del CRM se borró, el PDV no se ve (aunque la tarea siga en ClickUp); si se restaura, vuelve.
   const pdvs = (await db.prepare(`${SELECT_PDV} WHERE p.es_pdv = 1 AND COALESCE(p.unidad, '') IN (SELECT value FROM json_each(?1))
+      AND NOT EXISTS (SELECT 1 FROM records x WHERE x.id = p.record_id AND x.archived = 1)
       AND (EXISTS (SELECT 1 FROM produccion a WHERE a.pdv_task = p.task_id AND a.es_pdv = 0 AND a.estado NOT IN ('entregados', 'anulado'))
         OR (NOT EXISTS (SELECT 1 FROM produccion a WHERE a.pdv_task = p.task_id AND a.es_pdv = 0) AND p.estado NOT IN ('entregados', 'anulado'))
         OR (?2 = 1 AND p.actualizado > ?3))`)

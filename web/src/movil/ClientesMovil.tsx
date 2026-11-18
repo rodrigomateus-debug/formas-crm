@@ -8,6 +8,7 @@ import { Avatar, PropertyInput } from '../components';
 import { keyPropsFor } from '../pages/RecordPage';
 import type { DestinoOpcion } from '../pages/Recorridos';
 import { Hoja, TareaRapida } from './Movil';
+import { AltaNegocio } from './VentasMovil';
 
 // Clientes en el celular (versión celular, fase 2): empresas y contactos como tarjetas, una ficha con lo que se usa en la
 // calle (Llamar · WhatsApp · Mail · Cómo llegar, registrar lo que pasó, una tarea, un encargo) y un alta corta. La ficha
@@ -17,12 +18,12 @@ type Tipo = 'company' | 'contact';
 type Con = CrmRecord & { company?: { id: number; name: string } | null };
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 
-const tel = (v: unknown) => { const d = String(v ?? '').replace(/[^\d+]/g, ''); return d.length >= 6 ? `tel:${d}` : undefined; };
+export const tel = (v: unknown) => { const d = String(v ?? '').replace(/[^\d+]/g, ''); return d.length >= 6 ? `tel:${d}` : undefined; };
 const mapa = (r: CrmRecord) => {
   const dir = [r.props.address, r.props.city].filter(Boolean).join(', ');
   return dir ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(dir)}` : undefined;
 };
-const telDe = (r: CrmRecord) => r.props.mobilephone || r.props.phone;
+export const telDe = (r: CrmRecord) => r.props.mobilephone || r.props.phone;
 const sinHtml = (s: string) => s.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
 // ---------- Lista ----------
@@ -77,7 +78,7 @@ export function ClientesLista({ tipo }: { tipo: Tipo }) {
   );
 }
 
-function TarjetaCliente({ tipo, r }: { tipo: Tipo; r: Con }) {
+export function TarjetaCliente({ tipo, r }: { tipo: Tipo; r: Con }) {
   const { meta } = useMeta();
   const sub = tipo === 'contact'
     ? [r.props.jobtitle, r.company?.name].filter(Boolean).join(' · ') || r.props.email
@@ -104,7 +105,7 @@ export function FichaCliente({ tipo }: { tipo: Tipo }) {
   const [datos, setDatos] = useState<{ record: CrmRecord; associations: Assoc; redirect?: number } | null>(null);
   const [error, setError] = useState('');
   const [version, setVersion] = useState(0);
-  const [hoja, setHoja] = useState<null | 'registrar' | 'tarea' | 'contacto' | { editar: Property }>(null);
+  const [hoja, setHoja] = useState<null | 'registrar' | 'tarea' | 'contacto' | 'negocio' | { editar: Property }>(null);
   const [todos, setTodos] = useState(false);
   useEffect(() => {
     http<{ record: CrmRecord; associations: Assoc; redirect?: number }>('GET', `/records/${tipo}/${id}`)
@@ -189,7 +190,8 @@ export function FichaCliente({ tipo }: { tipo: Tipo }) {
       )}
 
       <section className="m-sec">
-        <div className="m-sec-cab"><h2>Negocios</h2><span className="muted small">{negocios.length || ''}</span></div>
+        <div className="m-sec-cab"><h2>Negocios</h2><span className="muted small">{negocios.length || ''}</span><span className="grow" />
+          {(tipo === 'company' || empresa) && <button type="button" className="m-link" onClick={() => setHoja('negocio')} aria-label="Nuevo negocio"><Icon name="plus" size={14} />Nuevo</button>}</div>
         {!negocios.length && <div className="m-vacio">Sin negocios.</div>}
         {negocios.slice(0, 8).map((d) => {
           const etapa = stageOf(meta, d.props.dealstage)?.stage;
@@ -217,19 +219,20 @@ export function FichaCliente({ tipo }: { tipo: Tipo }) {
 
       {hoja === 'registrar' && <Registrar record={r} onClose={() => setHoja(null)} onListo={cambio} />}
       {hoja === 'tarea' && <TareaRapida linkId={r.id} sobre={r.name} onClose={() => setHoja(null)} onCreada={cambio} />}
+      {hoja === 'negocio' && <AltaNegocio empresa={tipo === 'company' ? { id: r.id, name: r.name } : { id: empresa!.id, name: empresa!.name }} onClose={() => setHoja(null)} />}
       {hoja === 'contacto' && <AltaCliente tipo="contact" empresa={{ id: r.id, name: r.name }} onClose={() => setHoja(null)} onCreado={() => cambio()} />}
       {hoja && typeof hoja === 'object' && <EditarDato tipo={tipo} record={r} prop={hoja.editar} onClose={() => setHoja(null)} onListo={cambio} />}
     </div>
   );
 }
 
-function Accion({ icono, texto, href, nueva }: { icono: string; texto: string; href?: string; nueva?: boolean }) {
+export function Accion({ icono, texto, href, nueva }: { icono: string; texto: string; href?: string; nueva?: boolean }) {
   if (!href) return <span className="m-accion off" aria-disabled="true" title={`Sin ${texto === 'Mail' ? 'mail' : texto === 'Cómo llegar' ? 'dirección' : 'teléfono'} cargado`}><span><Icon name={icono} size={20} /></span>{texto}</span>;
   return <a className={`m-accion${icono === 'whatsapp' ? ' wa' : ''}`} href={href} {...(nueva ? { target: '_blank', rel: 'noreferrer' } : {})}><span><Icon name={icono} size={20} /></span>{texto}</a>;
 }
 
 // Lo último que pasó con el cliente: notas, llamadas, mails, reuniones, WhatsApp y tareas.
-function Actividad({ tipo, id, version }: { tipo: Tipo; id: number; version: number }) {
+export function Actividad({ tipo, id, version }: { tipo: ObjectType; id: number; version: number }) {
   const [acts, setActs] = useState<Activity[] | null>(null);
   const [cuantas, setCuantas] = useState(10);
   useEffect(() => {
@@ -261,10 +264,24 @@ function Actividad({ tipo, id, version }: { tipo: Tipo; id: number; version: num
 
 // ---------- Hojas ----------
 
+// Un campo en el celular: si es una lista corta, botones (se ven todas las opciones de una, sin abrir nada); si no, el
+// campo de siempre.
+export function CampoMovil({ prop, tipo, valor, onChange, autoFocus }: { prop: Property; tipo: ObjectType; valor: unknown; onChange: (v: unknown) => void; autoFocus?: boolean }) {
+  if (prop.type === 'enum' && prop.options.length > 0 && prop.options.length <= 16) {
+    return (
+      <div className="m-chips" role="group" aria-label={prop.label}>
+        {prop.options.map((o) => <button key={o.value} type="button" className={`chip sm${valor === o.value ? ' on' : ''}`} aria-pressed={valor === o.value}
+          onClick={() => onChange(valor === o.value ? '' : o.value)}>{o.label}</button>)}
+      </div>
+    );
+  }
+  return <PropertyInput prop={prop} value={valor ?? ''} onChange={onChange} type={tipo} autoFocus={autoFocus && prop.type !== 'enum'} />;
+}
+
 const TIPOS_REG: Array<[Activity['type'], string]> = [['note', 'Nota'], ['call', 'Llamada'], ['whatsapp', 'WhatsApp'], ['meeting', 'Reunión'], ['email', 'Mail']];
 const RESULTADOS = ['Conectada', 'Sin respuesta', 'Dejé mensaje', 'Ocupado', 'Número equivocado'];
 
-function Registrar({ record, onClose, onListo }: { record: CrmRecord; onClose: () => void; onListo: () => void }) {
+export function Registrar({ record, onClose, onListo }: { record: CrmRecord; onClose: () => void; onListo: () => void }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [tipo, setTipo] = useState<Activity['type']>('note');
@@ -303,7 +320,7 @@ function Registrar({ record, onClose, onListo }: { record: CrmRecord; onClose: (
   );
 }
 
-function EditarDato({ tipo, record, prop, onClose, onListo }: { tipo: Tipo; record: CrmRecord; prop: Property; onClose: () => void; onListo: () => void }) {
+export function EditarDato({ tipo, record, prop, onClose, onListo }: { tipo: ObjectType; record: CrmRecord; prop: Property; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
   const [valor, setValor] = useState<unknown>(record.props[prop.name] ?? '');
   const [ocupado, setOcupado] = useState(false);
@@ -315,7 +332,7 @@ function EditarDato({ tipo, record, prop, onClose, onListo }: { tipo: Tipo; reco
   return (
     <Hoja titulo={prop.label} onClose={onClose}>
       <form className="m-form" onSubmit={(e) => { e.preventDefault(); guardar(); }}>
-        <PropertyInput prop={prop} value={valor} onChange={setValor} type={tipo} autoFocus />
+        <CampoMovil prop={prop} tipo={tipo} valor={valor} onChange={setValor} autoFocus />
         <button type="submit" className="btn primary m-grande" disabled={ocupado}>Guardar</button>
       </form>
     </Hoja>
@@ -369,10 +386,7 @@ export function AltaCliente({ tipo, empresa, onClose, onCreado }: { tipo: Tipo; 
         </>}
         {requeridas.map((p) => (
           <div key={p.name} className="field">{p.label}
-            {p.type === 'enum' && p.options.length <= 16
-              ? <div className="m-chips" role="group" aria-label={p.label}>{p.options.map((o) => (
-                <button key={o.value} type="button" className={`chip sm${extra[p.name] === o.value ? ' on' : ''}`} aria-pressed={extra[p.name] === o.value} onClick={() => setExtra((x) => ({ ...x, [p.name]: o.value }))}>{o.label}</button>))}</div>
-              : <PropertyInput prop={p} value={extra[p.name] ?? ''} onChange={(v) => setExtra((x) => ({ ...x, [p.name]: v }))} type={tipo} />}
+            <CampoMovil prop={p} tipo={tipo} valor={extra[p.name]} onChange={(v) => setExtra((x) => ({ ...x, [p.name]: v }))} />
           </div>
         ))}
         <button type="submit" className="btn primary m-grande" disabled={ocupado || !listo}>Crear {tipo === 'company' ? 'empresa' : 'contacto'}</button>
@@ -381,7 +395,7 @@ export function AltaCliente({ tipo, empresa, onClose, onCreado }: { tipo: Tipo; 
   );
 }
 
-function ElegirEmpresa({ valor, onElegir }: { valor: { id: number; name: string } | null; onElegir: (e: { id: number; name: string } | null) => void }) {
+export function ElegirEmpresa({ valor, onElegir }: { valor: { id: number; name: string } | null; onElegir: (e: { id: number; name: string } | null) => void }) {
   const [q, setQ] = useState('');
   const dq = useDebounced(q, 250);
   const [res, setRes] = useState<CrmRecord[]>([]);

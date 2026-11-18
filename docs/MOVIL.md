@@ -32,19 +32,33 @@ Barra abajo: **Hoy · Clientes · ＋ · Ventas · Chat**. Arriba, el avatar (me
 - **Alta corta** (desde ＋, la lista o la ficha): empresa con nombre, sitio, teléfono, dirección y ciudad; contacto con
   nombre, apellido, celular, mail, cargo y empresa. Siempre se piden también los campos obligatorios que tenga
   configurados el CRM (hoy, el «Canal de contacto» de los contactos). Queda a nombre de quien lo carga.
+- **Ventas → Negocios**: los suyos del pipeline (si ve varios, se elige arriba), por etapa en una fila de botones
+  (Abiertos, cada etapa, Cerrados), con cuántos son y cuánto suman. La ficha muestra el monto y la etapa con su barra de
+  avance; tocando la etapa se elige otra de la lista, y si la etapa pide algo (el monto para «Envío de cotización», el
+  motivo para «Cierre perdido», lo que configure el pipeline) se pide ahí mismo. Pestañas Resumen (Registrar, Tarea, el
+  cliente con WhatsApp y Llamar, los datos principales del pipeline, editables, los pedidos y la actividad) y
+  Conversación (la del equipo, con menciones y archivos).
+- **Alta de negocio** (＋, la lista o la ficha de una empresa o contacto): nombre, empresa, monto, cantidad, producto y
+  etapa (las que el pipeline deja usar para crear), más lo que pida esa etapa. Si el pipeline exige empresa, no deja
+  crearlo sin una.
+- **Ventas → Pedidos**: solo para consultar (no se crean desde el celular). Lista con buscador, «Míos / Todos los que
+  veo», el estado de cada uno y los mensajes sin leer. La ficha abre en **Conversación** (comentar, avisar con @, subir
+  archivos y fotos desde el teléfono) y **Detalle**: «Encargo para este pedido» (con la empresa como destino), artículos con
+  su estado de producción, la entrega, los **logos de la empresa** (se suben desde ahí), factura y remitos, contactos y
+  negocio.
+- En las hojas, los campos de lista corta (canal de contacto, motivo de pérdida…) se eligen con botones.
 - Menú del avatar: Tareas, Recorridos, Contactos, Pedidos, Notas de productos, tema, versión completa y cerrar sesión.
 
 ## Fases
 
 1. **Hecha**: el esqueleto, Hoy y Recorridos.
 2. **Hecha**: Clientes (lista, ficha y alta corta).
-3. Ventas: negocios por etapa (se crean y se pasan de etapa) y pedidos para consultar, con comentarios, conversación,
-   avisos y subir archivos o logos (el vendedor no crea pedidos desde el celular).
+3. **Hecha**: Ventas (negocios por etapa, alta y cambio de etapa; pedidos para consultar y conversar).
 4. Tareas y Chat a medida.
 
-Mientras tanto, Ventas, Tareas y Chat abren las pantallas de siempre dentro del esqueleto del celular.
+Mientras tanto, Tareas y Chat abren las pantallas de siempre dentro del esqueleto del celular.
 
 ## Código
 
 `web/src/movil/`: `Movil.tsx` (esqueleto, `useModoMovil`, hojas, ＋, tarea rápida), `Hoy.tsx`, `RecorridosMovil.tsx`,
-`ClientesMovil.tsx` y `movil.css`. `App.tsx` elige cuál dibujar. Los modales del escritorio ocupan toda la pantalla con `body.movil`.
+`ClientesMovil.tsx`, `VentasMovil.tsx` y `movil.css`. `App.tsx` elige cuál dibujar. Los modales del escritorio ocupan toda la pantalla con `body.movil`.

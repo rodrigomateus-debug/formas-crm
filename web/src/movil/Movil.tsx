@@ -13,12 +13,13 @@ import ConversacionesPage, { useNoLeidas } from '../pages/Conversacion';
 import Hoy from './Hoy';
 import { RecorridosMovil, EncargoAsistente } from './RecorridosMovil';
 import { ClientesLista, FichaCliente, AltaCliente } from './ClientesMovil';
+import { NegociosLista, FichaNegocio, AltaNegocio, PedidosLista, FichaPedido } from './VentasMovil';
 
 // Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en una pantalla angosta, el perfil Ventas no ve el CRM de
 // escritorio achicado sino una app simple, con lo esencial para cargar desde la calle. Misma dirección, mismo login y la
 // misma API; lo que no está acá se abre con «Ver versión completa». Barra abajo: Hoy · Clientes · ＋ · Ventas · Chat.
-// Fase 1: el esqueleto, Hoy y Recorridos (encargo en tres pasos). Fase 2: Clientes (ClientesMovil.tsx). Ventas, Tareas y
-// Chat abren, por ahora, las pantallas de siempre dentro de este esqueleto (docs/MOVIL.md).
+// Fase 1: el esqueleto, Hoy y Recorridos (encargo en tres pasos). Fase 2: Clientes (ClientesMovil.tsx). Fase 3: Ventas
+// (VentasMovil.tsx). Tareas y Chat abren, por ahora, las pantallas de siempre dentro de este esqueleto (docs/MOVIL.md).
 
 const ANGOSTO = '(max-width: 760px)';
 const CLAVE_COMPLETA = 'crm-version-completa';
@@ -75,6 +76,10 @@ export default function AppMovil({ buscador }: { buscador: ReactNode }) {
           <Route path="/contacts" element={<ClientesLista key="contact" tipo="contact" />} />
           <Route path="/companies/:id" element={<FichaCliente key="company" tipo="company" />} />
           <Route path="/contacts/:id" element={<FichaCliente key="contact" tipo="contact" />} />
+          <Route path="/deals" element={<NegociosLista />} />
+          <Route path="/deals/:id" element={<FichaNegocio />} />
+          <Route path="/orders" element={<PedidosLista />} />
+          <Route path="/orders/:id" element={<FichaPedido />} />
           <Route path="/:objectPath" element={<ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />
         </Routes>
@@ -126,6 +131,7 @@ function MenuCrear({ onClose }: { onClose: () => void }) {
   const [tipo, setTipo] = useState<ObjectType | null>(null);
   const [tarea, setTarea] = useState(false);
   if (tipo === 'company' || tipo === 'contact') return <AltaCliente tipo={tipo} onClose={onClose} />;
+  if (tipo === 'deal') return <AltaNegocio onClose={onClose} />;
   if (tipo) return <CreateRecord type={tipo} onClose={onClose} />;
   if (tarea) return <TareaRapida onClose={onClose} />;
   const op = (icono: string, titulo: string, sub: string, fn: () => void) => (

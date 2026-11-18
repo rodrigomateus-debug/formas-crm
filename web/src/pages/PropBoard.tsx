@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMoneyExact, cobroPedido, fmtRelative, recordUrl, userName, propsOf, propOf, formatValue, Icon, Cargando, unidadesDe, type Activity, type CrmRecord, type ObjectType, type Filter, type Meta } from '../lib';
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
-import { BotonVacias, SortPick, useColapso, useFillHeight, type CardActions } from './Board';
+import { BotonVacias, SortPick, useColapso, type CardActions } from './Board';
 import { Select } from '../Select';
 import { ChatChip } from './Conversacion';
 import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useEsperaCorta, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
@@ -223,7 +223,6 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const [over, setOver] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const colapso = useColapso(`crm.board.collapsed.${type}.${prop}`, vacias);
-  const [boardRef, boardStyle] = useFillHeight();
   const def = groupable.find((p) => p.name === prop);
   const total = cols.reduce((n, c) => n + c.total, 0);
   // Pedidos: el total sin IVA abajo de cada columna y arriba, el del tablero (como el monto en el tablero de negocios).
@@ -352,7 +351,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           {/* Arriba, el total de los activos (lo que está en curso); el de cada etapa va abajo de su columna. */}
           {conMonto && montoActivos != null && <><span className="sep">·</span>Total activos sin IVA <b className="num" title={fmtMoneyExact(montoActivos, 'ARS')}>{fmtMoney(montoActivos, 'ARS') || '$ 0'}</b></>}</span>
       </div>
-      <div className={`board${boardStyle ? ' fill' : ''}${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
+      <div className={`board${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading}>
         {(!board.data || esperaProductos) && !board.error && <Cargando />}
         {esperaProductos ? null : porArea ? segmentos.map((s) => (
           <section key={`${s.area ?? 'otras'}-${s.cols[0].value || 'vacio'}`} className={`col-group${s.area ? ` area-${s.area}` : ' sin-area'}`}

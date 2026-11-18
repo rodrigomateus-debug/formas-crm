@@ -82,6 +82,9 @@ before(async () => {
       const q = url.searchParams.get('q') ?? '';
       if (/Roca 4250/.test(q)) return send([{ lat: '-34.5361', lon: '-58.5152' }]);
       if (/Matienzo 1308/.test(q)) return send([{ lat: '-34.5345', lon: '-58.5170' }]);
+      // «Pasan cerca»: Junín queda a unos 550 m de Uriburu.
+      if (new RegExp(`Uriburu ${N}`).test(q)) return send([{ lat: '-34.6000', lon: '-58.4000' }]);
+      if (new RegExp(`Junin ${N}`).test(q)) return send([{ lat: '-34.6050', lon: '-58.4000' }]);
       return send([{ lat: String(-34.5 - Math.random() / 10), lon: String(-58.5 - Math.random() / 10) }]);
     }
     if (url.pathname.startsWith('/sheets/')) {
@@ -177,6 +180,23 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   assert.equal(frec.proximos[0].fecha, MANANA, 'dice que mañana ya se va');
   assert.ok(r.data.bases.some((b) => b.id === 'matienzo'));
 
+  // ---------- Pasan cerca: un destino a menos de 2 km de una parada de ese día ----------
+  assert.equal((await api('POST', '/recorridos/encargos', { fecha: PASADO, destino: { nombre: `Punto Uno ${RUN}`, direccion: `Uriburu ${N}, CABA` }, llevar: [{ que: 'Sobre' }] })).status, 200);
+  const cerca = `/recorridos/destino?nombre=${encodeURIComponent(`Punto Dos ${RUN}`)}&direccion=${encodeURIComponent(`Junin ${N}, CABA`)}`;
+  let dp = null;
+  // Las direcciones nuevas se ubican en el fondo (una por segundo): la primera vez todavía no está.
+  for (let i = 0; i < 8 && !dp?.cerca; i++) {
+    r = await api('GET', cerca);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    dp = r.data.dias.find((d) => d.fecha === PASADO);
+    if (!dp?.cerca) await new Promise((ok) => setTimeout(ok, 2500));
+  }
+  assert.ok(dp?.cerca, JSON.stringify(dp));
+  assert.equal(dp.cerca.nombre, `Punto Uno ${RUN}`);
+  assert.ok(dp.cerca.metros >= 400 && dp.cerca.metros <= 700, String(dp.cerca.metros));
+  assert.equal(r.data.destino.zona, 'CABA');
+  assert.equal(r.data.dias.find((d) => d.fecha === MANANA)?.cerca ?? null, null, 'mañana no pasa nadie cerca');
+
   // ---------- La agenda: lo de otros clientes no dice de quién es (perfil Ventas) ----------
   asUser = null;
   const cliente = (await api('POST', '/records/company', { props: { name: `Cliente Secreto ${RUN}`, address: `Av. Libertador ${N}`, city: 'Vicente López' } })).data;
@@ -184,6 +204,7 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   r = await api('GET', `/recorridos/agenda?desde=${PASADO}&dias=1`, undefined, vera.email);
   const anon = r.data.dias[0].paradas.find((p) => p.localidad === 'Vicente López');
   assert.ok(anon, JSON.stringify(r.data.dias[0].paradas));
+  assert.equal(anon.zona, 'Norte', 'la zona sale de la localidad');
   assert.equal(anon.nombre, 'Un cliente');
   assert.equal(anon.encargos.length, 0);
   r = await api('GET', `/recorridos/agenda?desde=${PASADO}&dias=1`);
@@ -324,6 +345,16 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   // Y cuenta para los frecuentes de quien lo pidió.
   r = await api('GET', '/recorridos/sugerencias', undefined, wanda.email);
   assert.ok(r.data.frecuentes.some((d) => d.lugar_id === ceramica.lugar_id), JSON.stringify(r.data.frecuentes));
+  assert.ok(!(r.data.generales ?? []).some((d) => r.data.frecuentes.some((f) => f.key === d.key)), 'lo general no repite lo suyo');
+  // Alguien nuevo, sin encargos ni pedidos: le recomienda a dónde más va el recorrido (MAD, todos los jueves).
+  const nueva = (await api('POST', '/users', { email: `nueva.rc.${RUN}@formas.ar`, name: `Nueva Rc ${RUN}`, profile: 'comercial', role: 'member' })).data;
+  r = await api('GET', '/recorridos/sugerencias', undefined, nueva.email);
+  assert.equal(r.data.frecuentes.length, 0);
+  const general = r.data.generales.find((d) => d.lugar_id === mad.lugar_id);
+  assert.ok(general, JSON.stringify(r.data.generales));
+  assert.match(general.motivo, /viajes del recorrido/);
+  assert.deepEqual(general.habitual.dias, [4], 'y qué día se suele ir');
+  assert.ok(r.data.generales.length <= 9);
   const suyos = (await api('GET', `/recorridos/encargos?desde=${dia(HOY, -10)}&hasta=${HOY}`, undefined, wanda.email)).data.encargos;
   assert.ok(suyos.some((e) => e.estado === 'cancelado' && e.origen === 'planilla'), '«NO HABIA QUE IR» queda cancelado');
   const urgente = suyos.find((e) => e.destino === `CERAMICA ${RUN}`);

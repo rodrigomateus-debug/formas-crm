@@ -1454,9 +1454,9 @@ api.get('/productos/notas/:id/foto', async (c) => fotoNotaProducto(c.env, Number
 // Para todos los perfiles (también Ventas): cada uno carga y ve lo suyo; Logística, todo.
 
 api.get('/recorridos/agenda', async (c) => c.json(await agenda(c.env, c.get('ctx').user, c.req.query())));
-api.get('/recorridos/sugerencias', async (c) => c.json(await sugerenciasRecorrido(c.env, c.get('ctx').user)));
+api.get('/recorridos/sugerencias', async (c) => c.json(await sugerenciasRecorrido(c.env, c.get('ctx').user, (p) => c.executionCtx.waitUntil(p))));
 api.get('/recorridos/destinos', async (c) => c.json(await buscarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
-api.get('/recorridos/destino', async (c) => c.json(await diasDelDestino(c.env, c.get('ctx').user, c.req.query())));
+api.get('/recorridos/destino', async (c) => c.json(await diasDelDestino(c.env, c.get('ctx').user, c.req.query(), (p) => c.executionCtx.waitUntil(p))));
 api.get('/recorridos/libreta', async (c) => c.json(await listarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
 api.post('/recorridos/libreta', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), null, await c.req.json())));
 api.patch('/recorridos/libreta/:id', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));

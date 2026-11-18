@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando } from '../lib';
+import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
 import { Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
+import { marcaProveedor } from '../proveedores';
+import { ZONAS, nombreZona, type Zona } from '../zonas';
 
 // Recorridos (pedido de Rodrigo del 13/11/2026; src/worker/recorridos.ts, docs/RECORRIDOS.md): reemplaza la planilla
 // «Recorridos» de Logística. Cualquiera carga un encargo al recorrido de un día —llevar o retirar muestras, un sobre,
@@ -25,7 +27,10 @@ export interface DestinoOpcion {
   tipo: 'lugar' | 'empresa' | 'expreso' | 'base' | 'suelto'; key: string; nombre: string; direccion: string | null; detalle: string | null;
   lugar_id: number | null; company_id: number | null; record_id?: number | null; motivo?: string | null; horario?: string | null; contacto?: string | null;
   proximos?: Array<{ fecha: string; que: string[] }>; habitual?: Habitual | null; veces?: number;
+  cerca?: Cerca[]; dominio?: string | null; zona?: Zona | null;
 }
+// Un día que el recorrido pasa cerca (a menos de 2 km) de un destino, sin ir justo ahí.
+interface Cerca { fecha: string; nombre: string; metros: number }
 interface Base { id: string; nombre: string }
 
 // ---------- Fechas ----------
@@ -104,66 +109,129 @@ export default function RecorridosPage() {
   );
 }
 
+// ---------- Logos y zonas ----------
+
+// El logo del lugar: el isotipo si es un importador VIP, el favicon de su dominio si es una empresa del CRM y, si no, sus
+// iniciales sobre un color propio (siempre el mismo para el mismo nombre).
+const sinLogo = new Set<string>();
+const SOCIEDAD = /\b(s\.?\s?a\.?|s\.?\s?r\.?\s?l\.?|s\.?\s?a\.?\s?s\.?|s\.?\s?a\.?\s?i\.?\s?c\.?|y asociados|argentina)\b\.?/gi;
+function monograma(nombre: string) {
+  const limpio = lindo(nombre).replace(/\(.*?\)/g, '').replace(SOCIEDAD, '').trim() || nombre;
+  return initials(limpio).slice(0, 2).toUpperCase();
+}
+function tono(nombre: string) { let h = 0; for (const c of nombre.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+export function LogoLugar({ nombre, dominio, grande }: { nombre: string; dominio?: string | null; grande?: boolean }) {
+  const marca = marcaProveedor(nombre) ?? marcaProveedor(nombre.replace(/\(.*?\)/g, '').trim());
+  const src = !marca && dominio ? `/api/favicon/${encodeURIComponent(dominio)}` : '';
+  const [mal, setMal] = useState(() => !src || sinLogo.has(src));
+  useEffect(() => { setMal(!src || sinLogo.has(src)); }, [src]);
+  const cls = `rc-logo${grande ? ' lg' : ''}`;
+  if (marca) return <span className={`${cls} img`} style={{ background: marca.plate }} aria-hidden="true"><img src={`/proveedores/${marca.id}.png`} alt="" loading="lazy" /></span>;
+  if (src && !mal) return <span className={`${cls} img`} aria-hidden="true"><img src={src} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => { sinLogo.add(src); setMal(true); }} /></span>;
+  return <span className={`${cls} mono`} style={{ ['--h' as string]: tono(nombre) }} aria-hidden="true">{monograma(nombre)}</span>;
+}
+const ZonaTxt = ({ zona, localidad }: { zona?: Zona | null; localidad?: string | null }) => {
+  const loc = localidad ? lindo(localidad) : '';
+  if (!zona && !loc) return null;
+  // «CABA · Villa Crespo», «Zona Norte · Florida»; si la localidad ya es la zona, una vez.
+  const z = zona ? nombreZona(zona) : '';
+  return <span className="rc-zona" data-z={zona ?? undefined}>{[z, loc && loc.toLowerCase() !== z.toLowerCase() && loc.toLowerCase() !== 'caba' ? loc : ''].filter(Boolean).join(' · ')}</span>;
+};
+
 // ---------- Próximos días ----------
 
 interface ParadaAgenda { clave: string; nombre: string; localidad: string | null; direccion: string | null; tipos: Record<string, number>; detalle: string[]; encargos: Encargo[];
-  anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null }
+  anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; zona: Zona | null; dominio: string | null }
 interface DiaAgenda { fecha: string; feriado: string | null; armado: boolean; paradas: ParadaAgenda[] }
-const TIPOS: Array<[string, string, string]> = [['encargo', 'Encargo', 'X'], ['entrega', 'Entrega', 'E'], ['retiro', 'Retiro', 'R'], ['egreso', 'Egreso', 'G']];
+const TIPOS: Array<[string, string, string]> = [['entrega', 'entrega', 'entregas'], ['retiro', 'retiro', 'retiros'], ['egreso', 'egreso', 'egresos'], ['encargo', 'encargo', 'encargos']];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const movimientosTxt = (t: Record<string, number>) => TIPOS.filter(([k]) => t[k]).map(([k, uno, varios]) => (t[k] > 1 ? `${t[k]} ${varios}` : uno)).join(' · ');
+const ORDEN_ZONA = (z: Zona | null) => (z ? ZONAS.indexOf(z) : ZONAS.length);
 
 function Agenda({ version, puede, onNuevo, onAbrir }: { version: number; puede: boolean; onNuevo: (d: DestinoOpcion | null, fecha: string) => void; onAbrir: (id: number) => void }) {
   const [datos, setDatos] = useState<{ hoy: string; dias: DiaAgenda[] } | null>(null);
   const [error, setError] = useState('');
   const [buscar, setBuscar] = useState('');
+  const [zona, setZona] = useState<Zona | 'otros' | null>(null);
   useEffect(() => { http<{ hoy: string; dias: DiaAgenda[] }>('GET', `/recorridos/agenda${qs({ dias: 8 })}`).then((d) => { setDatos(d); setError(''); }, (e) => setError((e as Error).message)); }, [version]);
   if (error) return <div className="aviso warn small">{error}</div>;
   if (!datos) return <div className="empty plain">Cargando los próximos días…</div>;
   const q = buscar.trim().toLowerCase();
-  const filtra = (p: ParadaAgenda) => !q || [p.nombre, p.localidad, p.direccion, ...p.detalle].some((x) => (x ?? '').toLowerCase().includes(q));
+  const filtra = (p: ParadaAgenda) => (!q || [p.nombre, p.localidad, p.direccion, p.zona && nombreZona(p.zona), ...p.detalle].some((x) => (x ?? '').toLowerCase().includes(q)))
+    && (!zona || (zona === 'otros' ? !p.zona : p.zona === zona));
+  const hayZona = (z: Zona | 'otros') => datos.dias.some((d) => d.paradas.some((p) => (z === 'otros' ? !p.zona : p.zona === z)));
   return (
     <>
-      <div className="toolbar">
+      <div className="toolbar rc-toolbar">
         <div className="search" style={{ minWidth: 220, flex: '0 1 320px' }}><Icon name="search" />
-          <input className="input" placeholder="Buscar un lugar o una localidad" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar en los próximos días" />
+          <input className="input" placeholder="Buscar un lugar, una localidad o una zona" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar en los próximos días" />
         </div>
-        <span className="grow" />
-        <div className="cr-leyenda small">{TIPOS.map(([, n, k]) => <span key={k} className={`cr-k-${k}`}><i />{n}</span>)}</div>
+        <div className="rc-zonas" role="group" aria-label="Zona">
+          <button type="button" aria-pressed={!zona} className={!zona ? 'on' : ''} onClick={() => setZona(null)}>Todas</button>
+          {[...ZONAS, 'otros' as const].filter(hayZona).map((z) => (
+            <button key={z} type="button" data-z={z === 'otros' ? undefined : z} aria-pressed={zona === z} className={zona === z ? 'on' : ''} onClick={() => setZona(zona === z ? null : z)}>
+              {z !== 'otros' && <i />}{z === 'otros' ? 'Sin zona' : nombreZona(z)}</button>
+          ))}
+        </div>
       </div>
       <div className="rc-dias">
         {datos.dias.map((d) => {
           const ps = d.paradas.filter(filtra);
+          const rel = cuando(d.fecha, datos.hoy);
+          const fd = D(d.fecha);
+          const grupos = [...new Set(ps.map((p) => p.zona))].sort((a, b) => ORDEN_ZONA(a) - ORDEN_ZONA(b)).map((z) => [z, ps.filter((p) => p.zona === z)] as const);
+          const total = ps.length || 1;
+          // Con un solo chofer ese día, va en la cabecera; con varios, cada parada dice con quién va.
+          const choferes = [...new Set(d.paradas.map((p) => p.chofer).filter(Boolean))] as string[];
           return (
             <section key={d.fecha} className={`rc-dia${d.fecha === datos.hoy ? ' hoy' : ''}${d.feriado ? ' feriado' : ''}`}>
-              <header>
-                <div><b>{cuando(d.fecha, datos.hoy)}</b>{!['Hoy', 'Mañana'].includes(cuando(d.fecha, datos.hoy)) ? null : <span className="muted"> · {corto(d.fecha)}</span>}</div>
-                <span className="muted small">{d.feriado ? `Feriado: ${d.feriado}` : ps.length ? `${ps.length} lugar${ps.length === 1 ? '' : 'es'}` : 'Nada todavía'}{d.armado ? ' · recorrido armado' : ''}</span>
+              <header className="rc-dia-cab">
+                <div className="rc-fecha">
+                  <span className="rc-fecha-num num">{fd.getDate()}</span>
+                  <span className="rc-fecha-txt"><b>{DIAS[fd.getDay()]}</b><span>{MESES[fd.getMonth()]}</span></span>
+                  {['Hoy', 'Mañana'].includes(rel) && <span className="rc-rel">{rel}</span>}
+                </div>
+                {ps.length > 0 && (
+                  <div className="rc-mezcla" aria-hidden="true">
+                    {grupos.map(([z, xs]) => <span key={z ?? 'otros'} data-z={z ?? undefined} style={{ flexGrow: xs.length / total }} title={`${z ? nombreZona(z) : 'Sin zona'}: ${xs.length}`} />)}
+                  </div>
+                )}
+                <span className="rc-dia-meta">{d.feriado ? `Feriado · ${d.feriado}` : ps.length ? `${ps.length} lugar${ps.length === 1 ? '' : 'es'}` : 'Nada todavía'}{d.armado ? ` · ${choferes.length === 1 ? `va ${choferes[0].split(' ')[0]}` : 'recorrido armado'}` : ''}</span>
               </header>
-              <ul>
-                {ps.map((p) => (
-                  <li key={p.clave} className={p.encargos.length ? 'mio' : ''}>
-                    <div className="rc-p-cab">
-                      <div className="rc-p-nombre"><b>{p.anonima ? p.nombre : lindo(p.nombre)}</b>{p.localidad && <span>{lindo(p.localidad)}</span>}</div>
-                      {p.chofer && <span className="rc-chofer" title="Chofer"><Icon name="truck" size={12} />{p.chofer}</span>}
-                    </div>
-                    <div className="rc-p-tipos">
-                      {TIPOS.filter(([t]) => p.tipos[t]).map(([t, n, k]) => <span key={t} className={`rc-tipo cr-k-${k}`}>{p.tipos[t] > 1 ? `${p.tipos[t]} ` : ''}{p.tipos[t] > 1 ? `${n.toLowerCase()}s` : n}</span>)}
-                    </div>
-                    {p.encargos.map((e) => (
-                      <button key={e.id} type="button" className="rc-p-enc" onClick={() => onAbrir(e.id)}>
-                        <span className={`rc-estado ${ESTADO[e.estado].clase}`}>{ESTADO[e.estado].nombre}</span>
-                        <span>{resumen(e)}</span>
-                        <span className="rc-p-pidio"><QuienPidio id={e.user_id} name={e.quien} corto /></span>
-                      </button>
-                    ))}
-                    {puede && !p.anonima && d.fecha >= datos.hoy && (
-                      <button type="button" className="cr-link rc-sumar" onClick={() => onNuevo({ tipo: p.lugar_id ? 'lugar' : p.company_id ? 'empresa' : 'suelto', key: p.clave, nombre: p.nombre,
-                        direccion: p.direccion, detalle: null, lugar_id: p.lugar_id, company_id: p.company_id }, d.fecha)}><Icon name="plus" size={12} />Sumar algo acá</button>
-                    )}
-                  </li>
-                ))}
-                {!ps.length && <li className="vacio muted small">{q ? 'Nada que coincida.' : 'Todavía no hay nada para este día.'}</li>}
-              </ul>
-              {puede && d.fecha >= datos.hoy && !d.feriado && <button type="button" className="cr-agregar" onClick={() => onNuevo(null, d.fecha)}><Icon name="plus" size={12} />Encargo para {cuando(d.fecha, datos.hoy).toLowerCase()}</button>}
+              {grupos.map(([z, xs]) => (
+                <div key={z ?? 'otros'} className="rc-grupo" data-z={z ?? undefined}>
+                  {grupos.length > 1 || z ? <div className="rc-grupo-cab"><span>{z ? nombreZona(z) : 'Sin zona'}</span><span className="num">{xs.length}</span></div> : null}
+                  <ul>
+                    {[...xs].sort((a, b) => Number(b.encargos.length > 0) - Number(a.encargos.length > 0)).map((p) => {
+                      const sumar = puede && !p.anonima && d.fecha >= datos.hoy;
+                      const loc = p.localidad ? lindo(p.localidad) : '';
+                      return (
+                        <li key={p.clave} className={`rc-p${p.encargos.length ? ' mio' : ''}`}>
+                          <LogoLugar nombre={p.nombre} dominio={p.dominio} />
+                          <div className="rc-p-txt">
+                            <b>{p.anonima ? p.nombre : lindo(p.nombre)}</b>
+                            <span>{[loc && loc.toLowerCase() !== (p.zona ?? '').toLowerCase() ? loc : '', movimientosTxt(p.encargos.length ? { ...p.tipos, encargo: 0 } : p.tipos)].filter(Boolean).join(' · ')}</span>
+                          </div>
+                          <div className="rc-p-lado">
+                            {p.chofer && choferes.length > 1 && <span className="rc-p-chofer" title={`Va ${p.chofer}`}>{initials(p.chofer)}</span>}
+                            {sumar && <button type="button" className="rc-p-mas" title="Sumar un encargo acá" aria-label={`Sumar un encargo a ${lindo(p.nombre)}`} onClick={() => onNuevo({
+                              tipo: p.lugar_id ? 'lugar' : p.company_id ? 'empresa' : 'suelto', key: p.clave, nombre: p.nombre, direccion: p.direccion, detalle: null, lugar_id: p.lugar_id,
+                              company_id: p.company_id, dominio: p.dominio, zona: p.zona }, d.fecha)}><Icon name="plus" size={14} /></button>}
+                          </div>
+                          {p.encargos.map((e) => (
+                            <button key={e.id} type="button" className={`rc-talon ${ESTADO[e.estado].clase}`} onClick={() => onAbrir(e.id)}>
+                              <span className="rc-talon-cab"><i />{e.estado === 'pendiente' ? 'Encargo' : ESTADO[e.estado].nombre}<QuienPidio id={e.user_id} name={e.quien} corto /></span>
+                              <span className="rc-talon-que">{resumen(e)}</span>
+                            </button>
+                          ))}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+              {!ps.length && <p className="rc-vacio">{q || zona ? 'Nada que coincida.' : d.feriado ? 'No hay recorrido.' : 'Todavía no hay nada para este día.'}</p>}
+              {puede && d.fecha >= datos.hoy && !d.feriado && <button type="button" className="rc-agregar" onClick={() => onNuevo(null, d.fecha)}><Icon name="plus" size={13} />Encargo para {rel.toLowerCase()}</button>}
             </section>
           );
         })}
@@ -395,10 +463,10 @@ function AdminRecorridos() {
 
 // ---------- Cargar o ver un encargo ----------
 
-interface DiaDestino { fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number }
+interface DiaDestino { fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number; cerca: Cerca | null }
 interface InfoDestino { destino: DestinoOpcion; lugar: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null; localidad: string | null } | null;
   dias: DiaDestino[]; habitual: Habitual | null; ultimos: Encargo[] }
-interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; bases: Base[]; organiza: boolean }
+interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; generales?: DestinoOpcion[]; bases: Base[]; organiza: boolean }
 // En la pantalla la cantidad es el texto que se escribe («2,5»); el servidor la pasa a número.
 type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
 const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
@@ -521,8 +589,8 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
 function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable: boolean; onCambiar: () => void }) {
   return (
     <div className="rc-elegido">
-      <Icon name="pin" size={18} />
-      <div><b>{lindo(d.nombre)}</b><span>{d.direccion ?? 'Sin dirección'}</span>{(d.horario || d.contacto) && <span className="muted small">{[d.horario, d.contacto].filter(Boolean).join(' · ')}</span>}</div>
+      <LogoLugar nombre={d.nombre} dominio={d.dominio} grande />
+      <div><b>{lindo(d.nombre)}</b><ZonaTxt zona={d.zona} /><span>{d.direccion ?? 'Sin dirección'}</span>{(d.horario || d.contacto) && <span className="muted small">{[d.horario, d.contacto].filter(Boolean).join(' · ')}</span>}</div>
       {editable && <button type="button" className="btn sm ghost" onClick={onCambiar}>Cambiar</button>}
     </div>
   );
@@ -547,15 +615,17 @@ function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (
       </div>
       {res && (
         <ul className="rc-res">
-          {res.map((d) => <li key={d.key}><button type="button" onClick={() => onElegir(d)}><b>{lindo(d.nombre)}</b><span>{d.direccion ?? 'Sin dirección'}</span>
-            <em>{d.tipo === 'empresa' ? d.detalle : d.tipo === 'expreso' ? 'Expreso' : d.tipo === 'base' ? 'De Formas' : d.detalle}</em></button></li>)}
+          {res.map((d) => <li key={d.key}><button type="button" onClick={() => onElegir(d)}><LogoLugar nombre={d.nombre} dominio={d.dominio} />
+            <span className="rc-res-txt"><b>{lindo(d.nombre)}</b><span>{d.direccion ?? 'Sin dirección'}</span></span>
+            <span className="rc-res-lado"><ZonaTxt zona={d.zona} /><em>{d.tipo === 'empresa' ? d.detalle : d.tipo === 'expreso' ? 'Expreso' : d.tipo === 'base' ? 'De Formas' : d.detalle}</em></span></button></li>)}
           {!res.length && <li className="muted small">No está en la base. Cargalo como «Otro lugar».</li>}
         </ul>
       )}
-      {!res && sug && (sug.frecuentes.length > 0 || sug.de_pedidos.length > 0) && (
+      {!res && sug && (sug.frecuentes.length > 0 || sug.de_pedidos.length > 0 || !!sug.generales?.length) && (
         <>
           {sug.frecuentes.length > 0 && <Sugeridos titulo="A donde más mandás" items={sug.frecuentes} onElegir={onElegir} />}
           {sug.de_pedidos.length > 0 && <Sugeridos titulo="De tus pedidos y negocios" items={sug.de_pedidos} onElegir={onElegir} />}
+          {!!sug.generales?.length && <Sugeridos titulo={sug.frecuentes.length || sug.de_pedidos.length ? 'Donde más va el recorrido' : 'Donde más va el recorrido (cuando cargues encargos, acá van a aparecer los tuyos)'} items={sug.generales} onElegir={onElegir} />}
         </>
       )}
       {!res && !sug && <div className="muted small">Buscando tus destinos de siempre…</div>}
@@ -574,20 +644,47 @@ function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (
   );
 }
 
+// El porqué de cada sugerencia, corto: «Proveedor e impresor · PDV 31577, 31429 +2» en vez de la lista entera.
+function porque(motivo: string | null | undefined): { rol: string; pdvs: string[] } | null {
+  if (!motivo) return null;
+  const roles: string[] = [], pdvs: string[] = [], otros: string[] = [];
+  for (const parte of motivo.split(' · ')) {
+    const m = parte.match(/^(Cliente|Proveedor|Impresor) de tu PDV (.+)$/);
+    if (m) { if (!roles.includes(m[1])) roles.push(m[1]); if (!pdvs.includes(m[2])) pdvs.push(m[2]); }
+    else otros.push(parte.replace(/(\d+) (vez|veces) en los últimos 6 meses/, (_, n) => `${n} ${n === '1' ? 'envío' : 'envíos'} tuyos en 6 meses`));
+  }
+  const rol = roles.map((r, i) => (i ? r.toLowerCase() : r)).join(' e ').replace(/ e ([^e]*) e /, ', $1 e ');
+  return { rol: [rol, ...otros].filter(Boolean).join(' · '), pdvs };
+}
+const metros = (m: number) => (m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1).replace('.', ',').replace(',0', '')} km`);
+const cuandoCorto = (f: string, hoy: string) => { const c = cuando(f, hoy); return c.startsWith('El ') ? c.slice(3) : c.toLowerCase(); };
+const sueleTxt = (h: Habitual) => (h.dias.length && h.dias.length < 5 ? `Suelen ir los ${h.dias.map((i) => ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'][i]).join(', ').replace(/, ([^,]*)$/, ' y $1')}` : h.texto);
+
 function Sugeridos({ titulo, items, onElegir }: { titulo: string; items: DestinoOpcion[]; onElegir: (d: DestinoOpcion) => void }) {
   const hoy = hoyIso();
   return (
     <div className="rc-sug">
-      <div className="eyebrow">{titulo}</div>
+      <div className="rc-sug-titulo">{titulo}</div>
       <div className="rc-sug-grid">
         {items.map((d) => {
           const prox = d.proximos?.[0];
+          const cerca = d.cerca?.find((c) => !prox || c.fecha < prox.fecha);
+          const por = porque(d.motivo);
+          const estado = prox ? 'va' : cerca ? 'cerca' : d.habitual ? 'suele' : 'nada';
           return (
-            <button key={d.key} type="button" className="rc-sug-item" onClick={() => onElegir(d)} title={d.direccion ?? undefined}>
-              <b>{lindo(d.nombre)}</b>
-              {d.motivo && <span className="muted small">{d.motivo}</span>}
-              {prox ? <span className="rc-va"><i />Ya van {cuando(prox.fecha, hoy).toLowerCase()}</span>
-                : d.habitual ? <span className="rc-suele">{d.habitual.texto}</span> : null}
+            <button key={d.key} type="button" className={`rc-s ${estado}`} onClick={() => onElegir(d)} title={[d.direccion, d.habitual?.texto].filter(Boolean).join('\n') || undefined}>
+              <span className="rc-s-cab">
+                <LogoLugar nombre={d.nombre} dominio={d.dominio} />
+                <span className="rc-s-nombre"><b>{lindo(d.nombre)}</b><ZonaTxt zona={d.zona} /></span>
+              </span>
+              {por && (por.rol || por.pdvs.length > 0) && (
+                <span className="rc-s-por">{por.rol}{por.pdvs.length > 0 && <span className="rc-s-pdvs num">{por.pdvs.slice(0, 2).join(' · ')}{por.pdvs.length > 2 ? ` +${por.pdvs.length - 2}` : ''}</span>}</span>
+              )}
+              <span className="rc-s-pie">
+                {prox && <span className="rc-s-va"><i />Van {cuandoCorto(prox.fecha, hoy)}</span>}
+                {cerca && <span className="rc-s-cerca"><Radar />Pasan cerca {cuandoCorto(cerca.fecha, hoy)}<em>a {metros(cerca.metros)}, por {lindo(cerca.nombre)}</em></span>}
+                {!prox && !cerca && (d.habitual ? <span className="rc-s-suele">{sueleTxt(d.habitual)}</span> : <span className="rc-s-nada">Parada nueva</span>)}
+              </span>
             </button>
           );
         })}
@@ -595,6 +692,10 @@ function Sugeridos({ titulo, items, onElegir }: { titulo: string; items: Destino
     </div>
   );
 }
+// «Pasan cerca»: dos anillos, como un radar.
+const Radar = () => (
+  <svg className="rc-radar" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="currentColor" /><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.4 2" /></svg>
+);
 
 // Los próximos días hábiles para ese destino: cuáles ya tienen viaje ahí y cuáles son los de siempre.
 function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpcion; fecha: string; editable: boolean; onFecha: (f: string) => void }) {
@@ -609,16 +710,18 @@ function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpci
   const hoy = hoyIso();
   const dia = info?.dias.find((d) => d.fecha === fecha);
   const proximo = info?.dias.find((d) => d.viajes.length && d.fecha > hoy && d.propios < d.viajes.length);
+  // El primer día que pasan cerca, si es antes del próximo viaje justo ahí (o no hay ninguno).
+  const cercaDia = info?.dias.find((d) => d.cerca && d.fecha > hoy && (!proximo || d.fecha < proximo.fecha));
   return (
     <div className="rc-dia-elegir">
       {info && (
         <div className="rc-tira" role="group" aria-label="Día">
           {info.dias.map((d) => (
-            <button key={d.fecha} type="button" disabled={!editable || !!d.feriado} aria-pressed={d.fecha === fecha} className={`rc-d${d.fecha === fecha ? ' on' : ''}${d.viajes.length ? ' va' : ''}${d.habitual ? ' suele' : ''}`}
-              onClick={() => onFecha(d.fecha)} title={d.feriado ? `Feriado: ${d.feriado}` : d.viajes.length ? `Ese día ya van: ${d.viajes.join(', ')}` : d.habitual ? 'Es uno de los días que se suele ir' : undefined}>
+            <button key={d.fecha} type="button" disabled={!editable || !!d.feriado} aria-pressed={d.fecha === fecha} className={`rc-d${d.fecha === fecha ? ' on' : ''}${d.viajes.length ? ' va' : d.cerca ? ' cerca' : ''}${d.habitual ? ' suele' : ''}`}
+              onClick={() => onFecha(d.fecha)} title={d.feriado ? `Feriado: ${d.feriado}` : d.viajes.length ? `Ese día ya van: ${d.viajes.join(', ')}` : d.cerca ? `Pasan a ${metros(d.cerca.metros)}, por ${lindo(d.cerca.nombre)}` : d.habitual ? 'Es uno de los días que se suele ir' : undefined}>
               <span className="rc-d-dia">{d.fecha === hoy ? 'Hoy' : DIAS[D(d.fecha).getDay()].slice(0, 3)}</span>
               <span className="rc-d-num num">{D(d.fecha).getDate()}/{D(d.fecha).getMonth() + 1}</span>
-              <span className="rc-d-marca">{d.feriado ? 'Feriado' : d.viajes.length ? 'Ya van' : d.habitual ? 'Suele ir' : ''}</span>
+              <span className="rc-d-marca">{d.feriado ? 'Feriado' : d.viajes.length ? 'Van' : d.cerca ? 'Cerca' : d.habitual ? 'Suelen ir' : ''}</span>
             </button>
           ))}
           {editable && <SelectorFecha valor={fecha} onElegir={(f) => f && onFecha(f)} label="Otro día" className="rc-d otro" title="Otro día"><Icon name="calendar" size={14} /><span className="rc-d-marca">Otro día</span></SelectorFecha>}
@@ -629,7 +732,12 @@ function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpci
         <div className="rc-pista">
           {dia?.viajes.length && dia.propios === dia.viajes.length ? <span className="rc-va"><i /><b>{cuando(fecha, hoy)} ya tenés un encargo a {lindo(destino.nombre)}.</b> Si es para sumarle algo, podés editar ese; si no, este va en la misma parada.</span>
             : dia?.viajes.length ? <span className="rc-va"><i /><b>{cuando(fecha, hoy)} ya van a {lindo(destino.nombre)}</b> ({dia.viajes.join(', ')}): tu encargo va en la misma parada.</span>
+            : dia?.cerca ? <span className="rc-cerca-txt"><Radar /><span><b>{cuando(fecha, hoy)} pasan cerca</b>: hay una parada a {metros(dia.cerca.metros)}, en {lindo(dia.cerca.nombre)}. Logística lo suma al recorrido con un desvío corto.</span></span>
             : <span><b>{cuando(fecha, hoy)}</b> todavía no hay nada para {lindo(destino.nombre)}: va a ser una parada nueva.{info.habitual ? ` ${info.habitual.texto}.` : ''}</span>}
+          {cercaDia && cercaDia.cerca && cercaDia.fecha !== fecha && !dia?.viajes.length && !dia?.cerca && editable && (
+            <span className="rc-mejor cerca"><Radar />{cercaDia.fecha > fecha ? 'Si puede esperar' : 'Antes'}, {cuando(cercaDia.fecha, hoy).toLowerCase()} pasan a {metros(cercaDia.cerca.metros)} ({lindo(cercaDia.cerca.nombre)}).
+              <button type="button" className="cr-link" onClick={() => onFecha(cercaDia.fecha)}>Pedirlo {cuando(cercaDia.fecha, hoy).toLowerCase()}</button></span>
+          )}
           {proximo && proximo.fecha !== fecha && editable && (
             <span className="rc-mejor">{proximo.fecha > fecha ? 'Si puede esperar' : 'Antes'}, {cuando(proximo.fecha, hoy).toLowerCase()} ya van ({proximo.viajes.join(', ')}).
               <button type="button" className="cr-link" onClick={() => onFecha(proximo.fecha)}>Sumarlo {cuando(proximo.fecha, hoy).toLowerCase()}</button></span>

@@ -6,10 +6,11 @@ import { CERRADOS } from './produccion';
 import { serviceToken } from './google';
 import {
   SELECT_ENC, aEncargo, actualizarLugares, anfitrion, avisarEncargo, claveCalle, claveEncargo, claveParada, cronogramaConfig, diaSemana, direccionLugar, encargosEntre,
-  esDeLaParada, esDia, hoyBsAs, infoLugar, lugaresPara, lugaresPorId, mismoSitio, movimientos, puedeEditarCronograma, reindexarLugares, sumarDias, unicoLugar,
+  esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, ubicar, lugaresPara, lugaresPorId, mismoSitio, movimientos, puedeEditarCronograma, reindexarLugares, sumarDias, unicoLugar,
   type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio,
 } from './cronograma';
 import { direccionesDePedidos } from './direcciones';
+import { zonaDe, type Zona } from '../../web/src/zonas';
 
 // Recorridos (pedido de Rodrigo del 13/11/2026): reemplaza la planilla «Recorridos» de Logística. Vendedoras, backoffice,
 // producción, compras y administración cargan lo que el chofer tiene que llevar o retirar un día (muestras, sobres,
@@ -234,11 +235,24 @@ export interface DestinoOpcion {
   lugar_id: number | null; company_id: number | null; record_id?: number | null; motivo?: string | null; horario?: string | null; contacto?: string | null;
   // Para las sugerencias: cuándo ya se va (los próximos días) y qué días se suele ir.
   proximos?: Array<{ fecha: string; que: string[] }>; habitual?: Habitual | null; veces?: number;
+  // Los próximos días que el recorrido pasa cerca (a menos de RADIO_CERCA metros) sin ir justo ahí.
+  cerca?: Cerca[];
+  dominio?: string | null; zona?: Zona | null;   // para el logo y para agrupar por zona
 }
 const opcionLugar = (l: Lugar & { company_id?: number | null }, extra: Partial<DestinoOpcion> = {}): DestinoOpcion => ({
   tipo: 'lugar', key: `l:${l.id}`, nombre: l.nombre, direccion: l.direccion ? direccionLugar(l) : null, detalle: [l.horario, l.contacto].filter(Boolean).join(' · ') || null,
-  lugar_id: l.id, company_id: l.company_id ?? null, horario: l.horario, contacto: [l.contacto, l.telefono].filter(Boolean).join(' · ') || null, ...extra,
+  lugar_id: l.id, company_id: l.company_id ?? null, horario: l.horario, contacto: [l.contacto, l.telefono].filter(Boolean).join(' · ') || null,
+  zona: zonaDe({ zona: l.zona, localidad: l.localidad, direccion: l.direccion }), ...extra,
 });
+// El logo (dominio de la empresa) y la zona de cada destino, para que se reconozcan de un vistazo.
+async function decorar(db: D1Database, destinos: DestinoOpcion[]) {
+  const dom = await dominios(db, destinos.map((d) => d.company_id));
+  for (const d of destinos) {
+    if (d.company_id && dom.has(d.company_id)) d.dominio = dom.get(d.company_id);
+    if (d.zona === undefined || d.zona === null) d.zona = d.tipo === 'base' ? null : zonaDe({ direccion: d.direccion });
+  }
+  return destinos;
+}
 
 // Buscar un destino: en la libreta, en las empresas del CRM (las que la persona ve, más los proveedores e impresores), en
 // los expresos y en los depósitos de Formas. Si una empresa ya es un lugar de la libreta, sale una vez.
@@ -271,7 +285,7 @@ export async function buscarDestinos(env: Env, user: User, q: string) {
     out.push({ tipo: 'empresa', key: `c:${c.id}`, nombre: c.name, direccion: dir, detalle: c.rel === 'proveedor' ? 'Proveedor' : 'Empresa del CRM', lugar_id: null, company_id: c.id, horario: c.horario });
   }
   for (const x of expresos.results) out.push({ tipo: 'expreso', key: `x:${x.id}`, nombre: x.nombre, direccion: x.direccion, detalle: 'Expreso', lugar_id: null, company_id: null });
-  return { destinos: out.slice(0, 30) };
+  return { destinos: await decorar(db, out.slice(0, 30)) };
 }
 
 // Agregar o corregir un destino de la libreta desde el Hub. Lo que se corrige acá la planilla ya no lo pisa.
@@ -322,7 +336,11 @@ export async function listarDestinos(env: Env, user: User, q: string) {
 // ---------- Cuándo se va a cada lugar ----------
 
 // Un viaje previsto (o hecho) a un lugar un día: un movimiento de ClickUp o un encargo.
-interface Viaje extends Sitio { fecha: string; tipo: 'entrega' | 'retiro' | 'egreso' | 'encargo'; detalle: string; propio: boolean; encargo_id?: number; record_id?: number | null }
+interface Viaje extends Sitio {
+  fecha: string; tipo: 'entrega' | 'retiro' | 'egreso' | 'encargo'; detalle: string; propio: boolean; encargo_id?: number; record_id?: number | null;
+  lat?: number | null; lng?: number | null;   // el punto, si ya se sabe (la dirección validada de la tarjeta Entrega)
+  anonimo?: boolean;                          // para la vendedora, la entrega a un cliente de otra: no se dice el nombre
+}
 export interface Habitual { texto: string; dias: number[]; por_semana: number }
 const SEMANAS = 8;
 
@@ -347,7 +365,9 @@ async function viajesEntre(db: D1Database, user: User, desde: string, hasta: str
       const ds = m.record_id ? dirs.get(m.record_id) ?? [] : [];
       if (ds.length && ds.every((d) => d.retira)) continue;
       const suyo = !ventas || (p?.owner_id ?? null) === user.id;
-      viajes.push({ fecha: m.fecha, tipo: 'entrega', clave: claveParada(m), nombre: m.cliente ?? '', company_id: p?.company_id ?? null, direccion: ds.find((d) => !d.retira)?.direccion ?? null,
+      const dir = ds.find((d) => !d.retira);
+      viajes.push({ fecha: m.fecha, tipo: 'entrega', clave: claveParada(m), nombre: m.cliente ?? '', company_id: p?.company_id ?? null, direccion: dir?.direccion ?? null,
+        lat: dir?.validada ? dir.lat : null, lng: dir?.validada ? dir.lng : null, anonimo: !suyo,
         detalle: suyo ? `Entrega PDV ${m.npdv ?? '—'}` : 'Entrega a un cliente', propio: (p?.owner_id ?? null) === user.id, record_id: suyo ? m.record_id : null });
     } else {
       viajes.push({ fecha: m.fecha, tipo: m.tipo === 'egreso' ? 'egreso' : 'retiro', clave: claveParada(m), nombre: m.lugar ?? '', company_id: m.company_id, direccion: null,
@@ -376,7 +396,7 @@ async function historial(db: D1Database, hasta: string) {
       JOIN produccion_opciones o ON o.campo = x.campo AND o.option_id = x.op`).bind(desde, hasta).all<{ fecha: string; nombre: string; company_id: number | null }>(),
   ]);
   return [...encs.results.map((e) => ({ fecha: e.fecha, nombre: e.destino, direccion: e.direccion, lugar_id: e.lugar_id, company_id: e.company_id })),
-    ...prod.results.map((p) => ({ fecha: p.fecha, nombre: p.nombre, company_id: p.company_id, direccion: null }))];
+    ...prod.results.map((p) => ({ fecha: p.fecha, nombre: p.nombre, company_id: p.company_id, direccion: null, lugar_id: null as number | null }))];
 }
 const NOMBRE_DIA = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'];
 function habitualDe(dias: Set<string>): Habitual | null {
@@ -409,10 +429,89 @@ async function enriquecer(db: D1Database, user: User, destinos: DestinoOpcion[],
   return destinos;
 }
 
+// ---------- Cerca: el recorrido ya pasa al lado ----------
+
+export interface Cerca { fecha: string; nombre: string; metros: number }
+// «Cerca» es a menos de 2 km en línea recta de una parada que ya está ese día: en el AMBA es un desvío de 5 a 10 minutos,
+// lo que Logística suma sin rearmar el recorrido.
+const RADIO_CERCA = 2000;
+type Pto = { lat: number; lng: number };
+function metrosEntre(a: Pto, b: Pto) {
+  const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLng = (b.lng - a.lng) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
+}
+
+// Los retiros y egresos de ClickUp no traen dirección: la de la libreta (con su localidad y su zona) o la de la empresa.
+async function direccionesDeViajes(db: D1Database, viajes: Viaje[]) {
+  const sinDir = viajes.filter((v) => !v.direccion && v.lat == null);
+  const out = new Map<Viaje, { direccion: string; localidad: string | null; zona: string | null }>();
+  if (!sinDir.length) return out;
+  const ids = [...new Set(sinDir.map((v) => v.company_id).filter((x): x is number => !!x))];
+  const [deEmpresa, empresas, porNombre] = await Promise.all([
+    ids.length ? db.prepare('SELECT * FROM lugares WHERE activo = 1 AND company_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<Lugar & { company_id: number }>().then((r) => r.results)
+      : Promise.resolve([] as Array<Lugar & { company_id: number }>),
+    ids.length ? db.prepare("SELECT id, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city FROM records WHERE id IN (SELECT value FROM json_each(?))")
+      .bind(JSON.stringify(ids)).all<{ id: number; address: string | null; city: string | null }>().then((r) => new Map(r.results.map((e) => [e.id, e])))
+      : Promise.resolve(new Map<number, { id: number; address: string | null; city: string | null }>()),
+    lugaresPara(db, [...new Set(sinDir.map((v) => v.nombre).filter(Boolean))]),
+  ]);
+  for (const v of sinDir) {
+    const l = (v.company_id ? deEmpresa.find((x) => x.company_id === v.company_id) : undefined) ?? unicoLugar(porNombre.get(v.nombre)?.exactos ?? []);
+    const e = v.company_id ? empresas.get(v.company_id) : undefined;
+    if (l?.direccion) out.set(v, { direccion: direccionLugar(l), localidad: l.localidad, zona: l.zona });
+    else if (e?.address) out.set(v, { direccion: [e.address, e.city].filter(Boolean).join(', '), localidad: e.city, zona: null });
+  }
+  return out;
+}
+
+// Los dominios de las empresas (para el logo).
+async function dominios(db: D1Database, ids: Array<number | null | undefined>) {
+  const l = [...new Set(ids.filter((x): x is number => !!x))];
+  if (!l.length) return new Map<number, string>();
+  const { results } = await db.prepare("SELECT id, NULLIF(json_extract(props, '$.domain'), '') AS d FROM records WHERE id IN (SELECT value FROM json_each(?))")
+    .bind(JSON.stringify(l)).all<{ id: number; d: string | null }>();
+  return new Map(results.filter((r) => r.d).map((r) => [r.id, String(r.d).trim().toLowerCase()]));
+}
+
+// Para cada destino, los días que el recorrido pasa cerca sin ir justo ahí (el más cercano de cada día). Usa los puntos que ya
+// se ubicaron en el mapa (los de la ruta del día y las direcciones validadas de las entregas); lo que falta se busca en el
+// fondo, para la próxima vez que se abra.
+async function cercanias(env: Env, destinos: DestinoOpcion[], viajes: Viaje[], enFondo?: (p: Promise<unknown>) => void) {
+  if (!destinos.length) return;
+  const db = env.DB;
+  const hoy = hoyBsAs();
+  const futuros = viajes.filter((v) => v.fecha >= hoy);
+  const dirDe = await direccionesDeViajes(db, futuros);
+  const dirViaje = (v: Viaje) => v.direccion ?? dirDe.get(v)?.direccion ?? null;
+  const todas = [...new Set([...destinos.map((d) => d.direccion), ...futuros.filter((v) => v.lat == null).map(dirViaje)].filter((x): x is string => !!x))];
+  const { geo } = await ubicar(env, todas, false);
+  const faltan = todas.filter((d) => !geo.has(claveDireccion(d)));
+  if (faltan.length && enFondo) enFondo(ubicar(env, faltan, true).catch(() => undefined));
+  const punto = (dir: string | null): Pto | null => { const g = dir ? geo.get(claveDireccion(dir)) : null; return g ? { lat: g.lat, lng: g.lng } : null; };
+  const conPunto = futuros.map((v) => ({ v, p: v.lat != null && v.lng != null ? { lat: v.lat, lng: v.lng } : punto(dirViaje(v)) }))
+    .filter((x): x is { v: Viaje; p: Pto } => !!x.p);
+  for (const d of destinos) {
+    const p = punto(d.direccion);
+    d.cerca = [];
+    if (!p) continue;
+    const yo: Sitio = { nombre: d.nombre, company_id: d.company_id, lugar_id: d.lugar_id, direccion: d.direccion };
+    const porDia = new Map<string, Cerca>();
+    for (const { v, p: q } of conPunto) {
+      if (mismoSitio(yo, v)) continue;
+      const m = metrosEntre(p, q);
+      if (m > RADIO_CERCA) continue;
+      const ya = porDia.get(v.fecha);
+      if (!ya || m < ya.metros) porDia.set(v.fecha, { fecha: v.fecha, nombre: v.anonimo ? 'una entrega' : v.nombre, metros: Math.max(100, Math.round(m / 100) * 100) });
+    }
+    d.cerca = [...porDia.values()].sort((a, b) => a.fecha.localeCompare(b.fecha)).slice(0, 6);
+  }
+}
+
 // Las sugerencias al cargar un encargo: los destinos a los que más manda esta persona (sus encargos de los últimos 6
 // meses, también los de la planilla) y los de sus pedidos y negocios abiertos (el cliente, y el proveedor o el impresor de
 // cada artículo que falta). Cada uno con los próximos días que ya se va y qué días se suele ir.
-export async function sugerencias(env: Env, user: User) {
+export async function sugerencias(env: Env, user: User, enFondo?: (p: Promise<unknown>) => void) {
   const db = env.DB;
   await actualizarLugares(env, organiza(user));
   const hoy = hoyBsAs();
@@ -478,10 +577,62 @@ export async function sugerencias(env: Env, user: User) {
     for (const o of opsDe(p.ops)) agregar(empresaOpcion(o.company_id, { motivo: `${o.campo === 'impresor' ? 'Impresor' : 'Proveedor'} de tu ${pdv}`, record_id: p.id }));
   }
   for (const n of negocios.results) if (n.company_id) agregar(empresaOpcion(n.company_id, { motivo: `Negocio abierto: ${n.name}`, record_id: n.id }));
+  // Quien todavía no tiene destinos propios (recién empieza, no tiene pedidos abiertos): a dónde más va el recorrido, para
+  // todos. A medida que carga encargos y pedidos, se achica hasta desaparecer y queda solo lo suyo.
+  const propios = frecuentes.length + Math.min(dePedidos.length, 14);
+  const generales = await masVisitados(db, user, new Set([...frecuentes, ...dePedidos].map((d) => d.key)), propios === 0 ? 9 : propios < 4 ? 6 : propios < 8 ? 3 : 0);
+  const todos = [...frecuentes, ...dePedidos.slice(0, 14), ...generales];
   const { viajes } = await viajesEntre(db, user, hoy, sumarDias(hoy, 21));
-  await enriquecer(db, user, [...frecuentes, ...dePedidos], viajes);
+  await enriquecer(db, user, todos, viajes);
+  await cercanias(env, todos, viajes, enFondo);
+  await decorar(db, todos);
   const cfg = await cronogramaConfig(db);
-  return { frecuentes, de_pedidos: dePedidos.slice(0, 14), bases: cfg.bases.map((x) => ({ id: x.id, nombre: x.nombre })), organiza: organiza(user) };
+  return { frecuentes, de_pedidos: dePedidos.slice(0, 14), generales, bases: cfg.bases.map((x) => ({ id: x.id, nombre: x.nombre })), organiza: organiza(user) };
+}
+// Los lugares a los que más fue el recorrido en las últimas semanas (contando días, de todos): los encargos, el historial de
+// la planilla y los retiros y egresos de ClickUp. Para el perfil Ventas, solo lugares de la libreta y proveedores: nunca
+// el cliente de otra vendedora.
+async function masVisitados(db: D1Database, user: User, excluir: Set<string>, cuantos: number): Promise<DestinoOpcion[]> {
+  if (cuantos <= 0) return [];
+  const hist = await historial(db, sumarDias(hoyBsAs(), -1));
+  const grupos = new Map<string, { lugar_id: number | null; company_id: number | null; nombre: string; dias: Set<string> }>();
+  for (const h of hist) {
+    const k = h.lugar_id ? `l:${h.lugar_id}` : h.company_id ? `c:${h.company_id}` : `n:${norm(h.nombre)}`;
+    const g = grupos.get(k) ?? { lugar_id: h.lugar_id ?? null, company_id: h.company_id ?? null, nombre: h.nombre, dias: new Set<string>() };
+    g.dias.add(h.fecha);
+    grupos.set(k, g);
+  }
+  const top = [...grupos.values()].filter((g) => g.dias.size >= 2).sort((a, b) => b.dias.size - a.dias.size).slice(0, 40);
+  if (!top.length) return [];
+  const ids = [...new Set(top.map((g) => g.company_id).filter((x): x is number => !!x))];
+  const [lugares, deEmpresa, empresas, porNombre] = await Promise.all([
+    lugaresPorId(db, top.map((g) => g.lugar_id)),
+    ids.length ? db.prepare('SELECT * FROM lugares WHERE activo = 1 AND company_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<Lugar & { company_id: number }>().then((r) => r.results)
+      : Promise.resolve([] as Array<Lugar & { company_id: number }>),
+    ids.length ? db.prepare(`SELECT id, name, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city, json_extract(props, '$.tipo_de_relacion') AS rel
+        FROM records WHERE archived = 0 AND id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(ids))
+      .all<{ id: number; name: string; address: string | null; city: string | null; rel: string | null }>().then((r) => new Map(r.results.map((e) => [e.id, e])))
+      : Promise.resolve(new Map<number, { id: number; name: string; address: string | null; city: string | null; rel: string | null }>()),
+    lugaresPara(db, [...new Set(top.filter((g) => !g.lugar_id && !g.company_id).map((g) => g.nombre))]),
+  ]);
+  const ventas = esVentas(user);
+  // Un mismo lugar puede venir como encargo (lugar) y como retiro (empresa): se juntan los días.
+  const porOpcion = new Map<string, { o: DestinoOpcion; dias: Set<string> }>();
+  for (const g of top) {
+    let o: DestinoOpcion | null = null;
+    const l = g.lugar_id ? lugares.get(g.lugar_id) : g.company_id ? deEmpresa.find((x) => x.company_id === g.company_id) : unicoLugar(porNombre.get(g.nombre)?.exactos ?? []);
+    if (l) o = opcionLugar(l as Lugar & { company_id: number | null });
+    else if (g.company_id) {
+      const e = empresas.get(g.company_id);
+      const dir = e ? [e.address, e.city].filter(Boolean).join(', ') : '';
+      if (e && dir && (!ventas || e.rel === 'proveedor')) o = { tipo: 'empresa', key: `c:${e.id}`, nombre: e.name, direccion: dir, detalle: null, lugar_id: null, company_id: e.id };
+    }
+    if (!o || excluir.has(o.key)) continue;
+    const ya = porOpcion.get(o.key);
+    if (ya) for (const d of g.dias) ya.dias.add(d); else porOpcion.set(o.key, { o, dias: new Set(g.dias) });
+  }
+  return [...porOpcion.values()].sort((a, b) => b.dias.size - a.dias.size).slice(0, cuantos)
+    .map(({ o, dias }) => ({ ...o, veces: dias.size, motivo: `${dias.size} viajes del recorrido en ${SEMANAS} semanas` }));
 }
 const opsDe = (s: string | null) => {
   try { return (JSON.parse(s ?? '[]') as string[]).map((x) => { const [campo, id] = String(x).split(':'); return { campo, company_id: Number(id) }; }).filter((x) => x.company_id); }
@@ -490,7 +641,7 @@ const opsDe = (s: string | null) => {
 
 // Un destino elegido: lo que dice la libreta, los próximos días hábiles con lo que ya va ese día a ese lugar y si se suele
 // ir, y los últimos encargos a ese lugar (para copiar el contacto o lo que se mandó).
-export async function diasDelDestino(env: Env, user: User, q: { lugar_id?: string; company_id?: string; nombre?: string; direccion?: string }) {
+export async function diasDelDestino(env: Env, user: User, q: { lugar_id?: string; company_id?: string; nombre?: string; direccion?: string }, enFondo?: (p: Promise<unknown>) => void) {
   const db = env.DB;
   const hoy = hoyBsAs();
   const lugar = Number(q.lugar_id) ? await db.prepare('SELECT * FROM lugares WHERE id = ?').bind(Number(q.lugar_id)).first<Lugar & { company_id: number | null }>() : null;
@@ -505,15 +656,18 @@ export async function diasDelDestino(env: Env, user: User, q: { lugar_id?: strin
     db.prepare('SELECT fecha, nombre FROM feriados WHERE fecha BETWEEN ? AND ?').bind(hoy, hasta).all<{ fecha: string; nombre: string }>(),
   ]);
   await enriquecer(db, user, [destino], viajes);
+  await cercanias(env, [destino], viajes, enFondo);
+  await decorar(db, [destino]);
   const yo: Sitio = { nombre: destino.nombre, company_id: destino.company_id, lugar_id: destino.lugar_id, direccion: destino.direccion };
   const fer = new Map(feriados.results.map((f) => [f.fecha, f.nombre]));
-  const dias: Array<{ fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number }> = [];
+  const dias: Array<{ fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number; cerca: Cerca | null }> = [];
   for (let d = hoy; dias.length < 12 && d <= hasta; d = sumarDias(d, 1)) {
     if ([0, 6].includes(diaSemana(d))) continue;
     const delDia = viajes.filter((v) => v.fecha === d);
     const aca = delDia.filter((v) => mismoSitio(yo, v));
     dias.push({ fecha: d, feriado: fer.get(d) ?? null, viajes: [...new Set(aca.map((v) => v.detalle))], propios: aca.filter((v) => v.propio).length,
-      habitual: !!destino.habitual?.dias.includes(diaSemana(d)), cuantos: new Set(delDia.map((v) => v.clave)).size });
+      habitual: !!destino.habitual?.dias.includes(diaSemana(d)), cuantos: new Set(delDia.map((v) => v.clave)).size,
+      cerca: aca.length ? null : destino.cerca?.find((c) => c.fecha === d) ?? null });
   }
   const ultimos = (await db.prepare(`${SELECT_ENC} WHERE (e.lugar_id = ?1 OR (?2 IS NOT NULL AND e.company_id = ?2) OR lower(e.destino) = lower(?3)) AND e.estado <> 'cancelado'
       ORDER BY e.fecha DESC LIMIT 25`).bind(destino.lugar_id ?? -1, destino.company_id, destino.nombre).all<EncargoFila>()).results.map(aEncargo)
@@ -542,13 +696,14 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
     db.prepare('SELECT fecha, nombre FROM feriados WHERE fecha BETWEEN ? AND ?').bind(desde, hasta).all<{ fecha: string; nombre: string }>(),
   ]);
   const ventas = esVentas(user);
-  const lugares = await lugaresPorId(db, encs.map((e) => e.lugar_id));
+  const [lugares, dirDe] = await Promise.all([lugaresPorId(db, encs.map((e) => e.lugar_id)), direccionesDeViajes(db, viajes)]);
   // Los días hábiles y, si tienen algo, el sábado y el domingo.
   const fechas: string[] = [];
   for (let d = desde; d <= hasta; d = sumarDias(d, 1)) if (habiles.includes(d) || viajes.some((v) => v.fecha === d)) fechas.push(d);
   const out = fechas.map((fecha) => {
     const paradas: Array<{ clave: string; nombre: string; localidad: string | null; direccion: string | null; tipos: Record<string, number>; detalle: string[];
-      encargos: EncargoDia[]; anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; propio?: { nombre: string; direccion: string | null } }> = [];
+      encargos: EncargoDia[]; anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; propio?: { nombre: string; direccion: string | null };
+      zona: Zona | null; dominio: string | null; zona_libreta?: string | null }> = [];
     const delDia = viajes.filter((v) => v.fecha === fecha);
     // Primero lo de ClickUp (cada parada con su clave) y después los encargos, en la parada del mismo lugar o en una propia.
     for (const v of [...delDia.filter((x) => x.tipo !== 'encargo'), ...delDia.filter((x) => x.tipo === 'encargo')]) {
@@ -560,9 +715,11 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
       }
       if (!p) {
         const l = v.lugar_id ? lugares.get(v.lugar_id) : null;
+        const otra = dirDe.get(v);
         // Se ve el nombre si la arma algo propio o un proveedor o impresor (o, fuera del perfil Ventas, siempre).
-        p = { clave: v.clave!, nombre: v.nombre, localidad: l?.localidad ?? localidadDe(v.direccion), direccion: v.direccion ?? null, tipos: {}, detalle: [], encargos: [],
-          anonima: ventas && !v.propio && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null, lugar_id: v.lugar_id ?? null };
+        p = { clave: v.clave!, nombre: v.nombre, localidad: l?.localidad ?? otra?.localidad ?? localidadDe(v.direccion ?? otra?.direccion), direccion: v.direccion ?? otra?.direccion ?? null,
+          tipos: {}, detalle: [], encargos: [], anonima: ventas && !v.propio && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null,
+          lugar_id: v.lugar_id ?? null, zona: null, dominio: null, zona_libreta: l?.zona ?? otra?.zona ?? null };
         paradas.push(p);
       }
       p.tipos[v.tipo] = (p.tipos[v.tipo] ?? 0) + 1;
@@ -574,6 +731,7 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
       if (v.tipo === 'encargo') { const e = encs.find((x) => x.id === v.encargo_id)!; if (!ventas || e.user_id === user.id) p.encargos.push(e); }
       if (!p.localidad && v.direccion) p.localidad = localidadDe(v.direccion);
     }
+    for (const p of paradas) { p.zona = zonaDe({ zona: p.zona_libreta, localidad: p.localidad, direccion: p.direccion }); delete p.zona_libreta; }
     const delDiaRutas = rutas.results.filter((r) => r.fecha === fecha).map((r) => ({ chofer: r.chofer, orden: (JSON.parse(r.orden || '[]') as string[]).map(String) }));
     for (const [i, p] of paradas.entries()) {
       if (delDiaRutas.length) p.chofer = (delDiaRutas.find((r) => r.orden.some((c) => esDeLaParada(c, p.clave))) ?? delDiaRutas[0]).chofer;
@@ -586,6 +744,8 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
     paradas.sort((a, b) => Number(b.encargos.length > 0) - Number(a.encargos.length > 0) || Number(a.anonima) - Number(b.anonima) || a.nombre.localeCompare(b.nombre));
     return { fecha, feriado: feriados.results.find((f) => f.fecha === fecha)?.nombre ?? null, armado: delDiaRutas.length > 0, paradas };
   });
+  const dom = await dominios(db, out.flatMap((d) => d.paradas.map((p) => p.company_id)));
+  for (const d of out) for (const p of d.paradas) p.dominio = p.company_id ? dom.get(p.company_id) ?? null : null;
   return { hoy, dias: out, puede_organizar: organiza(user), puede_pedir: puedePedir(user) };
 }
 // La localidad de una dirección: lo que va después de la primera coma («Av. Libertador 1855, Vicente López»).

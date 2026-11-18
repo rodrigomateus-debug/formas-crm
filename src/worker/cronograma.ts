@@ -636,7 +636,7 @@ const GEOCODER = (env: Env) => env.GEOCODER_URL ?? 'https://nominatim.openstreet
 // El servicio pide a lo sumo una consulta por segundo: pocas por vez y la pantalla vuelve a pedir lo que falta.
 const GEO_POR_VEZ = 4;
 
-async function ubicar(env: Env, direcciones: string[], buscar: boolean) {
+export async function ubicar(env: Env, direcciones: string[], buscar: boolean) {
   const db = env.DB;
   const claves = [...new Set(direcciones.map(claveDireccion).filter(Boolean))];
   const out = new Map<string, Geo | null>();

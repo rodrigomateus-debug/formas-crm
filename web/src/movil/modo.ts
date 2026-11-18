@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { esVentas, type User } from '../lib';
 
-// Qué versión celular: la de Ventas o la de Logística (cada una con lo suyo). Producción, por ahora, la de escritorio.
-export type PerfilMovil = 'ventas' | 'logistica';
+// Qué versión celular: la de Ventas, la de Logística o la de Producción (cada una con lo suyo).
+export type PerfilMovil = 'ventas' | 'logistica' | 'produccion';
 export function perfilMovil(me: Pick<User, 'profile' | 'role'>): PerfilMovil | null {
   if (esVentas(me)) return 'ventas';
   if (me.profile === 'logistica' && me.role !== 'admin') return 'logistica';
+  if (me.profile === 'produccion' && me.role !== 'admin') return 'produccion';
   return null;
 }
 
@@ -24,7 +25,7 @@ export function usarVersionCompleta(si: boolean, a = '/') {
   window.location.assign(a);
 }
 
-// ¿Esta pantalla va con la versión celular (y cuál)? Celular, perfil Ventas o Logística y sin haber pedido la completa.
+// ¿Esta pantalla va con la versión celular (y cuál)? Celular, perfil Ventas, Logística o Producción y sin haber pedido la completa.
 export function useModoMovil(me: Pick<User, 'profile' | 'role'>) {
   const [celular, setCelular] = useState(() => typeof matchMedia === 'function' && matchMedia(CELULAR).matches);
   useEffect(() => {

@@ -146,7 +146,7 @@ function TarjetaNegocio({ r }: { r: Con }) {
 }
 
 // El botón que abre la conversación del equipo a pantalla completa, con cuántos mensajes hay sin leer.
-function BotonConversacion({ tipo, id }: { tipo: ObjectType; id: number }) {
+export function BotonConversacion({ tipo, id }: { tipo: ObjectType; id: number }) {
   const sin = useNoLeidosDe(id);
   return (
     <Link to={`/conversaciones/${tipo}/${id}`} className={`m-conv-boton${sin ? ' nuevo' : ''}`}>

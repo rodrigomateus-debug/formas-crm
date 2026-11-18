@@ -1,7 +1,7 @@
 # Versión celular
 
-Pedido de Rodrigo del 18/11/2026. En el celular, los perfiles **Ventas** y **Logística** no ven el CRM de escritorio
-achicado sino una app simple, con lo esencial de cada uno (Logística, más abajo). Misma dirección, mismo login y la misma
+Pedido de Rodrigo del 18/11/2026. En el celular, los perfiles **Ventas**, **Logística** y **Producción** no ven el CRM
+de escritorio achicado sino una app simple, con lo esencial de cada uno (Logística y Producción, más abajo). Misma dirección, mismo login y la misma
 API.
 
 
@@ -29,12 +29,31 @@ con cuántos remitos hay para revisar).
   mandarlo por WhatsApp), Pedidos (todos, sin «Míos»), Producción (en la versión completa) y Notas de productos.
 
 Queda en la compu: ordenar las paradas arrastrando, el mapa, corregir puntos, fijar horas, el remito de traslado y
-asignar a mano los renglones de un remito (o repartir uno de varios pedidos; la tarjeta lo avisa). Producción sigue con la
-versión de escritorio hasta su turno.
+asignar a mano los renglones de un remito (o repartir uno de varios pedidos; la tarjeta lo avisa).
+
+## Producción (pedido de Rodrigo del 18/11/2026)
+
+El perfil **Producción** tiene su versión celular (`ProduccionMovil.tsx`) para seguir los PDV y cambiarlos en el momento.
+Mismos permisos que en la compu; todo lo que se cambia se guarda en ClickUp (`PATCH /produccion/:task`). Barra abajo:
+**Hoy · Producción · ＋ · Pedidos · Chat**.
+
+- **Hoy**: sus PDV atrasados, sus entregas de la semana, lo que entra y sale hoy (del Cronograma), sus tareas y «Te
+  escribieron».
+- **Producción**: los PDV abiertos como tarjetas (cliente, entrega, cuántos artículos listos, atrasos en rojo). Filtros:
+  **Míos · Sin asignar · Todos**, la etapa, «Atrasados» y búsqueda (quedan en la dirección, se puede volver).
+- **Ficha del PDV**: pactada, **entrega real** (se cambia), **quién lo tiene** (pasa también a sus artículos abiertos),
+  la conversación del equipo y el pedido. Cada artículo abre una hoja con el **estado** (los de ClickUp, en botones),
+  sus **fechas** (ingreso y retiro del proveedor, egreso y retiro del impresor…, con atajos Hoy/Mañana/próximos días),
+  **proveedor**, **impresor** y asignados. Las unidades sueltas que se siguen en ClickUp solo se reasignan.
+- **＋**: encargo al recorrido y tarea. **Menú**: Tareas, Cronograma del día (el mismo **Día** de Logística, con marcar
+  hecho, chofer y cambiar de día), Recorridos y encargos, Producción completa (tablero, OC, filtros: versión de
+  escritorio) y Notas de productos.
+
+Queda en la compu: el tablero, las órdenes de compra, crear o partir PDV, los filtros avanzados y la vista por etapas.
 
 ## Cuándo aparece
 
-- Teléfono (hasta 760 px, o acostado) **y** perfil Ventas o Logística (`perfilMovil` en `modo.ts`). Producción y los
+- Teléfono (hasta 760 px, o acostado) **y** perfil Ventas, Logística o Producción (`perfilMovil` en `modo.ts`). Los
   administradores siguen con la versión de siempre, que se adapta sola a la pantalla chica.
 - Desde el avatar → **Ver versión completa** se pasa a la de siempre; queda recordado en ese navegador
   (`crm-version-completa`). Para volver, el botón **Versión celular** arriba.

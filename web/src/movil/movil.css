@@ -484,3 +484,43 @@ body.movil .drawer-head { padding-top: calc(14px + env(safe-area-inset-top)); }
 .m-choferes .ch-cab { flex-wrap: wrap; }
 .m-choferes .ch-acceso .row .btn { min-height: 40px; }
 .m-choferes .codigo-chofer { font-size: 28px; }
+
+/* ---------- Producción (ProduccionMovil.tsx) ---------- */
+
+.m-personas { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.m-personas .avatar-stack { display: inline-flex; }
+.m-personas .avatar-stack .avatar + .avatar { margin-left: -6px; box-shadow: 0 0 0 2px var(--ui-surface); }
+.m-pdv { align-items: flex-start; }
+.m-pdv .m-item-txt b { white-space: normal; }
+.m-pdv-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.m-pdv-lado { flex: none; max-width: 35%; padding-top: 2px; }
+
+/* Lo que entra y sale hoy: un número grande por carril. */
+.m-carriles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; padding: 0 14px 14px; }
+.m-carril { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); color: inherit; text-decoration: none; }
+.m-carril b { font-size: 22px; line-height: 1.1; }
+.m-carril span { font-size: 13px; font-weight: 500; }
+.m-carril small { font-size: 12px; color: var(--ui-warning-ink); }
+.m-carril small.muted { color: var(--text-3); }
+
+/* Un artículo del PDV: se toca para editarlo. */
+.m-art { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-sec-cab + .m-art { border-top: 0; }
+.m-art:active { background: var(--row-hover); }
+.m-art.cerrado { opacity: .65; }
+.m-art .m-item-txt { display: flex; flex-direction: column; gap: 4px; }
+.m-art-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-art-pie .st-pec { max-width: 100%; }
+.m-art-fechas { white-space: normal; }
+
+/* Los estados del artículo, con los colores de ClickUp, como botones. */
+.m-estados { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.m-estado { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 44px; min-width: 0; padding: 0 6px; border-radius: var(--r-control);
+  border: 1px solid var(--ui-line); background: var(--ui-surface); cursor: pointer; font: inherit; }
+.m-estado.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.m-estado:disabled { cursor: default; opacity: .7; }
+.m-estado .st-pec { font-size: 13px; min-width: 0; max-width: 100%; }
+.m-estado > svg { flex: none; }
+.m-datos-hoja { border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; }
+.m-opciones-largas { max-height: 50vh; overflow: auto; }

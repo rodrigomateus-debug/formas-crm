@@ -10,6 +10,7 @@ import { hooks } from './hooks';
 import { handleMcp } from './mcp';
 import { migrate } from './migrate';
 import { syncAll } from './gmail';
+import { syncCalendars } from './calendar';
 import { correrAvisos } from './avisos';
 import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
@@ -119,6 +120,7 @@ export default {
         // Rendimiento de los choferes: a los :45 se cierra un día que haya quedado sin medir (el de ayer, a la noche).
         if (turno === 4) await safe(() => cerrarPendientes(env, b));
         await safe(() => syncAll(env, b));
+        await safe(() => syncCalendars(env, b));   // reuniones de Google Calendar (calendar.ts)
       }
       else {
         // Facturas: siempre las que avisó el informe de cada hora; el barrido de todos los pedidos, solo de 3 a 4 de la mañana

@@ -92,7 +92,7 @@ export function personName(raw: string): { firstname?: string; lastname?: string
 
 const header = (m: GMessage, name: string) => m.payload.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
 
-async function openDealOf(db: D1Database, contactId: number) {
+export async function openDealOf(db: D1Database, contactId: number) {
   const { results } = await db.prepare(
     `SELECT d.id FROM associations a JOIN records d ON d.id = a.to_id AND d.archived = 0 JOIN stages s ON s.id = d.stage_id AND s.is_closed = 0
      WHERE a.from_id = ? AND a.to_type = 'deal'`,

@@ -43,6 +43,25 @@ test('el hook de totales pide token de administrador y valida el cuerpo', async 
   // test/pedidos.test.mjs («total sin IVA de Finnegans…»).
 });
 
+test('al combinar el pedido de HubSpot con su PDV de Finnegans quedan el pedido de Finnegans y su fecha', async () => {
+  const tok = (await call('POST', '/tokens', { name: `Combinar ${RUN}`, source: 'api' })).data.token;
+  const H = { authorization: `Bearer ${tok}` };
+  const n = 600000 + Math.floor(Math.random() * 99999);
+  // El PDV entra por Finnegans (con su pedido, su fecha y la razón social, que son de solo lectura).
+  const alta = (await call('POST', '/hooks/pedidos/totales', { totales: {}, pedidos: { [`PEDVTASTP - ${n}`]: { cliente: `Razón ${RUN}`, cuit: '30711111119', fecha: '2026-11-04' } } }, H)).data;
+  assert.equal(alta.nuevos?.creados, 1, JSON.stringify(alta));
+  const pdv = (await call('GET', `/records/order?q=${encodeURIComponent(`PDV ${n}`)}`)).data.results[0];
+  // El que armó HubSpot al ganar el negocio, sin número de PDV.
+  const hs = (await call('POST', '/records/order', { props: { hs_order_name: `Cliente ${RUN}` } })).data;
+  const r = await call('POST', `/records/order/${hs.id}/merge`, { other_id: pdv.id });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const p = r.data.props;
+  assert.equal(p.pdv_finnegans, String(n));
+  assert.equal(p.pedido_finnegans, `PEDVTASTP - ${n}`, 'el pedido de Finnegans (solo lectura) no se pierde');
+  assert.equal(p.razon_social, `Razón ${RUN}`);
+  assert.equal(p.fecha_pedido, '2026-11-04');
+});
+
 test('saldos: del informe de composición solo van los deudores, sin datos del cliente', () => {
   const f = filasDeSaldo([
     { CUENTA: 'Deudores en Cta. Cte.', IDENTIFICACIONEXTERNA: 'FCVTAELECT - 2583', DOCUMENTO: 'FCVTAELECT - 2583', DESCRIPCION: '31089 / SIN OC', IMPORTEMONPPAL: '1210.5', FECHAVTO: '20-11-2026', ORGANIZACION: 'CLIENTE SA', CUIT: '30-11111111-1' },

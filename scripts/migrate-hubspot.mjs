@@ -272,7 +272,10 @@ const EXTRA = {
   deals: ['createdate', 'hs_lastmodifieddate', 'hs_object_source_label', 'hs_object_source_detail_1', 'hs_v2_date_entered_current_stage'],
   orders: ['hs_createdate', 'hs_lastmodifieddate', 'hs_object_source_label'],
 };
-const ASSOC = { contacts: ['companies'], deals: ['contacts', 'companies'], orders: ['contacts', 'deals'], companies: ['companies'] };
+// Los negocios también traen sus pedidos: el pedido que arma HubSpot al ganar el negocio casi nunca cambia después, así
+// que con --since solo se veía el negocio y el vínculo negocio↔pedido no llegaba (el Inicio de Dirección mostraba los
+// ganados de noviembre sin sus pedidos).
+const ASSOC = { contacts: ['companies'], deals: ['contacts', 'companies', 'orders'], orders: ['contacts', 'deals'], companies: ['companies'] };
 const recordProps = (type) => [...new Set([...PROPS[type], ...EXTRA[type], ...(type === 'deals' ? STAGE_IDS.map((s) => `hs_v2_date_entered_${s}`) : [])])];
 function recordItem(type, r) {
   const p = r.properties ?? {};

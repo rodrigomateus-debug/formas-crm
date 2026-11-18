@@ -256,3 +256,18 @@ para este tipo de libretas de direcciones, para que esté completa pero se pueda
 
 Quién puede: Logística, Producción y los administradores corrigen todo, agrupan y ubican en el mapa; los demás, los
 destinos que cargaron ellos. Prueba: `test/destinos.test.mjs`.
+
+## La primera corrida (18/11/2026)
+
+Sobre los 2.471 destinos de la planilla DESTINOS, Claude revisó uno por uno y se cargó solo lo que pasó los controles
+(migración `0080_destinos_primera_corrida.sql`, que se aplica sola al publicar; reconoce cada destino por su clave de la
+planilla y no toca lo que ya se corrigió en el Hub):
+
+- **Se carga** si Claude está al menos 90 % seguro y el mapa (OpenStreetMap, el mismo buscador del Hub) lo ubica en esa
+  calle, localidad y provincia; o si está 80-89 % y el mapa lo encuentra en esa misma altura exacta (dos fuentes que
+  coinciden); o con 95 % o más aunque el mapa no lo encuentre. Además: no puede aparecer una altura que no estaba en la
+  planilla, la provincia tiene que coincidir con la zona y la calle tiene que ser la misma.
+- Resultado: **1.160 destinos completados** (dirección prolija, localidad, provincia, CP si estaba y el punto en el mapa),
+  **1.311 «Para revisar»** con la sugerencia y el motivo (sin altura, sin localidad, o que el mapa no confirmó), **627
+  con tipo** (473 clientes, 68 expresos, 36 impresores, 24 proveedores, 17 talleres, 9 otros) y **259 empresas con sus
+  sucursales agrupadas** (994 direcciones: YPF, Nestlé, Adare, Opessa, Puma, L'Oréal, Quilmes, Telefónica…).

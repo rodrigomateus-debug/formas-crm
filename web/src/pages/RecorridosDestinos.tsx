@@ -401,7 +401,9 @@ function MapaDestinos({ destinos, foco, ubicando, onElegir, onMover }: {
       const mk = L.marker([ubicando.lat, ubicando.lng], { draggable: true, zIndexOffset: 5000, icon: L.divIcon({ className: 'ds-pin-wrap', html: '<span class="ds-pin on ubicando"></span>', iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(g);
       mk.on('dragend', () => { const ll = mk.getLatLng(); cb.current.onMover(ll.lat, ll.lng); });
     }
-    if (!encuadrado.current && todos.length) { m.fitBounds(L.latLngBounds(todos).pad(0.05), { maxZoom: 12 }); encuadrado.current = true; }
+    // Arranca en el AMBA, donde está casi todo (los del interior se ven alejando el mapa).
+    const amba = todos.filter(([la, ln]) => la < -34.1 && la > -35.2 && ln > -59.4 && ln < -57.7);
+    if (!encuadrado.current && (amba.length || todos.length)) { m.fitBounds(L.latLngBounds(amba.length ? amba : todos).pad(0.05), { maxZoom: 12 }); encuadrado.current = true; }
   }, [destinos, foco?.id, ubicando]);
 
   // Al elegir un destino, el mapa va ahí.

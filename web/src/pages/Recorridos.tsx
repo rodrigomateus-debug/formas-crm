@@ -90,7 +90,7 @@ export default function RecorridosPage() {
   const cambio = useCallback(() => setVersion((v) => v + 1), []);
   const puede = meta.me.role !== 'viewer';
   return (
-    <div className="content rc-page">
+    <div className={`content rc-page${tab === 'destinos' ? ' list-fixed' : ''}`}>
       <div className="page-head">
         <h1>Recorridos</h1>
         {puede && <button type="button" className="btn primary" onClick={() => setNuevo({})}><Icon name="plus" size={16} />Nuevo encargo</button>}

@@ -2230,9 +2230,16 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-sugeridos ul, .ds-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .ds-sugeridos li, .ds-lista li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; border-top: 1px solid var(--ui-line); }
 .ds-seleccion { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface); box-shadow: 0 2px 10px rgba(0,0,0,.12); }
-.ds-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 30%); gap: 16px; align-items: start; }
+/* Destinos como las listas (list-fixed, en Recorridos.tsx): la tabla ocupa el resto de la pantalla y se desplaza adentro,
+   con la barra horizontal y el paginado siempre a la vista. El mapa, opcional, a la derecha y del mismo alto. */
+.ds-layout { display: flex; gap: 16px; align-items: stretch; min-height: 0; }
+.ds-layout > .ds-tabla { flex: 1 1 auto; min-width: 0; }
+.content.list-fixed > .ds-layout { flex: 1 1 auto; min-height: 240px; }
+.content.list-fixed.rc-page { overflow-y: auto; }
+.rc-page > .rc-admin:first-of-type { margin: 0 0 12px; padding: 6px 12px; }
+.ds-copia { min-width: 0; }
 .ds-locmov { display: none; }
-.ds-tabla { max-height: calc(100vh - 220px); overflow: auto; }
+.ds-tabla { overflow: auto; }
 .ds-tabla td { vertical-align: top; }
 /* Con más aire entre renglón y renglón (pedido de Rodrigo del 18/11/2026): cada fila tiene dos o tres líneas. */
 .ds-tabla table.grid td { height: auto; padding-top: 11px; padding-bottom: 11px; line-height: 1.45; }
@@ -2290,8 +2297,8 @@ thead .ds-acciones { z-index: 2; }
 .ds-acciones .btn + .btn { margin-left: 2px; }
 .ds-borrar:hover { color: var(--ui-negative-ink); background: var(--ui-negative-soft); }
 .ds-wa { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, #25d366 18%, transparent); color: color-mix(in srgb, #128c4b 80%, var(--ui-ink)); text-decoration: none; }
-.ds-mapa-col { position: sticky; top: 8px; display: flex; flex-direction: column; gap: 8px; }
-.ds-mapa { height: min(62vh, 560px); border-radius: var(--r-control); overflow: hidden; background: var(--ui-surface-sunken); }
+.ds-mapa-col { flex: 0 0 clamp(320px, 38%, 640px); display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow-y: auto; }
+.ds-mapa { flex: 1 1 auto; min-height: 280px; border-radius: var(--r-control); overflow: hidden; background: var(--ui-surface-sunken); }
 .ds-ficha { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); margin: 0; }
 .ds-pin-wrap { background: none; border: 0; }
 .ds-pin { display: block; width: 100%; height: 100%; border-radius: 50%; background: var(--c, #6b7280); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
@@ -2300,12 +2307,10 @@ thead .ds-acciones { z-index: 2; }
 .ds-form fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .ds-form legend { font-weight: 600; font-size: 13px; margin-bottom: 6px; padding: 0; }
 .ds-3 { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; }
-@media (max-width: 1680px) {
-  .ds-layout { grid-template-columns: minmax(0, 1fr); }
-  .ds-mapa-col { position: static; order: -1; }
-  .ds-mapa { height: 320px; }
-  .ds-tabla { max-height: none; }
-  .ds-mapa-col { scroll-margin-top: 12px; }
+@media (max-width: 860px) {
+  .ds-layout { flex-direction: column; }
+  .ds-mapa-col { order: -1; flex: none; overflow: visible; scroll-margin-top: 12px; }
+  .ds-mapa { flex: none; height: 320px; }
 }
 @media (max-width: 700px) {
   .ds-3 { grid-template-columns: 1fr 1fr; }
@@ -2317,7 +2322,7 @@ thead .ds-acciones { z-index: 2; }
   .ds-locmov { display: block; margin-left: 17px; }
   .ds-contacto { min-width: 110px; }
 }
-.ds-paginas { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-top: 1px solid var(--ui-line); background: var(--ui-surface); position: sticky; bottom: 0; }
+.ds-paginas { flex-wrap: wrap; gap: 8px; padding: 8px 2px 4px; }
 
 /* ---------- Tareas en equipo (tablero, panel y conversación; pedido de Rodrigo del 18/11/2026) ---------- */
 .estado-punto { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--ui-ink-3); }

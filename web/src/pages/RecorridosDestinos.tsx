@@ -79,6 +79,9 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
   const [revisar, setRevisar] = useState(false);
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [foco, setFoco] = useState<number | null>(null);
+  // El mapa es opcional («Ver mapa»): se abre a la derecha de la tabla y queda recordado en este navegador.
+  const [verMapa, setVerMapaYa] = useState(() => { try { return localStorage.getItem('crm.destinos.mapa') === '1'; } catch { return false; } });
+  const setVerMapa = (x: boolean) => { setVerMapaYa(x); try { localStorage.setItem('crm.destinos.mapa', x ? '1' : '0'); } catch { /* ignorar */ } };
   const [ubicando, setUbicando] = useState<{ id: number; lat: number; lng: number } | null>(null);
   const [editando, setEditando] = useState<Destino | 'nuevo' | null>(null);
   const [borrando, setBorrando] = useState<Destino | null>(null);
@@ -191,10 +194,12 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
     try { await http('PUT', '/cronograma/punto', { direccion: d.completa, lat: ubicando.lat, lng: ubicando.lng }); toast('Ubicación guardada: también la usa la ruta del cronograma.'); setUbicando(null); recargar(); }
     catch (e) { toast((e as Error).message, true); }
   };
-  // Con el mapa arriba de la lista (pantallas no tan anchas), al tocar una dirección se sube hasta el mapa.
+  // Tocar una dirección abre el mapa (si estaba cerrado). En el celular el mapa queda arriba de la lista: se sube hasta él.
   const enfocar = (d: Destino, desdeMapa = false) => {
     setFoco(d.id); if (ubicando && ubicando.id !== d.id) setUbicando(null);
-    if (!desdeMapa && window.matchMedia('(max-width: 1680px)').matches) document.querySelector('.ds-mapa-col')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (desdeMapa) return;
+    if (!verMapa) setVerMapa(true);
+    if (window.matchMedia('(max-width: 860px)').matches) setTimeout(() => document.querySelector('.ds-mapa-col')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
   };
   const marcar = (ids: number[], on: boolean) => setSel((s) => { const n = new Set(s); for (const id of ids) { if (on) n.add(id); else n.delete(id); } return n; });
 
@@ -206,6 +211,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
 
   return (
     <>
+      {admin}
       <div className="ds-resumen">
         <div><b>{datos.total}</b><span>destinos</span></div>
         <div title="Con el punto en el mapa"><b>{pct(datos.resumen.en_mapa)} %</b><span>en el mapa</span></div>
@@ -220,6 +226,8 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
         </div>
         <label className="small row ds-check"><input type="checkbox" checked={incompletos} onChange={(e) => setIncompletos(e.target.checked)} />Solo incompletos</label>
         <span className="grow" />
+        <button type="button" className={`btn sm qf-btn${verMapa ? ' on' : ''}`} aria-pressed={verMapa} onClick={() => setVerMapa(!verMapa)}
+          title={verMapa ? 'Cerrar el mapa' : 'Ver los destinos en el mapa, a la derecha de la lista'}><Icon name="pin" size={14} />{verMapa ? 'Ocultar mapa' : 'Ver mapa'}</button>
         {organiza && datos.ia && (
           <button type="button" className="btn sm" disabled={ia?.corriendo} onClick={completarIA}
             title="Claude completa la localidad, la provincia, la dirección para el mapa y el tipo. Solo cambia lo que está al menos 90 % seguro; lo demás queda «Para revisar».">
@@ -296,38 +304,37 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
               {!bloques.length && <tr><td colSpan={organiza ? 8 : 7} className="muted" style={{ textAlign: 'center', padding: 24 }}>No hay destinos con ese filtro.</td></tr>}
             </tbody>
           </table>
-          {paginas > 1 && (
-            <nav className="ds-paginas" aria-label="Páginas">
-              <span className="small muted">{(pag - 1) * POR_PAGINA + 1}–{Math.min(pag * POR_PAGINA, mostrados.length)} de {mostrados.length}</span>
-              <span className="grow" />
-              <button type="button" className="btn sm ghost" disabled={pag <= 1} onClick={() => setPagina(pag - 1)}>Anterior</button>
-              <Select className="input sm" value={String(pag)} onChange={(e) => setPagina(Number(e.target.value))} aria-label="Página">
-                {Array.from({ length: paginas }, (_, i) => <option key={i} value={String(i + 1)}>Página {i + 1} de {paginas}</option>)}
-              </Select>
-              <button type="button" className="btn sm ghost" disabled={pag >= paginas} onClick={() => setPagina(pag + 1)}>Siguiente</button>
-            </nav>
-          )}
         </div>
-        <aside className="ds-mapa-col">
+        {verMapa && <aside className="ds-mapa-col">
           <MapaDestinos destinos={enMapa} foco={enfocado} ubicando={ubicando} onElegir={(id) => { const d = porId.get(id); if (d) { enfocar(d, true); irA(id); document.getElementById(`ds-fila-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }}
             onMover={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
           {enfocado ? (
             <FichaMapa d={enfocado} organiza={organiza} ubicando={ubicando?.id === enfocado.id} onUbicar={(lat, lng) => setUbicando({ id: enfocado.id, lat, lng })}
               onGuardar={guardarPunto} onCancelar={() => setUbicando(null)} onEditar={() => setEditando(enfocado)} />
           ) : <p className="small muted ds-ficha">Tocá una dirección para verla en el mapa. {datos.resumen.sin_buscar > 0 && `Buscando ${datos.resumen.sin_buscar} direcciones en el mapa…`}</p>}
-        </aside>
+        </aside>}
       </div>
+      <nav className="pager ds-paginas" aria-label="Páginas">
+        <span className="small muted">{mostrados.length ? `${(pag - 1) * POR_PAGINA + 1}–${Math.min(pag * POR_PAGINA, mostrados.length)} de ${mostrados.length}` : 'Sin destinos'}</span>
+        <span className="small muted ds-copia" title={`La libreta de Logística se sigue copiando de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.${datos.copia.error ? ` Último error: ${datos.copia.error}` : ''}`}>
+          Planilla DESTINOS{datos.copia.at > 0 ? `: copiada ${fmtRelative(new Date(datos.copia.at).toISOString())}` : ''}{datos.copia.error ? ' (con error)' : ''}
+          {organiza && <> · <button type="button" className="cr-link" onClick={traerPlanilla}>Traer ahora</button></>}</span>
+        <span className="grow" />
+        {paginas > 1 && <>
+          <button type="button" className="btn sm ghost" disabled={pag <= 1} onClick={() => setPagina(pag - 1)}>Anterior</button>
+          <Select className="input sm" value={String(pag)} onChange={(e) => setPagina(Number(e.target.value))} aria-label="Página">
+            {Array.from({ length: paginas }, (_, i) => <option key={i} value={String(i + 1)}>Página {i + 1} de {paginas}</option>)}
+          </Select>
+          <button type="button" className="btn sm ghost" disabled={pag >= paginas} onClick={() => setPagina(pag + 1)}>Siguiente</button>
+        </>}
+      </nav>
 
-      <p className="muted small ds-nota">La libreta de Logística se sigue copiando de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.
-        {datos.copia.at > 0 && ` Última copia: ${fmtRelative(new Date(datos.copia.at).toISOString())}.`}{datos.copia.error ? ` (${datos.copia.error})` : ''}
-        {organiza && <> <button type="button" className="cr-link" onClick={traerPlanilla}>Traer la planilla ahora</button></>}</p>
 
       {editando && <EditarDestino d={editando === 'nuevo' ? null : editando} grupos={datos.grupos} organiza={organiza} maps={datos.maps}
         onClose={() => setEditando(null)} onListo={(id) => { setEditando(null); if (id) setFoco(id); recargar(); }} onBorrar={(d) => { setEditando(null); setBorrando(d); }} />}
       {borrando && <BorrarDestino d={borrando} onClose={() => setBorrando(null)} onListo={() => { if (foco === borrando.id) setFoco(null); setSel((s) => { const n = new Set(s); n.delete(borrando.id); return n; }); setBorrando(null); recargar(); }} />}
       {grupoAbierto && <EditarGrupo g={grupoAbierto} destinos={datos.destinos.filter((d) => d.grupo_id === grupoAbierto.id)} onClose={() => setGrupoAbierto(null)} onListo={() => { setGrupoAbierto(null); recargar(); }} />}
       {agrupando && <Agrupar ini={agrupando} grupos={datos.grupos} destinos={agrupando.ids.map((id) => porId.get(id)).filter((d): d is Destino => !!d)} onClose={() => setAgrupando(null)} onAgrupar={agruparYa} />}
-      {admin}
     </>
   );
 }

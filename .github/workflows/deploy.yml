@@ -46,6 +46,8 @@ jobs:
       GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
       GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
       SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+      # API de Darwin: «Conectar Darwin» suscribe al Hub a los eventos de las conversaciones (src/worker/darwin.ts).
+      DARWIN_API_KEY: ${{ secrets.DARWIN_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -61,6 +63,6 @@ jobs:
         run: printf '%s' "$GOOGLE_SA_JSON" | npx wrangler secret put GOOGLE_SA_JSON
       - name: ClickUp, Finnegans y Claude (remitos) para los pedidos (si están cargados en los secretos del repo)
         run: |
-          for k in CLICKUP_TOKEN FINNEGANS_CLIENT_ID FINNEGANS_CLIENT_SECRET ANTHROPIC_API_KEY GOOGLE_MAPS_API_KEY GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET SESSION_SECRET; do
+          for k in CLICKUP_TOKEN FINNEGANS_CLIENT_ID FINNEGANS_CLIENT_SECRET ANTHROPIC_API_KEY GOOGLE_MAPS_API_KEY GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET SESSION_SECRET DARWIN_API_KEY; do
             if [ -n "${!k}" ]; then printf '%s' "${!k}" | npx wrangler secret put "$k"; fi
           done

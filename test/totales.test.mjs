@@ -43,6 +43,29 @@ test('el hook de totales pide token de administrador y valida el cuerpo', async 
   // test/pedidos.test.mjs («total sin IVA de Finnegans…»).
 });
 
+test('la fecha de cada pedido: del renglón, sin los que no son pedidos', () => {
+  assert.deepEqual(T.fechasPorPedido([
+    { DOCNROINT: 'PEDVTASTP - 00031644', FECHA: '13-11-2026' }, { DOCNROINT: 'PEDVTASTP - 31644', FECHA: '14-11-2026' },
+    { DOCNROINT: 'PEDVTAFP - 2430', FECHA: '2026-11-05T00:00:00' }, { DOCNROINT: 'no es un pedido', FECHA: '01-11-2026' }, { DOCNROINT: 'PEDVTAFP - 1' },
+  ]), { 'PEDVTASTP - 31644': '2026-11-13', 'PEDVTAFP - 2430': '2026-11-05' });
+});
+
+test('la fecha del pedido de Finnegans queda en «Fecha del pedido»', async () => {
+  const tok = (await call('POST', '/tokens', { name: `Fechas ${RUN}`, source: 'api' })).data.token;
+  const H = { authorization: `Bearer ${tok}` };
+  const n = 700000 + Math.floor(Math.random() * 99999);
+  // Un pedido nuevo de Finnegans entra con su fecha.
+  const alta = (await call('POST', '/hooks/pedidos/totales', { totales: {}, pedidos: { [`PEDVTASTP - ${n}`]: { cliente: `Cliente ${RUN}`, fecha: '2026-10-06' } } }, H)).data;
+  assert.equal(alta.nuevos?.creados, 1, JSON.stringify(alta));
+  const o = (await call('GET', `/records/order?q=${encodeURIComponent(`PDV ${n}`)}`)).data.results[0];
+  assert.equal(o?.props.fecha_del_pedido, '2026-10-06');
+  // Y la corrida de todos los días la corrige si cambió en Finnegans (con el número como lo guarda Finnegans).
+  const r = (await call('POST', '/hooks/pedidos/totales', { totales: {}, fechas: { [`PEDVTASTP - 000${n}`]: '2026-10-07', 'PEDVTASTP - 1': 'ayer' } }, H)).data;
+  assert.ok(r.fechas >= 1, JSON.stringify(r));
+  assert.equal((await call('GET', `/records/order/${o.id}`)).data.record.props.fecha_del_pedido, '2026-10-07');
+  assert.equal((await call('POST', '/hooks/pedidos/totales', { totales: {}, fechas: { [`PEDVTASTP - ${n}`]: '2026-10-07' } }, H)).data.fechas, 0, 'si no cambió, no se toca');
+});
+
 test('saldos: del informe de composición solo van los deudores, sin datos del cliente', () => {
   const f = filasDeSaldo([
     { CUENTA: 'Deudores en Cta. Cte.', IDENTIFICACIONEXTERNA: 'FCVTAELECT - 2583', DOCUMENTO: 'FCVTAELECT - 2583', DESCRIPCION: '31089 / SIN OC', IMPORTEMONPPAL: '1210.5', FECHAVTO: '20-11-2026', ORGANIZACION: 'CLIENTE SA', CUIT: '30-11111111-1' },

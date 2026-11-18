@@ -351,6 +351,8 @@ export const COMPUTED: Record<string, PropDef[]> = {
     ['source', 'Origen del registro', 'string', 'Actividad', [], RO],
     // Para controlar los pedidos sin negocio (filtro «Sin negocio» de la lista de pedidos; migración 0026).
     ['num_associated_deals', 'Negocios asociados', 'number', 'Actividad', [], { ...RO, description: 'Un pedido va en un solo negocio: 0 es un pedido sin negocio.' }],
+    // La fecha del pedido en Finnegans, no la de alta en el CRM (pedidos-totales; migración 0089).
+    ['fecha_del_pedido', 'Fecha del pedido', 'date', 'Pedido', [], { ...RO, description: 'La fecha del pedido de venta en Finnegans (no la fecha en que entró al CRM).' }],
     // Estado de entrega según los remitos leídos (remitos.ts; migración 0027).
     ['estado_entrega', 'Estado de entrega', 'enum', 'Entrega', ESTADOS_ENTREGA, { ...RO, description: 'Lo calcula el CRM con los remitos leídos de este pedido: lo vendido contra lo entregado, producto por producto.' }],
     ['falta_entregar', 'Falta entregar', 'text', 'Entrega', [], { ...RO, description: 'Lo que todavía no figura en ningún remito leído.' }],

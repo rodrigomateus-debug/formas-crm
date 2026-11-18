@@ -56,6 +56,16 @@ export function vendedoresPorPedido(filasPorEmpresa) {
   }
   return out;
 }
+// La fecha de cada pedido (AAAA-MM-DD), del primer renglón que la tenga: en el CRM queda en «Fecha del pedido».
+export function fechasPorPedido(filas) {
+  const out = {};
+  for (const r of filas) {
+    const k = clavePedido(r.DOCNROINT);
+    const f = aIso(r.FECHA);
+    if (k && f && !(k in out)) out[k] = f;
+  }
+  return out;
+}
 // Finnegans cobra por cantidad de consultas: se cuentan y se informan al final de cada corrida.
 export const consultas = { n: 0 };
 // Los pedidos de venta recientes de Formas Publicitarias, para darlos de alta en el CRM sin esperar a ClickUp
@@ -386,13 +396,13 @@ async function main() {
   const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');
   if (!base || !process.env.CRM_TOKEN) throw new Error('Faltan CRM_URL y CRM_TOKEN.');
   const res = await fetch(`${base}/hooks/pedidos/totales`, { method: 'POST', redirect: 'manual',
-    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas),
+    headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas), fechas: fechasPorPedido(filas[0]),
       // Formas Publicitarias y FP DEMO (EMPRESAS[1], la de pruebas, que entra aparte).
       pedidos: { ...pedidosNuevos(filas[0], masDias(hoy, -15)), ...pedidosNuevos(filas[1] ?? [], masDias(hoy, -15), 'DEMO ') },
       anulados: [...pedidosAnulados(filas[0]), ...pedidosAnulados(filas[1] ?? [], 'DEMO ')] }) });
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
-  console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans).`);
+  console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans), ${r.fechas ?? 0} con fecha del pedido.`);
   if (r.nuevos) console.log(`Pedidos nuevos de Finnegans: ${r.nuevos.recibidos} recientes, ${r.nuevos.creados} dados de alta, ${r.nuevos.completados} completados, ${r.nuevos.con_negocio} asociados a su negocio, ${r.nuevos.anulados ?? 0} pasados a anulado; ${r.nuevos.duplicados} números de PDV repetidos.`);
   // Si un informe falla no se manda nada (si no, todos los pedidos facturados quedarían en 0).
   const filasSaldo = await saldos(tok, hoy);

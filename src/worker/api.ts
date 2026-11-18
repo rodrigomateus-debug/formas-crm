@@ -298,6 +298,7 @@ api.patch('/records/:type/:id', async (c) => {
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown> }>();
   if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, Number(c.req.param('id')), type)).pipeline_id);
+  await soloLoSuyoVentas(c, await registroVisible(c, Number(c.req.param('id'))), body.props);
   // Quien cambia a mano el monto de un negocio con pedidos lo deja «Monto a mano»: los pedidos ya no lo pisan (montos.ts).
   if (type === 'deal' && body.props && 'amount' in body.props && !('monto_a_mano' in body.props) && await tienePedidos(c.env.DB, Number(c.req.param('id')))) {
     body.props.monto_a_mano = true;
@@ -365,7 +366,9 @@ api.post('/records/:type/batch', async (c) => {
         });
         tasks++;
       } else {
-        if ((await registroVisible(c, id)).object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
+        const rec = await registroVisible(c, id);
+        if (rec.object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
+        await soloLoSuyoVentas(c, rec, body.props);
         await updateRecord(c.env.DB, ctx, type, id, body.props ?? {});
         updated++;
       }
@@ -1312,6 +1315,23 @@ api.post('/referidos', async (c) => {
   });
   return c.json(r, 201);
 });
+
+// Perfil Ventas (aviso de la revisión de la versión celular, 18/11/2026): cambia solo lo suyo o lo que no tiene
+// propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Ver una empresa ajena porque
+// está asociada a lo suyo no la habilita a editarla ni a quedársela: se la pide a un administrador (docs/PERFILES.md).
+// Es la misma regla que ya tenía Claude para todos (soloLoSuyo en mcp.ts).
+async function soloLoSuyoVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, rec: { name: string; owner_id: number | null }, props?: Record<string, unknown>) {
+  const user = c.get('ctx').user;
+  if (!esVentas(user)) return;
+  if (rec.owner_id != null && Number(rec.owner_id) !== user.id) {
+    const de = (await c.env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(rec.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
+    throw new HttpError(403, `«${rec.name}» es de ${de}: lo puede cambiar ella o un administrador.`);
+  }
+  const owner = props?.owner_id;
+  if (owner != null && owner !== '' && Number(owner) !== user.id) {
+    throw new HttpError(403, 'Como propietario solo podés ponerte a vos. Para pasárselo a otra persona, pedíselo a un administrador.');
+  }
+}
 
 async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
   const rec = await getRow(c.env.DB, id);

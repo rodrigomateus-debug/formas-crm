@@ -1,67 +1,68 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { http, useMeta, useToast, Icon, esVentas, type ObjectType, type User } from '../lib';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { http, useMeta, useToast, Icon, verComo, type ObjectType } from '../lib';
 import { Avatar, CreateRecord } from '../components';
 import { TEMAS, useTema } from '../theme';
 import { Campanita } from '../Notificaciones';
-import ObjectIndex from '../pages/ObjectIndex';
-import RecordPage from '../pages/RecordPage';
-import './movil.css';
+import { GlobalSearch } from '../Buscador';
 import NotasProductosPage from '../pages/NotasProductos';
 import { useNoLeidas } from '../pages/Conversacion';
+import { usarVersionCompleta } from './modo';
+import { useCerrarConAtras, usePuedeEscribir, useVolver } from './base';
 import Hoy from './Hoy';
 import { RecorridosMovil, EncargoAsistente } from './RecorridosMovil';
-import { ClientesLista, FichaCliente, AltaCliente } from './ClientesMovil';
+import { ClientesLista, FichaCliente, AltaCliente, PreguntaLlamada } from './ClientesMovil';
 import { NegociosLista, FichaNegocio, AltaNegocio, PedidosLista, FichaPedido } from './VentasMovil';
 import { TareasMovil, ChatMovil, ChatAbierto } from './TareasChatMovil';
+import './movil.css';
 
-// Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en una pantalla angosta, el perfil Ventas no ve el CRM de
+// Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en el teléfono, el perfil Ventas no ve el CRM de
 // escritorio achicado sino una app simple, con lo esencial para cargar desde la calle. Misma dirección, mismo login y la
 // misma API; lo que no está acá se abre con «Ver versión completa». Barra abajo: Hoy · Clientes · ＋ · Ventas · Chat.
-// Fase 1: el esqueleto, Hoy y Recorridos (encargo en tres pasos). Fase 2: Clientes (ClientesMovil.tsx). Fase 3: Ventas
-// (VentasMovil.tsx). Fase 4: Tareas y Chat (TareasChatMovil.tsx). Ver docs/MOVIL.md.
+// Raiz.tsx decide cuál se dibuja (modo.ts). Ver docs/MOVIL.md.
 
-const ANGOSTO = '(max-width: 760px)';
-const CLAVE_COMPLETA = 'crm-version-completa';
+// Las fichas: arriba, en vez del avatar, la flecha para volver a su lista.
+const FICHAS: Array<[RegExp, string]> = [[/^\/companies\/\d+$/, '/companies'], [/^\/contacts\/\d+$/, '/contacts'], [/^\/deals\/\d+$/, '/deals'], [/^\/orders\/\d+$/, '/orders']];
+// Las pantallas con lista ya tienen su buscador: arriba va el nombre, no un segundo buscador.
+const TITULOS: Array<[RegExp, string]> = [[/^\/(companies|contacts)$/, 'Clientes'], [/^\/(deals|orders)$/, 'Ventas'], [/^\/tasks$/, 'Tareas'],
+  [/^\/conversaciones$/, 'Chat'], [/^\/recorridos$/, 'Recorridos'], [/^\/productos$/, 'Notas de productos']];
+const TIPO_DE: Record<string, ObjectType> = { companies: 'company', contacts: 'contact', deals: 'deal', orders: 'order' };
 
-const leerCompleta = () => { try { return localStorage.getItem(CLAVE_COMPLETA) === '1'; } catch { return false; } };
-// Pasar a la versión completa (o volver a la del celular): se recuerda en este navegador.
-export function usarVersionCompleta(si: boolean) {
-  try { if (si) localStorage.setItem(CLAVE_COMPLETA, '1'); else localStorage.removeItem(CLAVE_COMPLETA); } catch { /* ignorar */ }
-  window.location.assign('/');
-}
-
-// ¿Esta pantalla va con la versión celular? Angosta, perfil Ventas y sin haber pedido la completa.
-export function useModoMovil(me: Pick<User, 'profile' | 'role'>) {
-  const [angosto, setAngosto] = useState(() => typeof matchMedia === 'function' && matchMedia(ANGOSTO).matches);
-  useEffect(() => {
-    const m = matchMedia(ANGOSTO);
-    const h = () => setAngosto(m.matches);
-    m.addEventListener('change', h);
-    return () => m.removeEventListener('change', h);
-  }, []);
-  const ventas = esVentas(me);
-  const completa = leerCompleta();
-  return { movil: angosto && ventas && !completa, puedeVolver: angosto && ventas && completa };
-}
-
-export default function AppMovil({ buscador }: { buscador: ReactNode }) {
+export default function AppMovil() {
+  const { meta } = useMeta();
   const loc = useLocation();
+  const volver = useVolver();
+  const puede = usePuedeEscribir();
   const [mas, setMas] = useState(false);
   const [crear, setCrear] = useState(false);
   useEffect(() => { setMas(false); setCrear(false); }, [loc.pathname]);
-  // Los modales del escritorio (crear, ficha de un encargo) ocupan toda la pantalla (styles.css, body.movil).
+  // Los modales del escritorio que se usan acá (un encargo, el panel de una tarea) ocupan toda la pantalla (body.movil).
   useEffect(() => { document.body.classList.add('movil'); return () => document.body.classList.remove('movil'); }, []);
+  useAltoVisible();
   const sinLeer = useNoLeidas();
+
+  // El link de una mención (campanita o mail: …/deals/123?conversacion=1&mensaje=45) abre la conversación, en el mensaje.
+  const sp = new URLSearchParams(loc.search);
+  const ficha = loc.pathname.match(/^\/(companies|contacts|deals|orders)\/(\d+)$/);
+  if (ficha && sp.has('conversacion')) {
+    const m = sp.get('mensaje');
+    return <Navigate replace to={`/conversaciones/${TIPO_DE[ficha[1]]}/${ficha[2]}${m ? `?mensaje=${m}` : ''}`} />;
+  }
+
   // A pantalla completa, sin las barras: el asistente del encargo y una conversación abierta.
-  const asistente = loc.pathname === '/recorridos/nuevo' || loc.pathname.startsWith('/conversaciones/');
+  const completa = loc.pathname === '/recorridos/nuevo' || loc.pathname.startsWith('/conversaciones/');
+  const enFicha = FICHAS.find(([r]) => r.test(loc.pathname));
+  const titulo = TITULOS.find(([r]) => r.test(loc.pathname))?.[1];
   const activo = (rutas: string[]) => rutas.some((r) => loc.pathname === r || loc.pathname.startsWith(`${r}/`));
   return (
-    <div className={`m-shell${asistente ? ' m-full' : ''}`}>
-      {!asistente && (
+    <div className={`m-shell${completa ? ' m-full' : ''}`}>
+      {meta.real_user && <MirandoComo />}
+      {!completa && (
         <header className="m-top">
-          <button type="button" className="m-yo" onClick={() => setMas(true)} aria-label="Menú: tareas, recorridos, tema y más"><MiAvatar /></button>
-          <div className="m-buscar">{buscador}</div>
+          {enFicha
+            ? <button type="button" className="btn ghost icon m-atras" onClick={() => volver(enFicha[1])} aria-label="Volver"><Icon name="chevron" size={24} /></button>
+            : <button type="button" className="m-yo" onClick={() => setMas(true)} aria-label="Menú: tareas, recorridos, tema y más"><MiAvatar /></button>}
+          {titulo ? <b className="m-top-tit">{titulo}</b> : <div className="m-buscar"><GlobalSearch corto /></div>}
           <Campanita />
         </header>
       )}
@@ -72,33 +73,80 @@ export default function AppMovil({ buscador }: { buscador: ReactNode }) {
           <Route path="/recorridos/nuevo" element={<EncargoAsistente />} />
           <Route path="/tasks" element={<TareasMovil />} />
           <Route path="/conversaciones" element={<ChatMovil />} />
-          <Route path="/conversaciones/:tipo/:id" element={<ChatAbierto />} />
+          <Route path="/conversaciones/:tipo/:id" element={<ConKey><ChatAbierto /></ConKey>} />
           <Route path="/productos" element={<NotasProductosPage />} />
           <Route path="/companies" element={<ClientesLista key="company" tipo="company" />} />
           <Route path="/contacts" element={<ClientesLista key="contact" tipo="contact" />} />
-          <Route path="/companies/:id" element={<FichaCliente key="company" tipo="company" />} />
-          <Route path="/contacts/:id" element={<FichaCliente key="contact" tipo="contact" />} />
+          <Route path="/companies/:id" element={<ConKey><FichaCliente tipo="company" /></ConKey>} />
+          <Route path="/contacts/:id" element={<ConKey><FichaCliente tipo="contact" /></ConKey>} />
           <Route path="/deals" element={<NegociosLista />} />
-          <Route path="/deals/:id" element={<FichaNegocio />} />
+          <Route path="/deals/:id" element={<ConKey><FichaNegocio /></ConKey>} />
           <Route path="/orders" element={<PedidosLista />} />
-          <Route path="/orders/:id" element={<FichaPedido />} />
-          <Route path="/:objectPath" element={<ObjectIndex />} />
-          <Route path="/:objectPath/:id" element={<RecordPage />} />
+          <Route path="/orders/:id" element={<ConKey><FichaPedido /></ConKey>} />
+          <Route path="*" element={<EnLaCompleta />} />
         </Routes>
       </main>
-      <div id="barra-vista" />
-      {!asistente && (
-        <nav className="m-tabs" aria-label="Menú principal">
+      {!completa && (
+        <nav className={`m-tabs${puede ? '' : ' sin-mas'}`} aria-label="Menú principal">
           <NavLink to="/" end className="m-tab"><Icon name="home" size={22} /><span>Hoy</span></NavLink>
           <NavLink to="/companies" className={`m-tab${activo(['/companies', '/contacts']) ? ' active' : ''}`}><Icon name="company" size={22} /><span>Clientes</span></NavLink>
-          <button type="button" className="m-tab m-mas" onClick={() => setCrear(true)} aria-label="Cargar algo nuevo"><span className="m-mas-btn"><Icon name="plus" size={24} /></span></button>
+          {puede && <button type="button" className="m-tab m-mas" onClick={() => setCrear(true)} aria-label="Cargar algo nuevo"><span className="m-mas-btn"><Icon name="plus" size={24} /></span></button>}
           <NavLink to="/deals" className={`m-tab${activo(['/deals', '/orders']) ? ' active' : ''}`}><Icon name="deal" size={22} /><span>Ventas</span></NavLink>
           <NavLink to="/conversaciones" className="m-tab"><Icon name="chat" size={22} /><span>Chat</span>
-            {sinLeer.no_leidos ? <span className={`m-badge${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</NavLink>
+            {sinLeer.no_leidos ? <span className={`m-badge${sinLeer.menciones ? ' mencion' : ''}`} aria-label={`${sinLeer.no_leidos} sin leer`}>{sinLeer.no_leidos}</span> : null}</NavLink>
         </nav>
       )}
       {crear && <MenuCrear onClose={() => setCrear(false)} />}
       {mas && <MenuMas onClose={() => setMas(false)} />}
+      {puede && <PreguntaLlamada />}
+    </div>
+  );
+}
+
+// Cada ficha se arma de cero al cambiar de registro (de una empresa a otra desde el buscador): nada del anterior queda a la
+// vista ni recibe lo que se escribe.
+function ConKey({ children }: { children: ReactNode }) {
+  const { id, tipo } = useParams();
+  return <div key={`${tipo ?? ''}-${id}`} className="m-ruta">{children}</div>;
+}
+
+// El alto que se ve de verdad (con el teclado abierto, en iPhone y Android): la app y las hojas se achican a ese alto, así
+// el botón para guardar y lo que se escribe no quedan debajo del teclado.
+function useAltoVisible() {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const raiz = document.documentElement;
+    const poner = () => { raiz.style.setProperty('--vvh', `${vv.height}px`); raiz.style.setProperty('--vvt', `${vv.offsetTop}px`); };
+    poner();
+    vv.addEventListener('resize', poner);
+    vv.addEventListener('scroll', poner);
+    return () => { vv.removeEventListener('resize', poner); vv.removeEventListener('scroll', poner); raiz.style.removeProperty('--vvh'); raiz.style.removeProperty('--vvt'); };
+  }, []);
+}
+
+// Un superadmin mirando como otra persona: siempre a la vista, con la vuelta a su usuario (en el celular no había forma).
+function MirandoComo() {
+  const { meta } = useMeta();
+  return (
+    <div className="m-mirando" role="status">
+      <Icon name="eye" size={16} /><span>Mirando como <b>{meta.me.name}</b> · solo para ver</span>
+      <button type="button" className="btn sm" onClick={() => verComo(null)}>Volver a {meta.real_user?.name.split(' ')[0]}</button>
+    </div>
+  );
+}
+
+// Lo que no está en el celular (Configuración, Analíticas, Cronograma…): se abre en la versión completa.
+function EnLaCompleta() {
+  const loc = useLocation();
+  return (
+    <div className="m-pag">
+      <div className="m-al-dia"><span className="m-al-dia-ico neutro"><Icon name="table" size={22} /></span>
+        <b>Esto se ve en la versión completa</b>
+        <small className="muted">En el celular está lo esencial para la calle.</small>
+        <button type="button" className="btn primary" onClick={() => usarVersionCompleta(true, loc.pathname + loc.search)}>Abrir la versión completa</button>
+        <NavLink to="/" className="m-link">Volver a Hoy</NavLink>
+      </div>
     </div>
   );
 }
@@ -110,16 +158,34 @@ function MiAvatar() {
 
 // ---------- Hoja que sube desde abajo ----------
 
+// Accesible (revisión del 18/11/2026): es un diálogo modal, el foco entra al abrir, Tab no se escapa al fondo, al
+// cerrar vuelve a donde estaba; y se cierra con el botón Atrás del teléfono sin perder la pantalla de abajo.
 export function Hoja({ titulo, onClose, children }: { titulo: string; onClose: () => void; children: ReactNode }) {
+  const id = useId();
+  const caja = useRef<HTMLDivElement>(null);
+  useCerrarConAtras(onClose);
   useEffect(() => {
-    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const antes = document.activeElement as HTMLElement | null;
+    // El foco, al primer campo con autoFocus o, si no hay, al título (sin abrir el teclado).
+    window.setTimeout(() => {
+      if (!caja.current?.contains(document.activeElement)) caja.current?.querySelector<HTMLElement>('h2')?.focus();
+    }, 0);
+    const k = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (e.key !== 'Tab' || !caja.current) return;
+      const foco = [...caja.current.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])')];
+      if (!foco.length) return;
+      const [primero, ultimo] = [foco[0], foco[foco.length - 1]];
+      if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus(); }
+      else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus(); }
+    };
     window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
-  }, [onClose]);
+    return () => { window.removeEventListener('keydown', k); if (antes?.isConnected) antes.focus({ preventScroll: true }); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="m-hoja-fondo" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="m-hoja" role="dialog" aria-label={titulo}>
-        <div className="m-hoja-cab"><span className="m-hoja-asa" aria-hidden="true" /><h2>{titulo}</h2>
+      <div className="m-hoja" role="dialog" aria-modal="true" aria-labelledby={id} ref={caja}>
+        <div className="m-hoja-cab"><span className="m-hoja-asa" aria-hidden="true" /><h2 id={id} tabIndex={-1}>{titulo}</h2>
           <button type="button" className="btn ghost icon" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={20} /></button></div>
         <div className="m-hoja-cuerpo">{children}</div>
       </div>
@@ -152,19 +218,26 @@ function MenuCrear({ onClose }: { onClose: () => void }) {
   );
 }
 
-// Tarea en dos toques: qué y cuándo.
+// Tarea en dos toques: qué y cuándo. «Hoy» es a las 10 o, si ya pasaron, en dos horas (antes quedaba vencida al crearla).
 const DIA = 86_400_000;
 function a10(dias: number) { const d = new Date(Date.now() + dias * DIA); d.setHours(10, 0, 0, 0); return d; }
+function hoyHora() {
+  const d = new Date();
+  if (d.getHours() < 9) return a10(0);
+  d.setHours(Math.min(d.getHours() + 2, 21), 0, 0, 0);
+  return d;
+}
 function lunesQueViene() { const d = new Date(); const n = ((8 - d.getDay()) % 7) || 7; return a10(n); }
 export function TareaRapida({ onClose, onCreada, linkId, sobre }: { onClose: () => void; onCreada?: () => void; linkId?: number; sobre?: string }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [texto, setTexto] = useState('');
-  const opciones: Array<[string, Date]> = [['Hoy', a10(0)], ['Mañana', a10(1)], ['Pasado', a10(2)], ['El lunes', lunesQueViene()]];
+  const hoy = hoyHora();
+  const opciones: Array<[string, Date]> = [[`Hoy ${hoy.getHours()}:00`, hoy], ['Mañana', a10(1)], ['Pasado', a10(2)], ['El lunes', lunesQueViene()]];
   const [cuando, setCuando] = useState(1);
   const [ocupado, setOcupado] = useState(false);
   async function crear() {
-    if (!texto.trim()) return;
+    if (!texto.trim() || ocupado) return;
     setOcupado(true);
     try {
       await http('POST', '/activities', { type: 'task', subject: texto.trim(), owner_id: meta.me.id, due_at: opciones[cuando][1].toISOString(), status: 'NOT_STARTED', priority: 'none', task_type: 'todo', ...(linkId ? { links: [linkId] } : {}) });
@@ -176,7 +249,7 @@ export function TareaRapida({ onClose, onCreada, linkId, sobre }: { onClose: () 
   return (
     <Hoja titulo={sobre ? `Tarea sobre ${sobre}` : 'Nueva tarea'} onClose={onClose}>
       <form className="m-form" onSubmit={(e) => { e.preventDefault(); crear(); }}>
-        <input className="input" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Llamar a…, mandar la cotización…" aria-label="Qué hay que hacer" maxLength={300} />
+        <input className="input" autoFocus value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Llamar a…, mandar la cotización…" aria-label="Qué hay que hacer" maxLength={300} enterKeyHint="done" />
         <div className="m-chips" role="group" aria-label="Para cuándo">
           {opciones.map(([t], i) => <button key={t} type="button" className={`chip${cuando === i ? ' on' : ''}`} aria-pressed={cuando === i} onClick={() => setCuando(i)}>{t}</button>)}
         </div>
@@ -186,7 +259,7 @@ export function TareaRapida({ onClose, onCreada, linkId, sobre }: { onClose: () 
   );
 }
 
-// El menú del avatar: lo que no entra en la barra de abajo.
+// El menú del avatar: lo que no entra en la barra de abajo (Contactos y Pedidos ya están en Clientes y Ventas).
 function MenuMas({ onClose }: { onClose: () => void }) {
   const { meta } = useMeta();
   const { tema, elegir } = useTema();
@@ -196,9 +269,7 @@ function MenuMas({ onClose }: { onClose: () => void }) {
     <Hoja titulo={meta.me.name} onClose={onClose}>
       <div className="m-lista-menu">
         <button type="button" onClick={() => ir('/tasks')}><Icon name="task" size={18} />Tareas</button>
-        <button type="button" onClick={() => ir('/recorridos')}><Icon name="route" size={18} />Recorridos</button>
-        <button type="button" onClick={() => ir('/contacts')}><Icon name="contact" size={18} />Contactos</button>
-        <button type="button" onClick={() => ir('/orders')}><Icon name="order" size={18} />Pedidos</button>
+        <button type="button" onClick={() => ir('/recorridos')}><Icon name="route" size={18} />Recorridos y mis encargos</button>
         <button type="button" onClick={() => ir('/productos')}><Icon name="alert" size={18} />Notas de productos</button>
       </div>
       <div className="m-sub">Tema</div>
@@ -206,9 +277,18 @@ function MenuMas({ onClose }: { onClose: () => void }) {
         {TEMAS.map(([k, l]) => <button key={k} type="button" className={`chip${tema === k ? ' on' : ''}`} aria-pressed={tema === k} onClick={() => elegir(k)}>{l}</button>)}
       </div>
       <div className="m-lista-menu">
+        {meta.real_user && <button type="button" onClick={() => verComo(null)}><Icon name="eye" size={18} />Volver a mi usuario ({meta.real_user.name})</button>}
         <button type="button" onClick={() => usarVersionCompleta(true)}><Icon name="table" size={18} />Ver versión completa</button>
         <a href="/auth/salir"><Icon name="logout" size={18} />Cerrar sesión</a>
       </div>
     </Hoja>
   );
+}
+
+// Para que las páginas lean el parámetro sin repetir: ?tarea=123 (links de la campanita y de los mails).
+export function useParametro(nombre: string) {
+  const [sp, setSp] = useSearchParams();
+  const valor = sp.get(nombre);
+  const sacar = () => setSp((p) => { const n = new URLSearchParams(p); n.delete(nombre); return n; }, { replace: true });
+  return [valor, sacar] as const;
 }

@@ -510,7 +510,8 @@ export function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; e
 }
 
 // Elegir el destino: tus frecuentes y los de tus pedidos (con cuándo ya se va), o buscar en toda la base, o una dirección.
-export function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (d: DestinoOpcion) => void }) {
+// autoFocus: en el celular no, así el teclado no tapa las sugerencias (que son el camino de un toque).
+export function ElegirDestino({ sug, onElegir, autoFocus = true }: { sug: Sugerencias | null; onElegir: (d: DestinoOpcion) => void; autoFocus?: boolean }) {
   const [q, setQ] = useState('');
   const [res, setRes] = useState<DestinoOpcion[] | null>(null);
   const [otro, setOtro] = useState(false);
@@ -524,7 +525,7 @@ export function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onEl
   return (
     <div className="rc-elegir">
       <div className="search"><Icon name="search" />
-        <input className="input" autoFocus placeholder="Buscá el lugar: proveedor, cliente, expreso, calle…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destino" />
+        <input className="input" autoFocus={autoFocus} type="search" enterKeyHint="search" placeholder="Buscá el lugar: proveedor, cliente, expreso, calle…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destino" />
       </div>
       {res && (
         <ul className="rc-res">

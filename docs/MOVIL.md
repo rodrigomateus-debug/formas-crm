@@ -71,3 +71,42 @@ Lo que no está en el celular (tableros, vistas, edición masiva, analíticas, c
 
 `web/src/movil/`: `Movil.tsx` (esqueleto, `useModoMovil`, hojas, ＋, tarea rápida), `Hoy.tsx`, `RecorridosMovil.tsx`,
 `ClientesMovil.tsx`, `VentasMovil.tsx`, `TareasChatMovil.tsx` y `movil.css`. `App.tsx` elige cuál dibujar. Los modales del escritorio ocupan toda la pantalla con `body.movil`.
+
+## Revisión del 18/11/2026
+
+Tres revisores (uso en la calle, robustez en el teléfono y reglas/permisos/accesibilidad) criticaron las cuatro fases.
+Lo que se cambió:
+
+- **Permisos (servidor, también en el escritorio)**: Ventas cambia solo lo suyo o lo sin dueño y no se lo pasa a otra
+  persona; un contacto nuevo no se asocia a la empresa de otra vendedora ([PERFILES.md](PERFILES.md)).
+- **Carga**: `Raiz.tsx` baja solo la versión que corresponde (el celular no carga el escritorio) y `movil.css` queda
+  después de `styles.css`, así sus reglas ganan. Girar el teléfono no pasa a la de escritorio (`modo.ts`).
+- **Errores**: sin señal o con la sesión vencida se dice («Sin conexión…», «Reintentar»), nunca «no hay nada»
+  (`useCarga` y `Fallo` en `base.tsx`; `http()` en `lib.tsx`). Al volver a la app después de 5 minutos o de otro día, lo
+  que está a la vista se recarga. Las respuestas viejas se descartan.
+- **Navegación**: las fichas tienen flecha para volver; «Volver» y «Salir» sin historial (un link de un mail, la app
+  recién abierta) van a la lista en vez de dejar la pantalla en blanco; las hojas y el panel de una tarea se cierran con el
+  botón Atrás del teléfono; la búsqueda y los filtros de las listas quedan en la dirección. `/tasks?tarea=…` abre la
+  tarea y `…?conversacion=1&mensaje=…` abre la conversación en el mensaje. Lo que no tiene pantalla en el celular dice
+  «Esto se ve en la versión completa».
+- **Teclado**: la app y las hojas miden lo que se ve (`visualViewport`), la barra de abajo se esconde mientras se
+  escribe, y la conversación de un pedido o negocio se abre a pantalla completa (en la ficha, con el teclado, no se veía).
+- **Reglas en pantalla**: pipelines que puede ver (no solo donde ya tenía negocios); el encargo desde un pedido queda
+  atado al pedido; «Solo mira» y «Ver como» no ven botones para cargar, y «Ver como» tiene cartel y vuelta; los
+  resultados de una llamada son los del sistema y no viene ninguno elegido; los obligatorios (y lo que exige la etapa) no
+  se pueden vaciar; el propietario no se edita (lo sin dueño se toma con «Tomarlo»); el alta avisa si ya existe (también
+  si es de otra vendedora); un negocio desde un contacto queda asociado al contacto; el cambio a una etapa perdida pide
+  también el detalle; el monto acepta puntos de miles; Negocios tiene «Sin dueño».
+- **Uso**: al volver de llamar o escribir por WhatsApp desde el CRM, pregunta «¿Cómo salió?»; «Visita» como tipo; Hoy en
+  orden de urgencia (Tareas, Te escribieron, Entregas de la semana, Encargos, Negocios sin movimiento); las tareas dicen
+  «10:00 · Cliente» o «Vencida ayer»; el círculo para tildar se toca en 44×44; las fichas muestran primero contactos,
+  pedidos y negocios y pliegan los datos vacíos; un solo buscador por pantalla; factura y remito se abren dentro de la
+  app (con «Compartir»); el encargo no abre el teclado sobre las sugerencias ni repite destinos.
+- **Accesibilidad**: las hojas son diálogos modales (foco adentro, Tab no se escapa, vuelve al cerrar); lo elegido se
+  ve lleno con el color de acento (también en oscuro); las acciones sin dato dicen por qué («Sin teléfono»).
+- **Ícono**: «Hub» con el moño de Formas arriba y la barra verde de la marca (`web/public/hub-*.png`); el manifiesto ya no
+  fija la orientación.
+
+Pendiente: el código compartido con el escritorio todavía pesa (~890 KB en total para el celular, antes 1,1 MB); la
+fecha de cierre y el origen del negocio no están en el alta corta.
+

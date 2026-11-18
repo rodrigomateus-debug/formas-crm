@@ -48,6 +48,12 @@ No ve ni hace:
 
 Lo que crea queda a su nombre (también si lo crea con Claude).
 
+**Qué puede cambiar** (revisión de la versión celular, 18/11/2026; `soloLoSuyoVentas` en `api.ts`): solo lo suyo o lo que no
+tiene propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Que vea una empresa ajena
+porque está asociada a lo suyo no la habilita a editarla ni a quedársela. Un contacto nuevo con el mail de una empresa de
+otra vendedora queda sin empresa (antes se asociaba solo y la empresa le quedaba a la vista y a mano). Es la misma regla
+que ya tenía Claude para todos. Prueba: `test/ventas-lo-suyo.test.mjs`.
+
 ## Perfil Producción (pedido de Rodrigo del 13/11/2026)
 
 Producción trabaja con los pedidos, no con la parte comercial:

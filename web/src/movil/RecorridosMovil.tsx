@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { http, useToast, Icon } from '../lib';
+import { useCerrarConAtras, useVolver } from './base';
 import { lindo } from '../pages/Cronograma';
 import {
   ListaEncargos, EncargoModal, ElegirDestino, ElegirDia, DestinoElegido, Items, cuando, proximoHabil, vacio,
@@ -24,9 +25,15 @@ export function RecorridosMovil() {
       <div className="m-rc-lista">
         <ListaEncargos version={version} onAbrir={(id) => setSp((p) => { const n = new URLSearchParams(p); n.set('encargo', String(id)); return n; }, { replace: true })} />
       </div>
-      {abierto && <EncargoModal id={abierto} onClose={cerrar} onListo={() => { cerrar(); setVersion((v) => v + 1); }} />}
+      {abierto && <EncargoAbierto id={abierto} onClose={cerrar} onListo={() => { cerrar(); setVersion((v) => v + 1); }} />}
     </div>
   );
+}
+
+// El encargo abierto (el modal de siempre, a pantalla completa): se cierra también con el botón Atrás.
+function EncargoAbierto(props: { id: number; onClose: () => void; onListo: () => void }) {
+  useCerrarConAtras(props.onClose);
+  return <EncargoModal {...props} />;
 }
 
 const PASOS = ['¿A dónde?', '¿Qué día?', '¿Qué hay que hacer?'];
@@ -42,11 +49,20 @@ export function EncargoAsistente() {
   const [fecha, setFecha] = useState(proximoHabil());
   const [llevar, setLlevar] = useState<ItemForm[]>([vacio()]);
   const [retirar, setRetirar] = useState<ItemForm[]>([vacio()]);
-  const [extra, setExtra] = useState({ desde: '', hacia: '', horario: '', contacto: '', notas: '', urgente: false, record_id: null as number | null });
+  // Lo que trae el destino de la ficha (el pedido, a quién preguntar) se carga igual que al elegirlo acá.
+  const [extra, setExtra] = useState({ desde: '', hacia: '', horario: '', contacto: desde?.contacto && /[a-z]/i.test(desde.contacto) ? desde.contacto : '', notas: '', urgente: false, record_id: desde?.record_id ?? null as number | null });
+  const volver = useVolver();
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => { http<Sugerencias>('GET', '/recorridos/sugerencias').then(setSug, () => setSug({ frecuentes: [], de_pedidos: [], bases: [], organiza: false })); }, []);
+  // Un mismo lugar no aparece dos veces (en «A donde más mandás» y en «De tus pedidos»).
+  useEffect(() => {
+    http<Sugerencias>('GET', '/recorridos/sugerencias').then((s) => {
+      const vistos = new Set<string>();
+      const nuevos = (l: DestinoOpcion[] = []) => l.filter((d) => { if (vistos.has(d.key)) return false; vistos.add(d.key); return true; });
+      setSug({ ...s, frecuentes: nuevos(s.frecuentes), de_pedidos: nuevos(s.de_pedidos), generales: nuevos(s.generales) });
+    }, () => setSug({ frecuentes: [], de_pedidos: [], bases: [], organiza: false }));
+  }, []);
   // Cada paso arranca arriba de todo.
   const cuerpo = useRef<HTMLDivElement>(null);
   useEffect(() => { cuerpo.current?.scrollTo(0, 0); }, [paso]);
@@ -56,7 +72,8 @@ export function EncargoAsistente() {
     setExtra((x) => ({ ...x, record_id: x.record_id ?? d.record_id ?? null, contacto: x.contacto || (d.contacto && /[a-z]/i.test(d.contacto) ? d.contacto : '') }));
     setPaso(1);
   };
-  const atras = () => (paso === 0 || (desde && paso === 1) ? navigate(-1) : setPaso(paso - 1));
+  const salir = () => volver('/recorridos');
+  const atras = () => (paso === 0 || (desde && paso === 1) ? salir() : setPaso(paso - 1));
   const hayAlgo = [...llevar, ...retirar].some((i) => i.que.trim() || i.pdv) || !!extra.notas.trim();
 
   async function guardar() {
@@ -70,7 +87,7 @@ export function EncargoAsistente() {
         destino: { lugar_id: destino.lugar_id, company_id: destino.company_id, nombre: destino.nombre, direccion: destino.direccion, guardar: destino.tipo === 'suelto' && !!(destino as DestinoOpcion & { guardar?: boolean }).guardar },
       });
       toast(`Listo: ${lindo(r.destino)}, ${cuando(r.fecha).toLowerCase()}. Logística lo ve en el cronograma.`);
-      if (desde) navigate(-1); else navigate('/recorridos', { replace: true });
+      if (desde) salir(); else navigate('/recorridos', { replace: true });
     } catch (e) { setError((e as Error).message); setOcupado(false); }
   }
 
@@ -88,7 +105,7 @@ export function EncargoAsistente() {
         {paso === 0 && (
           <section className="rc-paso">
             <h3>¿A dónde tiene que ir el chofer?</h3>
-            <ElegirDestino sug={sug} onElegir={elegir} />
+            <ElegirDestino sug={sug} onElegir={elegir} autoFocus={false} />
           </section>
         )}
         {paso === 1 && destino && (

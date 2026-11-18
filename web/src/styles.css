@@ -2210,21 +2210,23 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 @media (max-width: 800px) { .rd-det { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Recorridos → Destinos (RecorridosDestinos.tsx): la base de destinos con el mapa ---------- */
-.ds-resumen { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
-.ds-resumen > div, .ds-resumen-btn { display: flex; flex-direction: column; gap: 2px; min-width: 110px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
-.ds-resumen b { font-size: 18px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.ds-resumen span { font-size: 12px; color: var(--ui-ink-2); }
-.ds-resumen-btn { border: 1px solid transparent; cursor: pointer; text-align: left; font: inherit; color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
-.ds-resumen-btn span { color: inherit; }
-.ds-resumen-btn.on { border-color: currentColor; }
-.ds-toolbar { flex-wrap: wrap; gap: 8px; }
-.ds-check { gap: 6px; white-space: nowrap; }
-.ds-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.ds-toolbar { flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.ds-buscar { flex: 0 1 300px; min-width: 200px; }
+.ds-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ds-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink); font: inherit; font-size: 13px; cursor: pointer; }
 .ds-chip i { width: 8px; height: 8px; border-radius: 4px; background: var(--c); }
 .ds-chip span { color: var(--ui-ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ds-chip.on { background: var(--ui-ink); color: var(--ui-surface); border-color: var(--ui-ink); }
 .ds-chip.on span { color: inherit; opacity: .75; }
+/* El resumen, en un renglón chico arriba de la tabla. */
+.ds-resumen { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 0 8px; font-variant-numeric: tabular-nums; }
+.ds-resumen b { color: var(--ui-ink); font-weight: 600; }
+.ds-resumen .cr-link { display: inline-flex; align-items: center; gap: 4px; }
+.ds-resumen-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); border: 1px solid transparent; cursor: pointer; font: inherit;
+  color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
+.ds-resumen-btn b { color: inherit; }
+.ds-resumen-btn.on { border-color: currentColor; }
+.ds-check { gap: 5px; white-space: nowrap; }
 .ds-nota { margin: 8px 0; }
 .ds-sugeridos { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
 .ds-sugeridos ul, .ds-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -2236,7 +2238,10 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-layout > .ds-tabla { flex: 1 1 auto; min-width: 0; }
 .content.list-fixed > .ds-layout { flex: 1 1 auto; min-height: 240px; }
 .content.list-fixed.rc-page { overflow-y: auto; }
-.rc-page > .rc-admin:first-of-type { margin: 0 0 12px; padding: 6px 12px; }
+.rc-tabs-fila { display: flex; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--ui-line); margin-bottom: 12px; flex-wrap: wrap; }
+.rc-tabs-fila > .tabs { border-bottom: 0; margin-bottom: 0; flex: 0 1 auto; }
+.rc-tab-acciones { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-bottom: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ds-acciones-top { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .ds-copia { min-width: 0; }
 .ds-locmov { display: none; }
 .ds-tabla { overflow: auto; }
@@ -2314,15 +2319,20 @@ thead .ds-acciones { z-index: 2; }
 }
 @media (max-width: 700px) {
   .ds-3 { grid-template-columns: 1fr 1fr; }
-  .ds-resumen { gap: 6px; }
-  .ds-resumen > div, .ds-resumen-btn { min-width: 0; flex: 1 1 28%; padding: 6px 8px; }
-  .ds-resumen b { font-size: 15px; }
-  .ds-resumen span { font-size: 11px; }
+  .ds-buscar { flex: 1 1 100%; }
+  .ds-copia { display: none; }
   .ds-col-loc { display: none; }
   .ds-locmov { display: block; margin-left: 17px; }
   .ds-contacto { min-width: 110px; }
 }
-.ds-paginas { flex-wrap: wrap; gap: 8px; padding: 8px 2px 4px; }
+.ds-paginas { display: flex; align-items: center; gap: 6px; padding: 6px 2px 2px; min-height: 36px; white-space: nowrap; }
+.ds-copia { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ds-pags { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.ds-pag { min-width: 30px; justify-content: center; padding: 0 6px; font-variant-numeric: tabular-nums; }
+.ds-pag.on { background: var(--ui-ink); color: var(--ui-surface); }
+.ds-pag-x { padding: 0 4px; }
+.rc-admin.rc-admin-suelto { margin: 0; border: 0; padding: 0; }
+.rc-admin.rc-admin-suelto .rc-form { margin-top: 0; }
 
 /* ---------- Tareas en equipo (tablero, panel y conversación; pedido de Rodrigo del 18/11/2026) ---------- */
 .estado-punto { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--ui-ink-3); }

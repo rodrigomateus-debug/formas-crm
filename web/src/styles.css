@@ -380,8 +380,6 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: stretch; min-height: calc(100vh - 250px); }
 .col { flex: 0 0 272px; min-width: 0; background: var(--ui-surface-sunken); border-radius: var(--r-panel); display: flex; flex-direction: column; max-height: calc(100vh - 240px); }
 .col.over { outline: 2px dashed var(--accent-ink); outline-offset: -2px; }
-.board.fill { min-height: 0; }
-.board.fill .col { max-height: none; min-height: 0; }
 .col-head { padding: 12px 12px 10px; border-bottom: 1px solid var(--ui-line); }
 .col-head .t { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; }
 .col-head .t .n { margin-left: auto; color: var(--text-3); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -748,6 +746,16 @@ table.grid th .col-menu:hover { background: var(--ui-line); color: var(--accent-
   .content.list-fixed { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 6px; }
   .content.list-fixed > * { flex: none; }
   .content.list-fixed > .table-wrap { flex: 1 1 auto; min-height: 200px; }
+}
+/* Tableros (Negocios, Pedidos, Producción, Tareas…): la página no se desplaza para abajo. El tablero ocupa el alto que
+   queda en la ventana (hasta la barra del pie, si la hay) y se adapta al cambiar el tamaño; cada columna se desplaza
+   adentro y la barra para los costados queda siempre a la vista, al pie del tablero (pedido de Rodrigo del 18/11/2026).
+   En el celular la página se desplaza entera. */
+@media (min-width: 861px) {
+  .content:has(> .board) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
+  .content:has(> .board) > * { flex: none; }
+  .content:has(> .board) > .board { flex: 1 1 0; height: auto !important; min-height: 240px; padding-bottom: 8px; }
+  .content:has(> .board) > .board .col { max-height: none; min-height: 0; }
 }
 /* Barras de desplazamiento visibles en la tabla (en Mac se esconden si no se fuerzan). */
 .table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }
@@ -1837,7 +1845,7 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 
 /* ---------- Recorridos (pages/Recorridos.tsx): los encargos al recorrido y la base de destinos ---------- */
 .rc-page .page-head { margin-bottom: 4px; }
-.rc-intro { margin: 0 0 12px; max-width: 760px; }
+.rc-titulo { display: inline-flex; align-items: center; gap: 8px; }
 .rc-ia { padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
 .rc-ia.warn { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .rc-estado { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: var(--r-pill); padding: 1px 7px; margin-right: 6px;
@@ -2210,21 +2218,23 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 @media (max-width: 800px) { .rd-det { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Recorridos → Destinos (RecorridosDestinos.tsx): la base de destinos con el mapa ---------- */
-.ds-resumen { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
-.ds-resumen > div, .ds-resumen-btn { display: flex; flex-direction: column; gap: 2px; min-width: 110px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
-.ds-resumen b { font-size: 18px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-.ds-resumen span { font-size: 12px; color: var(--ui-ink-2); }
-.ds-resumen-btn { border: 1px solid transparent; cursor: pointer; text-align: left; font: inherit; color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
-.ds-resumen-btn span { color: inherit; }
-.ds-resumen-btn.on { border-color: currentColor; }
-.ds-toolbar { flex-wrap: wrap; gap: 8px; }
-.ds-check { gap: 6px; white-space: nowrap; }
-.ds-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 12px; }
+.ds-toolbar { flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+.ds-buscar { flex: 0 1 300px; min-width: 200px; }
+.ds-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .ds-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--ui-line); background: var(--ui-surface); color: var(--ui-ink); font: inherit; font-size: 13px; cursor: pointer; }
 .ds-chip i { width: 8px; height: 8px; border-radius: 4px; background: var(--c); }
 .ds-chip span { color: var(--ui-ink-2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ds-chip.on { background: var(--ui-ink); color: var(--ui-surface); border-color: var(--ui-ink); }
 .ds-chip.on span { color: inherit; opacity: .75; }
+/* El resumen, en un renglón chico arriba de la tabla. */
+.ds-resumen { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0 0 8px; font-variant-numeric: tabular-nums; }
+.ds-resumen b { color: var(--ui-ink); font-weight: 600; }
+.ds-resumen .cr-link { display: inline-flex; align-items: center; gap: 4px; }
+.ds-resumen-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); border: 1px solid transparent; cursor: pointer; font: inherit;
+  color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
+.ds-resumen-btn b { color: inherit; }
+.ds-resumen-btn.on { border-color: currentColor; }
+.ds-check { gap: 5px; white-space: nowrap; }
 .ds-nota { margin: 8px 0; }
 .ds-sugeridos { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
 .ds-sugeridos ul, .ds-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -2236,7 +2246,10 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-layout > .ds-tabla { flex: 1 1 auto; min-width: 0; }
 .content.list-fixed > .ds-layout { flex: 1 1 auto; min-height: 240px; }
 .content.list-fixed.rc-page { overflow-y: auto; }
-.rc-page > .rc-admin:first-of-type { margin: 0 0 12px; padding: 6px 12px; }
+.rc-tabs-fila { display: flex; align-items: flex-end; gap: 12px; border-bottom: 1px solid var(--ui-line); margin-bottom: 12px; flex-wrap: wrap; }
+.rc-tabs-fila > .tabs { border-bottom: 0; margin-bottom: 0; flex: 0 1 auto; }
+.rc-tab-acciones { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-bottom: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ds-acciones-top { gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .ds-copia { min-width: 0; }
 .ds-locmov { display: none; }
 .ds-tabla { overflow: auto; }
@@ -2314,15 +2327,20 @@ thead .ds-acciones { z-index: 2; }
 }
 @media (max-width: 700px) {
   .ds-3 { grid-template-columns: 1fr 1fr; }
-  .ds-resumen { gap: 6px; }
-  .ds-resumen > div, .ds-resumen-btn { min-width: 0; flex: 1 1 28%; padding: 6px 8px; }
-  .ds-resumen b { font-size: 15px; }
-  .ds-resumen span { font-size: 11px; }
+  .ds-buscar { flex: 1 1 100%; }
+  .ds-copia { display: none; }
   .ds-col-loc { display: none; }
   .ds-locmov { display: block; margin-left: 17px; }
   .ds-contacto { min-width: 110px; }
 }
-.ds-paginas { flex-wrap: wrap; gap: 8px; padding: 8px 2px 4px; }
+.ds-paginas { display: flex; align-items: center; gap: 6px; padding: 6px 2px 2px; min-height: 36px; white-space: nowrap; }
+.ds-copia { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ds-pags { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.ds-pag { min-width: 30px; justify-content: center; padding: 0 6px; font-variant-numeric: tabular-nums; }
+.ds-pag.on { background: var(--ui-ink); color: var(--ui-surface); }
+.ds-pag-x { padding: 0 4px; }
+.rc-admin.rc-admin-suelto { margin: 0; border: 0; padding: 0; }
+.rc-admin.rc-admin-suelto .rc-form { margin-top: 0; }
 
 /* ---------- Tareas en equipo (tablero, panel y conversación; pedido de Rodrigo del 18/11/2026) ---------- */
 .estado-punto { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; background: var(--ui-ink-3); }
@@ -2340,7 +2358,6 @@ thead .ds-acciones { z-index: 2; }
 .estado-tarea.hecha::before { background: var(--ui-positive); }
 
 .tareas-tablero { display: flex; flex-direction: column; min-height: 0; }
-.board.tareas { min-height: calc(100vh - 220px); }
 .board.tareas.cargando { opacity: .7; }
 .tarea-col .col-head .t { gap: 8px; }
 .tarea-col.vencidas .col-head .t { color: var(--bad); }
@@ -2416,3 +2433,46 @@ thead .ds-acciones { z-index: 2; }
 @media (max-width: 640px) {
   .tarea-campos { grid-template-columns: 100px minmax(0, 1fr); }
 }
+
+/* La «i» informativa (InfoTip, components.tsx). */
+.info-tip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--ui-ink-3); background: transparent; color: var(--ui-ink-2); font: 600 10px/1 Georgia, serif; font-style: italic; cursor: help; vertical-align: middle; }
+.info-tip:hover, .info-tip.on, .info-tip:focus-visible { border-color: var(--accent-ink); color: var(--accent-ink); background: var(--accent-soft); }
+.info-tip::before { content: ''; position: absolute; width: 32px; height: 32px; }   /* área de toque más grande en el celular */
+.info-tip { position: relative; }
+.info-tip-globo { position: fixed; z-index: 1000; transform: translateX(-50%); max-width: min(300px, calc(100vw - 24px)); padding: 8px 10px; border-radius: var(--r-control);
+  background: var(--ui-ink); color: var(--ui-surface); font-size: 12.5px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.2); pointer-events: none; }
+.info-tip-globo.arriba { transform: translate(-50%, -100%); }
+.info-tip-globo p { margin: 0; }
+.info-tip-globo p + p { margin-top: 6px; }
+.ds-mapa-tope { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0; }
+/* Resumen de una reunión en la línea de tiempo (RecordPage, ActivityItem). */
+.tl-resumen { margin-top: 6px; padding: 8px 10px; border-radius: var(--r-control); background: var(--accent-soft); font-size: 13px; line-height: 1.45; }
+.tl-resumen > div { white-space: pre-line; margin-top: 4px; color: var(--ui-ink); }
+
+/* Inicio de Dirección (InicioDireccion.tsx) */
+.dir-tabla { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dir-tabla th { text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); padding: 4px 6px; border-bottom: 1px solid var(--ui-line, var(--viz-grid)); white-space: nowrap; }
+.dir-tabla td { padding: 5px 6px; vertical-align: middle; white-space: nowrap; }
+.dir-tabla th.num, .dir-tabla td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dir-tabla tbody tr + tr td { border-top: 1px solid var(--viz-grid); }
+.dir-tabla .dir-total td { border-top: 2px solid var(--viz-grid); font-weight: 600; }
+.dir-tabla .dir-ganada td { font-weight: 600; color: var(--ok); }
+.dir-barra { display: block; background: var(--sunken, var(--ui-surface-sunken)); border-radius: 3px; height: 8px; min-width: 40px; }
+.dir-barra i { display: block; height: 8px; border-radius: 3px; background: var(--viz-1); }
+.dir-ganada .dir-barra i { background: var(--viz-2); }
+.dir-embudos { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 20px 28px; }
+.dir-embudo { min-width: 0; overflow-x: auto; }
+.dir-embudo > .row { margin-bottom: 6px; }
+@media (max-width: 720px) { .dir-embudos { grid-template-columns: 1fr; } }
+.dir-alerta { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px; background: var(--ui-negative-soft, var(--warn-soft)); color: var(--ui-negative-ink, var(--warn)); text-decoration: none; font-size: 13px; }
+.dir-alerta:hover { text-decoration: underline; }
+
+/* Resumen del día de Darwin (RecordPage → ActivityItem): el logo de Darwin y el sello «Hecho con IA». */
+.tl-item .ic.darwin-ic { background: #fff; border: 1px solid var(--ui-border, rgba(0,0,0,.08)); }
+.tl-item .ic.darwin-ic img { display: block; }
+.darwin-sello { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 12px; color: var(--muted, #667); }
+.darwin-sello .darwin-de { display: inline-flex; align-items: center; gap: 5px; }
+.tag.ia { background: color-mix(in srgb, #3d5af1 12%, transparent); color: #3d5af1; font-weight: 600; }
+.inicio-pestanas { display: flex; gap: 8px; padding: 16px var(--gutter) 0; flex: none; }
+.inicio-pestanas + .content { padding-top: 12px; }

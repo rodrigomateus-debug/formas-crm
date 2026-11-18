@@ -80,3 +80,73 @@ workflows que leen HubSpot. El teléfono ya viene resuelto, que es justo donde f
 
 «Outbound Pedidos» y «Outbound - Saldo Pendiente» están apagados (nunca se activaron: a la cuenta de HubSpot le
 faltaban permisos). Si se retoman, se hacen con un aviso del CRM sobre pedidos en vez de leer HubSpot.
+
+## 4. Actividad diaria: resumen del día y consultas (Darwin → CRM)
+
+Pedido del 18/11/2026: que el CRM se entere de lo que pasa en las conversaciones **después** de que Maru las pasa a una
+vendedora, con un resumen por día en el contacto y los datos duros de lo que consultó cada cliente («quién consultó por
+botellas»). Código: `src/worker/darwin.ts`; pantalla: **Consultas** (menú CRM) y la tarjeta «Consultas por WhatsApp» en la
+ficha del contacto y de la empresa; para Claude, las herramientas `buscar_consultas` y `pendientes_de_respuesta` del MCP.
+
+**De dónde salen los datos.** La API REST de Darwin (`api.getdarwin.ai`, spec revisada el 18/11/2026) **no tiene un
+endpoint para leer mensajes ni para listar las conversaciones**: `GET /v1/sessions?id=<teléfono>` da las sesiones de un
+contacto con sus campos inteligentes (sin resumen) y `GET /v1/webhook/events` devuelve eventos de ejemplo, no los reales.
+Por eso es Darwin el que le avisa al CRM: el CRM se suscribe a los eventos de las conversaciones con `POST /v1/webhook`.
+
+Para conectarlo:
+
+1. En Darwin (Configuración → Claves API, workspace Formas Shop) hay una clave propia del Hub, «FORMAS HUB CRM». Se
+   carga en el Worker: `npx wrangler secret put DARWIN_API_KEY`.
+2. En el Hub, Configuración → Integraciones → «Darwin: resumen del día y consultas» → **Conectar Darwin**. Crea un token
+   propio del CRM y suscribe `https://<hub>/hooks/darwin/evento?token=…` a `session.*` (abierta, pasada a una vendedora,
+   analizada con resumen y campos, cambio de etapa, cerrada). «Volver a conectar» reemplaza la suscripción y revoca el token
+   anterior; las otras suscripciones de Darwin (Zapier, Pipedream, etc.) no se tocan.
+
+Darwin entrega cada evento «al menos una vez»: el CRM guarda cada uno una sola vez (clave: tipo + sesión + `forwardedAt` /
+`summarizedAt` / etapa).
+
+Cada evento trae el resumen que hace Darwin de la sesión (`summary`), sus campos inteligentes (`producto`, `cantidad`,
+`Categoria`, `presupuesto`, `fecha_estimada`…), a quién se asignó y cuándo respondió el equipo (`lastHumanActivityAt`). El
+CRM los guarda tal cual (`darwin_eventos`) y lleva el estado de cada conversación (`darwin_conversaciones`).
+
+**El resumen del día.** De 0 a 6 de la mañana (cron de los :05, de a 15 por corrida), por cada conversación que tuvo
+movimiento el día anterior, Claude (`claude-sonnet-5-5`) lee los eventos, los resúmenes de Darwin, los campos y el resumen
+que el CRM guardó la vez anterior, y devuelve:
+
+- **El resumen**: quién habló, qué pidió el cliente, qué se le respondió y en qué quedó, y el próximo paso. Queda como
+  actividad de WhatsApp («Resumen del día», con el link a la conversación) en el **contacto** (buscado por teléfono, o por
+  mail), su **empresa** principal y su **negocio** (el que tiene el link a esa conversación, si no el abierto más reciente),
+  a nombre de la vendedora que la tiene (o del propietario del contacto).
+- **Las consultas**: un renglón por producto consultado ese día, con categoría y tipo de una **lista fija**
+  (`CATALOGO` en `darwin.ts`: Drinkware → Botella, Termo, Vaso…; Textil → Remera, Gorra…), producto como lo nombró, cantidad,
+  precio unitario y total, fecha en que lo necesita, ocasión (Fin de año, Día de la Madre…), personalización, si pidió
+  muestra o boceto, objeción, competidor y lugar de entrega. Para sumar un tipo, se agrega a la lista.
+
+Reglas:
+
+- Si el contacto **no está** en el CRM, no se crea nada (queda «sin contacto» en `darwin_resumenes`): el contacto lo crea el
+  aviso de siempre (§ 1) cuando Maru pasa la conversación.
+- Si ese día **no hubo nada nuevo** (un cierre automático, un saludo, lo mismo que ya decía el resumen anterior), no se escribe.
+- Si llega otro evento de un día ya resumido, ese día se rehace: se reemplaza el resumen y las consultas, sin duplicar.
+- A Claude no se le manda el teléfono, solo los últimos 4 dígitos.
+- Sin `ANTHROPIC_API_KEY` los eventos se guardan igual y se resumen cuando esté. «Resumir ahora» a mano:
+  `POST /api/darwin/resumir` (administradores). Estado: `GET /api/darwin/estado`.
+
+**Sin respuesta.** La pestaña «Sin respuesta» de Consultas lista las conversaciones que Maru ya pasó a una vendedora donde el
+cliente escribió (`session.replied`) después de la última respuesta del equipo (`lastHumanActivityAt`) y nadie le contestó en
+las últimas 4, 12, 24, 48 o 72 horas. El perfil Ventas ve las suyas. **A confirmar con eventos reales**: `session.replied`
+existe en los workflows de Darwin pero no figura en la lista de eventos de `POST /v1/webhook`; si con `session.*` no llega,
+esta pestaña queda vacía y hay que mandarlo con un workflow (disparador `darwin-event` `session.replied` → `http-request` a la
+misma URL, con `eventType`, `timestamp` y `data`).
+
+**Los mensajes uno por uno (Claude).** La API de Darwin no da los mensajes, pero el conector de Darwin en Claude sí
+(`darwin_conversation__events`). Una **tarea programada de Claude**, todas las noches, busca las conversaciones del workspace
+1986 con actividad el día anterior, lee sus mensajes (`types: ['message']`, `since` = el comienzo del día) y los carga en el Hub
+con la herramienta `cargar_conversacion_darwin` del conector «Formas Hub» (solo administradores). Cada mensaje se guarda una
+vez (`darwin_mensajes`, por su id de WhatsApp), con quién lo escribió: `human` es el cliente, `user` alguien del equipo (desde el
+inbox o el WhatsApp del celular), el resto Maru. El resumen del día usa esos mensajes como fuente principal (hasta ~15.000
+caracteres por conversación y día; si son más, los últimos) y la pestaña «Sin respuesta» sale de ellos: el último mensaje del
+cliente contra el último del equipo. Si la tarea no corrió, el resumen sale igual de los eventos.
+
+**Ícono del conector.** El MCP declara el ícono del Hub (`serverInfo.icons`, `hub-192.png`) y `/favicon.ico` devuelve ese
+mismo ícono, para que claude.ai lo muestre en el conector.

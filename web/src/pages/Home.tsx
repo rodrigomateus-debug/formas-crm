@@ -4,6 +4,8 @@ import { UnidadFilter } from './QuickFilters';
 import { http, qs, useMeta, esVentas, esOperaciones, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
+import InicioDireccion from './InicioDireccion';
+import InicioProduccion from './InicioProduccion';
 
 interface Dash {
   open: Array<{ pipeline_id: string; stage_id: string; n: number; amount: number }>;
@@ -14,6 +16,27 @@ interface Dash {
 }
 
 export default function Home() {
+  const { meta } = useMeta();
+  // Dirección (Configuración → Usuarios): resultados de todo el equipo, sin tareas (InicioDireccion.tsx), y una pestaña con
+  // el Inicio de Producción. Producción y Logística: su Inicio, con sus tareas (InicioProduccion.tsx).
+  if (meta.me.direccion) return <InicioConPestanas />;
+  return esOperaciones(meta.me) ? <InicioProduccion /> : <InicioEquipo />;
+}
+
+function InicioConPestanas() {
+  const [vista, setVista] = useState<'comercial' | 'produccion'>(() => { try { return localStorage.getItem('crm.inicio.vista') === 'produccion' ? 'produccion' : 'comercial'; } catch { return 'comercial'; } });
+  const elegir = (v: 'comercial' | 'produccion') => { setVista(v); try { localStorage.setItem('crm.inicio.vista', v); } catch { /* sin almacenamiento */ } };
+  return (
+    <>
+      <div className="inicio-pestanas" role="tablist" aria-label="Inicio">
+        {(['comercial', 'produccion'] as const).map((v) => <button key={v} type="button" role="tab" aria-selected={vista === v} className={`chip${vista === v ? ' on' : ''}`} onClick={() => elegir(v)}>{v === 'comercial' ? 'Comercial' : 'Producción y entregas'}</button>)}
+      </div>
+      {vista === 'comercial' ? <InicioDireccion /> : <InicioProduccion tareas={false} />}
+    </>
+  );
+}
+
+function InicioEquipo() {
   const { meta } = useMeta();
   // Perfil Ventas: siempre sus números (el servidor no le da los del equipo).
   const ventas = esVentas(meta.me);

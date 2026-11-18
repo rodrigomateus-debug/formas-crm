@@ -1,0 +1,260 @@
+// Actividad diaria de Darwin (src/worker/darwin.ts): los eventos que manda el workflow de Darwin, el resumen del día con IA
+// en el contacto (y su negocio) y las consultas con datos fijos («quién consultó por botellas»), y las conversaciones sin
+// respuesta. Claude simulado en el puerto 8797 (ANTHROPIC_BASE_URL de .dev.vars.example).
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+
+const CRM = process.env.CRM_URL ?? 'http://localhost:8787';
+const RUN = Date.now().toString(36);
+async function call(method, path, body, headers = {}) {
+  const res = await fetch(CRM + path, { method, headers: { 'content-type': 'application/json', ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = text; }
+  return { status: res.status, data };
+}
+const api = (m, p, b) => call(m, `/api${p}`, b);
+
+// Claude: con datos de esta corrida, un resumen y dos consultas; con cualquier otra cosa (corridas viejas en la misma base), nada nuevo.
+const pedidos = [];
+const darwin = { webhooks: [], llamadas: [] };
+let claude;
+before(async () => {
+  claude = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const ch of req) body += ch;
+    res.setHeader('content-type', 'application/json');
+    if (req.url.startsWith('/darwin/')) {
+      darwin.llamadas.push({ method: req.method, url: req.url, key: req.headers['x-api-key'], body: body ? JSON.parse(body) : null });
+      if (req.headers['x-api-key'] !== 'prueba') { res.statusCode = 401; return res.end('{}'); }
+      if (req.method === 'GET' && req.url === '/darwin/v1/webhook') return res.end(JSON.stringify(darwin.webhooks));
+      if (req.method === 'POST' && req.url === '/darwin/v1/webhook') {
+        const w = { id: 9000 + darwin.llamadas.length, url: JSON.parse(body).webhookUrl, enabled_events: JSON.parse(body).types };
+        darwin.webhooks.push(w);
+        return res.end(JSON.stringify({ webhookId: w.id, secret: 'secreto' }));
+      }
+      const m = req.url.match(/^\/darwin\/v1\/webhook\/(\d+)$/);
+      if (req.method === 'DELETE' && m) { darwin.webhooks = darwin.webhooks.filter((w) => w.id !== Number(m[1])); return res.end('{}'); }
+      res.statusCode = 404; return res.end('{}');
+    }
+    if (!req.url.startsWith('/anthropic/v1/messages')) { res.statusCode = 404; return res.end('{}'); }
+    const p = JSON.parse(body);
+    const datos = p.messages[0].content;
+    pedidos.push({ model: p.model, datos, system: p.system });
+    const nuestro = datos.includes(RUN);
+    const out = nuestro && datos.includes('300 botellas')
+      ? { hubo_novedad: true, resumen: `Maru atendió a Ana ${RUN}: quiere 300 botellas térmicas con logo grabado para fin de año y una mochila. Se la pasó a la vendedora.`,
+        proximo_paso: 'Mandar cotización de las botellas',
+        consultas: [
+          { categoria: 'Drinkware', tipo: 'Botella', producto: 'Botella térmica 500 ml', cantidad: 300, precio_unitario: 9000, presupuesto_total: null, fecha_necesaria: '2026-12-15',
+            ocasion: 'Fin de año', personalizacion: 'logo grabado láser', pidio_muestra: true, pidio_boceto: false, objecion: '', competidor: '', entrega: 'CABA' },
+          { categoria: 'Marroquinería', tipo: 'Mochila', producto: 'Mochila notebook', cantidad: null, precio_unitario: null, presupuesto_total: null, fecha_necesaria: '',
+            ocasion: '', personalizacion: '', pidio_muestra: false, pidio_boceto: false, objecion: 'Precio', competidor: '', entrega: '' },
+        ] }
+      : { hubo_novedad: false, resumen: '', proximo_paso: '', consultas: [] };
+    res.end(JSON.stringify({ id: 'msg_1', type: 'message', role: 'assistant', model: p.model, stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 },
+      content: [{ type: 'text', text: JSON.stringify(out) }] }));
+  });
+  await new Promise((r) => claude.listen(8797, r));
+});
+after(() => claude?.close());
+
+const state = {};
+const ayer = new Date(Date.now() - 30 * 3600_000).toISOString();
+const tel = `549115${String(Date.now()).slice(-7)}`;
+const conv = `15552-${tel}`;
+const evento = (eventType, data, timestamp = ayer) => ({ evento: eventType, timestamp, data: {
+  conversationId: conv, sessionId: 1, channelFamily: 'wa', channelType: 'wa-cloud', phoneNumber: `+${tel}`, conversationThreadId: tel, conversationTitle: `Ana ${RUN}`, ...data } });
+
+test('Darwin → CRM: los eventos del día se guardan con el token de integración', async () => {
+  const tok = await api('POST', '/tokens', { name: `Darwin actividad ${RUN}`, source: 'darwin' });
+  assert.equal(tok.status, 201, JSON.stringify(tok.data));
+  state.h = { authorization: `Bearer ${tok.data.token}` };
+  const sin = await call('POST', '/hooks/darwin/evento', evento('session.opened', {}));
+  assert.equal(sin.status, 401);
+  const ct = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Contacto por Whatsapp', firstname: 'Ana', lastname: RUN, mobilephone: `+${tel}` } });
+  assert.equal(ct.status, 201, JSON.stringify(ct.data));
+  state.contact = ct.data.id;
+  for (const e of [
+    evento('session.opened', {}),
+    evento('session.forwarded.qualified', { forwardedToName: 'Rodrigo Mateus', forwardedToEmail: 'rodrigo.mateus@formas.ar', forwardType: 'qualified', forwardedAt: ayer,
+      summary: `Ana ${RUN} quiere 300 botellas con logo para fin de año`, smartFields: { producto: 'Botellas', cantidad: 300, apellido: 'nolastname' } }),
+    evento('session.analyzed', { summary: `Ana ${RUN} quiere 300 botellas con logo para fin de año y consultó por mochilas`, smartFields: { Categoria: 'Drinkware' } }),
+  ]) {
+    const r = await call('POST', '/hooks/darwin/evento', e, state.h);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    assert.equal(r.data.conversation_id, conv);
+  }
+  // Una conversación de alguien que no está en el CRM: no se crea nada.
+  const otro = `549223${String(Date.now()).slice(-7)}`;
+  const r = await call('POST', '/hooks/darwin/evento', { evento: 'session.analyzed', timestamp: ayer, data: { conversationId: `15552-${otro}`, phoneNumber: otro, channelFamily: 'wa',
+    conversationTitle: `Desconocido ${RUN}`, summary: 'Hola' } }, state.h);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  state.otro = `15552-${otro}`;
+  const malo = await call('POST', '/hooks/darwin/evento', { evento: 'session.opened', data: {} }, state.h);
+  assert.equal(malo.status, 400);
+});
+
+test('resumen del día: actividad en el contacto con lo que pasó y las consultas con datos fijos', async () => {
+  const r = await api('POST', '/darwin/resumir', {});
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.hecho >= 1, JSON.stringify(r.data));
+  assert.ok(r.data.sin_contacto >= 1, JSON.stringify(r.data));
+  const nuestro = pedidos.find((p) => p.datos.includes(RUN) && p.datos.includes('300 botellas'));
+  assert.ok(nuestro, 'le pasa a Claude los resúmenes de Darwin');
+  assert.equal(nuestro.model, 'claude-sonnet-5-5');
+  assert.match(nuestro.datos, /Rodrigo Mateus/);
+  assert.ok(!nuestro.datos.includes(tel), 'no le manda el teléfono completo');
+
+  const tl = await api('GET', `/records/contact/${state.contact}/timeline`);
+  assert.equal(tl.status, 200, JSON.stringify(tl.data));
+  const act = (tl.data.activities ?? tl.data).filter((a) => a.type === 'whatsapp' && a.meta?.darwin);
+  assert.equal(act.length, 1);
+  assert.match(act[0].body, /300 botellas/);
+  assert.match(act[0].body, /Próximo paso: Mandar cotización/);
+  assert.match(act[0].body, /• Botella \(Botella térmica 500 ml\) — 300 u\./);
+  assert.equal(act[0].meta.atendio, 'Rodrigo Mateus');
+  assert.match(act[0].meta.link, /getdarwin\.ai\/agent\/1986\/conversations\/all\/15552-/);
+  state.activity = act[0].id;
+
+  const b = await api('GET', `/consultas?tipo=Botella&q=${RUN}`);
+  assert.equal(b.status, 200, JSON.stringify(b.data));
+  assert.equal(b.data.total, 1);
+  const c = b.data.consultas[0];
+  assert.equal(c.contact_id, state.contact);
+  assert.equal(c.cantidad, 300);
+  assert.equal(c.categoria, 'Drinkware');
+  assert.equal(c.ocasion, 'Fin de año');
+  assert.equal(c.pidio_muestra, true);
+  assert.equal(c.atendio, 'Rodrigo Mateus');
+  const porTexto = await api('GET', `/consultas?q=${encodeURIComponent('grabado láser')}&contact_id=${state.contact}`);
+  assert.equal(porTexto.data.total, 1, 'busca en la personalización');
+  const cien = await api('GET', `/consultas?q=${RUN}&min_cantidad=100`);
+  assert.deepEqual(cien.data.consultas.map((x) => x.tipo), ['Botella'], 'la mochila no tiene cantidad');
+  const todas = await api('GET', `/consultas?contact_id=${state.contact}`);
+  assert.equal(todas.data.total, 2);
+  assert.equal((await api('GET', `/consultas?q=${RUN}&sin_venta=1`)).data.total, 2, 'consultó y todavía no compró');
+});
+
+test('si llega algo más de ese día se rehace: un solo resumen y sin consultas repetidas', async () => {
+  const r = await call('POST', '/hooks/darwin/evento', evento('session.closed', { closedAt: ayer, summary: `Ana ${RUN} quiere 300 botellas con logo para fin de año; cerró la sesión` }), state.h);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  await api('POST', '/darwin/resumir', {});
+  const tl = await api('GET', `/records/contact/${state.contact}/timeline`);
+  const act = (tl.data.activities ?? tl.data).filter((a) => a.type === 'whatsapp' && a.meta?.darwin);
+  assert.equal(act.length, 1);
+  assert.equal(act[0].id, state.activity);
+  assert.equal((await api('GET', `/consultas?contact_id=${state.contact}`)).data.total, 2);
+});
+
+test('sin respuesta: el cliente escribió después de la última respuesta del equipo', async () => {
+  const hace = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  await call('POST', '/hooks/darwin/evento', evento('session.analyzed', { lastHumanActivityAt: hace(40) }, hace(39)), state.h);
+  await call('POST', '/hooks/darwin/evento', evento('session.replied', {}, hace(30)), state.h);
+  const p = await api('GET', '/darwin/pendientes?horas=24');
+  assert.equal(p.status, 200, JSON.stringify(p.data));
+  const fila = p.data.pendientes.find((x) => x.conversation_id === conv);
+  assert.ok(fila, 'aparece');
+  assert.equal(fila.asignada_a, 'Rodrigo Mateus');
+  assert.equal(fila.contact_id, state.contact);
+  assert.ok(!(await api('GET', '/darwin/pendientes?horas=48')).data.pendientes.some((x) => x.conversation_id === conv), 'escribió hace 30 h, no 48');
+  // La vendedora contesta: sale de la lista.
+  await call('POST', '/hooks/darwin/evento', evento('session.analyzed', { lastHumanActivityAt: hace(1) }, hace(1)), state.h);
+  assert.ok(!(await api('GET', '/darwin/pendientes?horas=24')).data.pendientes.some((x) => x.conversation_id === conv));
+});
+
+test('Claude (MCP): buscar_consultas', async () => {
+  const tok = await api('POST', '/tokens', { name: `Claude consultas ${RUN}`, source: 'mcp' });
+  const rpc = (method, params) => call('POST', `/mcp/${tok.data.token}`, { jsonrpc: '2.0', id: 1, method, params });
+  const list = await rpc('tools/list', {});
+  assert.ok(list.data.result.tools.some((t) => t.name === 'buscar_consultas'));
+  const r = await rpc('tools/call', { name: 'buscar_consultas', arguments: { tipo: 'Botella', q: RUN } });
+  const out = JSON.parse(r.data.result.content[0].text);
+  assert.equal(out.total, 1);
+  assert.match(out.consultas[0].url, new RegExp(`/contacts/${state.contact}$`));
+});
+
+test('estado del resumen diario', async () => {
+  const e = await api('GET', '/darwin/estado');
+  assert.equal(e.status, 200);
+  assert.ok(e.data.consultas >= 2);
+  assert.ok(e.data.sin_contacto >= 1);
+});
+
+test('Conectar Darwin: suscribe al Hub a session.* con un token propio; reconectar reemplaza la suscripción', async () => {
+  // Una suscripción ajena (Zapier) no se toca.
+  darwin.webhooks = [{ id: 1, url: 'https://hooks.zapier.com/x', enabled_events: ['session.forwarded'] }];
+  const r = await api('POST', '/darwin/conectar', {});
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const nuestra = darwin.webhooks.find((w) => w.url.includes('/hooks/darwin/evento?token=fcrm_'));
+  assert.ok(nuestra, JSON.stringify(darwin.webhooks));
+  assert.deepEqual(nuestra.enabled_events, ['session.*']);
+  const est = await api('GET', '/darwin/estado');
+  assert.equal(est.data.webhook.configurada, true);
+
+  // Darwin manda el evento como lo documenta su API: {eventType, timestamp, agentId, data}. Repetido, se guarda una vez.
+  const url = new URL(nuestra.url);
+  const ev = { eventType: 'session.analyzed', timestamp: ayer, agentId: 1986, data: { ...evento('x', {}).data, sessionId: 77, summarizedAt: ayer, summary: `Repetido ${RUN}` } };
+  const uno = await call('POST', url.pathname + url.search, ev);
+  assert.equal(uno.status, 200, JSON.stringify(uno.data));
+  assert.equal(uno.data.tipo, 'session.analyzed');
+  const dos = await call('POST', url.pathname + url.search, ev);
+  assert.equal(dos.data.repetido, true);
+
+  const r2 = await api('POST', '/darwin/conectar', {});
+  assert.equal(r2.status, 200);
+  assert.equal(darwin.webhooks.filter((w) => w.url.includes('/hooks/darwin/evento')).length, 1, 'una sola suscripción del Hub');
+  assert.ok(darwin.webhooks.some((w) => w.id === 1), 'la de Zapier sigue');
+  const vieja = await call('POST', url.pathname + url.search, { ...ev, data: { ...ev.data, summarizedAt: new Date().toISOString() } });
+  assert.equal(vieja.status, 401, 'el token anterior se revocó');
+  assert.ok(darwin.llamadas.every((l) => l.key === 'prueba'));
+});
+
+test('Claude carga los mensajes del día (cargar_conversacion_darwin) y el resumen los usa', async () => {
+  const tok = await api('POST', '/tokens', { name: `Claude mensajes ${RUN}`, source: 'mcp' });
+  const rpc = (args) => call('POST', `/mcp/${tok.data.token}`, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cargar_conversacion_darwin', arguments: args } });
+  const tel2 = `549341${String(Date.now()).slice(-7)}`;
+  const conv2 = `22953-${tel2}`;
+  const ct = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Contacto por Whatsapp', firstname: 'Beto', lastname: RUN, mobilephone: `+${tel2}` } });
+  const hace = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  const mensajes = [
+    { created_at: hace(30), source: 'human', source_name: 'Beto', message_text: `<<<UNTRUSTED_DATA>>>\nHola, soy Beto ${RUN}, necesito 300 botellas con logo\n<<<UNTRUSTED_DATA>>>`, message_external_id: `w1-${RUN}` },
+    { created_at: hace(29.9), source: 'ai', message_text: '¡Hola Beto! ¿Para cuándo las necesitás?', message_external_id: `w2-${RUN}` },
+    { created_at: hace(29.5), source: 'user', source_name: 'Rodrigo Mateus', message_text: 'Te paso la cotización mañana', message_external_id: `w3-${RUN}` },
+    { created_at: hace(29), source: 'human', source_name: 'Beto', message_text: '¿Me mandás también precio de mochilas?', message_external_id: `w4-${RUN}` },
+  ];
+  const r = await rpc({ conversation_id: conv2, titulo: `Beto ${RUN}`, atendio: 'Rodrigo Mateus', mensajes });
+  const out = JSON.parse(r.data.result.content[0].text);
+  assert.equal(out.mensajes, 4, r.data.result.content[0].text);
+  // Otra vez lo mismo (la tarea se corrió dos veces): no se duplica.
+  await rpc({ conversation_id: conv2, mensajes });
+  const malo = await rpc({ conversation_id: '5491100000000', mensajes });
+  assert.equal(malo.data.result.isError, true, 'el id completo de Darwin');
+
+  pedidos.length = 0;
+  const res = await api('POST', '/darwin/resumir', {});
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  const p = pedidos.find((x) => x.datos.includes(`Beto ${RUN}`));
+  assert.ok(p, 'Claude recibió la conversación');
+  assert.match(p.datos, /Mensajes del día:\n\d\d:\d\d Cliente: Hola, soy Beto .* 300 botellas con logo/);
+  assert.match(p.datos, /Maru \(IA\): ¡Hola Beto!/);
+  assert.match(p.datos, /Rodrigo Mateus: Te paso la cotización mañana/);
+  assert.ok(!p.datos.includes('UNTRUSTED_DATA'));
+  assert.equal(p.datos.match(/300 botellas con logo/g).length, 1, 'sin mensajes repetidos');
+
+  const tl = await api('GET', `/records/contact/${ct.data.id}/timeline`);
+  assert.equal((tl.data.activities ?? tl.data).filter((a) => a.type === 'whatsapp' && a.meta?.darwin).length, 1);
+  // El cliente escribió después de la última respuesta de la vendedora, hace 29 h: sin respuesta.
+  const pend = await api('GET', '/darwin/pendientes?horas=24');
+  assert.ok(pend.data.pendientes.some((x) => x.conversation_id === conv2), JSON.stringify(pend.data));
+});
+
+test('el conector del Hub tiene su ícono (claude.ai lo muestra)', async () => {
+  const tok = await api('POST', '/tokens', { name: `Claude icono ${RUN}`, source: 'mcp' });
+  const init = await call('POST', `/mcp/${tok.data.token}`, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+  assert.match(init.data.result.serverInfo.icons[0].src, /\/hub-192\.png$/);
+  const fav = await fetch(`${CRM}/favicon.ico`);
+  assert.equal(fav.status, 200);
+  assert.equal(fav.headers.get('content-type'), 'image/png');
+});

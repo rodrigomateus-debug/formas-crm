@@ -297,6 +297,7 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['url_clickup', 'PDV en ClickUp', 'url', 'Pedido', [], RO],
     ['detalle_produccion', 'Detalle de producción', 'text', 'Pedido', [], RO],
     ['entregado_el', 'Entregado el', 'date', 'Pedido', [], RO],
+    ['fecha_pedido', 'Fecha del pedido', 'date', 'Pedido', [], { ...RO, description: 'La fecha del pedido de venta en Finnegans (scripts/pedidos-totales.mjs).' }],
     ['factura_numero', 'Factura', 'string', 'Pedido', [], RO],
     ['hs_billing_address_firstname', 'Nombre (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_lastname', 'Apellido (facturación)', 'string', 'Facturación', [], CORE],

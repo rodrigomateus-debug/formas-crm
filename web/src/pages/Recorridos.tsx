@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
-import { Modal, QuienPidio, alEsc } from '../components';
+import { InfoTip, Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
@@ -38,8 +38,8 @@ interface Base { id: string; nombre: string }
 
 const D = (iso: string) => new Date(`${iso}T12:00:00`);
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const sumar = (dia: string, n: number) => { const d = D(dia); d.setDate(d.getDate() + n); return iso(d); };
-const hoyIso = () => iso(new Date());
+export const sumar = (dia: string, n: number) => { const d = D(dia); d.setDate(d.getDate() + n); return iso(d); };
+export const hoyIso = () => iso(new Date());
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
 const corto = (dia: string) => `${DIAS[D(dia).getDay()].slice(0, 3)} ${D(dia).getDate()}/${D(dia).getMonth() + 1}`;
 // «Hoy», «Mañana», «El lunes 17/11».
@@ -50,7 +50,7 @@ export function cuando(dia: string, hoy = hoyIso()) {
   return `El ${DIAS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
 }
 // El primer día hábil después de hoy: lo que se carga es, en general, para el día siguiente.
-function proximoHabil(desde = hoyIso()) { let d = sumar(desde, 1); while ([0, 6].includes(D(d).getDay())) d = sumar(d, 1); return d; }
+export function proximoHabil(desde = hoyIso()) { let d = sumar(desde, 1); while ([0, 6].includes(D(d).getDay())) d = sumar(d, 1); return d; }
 
 const num = new Intl.NumberFormat('es-AR');
 export const itemTexto = (i: ItemEnc) => [i.cant != null ? num.format(i.cant) : '', i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ');
@@ -89,21 +89,25 @@ export default function RecorridosPage() {
   const ir = (cambios: Record<string, string | null>) => setSp((p) => { const n = new URLSearchParams(p); for (const [k, v] of Object.entries(cambios)) { if (v == null) n.delete(k); else n.set(k, v); } return n; }, { replace: true });
   const cambio = useCallback(() => setVersion((v) => v + 1), []);
   const puede = meta.me.role !== 'viewer';
+  // A la derecha de las pestañas: los botones de la pestaña Destinos (los pone DestinosTab con un portal).
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
   return (
     <div className={`content rc-page${tab === 'destinos' ? ' list-fixed' : ''}`}>
       <div className="page-head">
-        <h1>Recorridos</h1>
+        <h1 className="rc-titulo">Recorridos <InfoTip label="Qué es Recorridos">Lo que necesitás que el chofer lleve o retire un día: muestras, un sobre, mercadería, un trámite. Elegí el destino y te decimos si ese día ya se va ahí.</InfoTip></h1>
         {puede && <button type="button" className="btn primary" onClick={() => setNuevo({})}><Icon name="plus" size={16} />Nuevo encargo</button>}
       </div>
-      <p className="rc-intro muted">Lo que necesitás que el chofer lleve o retire un día: muestras, un sobre, mercadería, un trámite. Elegí el destino y te decimos si ese día ya se va ahí.</p>
+      <div className="rc-tabs-fila">
       <div className="tabs" role="tablist">
         {([['agenda', 'Próximos días'], ['encargos', 'Encargos'], ['destinos', 'Destinos']] as const).map(([k, t]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={`tab${tab === k ? ' on' : ''}`} onClick={() => ir({ tab: k === 'agenda' ? null : k })}>{t}</button>
         ))}
       </div>
+      {tab === 'destinos' && <div className="rc-tab-acciones" ref={setSlot} />}
+      </div>
       {tab === 'agenda' && <Agenda version={version} puede={puede} onNuevo={(destino, fecha) => setNuevo({ destino, fecha })} onAbrir={(id) => ir({ encargo: String(id) })} />}
       {tab === 'encargos' && <ListaEncargos version={version} onAbrir={(id) => ir({ encargo: String(id) })} />}
-      {tab === 'destinos' && <DestinosTab admin={meta.me.role === 'admin' ? <AdminRecorridos /> : null} />}
+      {tab === 'destinos' && <DestinosTab slot={slot} admin={meta.me.role === 'admin' ? <AdminRecorridos abierto /> : null} />}
       {nuevo && <EncargoModal inicial={nuevo} onClose={() => { setNuevo(null); ir({ nuevo: null }); }} onListo={() => { setNuevo(null); ir({ nuevo: null }); cambio(); }} />}
       {abierto && <EncargoModal id={abierto} onClose={() => ir({ encargo: null })} onListo={() => { ir({ encargo: null }); cambio(); }} />}
     </div>
@@ -246,7 +250,7 @@ export const resumen = (e: Pick<Encargo, 'llevar' | 'retirar' | 'notas'>) => [
 
 // ---------- La lista de encargos ----------
 
-function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: number) => void }) {
+export function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: number) => void }) {
   const { meta } = useMeta();
   const toast = useToast();
   const organiza = meta.me.role === 'admin' || (meta.me.role !== 'viewer' && ['logistica', 'produccion'].includes(meta.me.profile));
@@ -319,7 +323,8 @@ function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: nu
 }
 
 // Para los administradores: el número del remito de traslado y traer el historial de la planilla.
-function AdminRecorridos() {
+// Suelto (en la pestaña Destinos se abre en una ventana, con «abierto»: sin el desplegable).
+function AdminRecorridos({ abierto = false }: { abierto?: boolean }) {
   const toast = useToast();
   const { meta } = useMeta();
   const [cfg, setCfg] = useState<{ remito_pv: string; remito_ultimo: number } | null>(null);
@@ -339,8 +344,8 @@ function AdminRecorridos() {
   };
   if (!cfg) return null;
   return (
-    <details className="rc-admin">
-      <summary>Configuración (administradores)</summary>
+    <details className={`rc-admin${abierto ? ' rc-admin-suelto' : ''}`} open={abierto || undefined}>
+      {!abierto && <summary>Configuración (administradores)</summary>}
       <div className="rc-form">
         <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <label className="field">Último número de remito de traslado usado<input className="input" inputMode="numeric" value={ultimo} onChange={(e) => setUltimo(e.target.value.replace(/\D/g, ''))} style={{ width: 160 }} /></label>
@@ -379,10 +384,10 @@ function AdminRecorridos() {
 interface DiaDestino { fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number; cerca: Cerca | null }
 interface InfoDestino { destino: DestinoOpcion; lugar: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null; localidad: string | null } | null;
   dias: DiaDestino[]; habitual: Habitual | null; ultimos: Encargo[] }
-interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; generales?: DestinoOpcion[]; bases: Base[]; organiza: boolean }
+export interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; generales?: DestinoOpcion[]; bases: Base[]; organiza: boolean }
 // En la pantalla la cantidad es el texto que se escribe («2,5»); el servidor la pasa a número.
-type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
-const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
+export type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
+export const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
 
 export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; inicial?: { destino?: DestinoOpcion | null; fecha?: string }; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
@@ -499,7 +504,7 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
   );
 }
 
-function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable: boolean; onCambiar: () => void }) {
+export function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable: boolean; onCambiar: () => void }) {
   return (
     <div className="rc-elegido">
       <LogoLugar nombre={d.nombre} dominio={d.dominio} grande />
@@ -510,7 +515,8 @@ function DestinoElegido({ d, editable, onCambiar }: { d: DestinoOpcion; editable
 }
 
 // Elegir el destino: tus frecuentes y los de tus pedidos (con cuándo ya se va), o buscar en toda la base, o una dirección.
-function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (d: DestinoOpcion) => void }) {
+// autoFocus: en el celular no, así el teclado no tapa las sugerencias (que son el camino de un toque).
+export function ElegirDestino({ sug, onElegir, autoFocus = true }: { sug: Sugerencias | null; onElegir: (d: DestinoOpcion) => void; autoFocus?: boolean }) {
   const [q, setQ] = useState('');
   const [res, setRes] = useState<DestinoOpcion[] | null>(null);
   const [otro, setOtro] = useState(false);
@@ -524,7 +530,7 @@ function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (
   return (
     <div className="rc-elegir">
       <div className="search"><Icon name="search" />
-        <input className="input" autoFocus placeholder="Buscá el lugar: proveedor, cliente, expreso, calle…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destino" />
+        <input className="input" autoFocus={autoFocus} type="search" enterKeyHint="search" placeholder="Buscá el lugar: proveedor, cliente, expreso, calle…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destino" />
       </div>
       {res && (
         <ul className="rc-res">
@@ -611,7 +617,7 @@ const Radar = () => (
 );
 
 // Los próximos días hábiles para ese destino: cuáles ya tienen viaje ahí y cuáles son los de siempre.
-function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpcion; fecha: string; editable: boolean; onFecha: (f: string) => void }) {
+export function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpcion; fecha: string; editable: boolean; onFecha: (f: string) => void }) {
   const [info, setInfo] = useState<InfoDestino | null>(null);
   useEffect(() => {
     let vivo = true;
@@ -667,7 +673,7 @@ function ElegirDia({ destino, fecha, editable, onFecha }: { destino: DestinoOpci
   );
 }
 
-function Items({ titulo, ayuda, items, onChange, editable }: { titulo: string; ayuda: string; items: ItemForm[]; onChange: (x: ItemForm[]) => void; editable: boolean }) {
+export function Items({ titulo, ayuda, items, onChange, editable }: { titulo: string; ayuda: string; items: ItemForm[]; onChange: (x: ItemForm[]) => void; editable: boolean }) {
   const set = (i: number, k: keyof ItemForm, v: string) => onChange(items.map((x, j) => (j === i ? { ...x, [k]: k === 'cant' ? (v.replace(/[^\d.,]/g, '') || null) : v || (k === 'pdv' ? null : '') } : x)));
   return (
     <div className="rc-items">

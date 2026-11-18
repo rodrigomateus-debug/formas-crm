@@ -247,5 +247,5 @@ ${admin ? '<li>Como sos administrador, puede cargar y cambiar cualquier cosa.</l
 <p class="chico">Vuelve a ${esc(d.host ?? '')}. Lo podés desconectar cuando quieras desde el CRM (abajo a la izquierda, «Conectar con Claude»).</p>`
     : `<p>${esc(d.texto ?? '')}</p>`}
 </main></body></html>`;
-  return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', ...NO_GUARDAR } });
+  return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'x-frame-options': 'DENY', 'referrer-policy': 'same-origin', ...NO_GUARDAR } });
 }

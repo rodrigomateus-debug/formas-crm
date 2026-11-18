@@ -40,6 +40,14 @@ function convert(p: Property | undefined, v: unknown, owners: Map<string, number
 // Desplegables cuyas opciones son las del CRM: la sincronización con HubSpot no les suma las suyas.
 const LISTAS_PROPIAS = new Set(['order:hs_pipeline_stage', 'deal:motivo_de_cierre_perdido']);
 
+// Propiedades que llena el CRM (Finnegans, ClickUp, sus reglas): HubSpot no las pisa aunque también las tenga.
+const CRM_PROPIAS = new Set([
+  'company:cada_cuanto_compra', 'company:cantidad_de_compras', 'company:compra_12m_usd', 'company:compra_historica_usd', 'company:estado_cliente',
+  'company:fecha_primera_compra', 'company:fecha_ultima_compra', 'company:saldo_pendiente', 'company:saldo_vencido', 'company:ticket_promedio_usd',
+  'company:tipo_de_relacion', 'company:unidad_finnegans', 'company:unidades_de_negocio', 'company:vendedora_finnegans', 'company:proveedor_de',
+  'contact:tipo_de_relacion', 'deal:monto_a_mano',
+]);
+
 // Lo que manda ClickUp en un pedido (ver clickup.ts): en un pedido migrado vale más que lo que traía HubSpot.
 const CLICKUP_PROPS = ['hs_pipeline_stage', 'unidad_de_negocio', 'cliente_clickup', 'pedido_finnegans', 'url_clickup', 'detalle_produccion', 'entregado_el', 'factura_numero'];
 const clickupOrders: Array<{ id: number; pdv: string }> = [];
@@ -57,7 +65,7 @@ migrate.get('/properties', async (c) => {
 
 migrate.post('/', async (c) => {
   const db = c.env.DB;
-  const body = await c.req.json<{ kind: string; items?: any[]; offset?: number; limit?: number }>();
+  const body = await c.req.json<{ kind: string; items?: any[]; offset?: number; limit?: number; force?: boolean; replace?: Array<number | string>; replace_links?: boolean; ids?: Array<number | string>; owner_hs?: string }>();
   const items = body.items ?? [];
   const stmts: D1PreparedStatement[] = [];
   const meta = new Meta(db);
@@ -126,16 +134,27 @@ migrate.post('/', async (c) => {
       const owners = await ownerIds(db);
       clickupOrders.length = 0;
       sameKey.length = 0;
+      // Lo que ya está en el CRM: las propiedades de HubSpot se aplican encima (no se reemplaza el JSON entero), así no se
+      // pierde lo que es solo del CRM (tipo de relación, compras de Finnegans, lo de ClickUp…).
+      const prev = new Map<number, Props>();
+      const ids = items.map((r) => Number(r.hs_id));
+      if (ids.length) {
+        const { results } = await db.prepare('SELECT id, props FROM records WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<{ id: number; props: string }>();
+        for (const row of results) prev.set(row.id, JSON.parse(row.props || '{}'));
+      }
+      const guard = body.force ? '' : 'WHERE records.updated_at <= excluded.updated_at';
       for (const r of items) {
         const type = HS_TYPES[r.type] ?? r.type as ObjectType;
         const defs = await meta.properties(type);
         const props: Props = {};
+        const vaciadas: string[] = [];
         for (const [k, raw] of Object.entries(r.props ?? {})) {
           const name = k === 'hubspot_owner_id' ? 'owner_id' : k;
           const def = defs.find((d) => d.name === name);
-          if (!def || def.read_only) continue;
+          if (!def || def.read_only || CRM_PROPIAS.has(`${type}:${name}`)) continue;
           const v = convert(def, raw, owners);
           if (v != null) props[name] = v;
+          else vaciadas.push(name);
         }
         if (type === 'contact' && props.firstname && props.lastname) Object.assign(props, splitName(props.firstname, props.lastname));
         if (type === 'order' && props.hs_pipeline_stage) props.hs_pipeline_stage = ORDER_STAGE_ALIAS[String(props.hs_pipeline_stage)] ?? props.hs_pipeline_stage;
@@ -143,6 +162,16 @@ migrate.post('/', async (c) => {
         // El workflow de Darwin inventaba mails (incompleto<teléfono>@gmail.com) para no duplicar: acá el contacto se busca por teléfono.
         if (type === 'contact' && /^incompleto[^@]*@gmail\.com$/i.test(String(props.email ?? ''))) delete props.email;
         const id = Number(r.hs_id);
+        // Encima de lo que ya tenía: lo que se vació en HubSpot se vacía (salvo en pedidos, que completan ClickUp y
+        // Finnegans) y lo que manda ClickUp en un pedido no lo pisa HubSpot.
+        const antes = prev.get(id);
+        if (antes) {
+          const merged: Props = { ...antes, ...props };
+          if (type !== 'order') for (const k of vaciadas) delete merged[k];
+          if (type === 'order') for (const k of CLICKUP_PROPS) if (antes[k] != null && antes[k] !== '') merged[k] = antes[k];
+          for (const k of Object.keys(props)) delete props[k];
+          Object.assign(props, merged);
+        }
         if (!r.archived && type === 'contact' && props.email) sameKey.push({ id, type, by: 'email', key: String(props.email).trim().toLowerCase() });
         const tel = type === 'contact' ? normPhone(props.phone || props.mobilephone) : null;
         if (!r.archived && tel) sameKey.push({ id, type: 'contact', by: 'phone', key: tel });
@@ -157,8 +186,9 @@ migrate.post('/', async (c) => {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hubspot', ?, ?, ?)
           ON CONFLICT (id) DO UPDATE SET name = excluded.name, props = excluded.props, owner_id = excluded.owner_id, email = excluded.email,
             domain = excluded.domain, phone = excluded.phone, pipeline_id = excluded.pipeline_id, stage_id = excluded.stage_id, amount = excluded.amount,
-            close_date = excluded.close_date, stage_entered_at = excluded.stage_entered_at, updated_at = excluded.updated_at, archived = excluded.archived
-          WHERE records.updated_at <= excluded.updated_at`)
+            close_date = excluded.close_date, stage_entered_at = excluded.stage_entered_at, updated_at = MAX(records.updated_at, excluded.updated_at),
+            archived = CASE WHEN records.merged_into IS NOT NULL THEN 1 ELSE excluded.archived END
+          ${guard}`)
           .bind(id, type, displayName(type, props), JSON.stringify(props), (props.owner_id as number) ?? null,
             type === 'contact' ? (props.email as string) ?? null : type === 'order' ? (props.hs_billing_address_email as string) ?? null : null,
             type === 'company' ? normDomain(props.domain || props.website) : type === 'contact' ? emailDomain(props.email) : null,
@@ -178,10 +208,18 @@ migrate.post('/', async (c) => {
       break;
     }
     case 'associations': {
+      // Con `replace`, las asociaciones de esos registros con otros de HubSpot quedan exactamente como las manda (sin las
+      // que se sacaron allá). Las que tienen con registros propios del CRM (pedidos de ClickUp/Finnegans…) no se tocan.
+      const scope = (body.replace ?? []).map(Number);
+      if (scope.length) {
+        const j = JSON.stringify(scope);
+        stmts.push(db.prepare(`DELETE FROM associations WHERE (from_id IN (SELECT value FROM json_each(?1)) AND to_id < ?2)
+          OR (to_id IN (SELECT value FROM json_each(?1)) AND from_id < ?2)`).bind(j, NATIVE_ID_START));
+      }
       for (const a of items) {
         const sql = `INSERT INTO associations (from_type, from_id, to_type, to_id, label, is_primary)
           SELECT f.object_type, f.id, t.object_type, t.id, ?, ? FROM records f, records t WHERE f.id = ? AND t.id = ?
-          ON CONFLICT (from_id, to_id) DO UPDATE SET is_primary = MAX(is_primary, excluded.is_primary)`;
+          ON CONFLICT (from_id, to_id) DO UPDATE SET is_primary = ${scope.length ? 'excluded.is_primary' : 'MAX(is_primary, excluded.is_primary)'}`;
         stmts.push(db.prepare(sql).bind(a.label ?? null, a.primary ? 1 : 0, Number(a.from), Number(a.to)));
         stmts.push(db.prepare(sql).bind(a.label ?? null, a.primary ? 1 : 0, Number(a.to), Number(a.from)));
       }
@@ -189,14 +227,18 @@ migrate.post('/', async (c) => {
     }
     case 'activities': {
       const owners = await ownerIds(db);
+      const guard = body.force ? '' : 'WHERE activities.updated_at <= excluded.updated_at';
       for (const a of items) {
         const id = Number(a.hs_id);
+        // Con `replace_links`, la actividad queda asociada solo a lo que dice HubSpot (entre registros de HubSpot).
+        if (body.replace_links) stmts.push(db.prepare('DELETE FROM activity_links WHERE activity_id = ? AND record_id < ?').bind(id, NATIVE_ID_START));
         stmts.push(db.prepare(`INSERT INTO activities (id, type, occurred_at, owner_id, subject, body, direction, status, outcome, due_at, completed_at,
             priority, task_type, meta, thread_id, created_at, updated_at, source, hs_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'hubspot', ?)
           ON CONFLICT (id) DO UPDATE SET occurred_at = excluded.occurred_at, owner_id = excluded.owner_id, subject = excluded.subject, body = excluded.body,
             status = excluded.status, outcome = excluded.outcome, due_at = excluded.due_at, completed_at = excluded.completed_at, priority = excluded.priority,
-            meta = excluded.meta, updated_at = excluded.updated_at WHERE activities.updated_at <= excluded.updated_at`)
+            direction = excluded.direction, task_type = excluded.task_type, thread_id = excluded.thread_id,
+            meta = excluded.meta, updated_at = MAX(activities.updated_at, excluded.updated_at), archived = 0 ${guard}`)
           .bind(id, a.type, a.occurred_at ?? a.created_at ?? now(), owners.get(String(a.owner_hs)) ?? null, (a.subject ?? '').slice(0, 500),
             (a.body ?? '').slice(0, 30000), a.direction ?? null, a.status ?? null, a.outcome ?? null, a.due_at ?? null, a.completed_at ?? null,
             a.priority ?? null, a.task_type ?? null, JSON.stringify(a.meta ?? {}), a.thread_id ?? null, a.created_at ?? now(), a.updated_at ?? a.created_at ?? now(), String(a.hs_id)));
@@ -207,9 +249,10 @@ migrate.post('/', async (c) => {
       break;
     }
     case 'finalize': {
-      // Recalcula Última actividad / Último contacto / Próxima actividad por tramos de ids.
+      // Recalcula Última actividad / Último contacto / Próxima actividad por tramos de ids (o solo los `ids` que se tocaron).
       const limit = Math.min(body.limit ?? 2000, 5000);
-      const { results } = await db.prepare('SELECT id FROM records ORDER BY id LIMIT ? OFFSET ?').bind(limit, body.offset ?? 0).all<{ id: number }>();
+      const results = body.ids ? body.ids.slice(0, 5000).map((id) => ({ id: Number(id) }))
+        : (await db.prepare('SELECT id FROM records ORDER BY id LIMIT ? OFFSET ?').bind(limit, body.offset ?? 0).all<{ id: number }>()).results;
       if (!results.length) return c.json({ done: true });
       const ts = now();
       await db.prepare(`UPDATE records SET
@@ -219,7 +262,34 @@ migrate.post('/', async (c) => {
         next_activity_at = (SELECT MIN(COALESCE(a.due_at, a.occurred_at)) FROM activities a JOIN activity_links l ON l.activity_id = a.id
           WHERE l.record_id = records.id AND a.archived = 0 AND ((a.type = 'task' AND a.status != 'COMPLETED') OR (a.type = 'meeting' AND a.occurred_at > ?1)))
         WHERE id IN (SELECT value FROM json_each(?2))`).bind(ts, JSON.stringify(results.map((r) => r.id))).run();
-      return c.json({ done: results.length < limit, next: (body.offset ?? 0) + results.length });
+      return c.json({ done: !!body.ids || results.length < limit, next: (body.offset ?? 0) + results.length });
+    }
+    case 'owned': {
+      // Lo que el CRM tiene de un propietario de HubSpot (para reconciliar 1 a 1 con su HubSpot): sus registros traídos de
+      // HubSpot y las actividades de HubSpot que son suyas o cuelgan de esos registros. Con los totales para el control.
+      const hs = String(body.owner_hs ?? '');
+      const user = await db.prepare('SELECT id FROM users WHERE hs_owner_id = ?').bind(hs).first<{ id: number }>();
+      if (!user) throw new HttpError(404, `No hay usuario del CRM para el propietario ${hs}`);
+      const [recs, acts] = await db.batch([
+        db.prepare('SELECT id, object_type FROM records WHERE owner_id = ? AND archived = 0 AND id < ?').bind(user.id, NATIVE_ID_START),
+        db.prepare(`SELECT id, type FROM activities WHERE owner_id = ?1 AND archived = 0 AND id < ?2
+          UNION SELECT a.id, a.type FROM records r JOIN activity_links l ON l.record_id = r.id JOIN activities a ON a.id = l.activity_id
+          WHERE r.owner_id = ?1 AND r.archived = 0 AND a.archived = 0 AND a.id < ?2`).bind(user.id, NATIVE_ID_START),
+      ]);
+      return c.json({ user_id: user.id, records: recs.results, activities: acts.results });
+    }
+    case 'archive': {
+      // Lo que ya no está en HubSpot (borrado o combinado allá): se archiva, como «Eliminar» en el CRM, con su historial.
+      const ts = now();
+      for (const it of items) {
+        const id = Number(it.id);
+        if (!(id < NATIVE_ID_START)) continue;
+        if (it.kind === 'activity') { stmts.push(db.prepare('UPDATE activities SET archived = 1, updated_at = ? WHERE id = ?').bind(ts, id)); continue; }
+        stmts.push(db.prepare(`INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, source)
+          SELECT id, 'archived', 'false', 'true', ?, 'hubspot' FROM records WHERE id = ? AND archived = 0`).bind(ts, id));
+        stmts.push(db.prepare('UPDATE records SET archived = 1, updated_at = ? WHERE id = ?').bind(ts, id));
+      }
+      break;
     }
     case 'stats': {
       const [r, a, u] = await db.batch([

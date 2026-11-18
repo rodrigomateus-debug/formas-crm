@@ -19,6 +19,7 @@ import { aplicarImagenes, cargarProductosPendientes } from './productos';
 import { estadoOrdenesCompra, sincronizarOrdenesCompra } from './ordenescompra';
 import { aplicarCostosLogo } from './costoslogo';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
+import { guardarEvento } from './darwin';
 import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
@@ -173,6 +174,24 @@ hooks.post('/darwin', (c) => run(c.env, c.req.raw, 'darwin', async (raw) => {
     note: summary ? `Resumen de Darwin${d.forwardType ? ` (${d.forwardType})` : ''}:\n${summary}` : undefined,
   };
 }));
+
+// Darwin → actividad diaria (darwin.ts, docs/DARWIN.md § 4): el workflow «Formas Shop → CRM: actividad» manda cada evento de
+// las conversaciones (abierta, respondida, pasada a una vendedora, analizada, cerrada). Solo se guarda: el resumen del día lo
+// arma el CRM a la madrugada. Con el mismo token tipo «Darwin».
+hooks.post('/darwin/evento', async (c) => {
+  let body: Record<string, any> = {};
+  try {
+    if (!/^Bearer fcrm_/.test(c.req.header('authorization') ?? '') && !c.req.query('token')) throw new HttpError(401, 'Falta el token de integración (Authorization: Bearer fcrm_…).');
+    await authenticate(c.env, c.req.raw);
+    body = await readBody(c.req.raw);
+    const r = await guardarEvento(c.env, body);
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    const status = e instanceof HttpError ? e.status : 500;
+    await log(c.env, 'darwin-evento', body, { error: (e as Error).message }, false).catch(() => {});
+    return c.json({ ok: false, error: (e as Error).message }, status as 400);
+  }
+});
 
 // Prospección por LinkedIn (reemplaza al Zap): HeyReach u otra herramienta manda el lead directo.
 // Deduplica por la URL del perfil (el Zap creaba el mismo perfil varias veces) y separa bien nombre y apellido.

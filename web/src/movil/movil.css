@@ -1,0 +1,526 @@
+/* Versión celular del Hub (Movil.tsx). Mismos tokens que el escritorio (styles.css), así sigue el tema de cada uno.
+   Como el escritorio, la pantalla no se desplaza entera: arriba la barra, abajo las pestañas y, en el medio, lo que
+   corresponde se desplaza solo. Todo lo que se toca mide 44px o más. */
+
+.m-shell { display: flex; flex-direction: column; height: 100dvh; background: var(--ui-canvas); }
+.m-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.m-main > .content { padding: 16px 16px 32px; }
+
+/* Arriba: tu avatar (abre el menú), el buscador y la campanita. */
+.m-top { flex: none; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 12px 8px; background: var(--ui-surface); border-bottom: 1px solid var(--ui-line); }
+.m-yo { flex: none; padding: 0; border: 0; background: none; border-radius: 50%; width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+.m-yo .avatar { width: 34px; height: 34px; }
+.m-buscar { flex: 1; min-width: 0; }
+.m-buscar .gsearch { width: 100%; position: static; }
+.m-buscar .gsearch .popover { position: fixed; left: 8px; right: 8px; top: calc(56px + env(safe-area-inset-top)); max-height: 70dvh; overflow: auto; }
+
+/* Abajo: las cinco pestañas, con el ＋ en el medio. */
+.m-tabs { flex: none; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--ui-surface); border-top: 1px solid var(--ui-line); padding-bottom: env(safe-area-inset-bottom); }
+.m-tab { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; color: var(--text-3);
+  font: 500 11px/1.2 var(--font); text-decoration: none; background: none; border: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.m-tab.active { color: var(--accent-ink); }
+.m-tab.active svg { stroke-width: 2.2; }
+.m-mas-btn { width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); box-shadow: var(--shadow-float); transform: translateY(-8px); }
+.m-mas:active .m-mas-btn { transform: translateY(-8px) scale(.94); }
+.m-badge { position: absolute; top: 6px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ui-negative); color: var(--on-negative); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+.m-badge.mencion { background: var(--accent); color: var(--on-accent); }
+
+/* Páginas propias de la versión celular. */
+.m-pag { flex: 1; overflow: auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px; }
+.m-pag > * { flex-shrink: 0; }
+.m-pag h1 { font-size: 24px; margin: 0; }
+.m-saludo p { margin: 2px 0 0; }
+.m-pag-cab { display: flex; align-items: center; gap: 8px; }
+
+.m-cta { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 14px; border-radius: var(--r-panel); border: 0; cursor: pointer;
+  background: var(--ui-surface-navy); color: var(--ui-ink-on-navy-strong); font: inherit; }
+.m-cta b { display: block; font-size: 15px; }
+.m-cta small { display: block; color: var(--ui-ink-on-navy); font-size: 12px; margin-top: 2px; }
+.m-cta > span:nth-child(2) { flex: 1; min-width: 0; }
+.m-cta > svg:last-child { transform: rotate(180deg); opacity: .7; flex: none; }
+.m-cta-ico { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-surface-navy-2); color: var(--formas-green); }
+
+.m-sec { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); overflow: hidden; }
+.m-sec-cab { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+.m-sec-cab h2 { font-size: 15px; margin: 0; }
+.m-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--r-pill); }
+.m-pill.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.m-link { display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 6px 0; color: var(--accent-ink); font: 500 13px var(--font); cursor: pointer; text-decoration: none; }
+.m-vacio { padding: 6px 14px 16px; color: var(--text-3); font-size: 13px; }
+.m-ver { display: block; padding: 12px 14px; border-top: 1px solid var(--ui-line); font-size: 13px; font-weight: 500; color: var(--accent-ink); text-decoration: none; }
+
+.m-item { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; border-top: 1px solid var(--ui-line); color: inherit; text-decoration: none; }
+.m-sec-cab + .m-item, .m-sec-cab + .cargando + .m-item { border-top: 0; }
+.m-item-link:active { background: var(--row-hover); }
+.m-item-txt { flex: 1; min-width: 0; }
+.m-item-txt b { display: flex; align-items: center; gap: 6px; font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
+.m-item-txt small { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-item-txt small a { color: inherit; text-decoration: underline; text-decoration-color: var(--ui-line-strong); }
+.m-check { width: 26px; height: 26px; }
+.m-fecha { flex: none; width: 64px; font-size: 12px; color: var(--ui-ink-2); }
+.m-fecha b { font-weight: 600; }
+
+/* Botones y formularios cómodos con el dedo; 16px en los campos para que el iPhone no haga zoom. */
+.btn.m-grande { width: 100%; height: 48px; font-size: 15px; justify-content: center; }
+body.movil .input, body.movil select, body.movil textarea { font-size: 16px; }
+body.movil .input:not(textarea) { min-height: 44px; }
+body.movil .input.sm { min-height: 40px; }
+.m-form { display: flex; flex-direction: column; gap: 14px; }
+.m-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.m-chips .chip { min-height: 38px; padding: 0 14px; font-size: 14px; }
+.m-sub { margin: 16px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+
+/* Hoja que sube desde abajo (＋, el menú del avatar, la tarea rápida). */
+.m-hoja-fondo { position: fixed; inset: 0; z-index: 70; background: var(--scrim); display: flex; align-items: flex-end; animation: fade-in var(--dur) var(--ease); }
+.m-hoja { width: 100%; max-height: 88dvh; display: flex; flex-direction: column; background: var(--ui-surface); border-radius: 16px 16px 0 0; box-shadow: var(--shadow-float);
+  padding-bottom: env(safe-area-inset-bottom); animation: m-subir var(--dur-slow) var(--ease-out); }
+.m-hoja-cab { position: relative; display: flex; align-items: center; gap: 8px; padding: 18px 12px 6px 18px; }
+.m-hoja-cab h2 { flex: 1; margin: 0; font-size: 17px; }
+.m-hoja-asa { position: absolute; top: 7px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--ui-line-strong); }
+.m-hoja-cuerpo { overflow: auto; padding: 6px 18px 18px; }
+@keyframes m-subir { from { transform: translateY(100%); } to { transform: none; } }
+
+.m-ops { display: flex; flex-direction: column; gap: 4px; }
+.m-op { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 4px; text-align: left; background: none; border: 0; border-radius: var(--r-control); cursor: pointer; font: inherit; color: inherit; }
+.m-op:active { background: var(--row-hover); }
+.m-op b { display: block; font-size: 15px; font-weight: 500; }
+.m-op small { display: block; font-size: 12px; color: var(--text-3); }
+.m-op-ico { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+
+.m-lista-menu { display: flex; flex-direction: column; }
+.m-lista-menu > button, .m-lista-menu > a { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 4px; background: none; border: 0; border-bottom: 1px solid var(--ui-line);
+  font: 400 15px var(--font); color: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.m-lista-menu > :last-child { border-bottom: 0; }
+.m-lista-menu svg { color: var(--ui-ink-2); }
+
+/* Recorridos: la lista de encargos, sin la barra de filtros apretada. */
+.m-rc-lista .toolbar { flex-wrap: wrap; gap: 8px; }
+.m-rc-lista .toolbar .row { flex-wrap: wrap; }
+
+/* El asistente del encargo: a pantalla completa, un paso por pantalla, el botón para seguir siempre abajo a mano. */
+.m-shell.m-full .m-main { background: var(--ui-surface); }
+.m-asis { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--ui-surface); }
+.m-asis-cab { position: relative; flex: none; display: flex; align-items: center; gap: 8px; padding: calc(8px + env(safe-area-inset-top)) 8px 10px; border-bottom: 1px solid var(--ui-line); }
+.m-asis-tit { flex: 1; min-width: 0; text-align: center; }
+.m-asis-tit b { display: block; font-size: 15px; }
+.m-asis-tit small { display: block; font-size: 12px; color: var(--text-3); }
+.m-asis-barra { position: absolute; left: 0; right: 0; bottom: -1px; height: 3px; background: var(--ui-surface-sunken); }
+.m-asis-barra i { display: block; height: 100%; background: var(--accent); transition: width var(--dur-slow) var(--ease-out); }
+.m-asis-cuerpo { flex: 1; overflow: auto; padding: 16px; }
+.m-asis-cuerpo .rc-paso { display: flex; flex-direction: column; gap: 14px; }
+.m-asis-cuerpo .rc-paso h3 { margin: 4px 0 0; font-size: 17px; }
+.m-asis-pie { flex: none; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--ui-line); background: var(--ui-surface); }
+.m-asis-resumen { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.m-asis-resumen span { color: var(--ui-ink-2); }
+.m-asis-resumen .m-link { margin-left: auto; padding: 0; }
+.m-switch { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 14px; }
+.m-switch input { width: 20px; height: 20px; }
+.m-mas-datos { border: 1px solid var(--ui-line); border-radius: var(--r-control); padding: 0 12px; }
+.m-mas-datos summary { min-height: 44px; display: flex; align-items: center; font-size: 13px; color: var(--ui-ink-2); cursor: pointer; }
+.m-mas-datos[open] { padding-bottom: 12px; }
+.m-mas-datos[open] > :not(summary) + :not(summary), .m-mas-datos[open] > summary + * { margin-top: 10px; }
+
+/* Las piezas del encargo de escritorio, acomodadas al ancho del celular. */
+.m-asis .rc-sug-grid { grid-template-columns: 1fr; }
+.m-asis .rc-tira { margin: 0 -16px; padding: 0 16px 4px; scroll-padding-inline: 16px; scroll-snap-type: x proximity; }
+.m-asis .rc-d { width: 70px; min-height: 64px; scroll-snap-align: start; }
+.m-asis .rc-item { grid-template-columns: 76px minmax(0, 1fr) 40px; grid-template-areas: "que que que" "cant pdv x"; row-gap: 6px; padding-bottom: 10px; border-bottom: 1px dashed var(--ui-line); }
+.m-asis .rc-item > :nth-child(1) { grid-area: cant; }
+.m-asis .rc-item > :nth-child(2) { grid-area: que; }
+.m-asis .rc-item > :nth-child(3) { grid-area: pdv; max-width: 120px; }
+.m-asis .rc-item > :nth-child(4) { grid-area: x; }
+.m-asis .rc-2 { grid-template-columns: 1fr; }
+
+/* Los modales del escritorio (crear un registro, abrir un encargo) ocupan toda la pantalla. */
+body.movil .overlay.center { padding: 0; align-items: stretch; }
+body.movil .modal, body.movil .modal.wide { width: 100%; max-height: none; height: 100dvh; border-radius: 0; }
+body.movil .modal-head { padding-top: calc(12px + env(safe-area-inset-top)); }
+body.movil .modal-foot { padding-bottom: calc(12px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+body.movil .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+body.movil:has(.m-full) .toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
+
+/* ---------- Clientes (ClientesMovil.tsx) ---------- */
+
+/* Empresas | Contactos: un control segmentado. */
+.m-seg { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: var(--ui-surface-sunken); }
+.m-seg-op { display: grid; place-items: center; min-height: 38px; border-radius: 8px; font: 500 14px var(--font); color: var(--ui-ink-2); text-decoration: none; }
+.m-seg-op.active { background: var(--ui-surface); color: var(--ui-ink); box-shadow: 0 1px 2px rgba(18, 20, 58, .12); }
+.m-fila { display: flex; align-items: center; gap: 8px; }
+.m-vacio-solo { padding: 24px 4px; text-align: center; }
+
+.m-item-cuerpo { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; color: inherit; text-decoration: none; min-height: 44px; }
+.m-item-cuerpo:active { opacity: .7; }
+.m-ico-btn { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; color: var(--accent-ink); background: var(--accent-soft); }
+.m-ico-btn.wa { color: #1c8a4a; background: rgba(37, 211, 102, .12); }
+[data-theme="dark"] .m-ico-btn.wa { color: #6fd07f; }
+
+/* La ficha */
+.m-ficha-cab { display: flex; align-items: center; gap: 14px; }
+.m-ficha-cab .avatar { flex: none; }
+.m-ficha-tit { min-width: 0; }
+.m-ficha-tit h1 { font-size: 22px; line-height: 1.2; overflow-wrap: anywhere; }
+.m-ficha-tit p { margin: 4px 0 0; font-size: 13px; }
+.m-ficha-tit a { color: inherit; text-decoration: underline; text-decoration-color: var(--ui-line-strong); }
+
+.m-acciones { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.m-accion { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 2px; border-radius: var(--r-panel); background: var(--ui-surface); border: 1px solid var(--ui-line);
+  font: 500 12px var(--font); color: var(--ui-ink); text-decoration: none; }
+.m-accion > span { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.m-accion.wa > span { color: #1c8a4a; background: rgba(37, 211, 102, .12); }
+[data-theme="dark"] .m-accion.wa > span { color: #6fd07f; }
+.m-accion:active { background: var(--row-hover); }
+.m-accion.off { color: var(--text-3); opacity: .55; }
+.m-accion.off > span { background: var(--ui-surface-sunken); color: var(--text-3); }
+
+.m-rapidas { display: flex; gap: 8px; }
+.m-rapidas .btn { flex: 1; height: 42px; justify-content: center; }
+
+.m-datos { margin: 0; }
+.m-dato { display: flex; align-items: baseline; gap: 12px; width: 100%; min-height: 48px; padding: 10px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-dato:first-child { border-top: 0; }
+.m-dato:not(:disabled):active { background: var(--row-hover); }
+.m-dato:disabled { cursor: default; }
+.m-dato dt { flex: none; width: 40%; font-size: 12px; color: var(--text-3); }
+.m-dato dd { flex: 1; min-width: 0; margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.m-dato dd.muted { color: var(--accent-ink); font-size: 13px; }
+.m-dato:disabled dd.muted { color: var(--text-3); }
+
+.m-act { display: flex; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--ui-line); }
+.m-sec-cab + .m-act { border-top: 0; }
+.m-act-ico { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-surface-sunken); color: var(--ui-ink-2); }
+.m-act-ico.t-call, .m-act-ico.t-whatsapp { color: var(--ui-positive-ink); background: var(--ui-positive-soft); }
+.m-act-ico.t-email { color: var(--ui-info-ink); background: var(--ui-info-soft); }
+.m-act-ico.t-task { color: var(--ui-warning-ink); background: var(--ui-warning-soft); }
+.m-act .m-item-txt b { white-space: normal; }
+.m-act-txt { margin: 2px 0; font-size: 13px; color: var(--ui-ink-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tachada { text-decoration: line-through; color: var(--text-3); }
+
+/* Formularios cortos de las hojas */
+.m-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.m-form .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ui-ink-2); }
+.m-elegida { display: flex; align-items: baseline; gap: 8px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.m-elegida .m-link { margin-left: auto; padding: 0; }
+.m-opciones { display: flex; flex-direction: column; border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; }
+.m-opciones button { min-height: 44px; padding: 0 12px; text-align: left; background: var(--ui-surface); border: 0; border-top: 1px solid var(--ui-line); font: 400 15px var(--font); color: var(--ui-ink); cursor: pointer; }
+.m-opciones button:first-child { border-top: 0; }
+.chip.sm { min-height: 32px; padding: 0 10px; font-size: 13px; }
+.m-sec > .m-item:first-child { border-top: 0; }
+
+/* En el celular no hay «pasar el mouse»: los links no se subrayan al tocarlos. */
+.m-shell a:hover { text-decoration: none; }
+/* Los avisos del día («Mañana ya van…») en párrafo, con el punto adelante, no en columnas. */
+.m-asis .rc-pista .rc-va { display: block; font-size: 14px; }
+.m-asis .rc-pista .rc-va i { margin-right: 6px; vertical-align: 1px; }
+.m-asis .rc-mejor { display: block; }
+.m-asis .rc-mejor .cr-link { display: inline-flex; margin-left: 4px; }
+
+/* ---------- Ventas (VentasMovil.tsx) ---------- */
+
+/* Etapas en una sola fila que se desliza de costado. */
+.m-chips-scroll { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; }
+.m-chips-scroll::-webkit-scrollbar { display: none; }
+.m-chips-scroll .chip { flex: none; white-space: nowrap; }
+.m-pill.nuevo { background: var(--accent); color: var(--on-accent); margin-left: 6px; }
+.m-monto { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 13px; }
+.m-monto small { font-size: 11px; }
+.m-seg-op { border: 0; background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; }
+
+/* Ficha del negocio: el monto y la etapa bien a la vista; la etapa se toca para cambiarla. */
+.m-negocio-sub { margin: 4px 0 0; font-size: 15px; }
+.m-etapa { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; padding: 12px 14px; text-align: left; border-radius: var(--r-panel); cursor: pointer;
+  border: 1px solid var(--ui-line); background: var(--ui-surface); font: inherit; color: inherit; }
+.m-etapa > span:first-child { flex: 1; min-width: 0; }
+.m-etapa small { display: block; font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; }
+.m-etapa b { font-size: 16px; font-weight: 600; }
+.m-etapa.ganado { border-color: var(--ui-positive); background: var(--ui-positive-soft); }
+.m-etapa.perdido { border-color: var(--ui-negative); background: var(--ui-negative-soft); }
+.m-etapa-barra { order: 3; flex-basis: 100%; display: flex; gap: 3px; }
+.m-etapa-barra i { flex: 1; height: 4px; border-radius: 2px; background: var(--ui-surface-sunken); }
+.m-etapa-barra i.on { background: var(--accent); }
+.m-etapa:disabled { cursor: default; }
+
+.m-etapas { display: flex; flex-direction: column; }
+.m-etapas button { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 6px; border: 0; border-bottom: 1px solid var(--ui-line); background: none;
+  font: 400 15px var(--font); color: var(--ui-ink); text-align: left; cursor: pointer; }
+.m-etapas button:last-child { border-bottom: 0; }
+.m-etapas button.on { font-weight: 600; color: var(--accent-ink); }
+.m-etapas button svg { margin-left: auto; }
+.m-etapa-punto { flex: none; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--ui-line-strong); }
+.m-etapas button.on .m-etapa-punto { border-color: var(--accent); background: var(--accent); }
+.m-etapas .ganado .m-etapa-punto { border-color: var(--ui-positive); }
+.m-etapas .perdido .m-etapa-punto { border-color: var(--ui-negative); }
+
+/* Con la conversación abierta, la ficha no se desplaza entera: la conversación llena lo que queda y escribe abajo. */
+.m-pag.m-con-chat { overflow: hidden; padding-bottom: 0; gap: 12px; }
+.m-pag.m-con-chat > .m-conv { flex: 1 1 0; min-height: 0; height: auto; margin: 0 -16px; border-radius: 0; border-left: 0; border-right: 0; border-bottom: 0; }
+
+/* Pedido */
+.m-pedido-estado { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.m-etapa-chip { flex: none; max-width: 45%; font-size: 12px; }
+.m-etapa-chip .etapa { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.m-art-img { flex: none; width: 48px; height: 48px; border-radius: 8px; object-fit: contain; background: var(--image-well); border: 1px solid var(--ui-line); }
+.m-art-img.vacia { display: grid; place-items: center; color: var(--text-3); background: var(--ui-surface-sunken); }
+.m-art-nombre { white-space: normal !important; display: -webkit-box !important; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.m-art-estado { flex: none; max-width: 32%; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: var(--r-pill); text-align: center;
+  background: color-mix(in srgb, var(--c, var(--ui-ink-3)) 16%, transparent); color: var(--ui-ink); border: 1px solid color-mix(in srgb, var(--c, var(--ui-ink-3)) 45%, transparent); }
+.m-logos .panel { border-radius: var(--r-panel); }
+
+/* ---------- Tareas y Chat (TareasChatMovil.tsx) ---------- */
+
+.m-seg-3 { grid-template-columns: repeat(3, 1fr); }
+.m-tarea-txt { flex: 1; min-width: 0; padding: 4px 0; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-tarea-txt b { white-space: normal !important; }
+.m-check.on { background: var(--ok-fill); border-color: var(--ok-fill); color: var(--on-ok-fill); }
+.m-sec-cab h2.overdue { color: var(--ui-negative-ink); }
+.m-al-dia { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px 16px; text-align: center; }
+.m-al-dia > span { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+
+/* El panel de una tarea (el de siempre) ocupa toda la pantalla. */
+body.movil .drawer { width: 100%; padding-bottom: env(safe-area-inset-bottom); }
+body.movil .drawer-head { padding-top: calc(14px + env(safe-area-inset-top)); }
+
+/* La bandeja del chat */
+.m-conv-fila { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-conv-fila:first-child { border-top: 0; }
+.m-conv-fila:active { background: var(--row-hover); }
+.m-conv-fila .avatar { width: 40px; height: 40px; font-size: 14px; }
+.m-conv-fila small { display: block; font-size: 13px; color: var(--ui-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-conv-fila small em { font-style: normal; font-weight: 500; }
+.m-conv-fila.sin-leer b { font-weight: 700; }
+.m-conv-fila.sin-leer small { color: var(--ui-ink); }
+.m-mencion { color: var(--accent-ink); font-weight: 700; }
+.m-conv-lado { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.m-conv-lado small { font-size: 11px; }
+.m-badge-fila { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--ui-negative); color: var(--on-negative); }
+.m-badge-fila.mencion { background: var(--accent); color: var(--on-accent); }
+
+/* Una conversación abierta, a pantalla completa. */
+.m-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--ui-surface); }
+.m-chat-tit { color: inherit; text-decoration: none; min-width: 0; }
+.m-chat-tit b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-conv.m-conv-full { flex: 1 1 0; min-height: 0; height: auto; border: 0; border-radius: 0; }
+.m-conv-full .conv-head { padding-top: 6px; padding-bottom: 6px; }
+.m-chat .conv-foot, .m-chat .conv form:last-child { padding-bottom: env(safe-area-inset-bottom); }
+
+/* ---------- Revisión del 18/11/2026 ---------- */
+
+/* Con el teclado abierto: la app y las hojas miden lo que se ve de verdad (--vvh, Movil.tsx), así lo que se escribe y el
+   botón para guardar quedan a la vista. Mientras se escribe, la barra de abajo se esconde. */
+.m-shell { height: var(--vvh, 100dvh); }
+.m-hoja-fondo { inset: auto 0 auto 0; top: var(--vvt, 0px); height: var(--vvh, 100dvh); }
+.m-hoja { max-height: calc(var(--vvh, 100dvh) * .92); }
+.m-shell:has(.m-main :is(input:not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"]):focus) .m-tabs { display: none; }
+.m-ruta { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Arriba: en las fichas, la flecha para volver; en las listas, el nombre (el buscador ya está en la lista). */
+.m-atras { width: 40px; height: 40px; flex: none; }
+.m-top-tit { flex: 1; min-width: 0; font-size: 17px; }
+.m-tabs.sin-mas { grid-template-columns: repeat(4, 1fr); }
+.m-mirando { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: calc(6px + env(safe-area-inset-top)) 12px 6px; font-size: 13px;
+  background: var(--ui-warning-soft); color: var(--ui-warning-ink); border-bottom: 1px solid var(--ui-line); }
+.m-mirando span { flex: 1; min-width: 0; }
+.m-mirando + .m-top { padding-top: 8px; }
+
+/* Algo no cargó: el motivo y «Reintentar», nunca «no hay nada». */
+.m-fallo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px; border-radius: var(--r-panel); background: var(--ui-negative-soft); color: var(--ui-negative-ink); font-size: 14px; }
+.m-fallo span { flex: 1; min-width: 0; }
+.m-fallo.chico { margin: 0 14px 12px; padding: 10px 12px; font-size: 13px; border-radius: var(--r-control); }
+
+/* Botones con aspecto de link al pie de una sección («Ver más», «Completar datos»). */
+.m-ver { width: 100%; border: 0; border-top: 1px solid var(--ui-line); background: none; text-align: left; font: 500 14px var(--font); cursor: pointer; min-height: 44px; }
+
+/* Tareas: el círculo se toca en 44×44 aunque se vea de 24, y «+1 día» también mide 44 de alto. */
+.m-tarea { gap: 6px; padding-left: 4px; }
+.m-check-zona { flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; cursor: pointer; }
+.m-check-zona .m-check { width: 24px; height: 24px; pointer-events: none; }
+.m-mas-dia { min-height: 44px; padding: 0 10px; font-size: 13px; flex: none; }
+.m-tarea-txt small { white-space: normal; }
+.m-tarea-link { color: var(--ui-ink-2); }
+
+/* Los datos de la ficha: etiqueta y valor; lo vacío, plegado al final. */
+.m-dato-et { flex: none; width: 40%; font-size: 13px; color: var(--text-3); }
+.m-dato-val { flex: 1; min-width: 0; font-size: 15px; overflow-wrap: anywhere; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-dato-val.vacio { color: var(--accent-ink); font-size: 14px; }
+.m-dato-fijo { cursor: default; }
+.m-dato:disabled .m-dato-val.vacio { color: var(--text-3); }
+
+/* Llamar · WhatsApp · Mail · Cómo llegar sin dato: se lee por qué (en pantalla táctil no hay «title»). */
+.m-accion.off { opacity: 1; color: var(--text-3); background: var(--ui-surface-sunken); }
+.m-accion.off small { font-size: 11px; font-weight: 400; }
+.m-accion.wa > span, .m-ico-btn.wa { color: var(--ui-positive-ink); background: var(--ui-positive-soft); }
+[data-theme="dark"] .m-accion.wa > span, [data-theme="dark"] .m-ico-btn.wa { color: var(--ui-positive-ink); }
+.m-link-empresa { display: inline-block; padding: 8px 0; }
+
+/* Lo elegido se ve de lejos y al sol: lleno con el color de acento. */
+.m-shell .chip.on, .m-hoja .chip.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.m-shell .chip.on svg, .m-hoja .chip.on svg { margin-right: 4px; }
+[data-theme="dark"] .m-seg { background: var(--ui-surface-sunken); }
+[data-theme="dark"] .m-seg-op.active { background: var(--ui-surface-navy-2); color: #fff; box-shadow: inset 0 0 0 1px var(--ui-line-strong); }
+.m-seg-op.active { font-weight: 600; }
+
+/* «¿Cómo salió la llamada?»: botones grandes, de a dos. */
+.m-resultados { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.m-resultado { min-height: 48px; padding: 0 10px; border-radius: var(--r-control); border: 1px solid var(--ui-line-strong); background: var(--ui-surface); font: 500 14px var(--font); color: var(--ui-ink); cursor: pointer; }
+.m-resultado.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* Ya existe (al cargar un cliente). */
+.m-ya-existe { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 13px; }
+.m-ya-existe a { color: var(--accent-ink); font-weight: 500; padding: 6px 0; }
+.m-opciones button:disabled { color: var(--text-3); cursor: default; }
+
+/* La conversación de un pedido o negocio: un botón grande que la abre a pantalla completa. */
+.m-conv-boton { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-panel); border: 1px solid var(--ui-line); background: var(--ui-surface); color: inherit; text-decoration: none; }
+.m-conv-boton > span { flex: 1; min-width: 0; }
+.m-conv-boton b { display: block; font-size: 15px; }
+.m-conv-boton small { display: block; font-size: 12px; color: var(--text-3); }
+.m-conv-boton > svg:last-child { transform: rotate(180deg); color: var(--text-3); }
+.m-conv-boton.nuevo { border-color: var(--accent); }
+.m-conv-boton.nuevo small { color: var(--accent-ink); font-weight: 500; }
+.m-no-leida { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; min-height: 40px; padding: 0 8px; }
+
+/* El chat a pantalla completa: la conversación llena el alto (pisa el mínimo de 460px del escritorio) y el cuadro de
+   escribir respeta la barra de inicio del iPhone. */
+.m-chat .conv.en-ficha.m-conv-full { flex: 1 1 0; min-height: 0; height: auto; border: 0; border-radius: 0; }
+.m-chat .conv-escribir { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+
+/* Factura o remito abierto dentro de la app. */
+.m-visor { position: fixed; inset: 0; z-index: 80; display: flex; flex-direction: column; background: var(--ui-surface); height: var(--vvh, 100dvh); }
+.m-visor-cuerpo { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; padding: 8px; background: var(--ui-surface-sunken); }
+.m-visor-cuerpo iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+.m-visor-cuerpo img { max-width: 100%; margin: auto; }
+.m-item-boton { width: 100%; border: 0; border-top: 1px solid var(--ui-line); background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-item-boton:disabled { cursor: default; }
+
+/* Estado vacío amable (Estás al día, Esto se ve en la versión completa). */
+.m-al-dia-ico { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+.m-al-dia-ico.neutro { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* Con el texto del sistema agrandado: los renglones secundarios bajan de línea en vez de cortarse. */
+.m-item-txt small { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+
+/* ---------- Logística (LogisticaMovil.tsx) ---------- */
+
+.m-pill.aviso { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.m-pill.ok { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+.m-pill { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Cómo va cada chofer: nombre, paradas hechas y una barra de avance. */
+.m-chofer-ico { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.m-barra { display: block; height: 6px; margin-top: 6px; border-radius: 3px; background: var(--ui-surface-sunken); overflow: hidden; }
+.m-barra i { display: block; height: 100%; background: var(--ui-positive); border-radius: 3px; }
+.m-chofer-alertas { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.m-resolver-ico { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.m-resolver-ico.aviso { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.m-resolver-ico.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.m-item-link > svg:last-child { transform: rotate(180deg); color: var(--text-3); flex: none; }
+
+/* Día: la semana en una tira (con lo pendiente de cada día) y el día elegido. */
+.m-semana { display: flex; align-items: center; gap: 2px; margin: 0 -8px; }
+.m-semana > .btn { flex: none; width: 36px; height: 44px; }
+.m-semana .m-sig svg { transform: rotate(180deg); }
+.m-semana-dias { flex: 1; min-width: 0; display: flex; gap: 4px; }
+.m-semana-dia { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0; border-radius: 10px; border: 1px solid transparent;
+  background: none; font: inherit; color: var(--ui-ink-2); cursor: pointer; }
+.m-semana-dia small { font-size: 11px; }
+.m-semana-dia b { font-size: 17px; color: var(--ui-ink); }
+.m-semana-n { min-height: 16px; font-size: 11px; font-weight: 600; color: var(--accent-ink); }
+.m-semana-dia.hoy small { color: var(--accent-ink); font-weight: 600; }
+.m-semana-dia.mal .m-semana-n { color: var(--ui-negative-ink); }
+.m-semana-dia.on { background: var(--accent); border-color: var(--accent); }
+.m-semana-dia.on small, .m-semana-dia.on b, .m-semana-dia.on .m-semana-n { color: var(--on-accent); }
+.m-dia-tit { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-dia-tit h1 { font-size: 22px; }
+.m-nota { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 14px; }
+
+/* Una tarjeta del día: hecho a la izquierda (44×44), qué y dónde, y las acciones abajo. */
+.m-mov { display: flex; gap: 4px; padding: 8px 14px 10px 4px; border-top: 1px solid var(--ui-line); }
+.m-sec-cab + .m-mov { border-top: 0; }
+.m-mov.hecho { background: var(--ui-surface-sunken); }
+.m-mov-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.m-mov-tit { display: block; width: 100%; padding: 0; border: 0; background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-mov-tit:disabled { cursor: default; }
+.m-mov-tit b { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 15px; font-weight: 600; }
+.m-mov-tit small { display: block; font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+.m-mov-arts { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--ui-ink-2); }
+.m-mov-avisos { display: flex; flex-wrap: wrap; gap: 6px; }
+.m-mov-acc { display: flex; flex-wrap: wrap; gap: 8px; }
+.m-mov-acc .btn { min-height: 40px; }
+.m-hecho { background: var(--ui-surface-sunken); }
+
+/* La ruta del día: el recorrido elegido y sus paradas en orden. */
+.m-ruta-cab { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-panel); background: var(--ui-surface); border: 1px solid var(--ui-line); }
+.m-paradas { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-radius: var(--r-panel); background: var(--ui-surface); border: 1px solid var(--ui-line); overflow: hidden; }
+.m-parada { display: flex; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--ui-line); }
+.m-parada:first-child { border-top: 0; }
+.m-parada.hecha { background: var(--ui-surface-sunken); }
+.m-parada.mal { box-shadow: inset 3px 0 0 var(--ui-negative); }
+.m-parada-n { flex: none; width: 30px; height: 30px; margin-top: 2px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  background: var(--accent); color: var(--on-accent); }
+.m-parada.hecha .m-parada-n { background: var(--ok-fill); color: var(--on-ok-fill); }
+.m-parada-cuerpo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.m-parada-det { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
+.m-nota-pie { margin: 0; text-align: center; }
+
+/* Entregas: cada remito con su foto grande arriba y las decisiones abajo. */
+.m-remito { display: flex; flex-direction: column; }
+.m-remito-foto { display: block; width: 100%; max-height: 280px; overflow: hidden; padding: 0; border: 0; background: var(--image-well); cursor: zoom-in; }
+.m-remito-foto img { display: block; width: 100%; height: 280px; object-fit: cover; object-position: top; }
+.m-remito-pdf { display: flex; align-items: center; justify-content: center; gap: 8px; height: 96px; color: var(--accent-ink); font-weight: 500; background: var(--ui-surface-sunken); }
+.m-remito-cuerpo { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 14px; }
+.m-remito-cab { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
+.m-remito-cab b { font-size: 16px; }
+.m-remito-acc { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.m-remito-acc > .btn { min-height: 46px; justify-content: center; white-space: normal; text-align: center; }
+.m-remito-sec { display: flex; gap: 8px; justify-content: center; }
+.m-fallo.chico.m-motivo { margin: 0; }
+.m-buscar-pedido { display: flex; flex-direction: column; gap: 6px; }
+.m-op-pedido { min-height: 44px; padding: 0 12px; text-align: left; border: 1px solid var(--ui-line); border-radius: var(--r-control); background: var(--ui-surface); font: 400 15px var(--font); color: var(--ui-ink); cursor: pointer; }
+
+/* Choferes: el panel de siempre, a lo ancho. */
+.m-choferes .ch-crear { display: flex; flex-direction: column; gap: 8px; }
+.m-choferes .ch-crear .btn { min-height: 44px; justify-content: center; }
+.m-choferes .ch-cab { flex-wrap: wrap; }
+.m-choferes .ch-acceso .row .btn { min-height: 40px; }
+.m-choferes .codigo-chofer { font-size: 28px; }
+
+/* ---------- Producción (ProduccionMovil.tsx) ---------- */
+
+.m-personas { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.m-personas .avatar-stack { display: inline-flex; }
+.m-personas .avatar-stack .avatar + .avatar { margin-left: -6px; box-shadow: 0 0 0 2px var(--ui-surface); }
+.m-pdv { align-items: flex-start; }
+.m-pdv .m-item-txt b { white-space: normal; }
+.m-pdv-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.m-pdv-lado { flex: none; max-width: 35%; padding-top: 2px; }
+
+/* Lo que entra y sale hoy: un número grande por carril. */
+.m-carriles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; padding: 0 14px 14px; }
+.m-carril { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-surface-sunken); color: inherit; text-decoration: none; }
+.m-carril b { font-size: 22px; line-height: 1.1; }
+.m-carril span { font-size: 13px; font-weight: 500; }
+.m-carril small { font-size: 12px; color: var(--ui-warning-ink); }
+.m-carril small.muted { color: var(--text-3); }
+
+/* Un artículo del PDV: se toca para editarlo. */
+.m-art { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 12px 14px; border: 0; border-top: 1px solid var(--ui-line); background: none;
+  text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.m-sec-cab + .m-art { border-top: 0; }
+.m-art:active { background: var(--row-hover); }
+.m-art.cerrado { opacity: .65; }
+.m-art .m-item-txt { display: flex; flex-direction: column; gap: 4px; }
+.m-art-pie { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.m-art-pie .st-pec { max-width: 100%; }
+.m-art-fechas { white-space: normal; }
+
+/* Los estados del artículo, con los colores de ClickUp, como botones. */
+.m-estados { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.m-estado { display: flex; align-items: center; justify-content: space-between; gap: 4px; min-height: 44px; min-width: 0; padding: 0 6px; border-radius: var(--r-control);
+  border: 1px solid var(--ui-line); background: var(--ui-surface); cursor: pointer; font: inherit; }
+.m-estado.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.m-estado:disabled { cursor: default; opacity: .7; }
+.m-estado .st-pec { font-size: 13px; min-width: 0; max-width: 100%; }
+.m-estado > svg { flex: none; }
+.m-datos-hoja { border: 1px solid var(--ui-line); border-radius: var(--r-control); overflow: hidden; }
+.m-opciones-largas { max-height: 50vh; overflow: auto; }

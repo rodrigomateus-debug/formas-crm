@@ -66,6 +66,10 @@ test('conectar con Claude: OAuth como un conector de HubSpot o ClickUp', async (
   const tok = await (await yo.pedir(yo.verifier)).json();
   assert.ok(tok.access_token?.startsWith('fcrm_') && tok.refresh_token && tok.expires_in > 0, JSON.stringify(tok));
   assert.equal((await yo.pedir(yo.verifier)).status, 400, 'el código ya se usó');
+  // La página de permiso no puede ser «no-referrer»: con eso Chrome manda el formulario con «Origin: null» y el CRM lo
+  // rechazaba como si viniera de otra página (pasó el 18/11/2026 al conectar el Hub en claude.ai).
+  const pag = await fetch(`${CRM}/conectar/autorizar?${new URLSearchParams({ response_type: 'code', client_id: reg.client_id, redirect_uri: VUELTA, code_challenge: 'a'.repeat(43), code_challenge_method: 'S256' })}`);
+  assert.equal(pag.headers.get('referrer-policy'), 'same-origin');
   // Un formulario armado en otra página no da permiso.
   const otro = await fetch(`${CRM}/conectar/autorizar`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: 'https://malo.example.com' },
     body: new URLSearchParams({ client_id: reg.client_id, redirect_uri: VUELTA, code_challenge: 'x'.repeat(43), decision: 'permitir' }) });

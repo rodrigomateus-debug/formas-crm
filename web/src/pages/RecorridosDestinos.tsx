@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Link } from 'react-router-dom';
 import { http, useMeta, useToast, Icon, fmtRelative, Cargando, whatsappUrl, recordUrl } from '../lib';
-import { Avatar, Modal, RecordPicker } from '../components';
+import { Avatar, InfoTip, Modal, RecordPicker } from '../components';
 import { Select } from '../Select';
 import { lindo } from './Cronograma';
 import { BuscarDireccion, type Sugerencia } from './Direcciones';
@@ -68,18 +69,19 @@ function TipoTag({ tipo, origen }: { tipo: Tipo | null; origen?: string | null }
   return <span className="ds-tipo" style={{ '--c': t[2] } as React.CSSProperties} title={origen ? ORIGEN_TIPO[origen] : undefined}>{t[1]}</span>;
 }
 
-type Filtro = 'todos' | Tipo | 'sin_tipo';
-export function DestinosTab({ admin }: { admin?: ReactNode }) {
+type Filtro = 'top' | 'todos' | Tipo | 'sin_tipo';   // top: los más visitados (el filtro de entrada)
+export function DestinosTab({ admin, slot }: { admin?: ReactNode; slot?: HTMLElement | null }) {
   const { meta } = useMeta();
   const toast = useToast();
   const [datos, setDatos] = useState<Datos | null>(null);
   const [v, setV] = useState(0);
   const [q, setQ] = useState('');
-  const [filtro, setFiltro] = useState<Filtro>('todos');
+  const [filtro, setFiltro] = useState<Filtro>('top');
   const [incompletos, setIncompletos] = useState(false);
   const [revisar, setRevisar] = useState(false);
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [foco, setFoco] = useState<number | null>(null);
+  const [config, setConfig] = useState(false);
   // El mapa es opcional («Ver mapa»): se abre a la derecha de la tabla y queda recordado en este navegador.
   const [verMapa, setVerMapaYa] = useState(() => { try { return localStorage.getItem('crm.destinos.mapa') === '1'; } catch { return false; } });
   const setVerMapa = (x: boolean) => { setVerMapaYa(x); try { localStorage.setItem('crm.destinos.mapa', x ? '1' : '0'); } catch { /* ignorar */ } };
@@ -120,7 +122,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
     const t = q.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const gnombre = new Map(datos.grupos.map((g) => [g.id, `${g.nombre} ${g.empresa ?? ''}`]));
     return datos.destinos.filter((d) => {
-      if (filtro === 'sin_tipo' ? d.tipo : filtro !== 'todos' && d.tipo !== filtro) return false;
+      if (filtro === 'sin_tipo' ? d.tipo : filtro !== 'todos' && filtro !== 'top' && d.tipo !== filtro) return false;
       if (incompletos && !d.faltan.length) return false;
       if (revisar && d.ia_estado !== 'dudoso') return false;
       if (!t) return true;
@@ -141,16 +143,20 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
     ];
     return lista.sort((a, b) => orden(b.destinos) - orden(a.destinos) || (a.grupo?.nombre ?? a.destinos[0].nombre).localeCompare(b.grupo?.nombre ?? b.destinos[0].nombre));
   }, [datos, visibles]);
-  // Por defecto se ven los más visitados (pedido de Rodrigo del 18/11/2026): con los miles de destinos a la vez, la lista y
-  // el mapa (que vuelve a dibujar todos sus puntos en cada clic) se ponían lentos. Los bloques ya vienen con los más
-  // visitados primero; el buscador y los filtros siguen buscando en todos. El elegido se ve siempre, aunque no esté entre ellos.
-  const mostrados = useMemo(() => {
-    if (verTodos || bloques.length <= TOPE) return bloques;
-    const top = bloques.slice(0, TOPE);
-    const elegido = foco != null && !top.some((b) => b.destinos.some((d) => d.id === foco)) ? bloques.find((b) => b.destinos.some((d) => d.id === foco)) : null;
-    return elegido ? [...top, elegido] : top;
-  }, [bloques, verTodos, foco]);
-  const enMapa = useMemo(() => mostrados.flatMap((b) => b.destinos), [mostrados]);
+  // «100 más visitados» (el filtro de entrada; pedido de Rodrigo del 18/11/2026): los bloques ya vienen con los más
+  // visitados primero. Si se busca algo, se busca en todos.
+  const mostrados = useMemo(() => (filtro === 'top' && !q.trim() ? bloques.slice(0, TOPE) : bloques), [bloques, filtro, q]);
+  // Para el pie: cuántas direcciones (cada sucursal cuenta) y cuántos grupos (empresas con sucursales) se ven.
+  const nDirecciones = mostrados.reduce((n, b) => n + b.destinos.length, 0), nGrupos = mostrados.filter((b) => b.grupo).length;
+  // El mapa, con muchos puntos (los vuelve a dibujar en cada clic), se pone lento: si la lista tiene más de 100, el mapa
+  // muestra los 100 primeros salvo que se pida ver todos. El elegido se ve siempre, aunque no esté entre ellos.
+  const mapaTope = !verTodos && mostrados.length > TOPE;
+  const enMapa = useMemo(() => {
+    if (!mapaTope) return mostrados.flatMap((b) => b.destinos);
+    const top = mostrados.slice(0, TOPE);
+    const elegido = foco != null && !top.some((b) => b.destinos.some((d) => d.id === foco)) ? mostrados.find((b) => b.destinos.some((d) => d.id === foco)) : null;
+    return (elegido ? [...top, elegido] : top).flatMap((b) => b.destinos);
+  }, [mostrados, mapaTope, foco]);
   // De a 40 por página (un grupo cuenta como uno): dibujar miles de filas de una traba la página. La búsqueda y los
   // filtros buscan en todos.
   const POR_PAGINA = 40;
@@ -207,26 +213,28 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
   if (!datos) return <Cargando />;
   const enfocado = foco != null ? porId.get(foco) ?? null : null;
   const pct = (n: number) => (datos.total ? Math.round((n / datos.total) * 100) : 0);
-  const filtrando = !!q.trim() || filtro !== 'todos' || incompletos || revisar;
-  const conteo = (t: Filtro) => datos.destinos.filter((d) => (t === 'todos' ? true : t === 'sin_tipo' ? !d.tipo : d.tipo === t)).length;
+  const filtrando = !!q.trim() || (filtro !== 'todos' && filtro !== 'top') || incompletos || revisar;
+  const conteo = (t: Filtro) => datos.destinos.filter((d) => (t === 'todos' || t === 'top' ? true : t === 'sin_tipo' ? !d.tipo : d.tipo === t)).length;
 
   return (
     <>
-      {admin}
-      <div className="ds-resumen">
-        <div><b>{datos.total}</b><span>destinos</span></div>
-        <div title="Con el punto en el mapa"><b>{pct(datos.resumen.en_mapa)} %</b><span>en el mapa</span></div>
-        <div title="Con dirección, localidad, provincia, mapa, teléfono y tipo"><b>{pct(datos.resumen.completos)} %</b><span>completos</span></div>
-        <div><b>{datos.grupos.length}</b><span>empresas con sucursales</span></div>
-        {datos.resumen.para_revisar > 0 && <button type="button" className={`ds-resumen-btn${revisar ? ' on' : ''}`} onClick={() => setRevisar(!revisar)}><b>{datos.resumen.para_revisar}</b><span>para revisar</span></button>}
-      </div>
-
       <div className="toolbar ds-toolbar">
-        <div className="search" style={{ minWidth: 200, flex: '1 1 260px', maxWidth: 360 }}><Icon name="search" />
+        <div className="search ds-buscar"><Icon name="search" />
           <input className="input" placeholder="Buscar nombre, calle, localidad, contacto…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar destinos" />
         </div>
-        <label className="small row ds-check"><input type="checkbox" checked={incompletos} onChange={(e) => setIncompletos(e.target.checked)} />Solo incompletos</label>
-        <span className="grow" />
+        <div className="ds-chips" role="tablist" aria-label="Tipo de destino">
+          {(['top', 'todos', ...TIPOS.map((t) => t[0]), 'sin_tipo'] as Filtro[]).map((t) => {
+            if (t === 'top') return datos.destinos.length > TOPE || filtro === 'top' ? <button key={t} type="button" role="tab" aria-selected={filtro === t} className={`ds-chip${filtro === t ? ' on' : ''}`}
+              onClick={() => setFiltro(t)} title="Los destinos (y empresas con sucursales) con más viajes. El buscador busca en todos.">{TOPE} más visitados</button> : null;
+            const n = conteo(t);
+            if (!n && t !== 'todos') return null;
+            const info = tipoDe(t);
+            return <button key={t} type="button" role="tab" aria-selected={filtro === t} className={`ds-chip${filtro === t ? ' on' : ''}`} style={info ? { '--c': info[2] } as React.CSSProperties : undefined}
+              onClick={() => setFiltro(t)}>{info && <i />}{t === 'todos' ? 'Todos' : t === 'sin_tipo' ? 'Sin tipo' : info![1]}<span>{n}</span></button>;
+          })}
+        </div>
+      </div>
+      {(() => { const b = <>
         <button type="button" className={`btn sm qf-btn${verMapa ? ' on' : ''}`} aria-pressed={verMapa} onClick={() => setVerMapa(!verMapa)}
           title={verMapa ? 'Cerrar el mapa' : 'Ver los destinos en el mapa, a la derecha de la lista'}><Icon name="pin" size={14} />{verMapa ? 'Ocultar mapa' : 'Ver mapa'}</button>
         {organiza && datos.ia && (
@@ -234,27 +242,30 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
             title="Claude completa la localidad, la provincia, la dirección para el mapa y el tipo. Solo cambia lo que está al menos 90 % seguro; lo demás queda «Para revisar».">
             <Icon name="spark" size={14} />{ia?.corriendo ? 'Revisando…' : 'Completar con IA'}</button>
         )}
+        {admin && <button type="button" className="btn sm ghost" onClick={() => setConfig(true)} title="Configuración (administradores)" aria-label="Configuración (administradores)"><Icon name="settings" size={14} /></button>}
         {meta.me.role !== 'viewer' && <button type="button" className="btn sm primary" onClick={() => setEditando('nuevo')}><Icon name="plus" size={14} />Nuevo destino</button>}
-      </div>
-      <div className="ds-chips" role="tablist" aria-label="Tipo de destino">
-        {(['todos', ...TIPOS.map((t) => t[0]), 'sin_tipo'] as Filtro[]).map((t) => {
-          const n = conteo(t);
-          if (!n && t !== 'todos') return null;
-          const info = tipoDe(t);
-          return <button key={t} type="button" role="tab" aria-selected={filtro === t} className={`ds-chip${filtro === t ? ' on' : ''}`} style={info ? { '--c': info[2] } as React.CSSProperties : undefined}
-            onClick={() => setFiltro(t)}>{info && <i />}{t === 'todos' ? 'Todos' : t === 'sin_tipo' ? 'Sin tipo' : info![1]}<span>{n}</span></button>;
-        })}
+      </>; return slot ? createPortal(b, slot) : <div className="row ds-acciones-top">{b}</div>; })()}
+      {/* El resumen, en un renglón: los números, «para revisar», «solo incompletos», las empresas por agrupar y el tope. */}
+      <div className="ds-resumen small muted">
+        <span><b>{datos.total}</b> destinos · <b>{pct(datos.resumen.en_mapa)} %</b> en el mapa · <b>{pct(datos.resumen.completos)} %</b> completos · <b>{datos.grupos.length}</b> con sucursales</span>
+        <InfoTip label="Qué significan los números">
+          <p><b>En el mapa:</b> con el punto ubicado. <b>Completos:</b> con dirección, localidad, provincia, mapa, teléfono y tipo. <b>Con sucursales:</b> empresas con varias direcciones agrupadas.</p>
+          <p>Tocá una dirección para verla en el mapa.</p>
+        </InfoTip>
+        {datos.resumen.para_revisar > 0 && <button type="button" className={`ds-resumen-btn${revisar ? ' on' : ''}`} aria-pressed={revisar} onClick={() => setRevisar(!revisar)}><b>{datos.resumen.para_revisar}</b> para revisar</button>}
+        <label className="row ds-check"><input type="checkbox" checked={incompletos} onChange={(e) => setIncompletos(e.target.checked)} />Solo incompletos</label>
+        {organiza && sugeridos.length > 0 && (
+          <button type="button" className="cr-link" onClick={() => setVerSugeridos(!verSugeridos)}>
+            <Icon name="merge" size={13} /> {sugeridos.length} por agrupar{verSugeridos ? ' (ocultar)' : ''}</button>
+        )}
       </div>
       {ia && (
         <p className="small muted ds-nota">{ia.corriendo ? 'La IA está revisando los destinos… ' : 'IA: '}{ia.corregidos} completados · {ia.dudosos} para revisar{ia.corriendo && ia.pendientes ? ` · faltan ${ia.pendientes}` : ''}
           {ia.corriendo && <> · <button type="button" className="cr-link" onClick={() => { frenar.current = true; }}>Frenar</button></>}</p>
       )}
 
-      {organiza && sugeridos.length > 0 && (
+      {organiza && verSugeridos && sugeridos.length > 0 && (
         <div className="ds-sugeridos">
-          <button type="button" className="cr-link" onClick={() => setVerSugeridos(!verSugeridos)}>
-            <Icon name="merge" size={14} /> {sugeridos.length} {sugeridos.length === 1 ? 'empresa parece tener' : 'empresas parecen tener'} varias direcciones sueltas: {verSugeridos ? 'ocultar' : 'ver y agrupar'}</button>
-          {verSugeridos && (
             <ul>
               {sugeridos.map((s) => (
                 <li key={s.ids.join(',')}>
@@ -265,7 +276,6 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
                 </li>
               ))}
             </ul>
-          )}
         </div>
       )}
 
@@ -275,14 +285,6 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
           {organiza && <button type="button" className="btn sm primary" onClick={() => setAgrupando({ ids: [...sel], nombre: lindo(porId.get([...sel][0])?.nombre ?? ''), grupo_id: null })}><Icon name="merge" size={14} />Agrupar como una empresa</button>}
           <button type="button" className="btn sm ghost" onClick={() => setSel(new Set())}>Deseleccionar</button>
         </div>
-      )}
-
-      {bloques.length > TOPE && (
-        <p className="small muted ds-nota ds-tope" role="status">
-          {verTodos ? `Se ven los ${visibles.length} destinos${filtrando ? ' que coinciden' : ''}: con tantos, la lista y el mapa van más lentos. `
-            : `Se ven los ${TOPE} más visitados de ${filtrando ? `los ${visibles.length} que coinciden` : `${visibles.length} destinos`}. El buscador encuentra cualquiera. `}
-          <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{verTodos ? 'Volver a los más visitados' : 'Ver todos'}</button>
-        </p>
       )}
 
       <div className="ds-layout">
@@ -312,22 +314,25 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
           {enfocado ? (
             <FichaMapa d={enfocado} organiza={organiza} ubicando={ubicando?.id === enfocado.id} onUbicar={(lat, lng) => setUbicando({ id: enfocado.id, lat, lng })}
               onGuardar={guardarPunto} onCancelar={() => setUbicando(null)} onEditar={() => setEditando(enfocado)} />
-          ) : <p className="small muted ds-ficha">Tocá una dirección para verla en el mapa. {datos.resumen.sin_buscar > 0 && `Buscando ${datos.resumen.sin_buscar} direcciones en el mapa…`}</p>}
+          ) : datos.resumen.sin_buscar > 0 ? <p className="small muted ds-ficha">Buscando {datos.resumen.sin_buscar} direcciones en el mapa…</p> : null}
+          {mostrados.length > TOPE && (
+            <p className="small muted ds-mapa-tope">{mapaTope ? `En el mapa: los ${TOPE} más visitados.` : `En el mapa: los ${mostrados.length}.`}{' '}
+              <button type="button" className="cr-link" onClick={() => setVerTodos(!verTodos)}>{mapaTope ? 'Ver todos' : 'Solo los más visitados'}</button>
+              <InfoTip label="Por qué no se ven todos">Con miles de puntos el mapa se pone lento. La lista muestra todos.</InfoTip></p>
+          )}
         </aside>}
       </div>
-      <nav className="pager ds-paginas" aria-label="Páginas">
-        <span className="small muted">{mostrados.length ? `${(pag - 1) * POR_PAGINA + 1}–${Math.min(pag * POR_PAGINA, mostrados.length)} de ${mostrados.length}` : 'Sin destinos'}</span>
-        <span className="small muted ds-copia" title={`La libreta de Logística se sigue copiando de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.${datos.copia.error ? ` Último error: ${datos.copia.error}` : ''}`}>
-          Planilla DESTINOS{datos.copia.at > 0 ? `: copiada ${fmtRelative(new Date(datos.copia.at).toISOString())}` : ''}{datos.copia.error ? ' (con error)' : ''}
-          {organiza && <> · <button type="button" className="cr-link" onClick={traerPlanilla}>Traer ahora</button></>}</span>
+      <nav className="ds-paginas" aria-label="Páginas">
+        <span className="small muted ds-pag-cuenta">{mostrados.length ? <>
+          <b>{nDirecciones.toLocaleString('es-AR')}</b> {nDirecciones === 1 ? 'dirección' : 'direcciones'}{nGrupos > 0 && <> · <b>{nGrupos.toLocaleString('es-AR')}</b> {nGrupos === 1 ? 'grupo' : 'grupos'}</>}
+          {paginas > 1 && ` · filas ${(pag - 1) * POR_PAGINA + 1}–${Math.min(pag * POR_PAGINA, mostrados.length)} de ${mostrados.length.toLocaleString('es-AR')}`}</> : 'Sin destinos'}</span>
+        <InfoTip label="Planilla DESTINOS">
+          <p>La libreta de Logística se copia de la planilla DESTINOS una vez por día, sin pisar lo que se corrige acá.</p>
+          {datos.copia.at > 0 && <p>Última copia: {fmtRelative(new Date(datos.copia.at).toISOString())}.{datos.copia.error ? ` Error: ${datos.copia.error}` : ''}</p>}
+        </InfoTip>
+        {organiza && <button type="button" className="cr-link small" onClick={traerPlanilla}>Traer planilla</button>}
         <span className="grow" />
-        {paginas > 1 && <>
-          <button type="button" className="btn sm ghost" disabled={pag <= 1} onClick={() => setPagina(pag - 1)}>Anterior</button>
-          <Select className="input sm" value={String(pag)} onChange={(e) => setPagina(Number(e.target.value))} aria-label="Página">
-            {Array.from({ length: paginas }, (_, i) => <option key={i} value={String(i + 1)}>Página {i + 1} de {paginas}</option>)}
-          </Select>
-          <button type="button" className="btn sm ghost" disabled={pag >= paginas} onClick={() => setPagina(pag + 1)}>Siguiente</button>
-        </>}
+        {paginas > 1 && <Paginas pag={pag} paginas={paginas} onIr={setPagina} />}
       </nav>
 
 
@@ -335,8 +340,26 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
         onClose={() => setEditando(null)} onListo={(id) => { setEditando(null); if (id) setFoco(id); recargar(); }} onBorrar={(d) => { setEditando(null); setBorrando(d); }} />}
       {borrando && <BorrarDestino d={borrando} onClose={() => setBorrando(null)} onListo={() => { if (foco === borrando.id) setFoco(null); setSel((s) => { const n = new Set(s); n.delete(borrando.id); return n; }); setBorrando(null); recargar(); }} />}
       {grupoAbierto && <EditarGrupo g={grupoAbierto} destinos={datos.destinos.filter((d) => d.grupo_id === grupoAbierto.id)} onClose={() => setGrupoAbierto(null)} onListo={() => { setGrupoAbierto(null); recargar(); }} />}
+      {config && <Modal title="Configuración de Recorridos" onClose={() => setConfig(false)} wide>{admin}</Modal>}
       {agrupando && <Agrupar ini={agrupando} grupos={datos.grupos} destinos={agrupando.ids.map((id) => porId.get(id)).filter((d): d is Destino => !!d)} onClose={() => setAgrupando(null)} onAgrupar={agruparYa} />}
     </>
+  );
+}
+
+// Paginado de un renglón: ‹ 1 … 4 5 6 … 20 ›
+function Paginas({ pag, paginas, onIr }: { pag: number; paginas: number; onIr: (p: number) => void }) {
+  const nums: Array<number | null> = [];
+  for (let i = 1; i <= paginas; i++) {
+    if (i === 1 || i === paginas || Math.abs(i - pag) <= 1) nums.push(i);
+    else if (nums[nums.length - 1] !== null) nums.push(null);
+  }
+  return (
+    <span className="ds-pags">
+      <button type="button" className="btn sm ghost ds-pag" disabled={pag <= 1} onClick={() => onIr(pag - 1)} aria-label="Página anterior">‹</button>
+      {nums.map((n, i) => (n == null ? <span key={`x${i}`} className="muted ds-pag-x">…</span>
+        : <button key={n} type="button" className={`btn sm ghost ds-pag${n === pag ? ' on' : ''}`} aria-current={n === pag ? 'page' : undefined} onClick={() => onIr(n)}>{n}</button>))}
+      <button type="button" className="btn sm ghost ds-pag" disabled={pag >= paginas} onClick={() => onIr(pag + 1)} aria-label="Página siguiente">›</button>
+    </span>
   );
 }
 

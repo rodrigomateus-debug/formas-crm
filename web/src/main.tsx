@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { MetaProvider, ToastProvider } from './lib';
-import App from './App';
+import Raiz from './Raiz';
 import './styles.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -10,7 +10,7 @@ createRoot(document.getElementById('root')!).render(
     <BrowserRouter>
       <ToastProvider>
         <MetaProvider>
-          <App />
+          <Raiz />
         </MetaProvider>
       </ToastProvider>
     </BrowserRouter>

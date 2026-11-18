@@ -28,10 +28,10 @@ export interface Mov {
   hora?: string | null;       // la hora fijada a mano en su parada, en la ruta del día («A las 12:00»)
   parada?: string;            // la clave de su parada en la ruta del día
 }
-interface Nota { id: number; fecha: string; texto: string; hecho: number }
-interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
+export interface Nota { id: number; fecha: string; texto: string; hecho: number }
+export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
 interface DiaResumen { total: number; pendientes: number; atrasados: number }
-interface Vista {
+export interface Vista {
   hoy: string; desde: string; hasta: string; movimientos: Mov[]; notas: Nota[]; feriados: Record<string, string>; dias: Record<string, DiaResumen>;
   sin_fecha: SinFecha[]; puede_editar: boolean; choferes?: string[]; expresos?: string[];
   encargos?: Encargo[];   // lo que pidió alguien al recorrido de cada día (Recorridos)
@@ -74,9 +74,9 @@ export const cantidad = (m: { cantidad: number | null; articulo: string }) => [m
 
 // Una tarjeta: los artículos de un PDV que tienen el mismo movimiento, el mismo día, en el mismo lugar.
 // `parada`: va en la ruta del día (no es un ingreso ni lo retira el cliente), así que se le elige el chofer.
-interface Tarjeta { key: string; tipo: Tipo; fecha: string; titulo: string; pdv: string; para: string; movs: Mov[]; hecho: boolean; evento: boolean; avisos: string[]; record_id: number | null; dominio: string | null; crudo: string;
+export interface Tarjeta { key: string; tipo: Tipo; fecha: string; titulo: string; pdv: string; para: string; movs: Mov[]; hecho: boolean; evento: boolean; avisos: string[]; record_id: number | null; dominio: string | null; crudo: string;
   parada: boolean; chofer: string | null; retira_en: string | null }
-function tarjetas(movs: Mov[]): Tarjeta[] {
+export function tarjetas(movs: Mov[]): Tarjeta[] {
   const m = new Map<string, Tarjeta>();
   for (const x of movs) {
     const key = `${x.fecha}|${x.tipo}|${x.pdv_task}|${x.lugar ?? ''}`;

@@ -74,7 +74,7 @@ function Users() {
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       {fotos.data?.error && <p className="small danger-text" style={{ marginTop: 0 }}>Fotos de Google: {fotos.data.error}</p>}
       <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort" title="Los pipelines de negocios que le aparecen. Si tiene más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.">Pipelines que ve</th><th className="nosort" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos por mail</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
+        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort" title="Los pipelines de negocios que le aparecen. Si tiene más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.">Pipelines que ve</th><th className="nosort" title="Gerencia (perfil Comercial): ve y edita todo lo del equipo elegido, como si fuera suyo.">Gerencia de</th><th className="nosort" title="Dirección: Inicio con los resultados de todo el equipo (ganado por vendedora con sus pedidos, embudos, ranking por empresa), sin tareas.">Dirección</th><th className="nosort" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos por mail</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
         <tbody>{users.data?.map((u) => (
           <tr key={u.id}>
             <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
@@ -97,6 +97,12 @@ function Users() {
                   ? <button type="button" className="cr-link" title="Volver a la regla de cada pipeline (los equipos que lo ven)" onClick={() => patch(u.id, { pipelines: null })}>Elegidos a mano · volver a «según equipos»</button>
                   : <span className="muted">Según sus equipos</span>}
               </div>}</td>
+            <td>{u.role === 'admin' ? <span className="muted small">—</span>
+              : <Select className="input sm" style={{ minWidth: 130 }} value={u.gerencia_team ?? ''} onChange={(e) => patch(u.id, { gerencia_team: e.target.value ? Number(e.target.value) : null })} aria-label={`Gerencia de: ${u.name}`}>
+                <option value="">Ninguno</option>
+                {meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </Select>}</td>
+            <td><input type="checkbox" checked={!!u.direccion} onChange={(e) => patch(u.id, { direccion: e.target.checked })} aria-label={`Dirección: ${u.name}`} /></td>
             <td><input type="checkbox" checked={!!u.avisos_mail} onChange={(e) => patch(u.id, { avisos_mail: e.target.checked })} aria-label={`Avisos por mail para ${u.name}`} /></td>
             <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
             <td style={{ whiteSpace: 'nowrap' }}>{meta.superadmin && u.active && u.id !== meta.me.id && <button className="btn sm ghost icon" title={`Ver el CRM como ${u.name} (solo para mirar)`}
@@ -109,6 +115,8 @@ function Users() {
         Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.
         Pipelines que ve: por defecto, según sus equipos (lo que dice cada pipeline en Pipelines); al marcarlos acá quedan elegidos a mano para esa persona. Si ve más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.
         Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito, o su menú abajo a la izquierda), solo para mirar, y dar o sacar este permiso.
+        Gerencia de (perfil Comercial): ve y edita todo lo de ese equipo como si fuera suyo (lo de sus vendedoras, los negocios de sus pipelines y los pedidos de su unidad) y puede asignárselo a cualquiera del equipo.
+        Dirección: su Inicio muestra los resultados de todo el equipo en el período que elija (ganado por vendedora con sus pedidos, embudo de cada pipeline, motivos de pérdida, ranking por empresa), aunque su perfil sea Comercial; no muestra tareas.
         Avisos por mail: el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega. Arranca apagado; solo les llega a los que lo tienen prendido.</p>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
         try { await http('POST', '/users', { ...f, teams: f.teams.map(Number) }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
@@ -126,7 +134,7 @@ function Users() {
 }
 
 type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
-  superadmin: number; principal: boolean };
+  superadmin: number; direccion?: number; gerencia_team?: number | null; principal: boolean };
 type Uso = { registros: Record<ObjectType, number>; tareas_abiertas: number; tokens: number; choferes: number };
 
 // Eliminar un usuario: antes dice qué tiene a su nombre y a quién se le pasa (src/worker/api.ts, DELETE /users/:id).
@@ -495,6 +503,8 @@ function Integrations() {
       <Pedidos />
       <BocetosDrive />
       <Gmail />
+      <Calendario />
+      <DarwinActividad />
       <OutboundHooks />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">
         <p style={{ margin: 0 }}>Para que Claude y Cowork lean y actualicen el CRM: creá un token de tipo «Claude (MCP)» y cargá esta URL como conector personalizado en claude.ai (Configuración → Conectores → Agregar conector personalizado):</p>
@@ -533,6 +543,41 @@ function Integrations() {
           ))}</tbody>
         </table></div>
       </div></div>
+    </div>
+  );
+}
+
+// Darwin → resumen del día y consultas (darwin.ts, docs/DARWIN.md § 4).
+function DarwinActividad() {
+  const toast = useToast();
+  const st = useAsync(() => http<{ configured: boolean; webhook: { configurada: boolean; clave: boolean; eventos?: string[]; error?: string }; eventos_24h: number; ultimo_evento: string | null;
+    pendientes: number; hechos: number; sin_contacto: number; errores: number; consultas: number }>('GET', '/darwin/estado'), []);
+  const [busy, setBusy] = useState(false);
+  const d = st.data;
+  const accion = async (path: string, ok: (r: Record<string, unknown>) => string) => {
+    setBusy(true);
+    try { const r = await http<Record<string, unknown>>('POST', path, {}); toast(ok(r)); st.reload(); } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel"><div className="panel-head"><h2>Darwin: resumen del día y consultas</h2>
+      {d && (d.webhook.configurada ? <span className="tag ok">Conectado</span> : <span className="tag warn">Sin conectar</span>)}</div>
+      <div className="panel-body stack small">
+        <p style={{ margin: 0 }}>Darwin le avisa al Hub cada movimiento de las conversaciones (con Maru y con cada vendedora). A la madrugada el Hub deja en cada contacto un resumen del día con IA y anota lo que consultó en <a href="/consultas">Consultas</a>.</p>
+        {d && <>
+          {!d.webhook.clave && <div className="tag warn">Falta la clave de la API de Darwin en el Worker: <code>npx wrangler secret put DARWIN_API_KEY</code>.</div>}
+          {d.webhook.error && <div className="tag bad">{d.webhook.error}</div>}
+          {!d.configured && <div className="tag warn">Falta la clave de Claude (ANTHROPIC_API_KEY): los eventos se guardan y se resumen cuando esté.</div>}
+          <div className="muted">
+            Eventos en las últimas 24 h: <b>{d.eventos_24h}</b>{d.ultimo_evento ? ` (el último ${fmtDate(d.ultimo_evento, true)})` : ''} · días resumidos: <b>{d.hechos}</b> · por resumir: <b>{d.pendientes}</b>
+            {' '}· sin contacto en el Hub: {d.sin_contacto} · con error: {d.errores} · consultas: <b>{d.consultas}</b>
+          </div>
+        </>}
+        <div className="row wrap">
+          <button className="btn primary sm" disabled={busy || !d?.webhook.clave} onClick={() => accion('/darwin/conectar', () => 'Darwin conectado: manda los eventos de las conversaciones al Hub')}>
+            {d?.webhook.configurada ? 'Volver a conectar' : 'Conectar Darwin'}</button>
+          <button className="btn sm" disabled={busy || !d?.pendientes} onClick={() => accion('/darwin/resumir', (r) => `Resumidos: ${Number(r.hecho ?? 0)} · sin novedad: ${Number(r.sin_novedad ?? 0)} · quedan ${Number(r.quedan ?? 0)}`)}>Resumir ahora lo de días anteriores</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -592,6 +637,45 @@ function Gmail() {
           {last?.at && <span className="small muted">Última pasada: {fmtDate(last.at, true)}</span>}
         </div>
         {last?.out?.some((o) => o.error) && <div className="small" style={{ color: 'var(--bad)' }}>{last.out.filter((o) => o.error).map((o) => `${o.mailbox}: ${o.error}`).join(' · ')}</div>}
+      </div>
+    </div>
+  );
+}
+
+interface CalendarStatus {
+  config: { enabled: boolean; create_contacts: boolean; users: string[] | 'all' };
+  has_credentials: boolean;
+  state: Record<string, { at?: string; out?: Array<{ calendar?: string; error?: string; nuevas?: number; skipped?: string }> }>;
+}
+
+// Google Calendar (calendar.ts): las reuniones con gente de afuera quedan como actividad; desde la ficha se agendan.
+function Calendario() {
+  const toast = useToast();
+  const st = useAsync(() => http<CalendarStatus>('GET', '/calendar'), []);
+  const [busy, setBusy] = useState(false);
+  if (!st.data) return null;
+  const cfg = st.data.config;
+  const save = async (patch: Partial<CalendarStatus['config']>) => {
+    try { await http('PUT', '/calendar', patch); st.reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
+  };
+  const last = st.data.state.calendar_last_run;
+  return (
+    <div className="panel"><div className="panel-head"><h2>Reuniones (Google Calendar)</h2>
+      {st.data.has_credentials ? <span className={`tag ${cfg.enabled ? 'ok' : ''}`}>{cfg.enabled ? 'Activo' : 'Apagado'}</span> : <span className="tag warn">Falta la cuenta de servicio</span>}</div>
+      <div className="panel-body stack">
+        <p style={{ margin: 0 }}>Cada 10 minutos mira los calendarios del equipo: las reuniones con invitados de afuera quedan como actividad «Reunión» en sus contactos, su empresa y su negocio abierto. Si se mueven, se actualizan; si se cancelan, se archivan. Desde la ficha, «Reunión» la agenda en el calendario de quien la crea y manda la invitación (con Meet).</p>
+        <p className="small muted" style={{ margin: 0 }}>Usa la misma cuenta de servicio que Gmail y sus dominios propios e ignorados. En Google Workspace (Seguridad → Control de API → Delegación de todo el dominio) hay que sumarle el permiso https://www.googleapis.com/auth/calendar.events.</p>
+        <label className="row"><input type="checkbox" checked={cfg.enabled} disabled={!st.data.has_credentials} onChange={(e) => save({ enabled: e.target.checked })} />Registrar las reuniones automáticamente</label>
+        <label className="row"><input type="checkbox" checked={cfg.create_contacts} onChange={(e) => save({ create_contacts: e.target.checked })} />Crear el contacto (y su empresa) cuando un invitado no está en el CRM</label>
+        <div className="row">
+          <button className="btn" disabled={busy || !st.data.has_credentials || !cfg.enabled} onClick={async () => {
+            setBusy(true);
+            try { const r = await http<Array<{ nuevas?: number; error?: string }>>('POST', '/calendar/sync'); toast(`Listo: ${r.reduce((n, x) => n + (x.nuevas ?? 0), 0)} reuniones nuevas`); st.reload(); }
+            catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+          }}>Sincronizar ahora</button>
+          {last?.at && <span className="small muted">Última pasada: {fmtDate(last.at, true)}</span>}
+        </div>
+        {last?.out?.some((o) => o.error) && <div className="small" style={{ color: 'var(--bad)' }}>{last.out.filter((o) => o.error).map((o) => `${o.calendar}: ${o.error}`).join(' · ')}</div>}
       </div>
     </div>
   );

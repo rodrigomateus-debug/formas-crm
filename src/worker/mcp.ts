@@ -3,12 +3,14 @@ import { assertType, HttpError, OBJECT_TYPES } from './env';
 import { Meta } from './meta';
 import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor, updateRecord, type Filter } from './records';
 import { associate, associationsOf, dissociate, primaryCompanyId } from './associations';
+import { limpiarGrupales } from './calendar';
 import { createActivity, getActivity, listTasks, timeline, updateActivity, ACTIVITY_TYPES } from './activities';
 import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
 import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
-import { assertActividadVisible, assertVisible, esOperaciones, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
+import { buscarConsultas, cargarConversacion, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
+import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -347,6 +349,59 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'calendario_limpiar_grupales',
+    description: 'Solo administradores. Archiva las reuniones del calendario que son grupales (más de 3 empresas de afuera: boards, eventos, webinars) y los contactos y empresas que creó el calendario y quedaron sin nada. Con aplicar=false (default) solo lista qué archivaría. Se puede restaurar.',
+    inputSchema: { type: 'object', properties: { aplicar: { type: 'boolean' } } },
+    run: async (a, ctx, env) => {
+      if (ctx.user.role !== 'admin') throw new HttpError(403, 'Solo para administradores.');
+      return limpiarGrupales(env, { ...ctx, source: 'calendar' }, a.aplicar === true);
+    },
+  },
+  {
+    name: 'resumen_reunion',
+    description: 'Guarda el resumen breve de una reunión en su actividad «Reunión» del CRM (lo ve todo el equipo en la ficha del contacto, la empresa y el negocio). Usala después de resumir una reunión con un cliente (notas de Claude, de Gemini en Meet, una transcripción): 3 a 8 renglones con qué se habló, acuerdos y próximos pasos, en castellano. Se le pasa el id de la reunión o, si no lo sabés, el registro (contacto, empresa o negocio) y el día: busca la reunión de ese día; si no hay, la registra.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        resumen: { type: 'string', description: 'El resumen breve.' },
+        id: { type: 'integer', description: 'La actividad de la reunión, si se sabe.' },
+        record_id: { type: 'integer', description: 'Contacto, empresa o negocio de la reunión (si no se pasa id).' },
+        fecha: { type: 'string', description: 'Día de la reunión (ISO 8601); default hoy.' },
+        titulo: { type: 'string', description: 'Título, si hay que registrarla.' },
+        fuente: { type: 'string', description: 'De dónde sale el resumen: Claude (default), Gemini, transcripción…' },
+      },
+      required: ['resumen'],
+    },
+    run: async (a, ctx, env) => {
+      const db = env.DB;
+      const resumen = String(a.resumen ?? '').trim();
+      if (!resumen) throw new HttpError(400, 'Falta el resumen.');
+      const fuente = String(a.fuente ?? 'Claude');
+      let id = a.id ? Number(a.id) : null;
+      if (!id) {
+        if (!a.record_id) throw new HttpError(400, 'Pasá el id de la reunión o el registro (record_id) y el día.');
+        await assertVisible(db, new Meta(db), ctx.user, await getRow(db, Number(a.record_id)));
+        const dia = a.fecha ? new Date(String(a.fecha)) : new Date();
+        if (Number.isNaN(dia.getTime())) throw new HttpError(400, '"fecha" no es una fecha válida.');
+        // La reunión de ese día en el registro (o en sus contactos, si es una empresa o un negocio), la más cercana.
+        const r = await db.prepare(`SELECT a.id FROM activities a JOIN activity_links l ON l.activity_id = a.id
+            WHERE a.type = 'meeting' AND a.archived = 0 AND l.record_id = ?1 AND a.occurred_at BETWEEN ?2 AND ?3
+            ORDER BY abs(julianday(a.occurred_at) - julianday(?4)) LIMIT 1`)
+          .bind(Number(a.record_id), new Date(dia.getTime() - 86_400_000).toISOString(), new Date(dia.getTime() + 86_400_000).toISOString(), dia.toISOString()).first<{ id: number }>();
+        id = r?.id ?? null;
+        if (!id) {
+          const act = await createActivity(db, ctx, { type: 'meeting', subject: String(a.titulo ?? 'Reunión'), occurred_at: dia.toISOString(), links: [Number(a.record_id)],
+            meta: { resumen, resumen_de: fuente } });
+          return { id: act.id, creada: true, links: act.links };
+        }
+      }
+      const cur = await getActivity(db, id);
+      if (cur.type !== 'meeting') throw new HttpError(400, `La actividad ${id} no es una reunión.`);
+      const act = await updateActivity(db, ctx, id, { meta: { resumen, resumen_de: fuente } });
+      return { id: act.id, creada: false, subject: act.subject, occurred_at: act.occurred_at };
+    },
+  },
+  {
     name: 'preparar_reunion',
     description: 'Junta todo lo que hace falta para preparar una reunión o una llamada con un cliente: compras en Finnegans (estado del cliente, última compra, cuánto compra en US$ MEP, ritmo), saldo y vencido, contactos, negocios abiertos y ganados, pedidos y su estado de producción, tareas abiertas y la actividad reciente (mails, notas, llamadas, WhatsApp). Se le pasa el id de una empresa, un contacto o un negocio (usa su empresa principal). Con eso armá un resumen corto de la relación, los temas abiertos, los riesgos (deuda vencida, cliente en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.',
     readOnly: true,
@@ -389,6 +444,42 @@ const TOOLS: Tool[] = [
         hoy: new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10),
       };
     },
+  },
+  {
+    name: 'buscar_consultas',
+    description: `Lo que consultaron los clientes por WhatsApp (Darwin: Maru y las vendedoras), un renglón por producto, con datos fijos: quién consultó por botellas, quién pidió más de 100 unidades para fin de año, quién consultó y no compró. Filtros: tipo o categoría (de la lista), q (texto libre en producto, personalización, contacto o empresa), desde/hasta (AAAA-MM-DD), min_cantidad, ocasion, sin_venta (true: el contacto no tiene un negocio ganado después de la consulta), contact_id, company_id, owner_id. Categorías y tipos: ${Object.entries(CATALOGO).map(([c, t]) => `${c} (${t.join(', ')})`).join('; ')}. Ocasiones: ${OCASIONES.filter(Boolean).join(', ')}.`,
+    readOnly: true,
+    inputSchema: { type: 'object', properties: {
+      tipo: { type: 'string' }, categoria: { type: 'string' }, q: { type: 'string' }, desde: { type: 'string' }, hasta: { type: 'string' },
+      min_cantidad: { type: 'integer' }, ocasion: { type: 'string' }, sin_venta: { type: 'boolean' }, contact_id: { type: 'integer' }, company_id: { type: 'integer' },
+      owner_id: { type: 'integer' }, limit: { type: 'integer' }, offset: { type: 'integer' },
+    } },
+    run: async (a, ctx, env, base) => {
+      const r = await buscarConsultas(env.DB, ctx.user, a);
+      return { ...r, catalogo: undefined, ocasiones: undefined, consultas: r.consultas.map((c) => ({ ...c, url: c.contact_id ? link(base, 'contact', Number(c.contact_id)) : null })) };
+    },
+  },
+  {
+    name: 'cargar_conversacion_darwin',
+    description: 'Carga en el Hub los mensajes de UNA conversación de Darwin (WhatsApp), leídos con el conector de Darwin (darwin_conversation__events con types ["message"]). Solo administradores. Pasá cada mensaje tal cual viene de Darwin: created_at, source («human» es el cliente, «user» alguien del equipo, otro valor la IA Maru), source_name, message_text y message_external_id. Cada mensaje se guarda una vez; el día queda para el resumen nocturno (resumen en el contacto y consultas). Hasta 1000 mensajes por llamada.',
+    inputSchema: { type: 'object', properties: {
+      conversation_id: { type: 'string', description: 'El id completo de Darwin: <canal>-<teléfono>.' },
+      titulo: { type: 'string', description: 'El título de la conversación en Darwin (nombre del cliente).' },
+      atendio: { type: 'string', description: 'Nombre de la vendedora que tiene asignada la conversación, si hay; vacío si la atiende solo Maru.' },
+      atendio_email: { type: 'string' },
+      campos: { type: 'object', description: 'Los campos inteligentes de la última sesión (smart_fields), tal cual.' },
+      mensajes: { type: 'array', items: { type: 'object', properties: {
+        created_at: { type: 'string' }, source: { type: 'string' }, source_name: { type: 'string' }, message_text: { type: 'string' }, message_external_id: { type: 'string' },
+      } } },
+    }, required: ['conversation_id', 'mensajes'] },
+    run: async (a, ctx, env) => cargarConversacion(env, ctx, a),
+  },
+  {
+    name: 'pendientes_de_respuesta',
+    description: 'Conversaciones de WhatsApp (Darwin) que Maru ya pasó a una vendedora donde el cliente escribió y nadie del equipo le contestó en las últimas `horas` (24 por defecto).',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { horas: { type: 'integer' } } },
+    run: async (a, ctx, env) => pendientesDeRespuesta(env.DB, ctx.user, Number(a.horas) || 24),
   },
   {
     name: 'get_activity',
@@ -460,7 +551,7 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   }
   // Asignar a otra persona, no: desde Claude cada uno se asigna a sí mismo (o lo deja sin propietario).
   const owner = tool === 'create_record' || tool === 'update_record' ? a.properties?.owner_id : a.owner_id;
-  if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me) {
+  if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me && !(await esDeSuEquipo(env.DB, ctx.user, owner))) {
     throw new HttpError(403, 'Desde Claude solo podés asignarte cosas a vos. Para asignarle algo a otra persona, hacelo en el CRM.');
   }
   if (Array.isArray(a.colaboradores) && a.colaboradores.some((u: unknown) => Number(u) !== me)) {
@@ -469,7 +560,7 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   for (const id of EDITA[tool]?.(a) ?? []) {
     const row = await getRow(env.DB, Number(id));
     // Asociar algo tuyo con una empresa o un contacto ajeno se puede (solo se toca lo tuyo); el resto, solo si es tuyo.
-    if (row.owner_id != null && Number(row.owner_id) !== me) {
+    if (row.owner_id != null && Number(row.owner_id) !== me && !(await esSuyo(env.DB, ctx.user, row))) {
       const de = (await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(row.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
       throw new HttpError(403, `«${row.name}» es de ${de}: desde Claude solo podés cambiar lo tuyo (o lo que no tiene propietario).`);
     }
@@ -490,7 +581,9 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
       return ok({
         protocolVersion: msg.params?.protocolVersion && ['2025-06-18', '2025-03-26', '2024-11-05'].includes(msg.params.protocolVersion) ? msg.params.protocolVersion : PROTOCOL,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'formas-crm', title: 'Formas Hub', version: '1.0.0' },
+        // El ícono del Hub, para que el conector se distinga en claude.ai (MCP: serverInfo.icons).
+        serverInfo: { name: 'formas-crm', title: 'Formas Hub', version: '1.0.0', websiteUrl: base,
+          icons: [{ src: `${base}/hub-192.png`, mimeType: 'image/png', sizes: ['192x192'] }, { src: `${base}/hub-512.png`, mimeType: 'image/png', sizes: ['512x512'] }] },
         instructions: 'CRM propio de Formas Publicitarias (reemplazo de HubSpot). Objetos: contact, company, deal, order. '
           + 'Antes de crear, buscá (search_records) para no duplicar, o usá upsert_bundle. Usá list_properties para nombres internos y opciones válidas, '
           + 'list_pipelines para etapas y list_users para propietarios. Todo lo que hagas queda en el historial con origen "mcp". '

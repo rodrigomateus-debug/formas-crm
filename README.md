@@ -18,6 +18,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Tareas en equipo (tablero como ClickUp/Asana, responsable y colaboradores, relacionadas con pedidos, negocios, empresas y contactos, pasos y conversación con @menciones): [docs/TAREAS.md](docs/TAREAS.md).
 - Perfiles y qué ve cada uno (el perfil Ventas ve lo suyo): [docs/PERFILES.md](docs/PERFILES.md).
 - Unidad de negocio de empresas (a mano, por sus compras o por el propietario) y contactos (la de su empresa): [docs/UNIDADES.md](docs/UNIDADES.md).
+- Consultas por WhatsApp (Darwin → CRM: resumen del día de cada conversación en el contacto y lo que consultó cada cliente con datos fijos, para buscar «quién consultó por botellas»; y quién espera respuesta): [docs/DARWIN.md](docs/DARWIN.md#4-actividad-diaria-resumen-del-día-y-consultas-darwin--crm).
 - Referidos (quién nos recomendó a quién: desde el Workspace de Formas Shop o la ficha del cliente, con negocio en Lead, nota, tarea y el agradecimiento al ganar): [docs/REFERIDOS.md](docs/REFERIDOS.md).
 
 ## Cómo está hecho
@@ -115,7 +116,22 @@ Con `--limit=50` es una prueba corta. Después, la corrida completa (sin `--limi
 HUBSPOT_TOKEN=pat-… CRM_URL=https://<crm> CRM_TOKEN=fcrm_… node scripts/migrate-hubspot.mjs --since=2026-11-01
 ```
 
-Es repetible: no duplica y no pisa lo que ya se editó en el CRM. Trae propietarios (con su equipo), pipelines,
+**1 a 1 con el HubSpot de un vendedor** (para quien ya prueba el CRM; hoy Mili Formosa, propietario 494686419):
+
+```bash
+HUBSPOT_TOKEN=pat-… CRM_URL=https://<crm> CRM_TOKEN=fcrm_… node scripts/migrate-hubspot.mjs --owner=494686419 --report=control.json
+```
+
+Trae todos sus contactos, empresas, negocios y pedidos (y los registros de otros asociados a los suyos), deja sus
+asociaciones exactamente como en HubSpot, todas las actividades suyas o de sus registros (aunque las haya cargado otro), y
+archiva lo que ya no está allá; lo que pasó a otro vendedor queda con el otro. Acá HubSpot manda: pisa lo editado en el CRM,
+salvo lo que es solo del CRM (tipo de relación, compras y saldos de Finnegans, lo de ClickUp). Al final compara los totales
+de los dos lados y, si no dan igual, termina con error. El workflow «Sincronizar desde HubSpot» lo corre todas las noches
+para los de `OWNERS_1A1` y deja el control como artefacto; a mano, con el campo «owner».
+
+Es repetible: no duplica y no pisa lo que ya se editó en el CRM. Las propiedades de HubSpot se aplican encima de las del
+registro (lo que es solo del CRM no se pierde) y lo que se vació en HubSpot se vacía. Con `--since` también trae las
+asociaciones de lo que cambió y recalcula la última y próxima actividad solo de lo tocado. Trae propietarios (con su equipo), pipelines,
 propiedades (crea las custom que falten y suma opciones nuevas), contactos, empresas, negocios, pedidos, asociaciones
 con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, tareas y WhatsApp.
 
@@ -252,3 +268,22 @@ Cada corrida lee hasta unos 40 mails en total (el tope de consultas del plan gra
 bandeja que hace más que no se lee; lo que falta sigue en la próxima. Con token de administrador: `GET /hooks/gmail`
 (estado), `PUT /hooks/gmail` (configuración, por ejemplo `{"enabled": true, "users": ["alguien@formas.ar"]}`) y
 `POST /hooks/gmail/sync` (leer ahora).
+
+## Google Calendar
+
+Con la misma cuenta de servicio de `GOOGLE_SA_JSON` (código en `src/worker/calendar.ts`). Antes de prenderlo, en Google
+Workspace (Seguridad → Controles de API → Delegación de todo el dominio) hay que sumarle a esa cuenta el permiso
+`https://www.googleapis.com/auth/calendar.events` (y tener habilitada la Google Calendar API en su proyecto de Google Cloud).
+- **Registrar:** en Configuración → Integraciones → «Reuniones (Google Calendar)» se prende. Cada 10 minutos (junto con
+  Gmail) mira los calendarios del equipo: una reunión con invitados de afuera queda como actividad «Reunión» en sus
+  contactos, en su empresa (por el contacto) y en su negocio abierto. Los invitados que no son contactos se crean (con su
+  empresa por el dominio del mail, como con Gmail). Si la reunión se mueve se actualiza y si se cancela se archiva. La
+  misma reunión en varios calendarios del equipo se guarda una vez (por su iCalUID). Usa los dominios propios e
+  ignorados de la configuración de Gmail.
+- **Agendar:** en la ficha, «Reunión» → «Agendar en Google Calendar y mandar la invitación» la crea en el calendario de
+  quien la arma, con los invitados (los contactos con mail de la ficha y otros mails) y, si se pide, el link de Meet.
+- **Resumen:** si la reunión se hizo con «Tomar notas con Gemini» en Meet, Meet adjunta al evento el documento de notas;
+  la pasada del calendario lo lee por Drive (permiso `drive`, que la cuenta ya tiene) y guarda la sección «Resumen» en
+  la reunión. Claude lo carga con la herramienta `resumen_reunion` del conector (por id de la reunión, o por contacto,
+  empresa o negocio y día). En la ficha se ve como «Resumen (Gemini)» / «Resumen (Claude)».
+- Prueba: `test/calendar.test.mjs` (contra un Google simulado; ver `test/gmail-dev-vars.mjs`).

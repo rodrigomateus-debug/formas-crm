@@ -2,7 +2,7 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Formas Hub</title>
     <meta name="color-scheme" content="light dark" />
     <script>
@@ -16,6 +16,16 @@
       })();
     </script>
     <link rel="icon" href="/formas-favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/hub-192.png" type="image/png" sizes="192x192" />
+    <!-- Para agregar el Hub a la pantalla de inicio del celular (versión celular, web/src/movil/). Con las credenciales:
+         el manifiesto también pasa por el login. -->
+    <link rel="manifest" href="/hub.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/hub-apple-touch.png" />
+    <meta name="theme-color" content="#000085" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Hub" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />

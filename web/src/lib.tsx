@@ -19,7 +19,7 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 // photo_url: la foto de su cuenta de Google (la trae el CRM, src/worker/fotos.ts); sin foto, se ven sus iniciales.
-export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number }
+export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number; direccion?: number }
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
 export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
@@ -100,14 +100,28 @@ export function verComo(id: number | null) {
 // ---------- HTTP ----------
 
 export async function http<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method,
-    headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo() },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    credentials: 'same-origin',
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      method,
+      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'same-origin',
+      // Con la sesión de Cloudflare Access vencida, /api contesta con un redireccionamiento al login: seguirlo falla sin
+      // decir por qué. Así se ve y se recarga la página, que lleva al login (revisión de la versión celular, 18/11/2026).
+      redirect: 'manual',
+    });
+  } catch {
+    // Sin señal (o el servidor no contestó): un mensaje en castellano, no «Failed to fetch».
+    throw new Error(navigator.onLine === false ? 'Sin conexión: revisá la señal y probá de nuevo.' : 'No se pudo conectar con el Hub. Probá de nuevo en un momento.');
+  }
+  if (res.type === 'opaqueredirect' || (res.status === 0 && res.type !== 'basic')) {
+    window.location.reload();
+    return new Promise<T>(() => { /* la página se va al login */ });
+  }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { error: `El Hub contestó algo inesperado (${res.status}). Probá de nuevo.` }; }
   // El usuario que se estaba mirando ya no está (o se perdió el permiso): vuelve al propio.
   if (res.status === 403 && data?.ver_como_invalido && verComoId()) { verComo(null); throw new Error(data.error); }
   // Sin sesión (o vencida): a la pantalla de «Ingresar con Google», y después de vuelta a donde estaba.
@@ -555,4 +569,19 @@ export function unidadesDe(meta: Meta, type: ObjectType | 'task', props: Record<
   if (type === 'order') { const k = PEDIDO_UNIDAD[String(props.unidad_de_negocio ?? '').toUpperCase()]; return k ? [k] : []; }
   if (type === 'company') return unidadDeEmpresa(meta, props).keys;
   return delPropietario(meta, props.owner_id);
+}
+
+// Los datos principales de cada ficha (los elige un administrador; si no, estos). Los usan la ficha de escritorio y la
+// versión celular.
+export const KEY_PROPS: Record<ObjectType, string[]> = {
+  contact: ['email', 'phone', 'mobilephone', 'jobtitle', 'owner_id', 'lifecyclestage', 'hs_lead_status', 'origen_del_contacto', 'tipo_de_origen'],
+  company: ['domain', 'phone', 'owner_id', 'industry', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'objetivo_economico_anual', 'cuit'],
+  deal: ['amount', 'closedate', 'pipeline', 'dealstage', 'owner_id', 'producto', 'cantidad', 'tipo_de_producto', 'origen_del_negocio', 'hs_next_step'],
+  order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'hs_billing_address_email', 'hs_billing_address_phone'],
+};
+
+// «Acerca de» de cada objeto: lo elegido en «Elegir datos» o, si nadie eligió, lo de siempre.
+export function keyPropsFor(meta: Meta, type: ObjectType) {
+  const chosen = meta.key_props?.[type];
+  return chosen?.length ? chosen : KEY_PROPS[type];
 }

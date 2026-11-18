@@ -1,4 +1,5 @@
 import { procesarSalidaClickup } from './clickup';
+import { buscarConsultas, conectarDarwin, estadoDarwin, pendientesDeRespuesta, resumirPendientes, suscripcionDarwin } from './darwin';
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType, User } from './env';
@@ -12,6 +13,7 @@ import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
 import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
+import { agendarReunion, calendarConfig, DEFAULT_CALENDAR, syncCalendars, type NuevaReunion } from './calendar';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
@@ -36,9 +38,11 @@ import { actualizarFotos, fotosEstado } from './fotos';
 import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
+import { resumenDireccion } from './direccion';
+import { inicioProduccion } from './inicioprod';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
-import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
@@ -123,7 +127,7 @@ api.get('/meta', async (c) => {
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
-    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin, direccion FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -298,6 +302,7 @@ api.patch('/records/:type/:id', async (c) => {
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown> }>();
   if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, Number(c.req.param('id')), type)).pipeline_id);
+  await soloLoSuyoVentas(c, await registroVisible(c, Number(c.req.param('id'))), body.props);
   // Quien cambia a mano el monto de un negocio con pedidos lo deja «Monto a mano»: los pedidos ya no lo pisan (montos.ts).
   if (type === 'deal' && body.props && 'amount' in body.props && !('monto_a_mano' in body.props) && await tienePedidos(c.env.DB, Number(c.req.param('id')))) {
     body.props.monto_a_mano = true;
@@ -365,7 +370,9 @@ api.post('/records/:type/batch', async (c) => {
         });
         tasks++;
       } else {
-        if ((await registroVisible(c, id)).object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
+        const rec = await registroVisible(c, id);
+        if (rec.object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
+        await soloLoSuyoVentas(c, rec, body.props);
         await updateRecord(c.env.DB, ctx, type, id, body.props ?? {});
         updated++;
       }
@@ -878,6 +885,12 @@ api.get('/dashboard', async (c) => {
   return c.json({ month: m, open: open.results, won: won.results, created: created.results, lost: lost.results, tasks: tasks.results[0] });
 });
 
+// Inicio de Dirección (direccion.ts): solo para los usuarios con la marca «Dirección».
+api.get('/dashboard/direccion', async (c) => c.json(await resumenDireccion(c.env.DB, c.get('ctx'), c.req.query())));
+// Inicio de Producción (inicioprod.ts): pedidos, cumplimiento de lo pactado y tiempos de entrega. No se llama /produccion
+// para no caer en la regla de Ventas de esa ruta: Dirección con perfil Ventas también lo ve.
+api.get('/dashboard/pedidos', async (c) => c.json(await inicioProduccion(c.env.DB, c.get('ctx'), c.req.query())));
+
 function todayBounds(): [string, string, string] {
   const start = new Date(); start.setUTCHours(3, 0, 0, 0);
   if (start.getTime() > Date.now()) start.setUTCDate(start.getUTCDate() - 1);
@@ -1313,6 +1326,25 @@ api.post('/referidos', async (c) => {
   return c.json(r, 201);
 });
 
+// Perfil Ventas (aviso de la revisión de la versión celular, 18/11/2026): cambia solo lo suyo o lo que no tiene
+// propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Ver una empresa ajena porque
+// está asociada a lo suyo no la habilita a editarla ni a quedársela: se la pide a un administrador (docs/PERFILES.md).
+// Es la misma regla que ya tenía Claude para todos (soloLoSuyo en mcp.ts).
+async function soloLoSuyoVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, rec: { id?: number; name: string; owner_id: number | null }, props?: Record<string, unknown>) {
+  const user = c.get('ctx').user;
+  if (!esVentas(user)) return;
+  // Gerenta (alcance.ts): también lo de su equipo y su unidad, y lo puede asignar a cualquiera del equipo.
+  if (!(await esSuyo(c.env.DB, user, rec))) {
+    const de = (await c.env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(rec.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
+    throw new HttpError(403, `«${rec.name}» es de ${de}: lo puede cambiar ella o un administrador.`);
+  }
+  const owner = props?.owner_id;
+  if (owner != null && owner !== '' && !(await esDeSuEquipo(c.env.DB, user, owner))) {
+    throw new HttpError(403, gerenciaDe(user) ? 'Como propietario podés poner a alguien de tu equipo. Para pasárselo a otra persona, pedíselo a un administrador.'
+      : 'Como propietario solo podés ponerte a vos. Para pasárselo a otra persona, pedíselo a un administrador.');
+  }
+}
+
 async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
   const rec = await getRow(c.env.DB, id);
   await assertVisible(c.env.DB, new Meta(c.env.DB), c.get('ctx').user, rec);
@@ -1618,6 +1650,22 @@ api.patch('/rendimiento/:fecha/:n', async (c) => c.json(await corregir(c.env, c.
 
 api.get('/records/company/:id/produccion', async (c) => c.json(await produccionDeEmpresa(c.env.DB, Number(c.req.param('id')))));
 
+// Darwin (darwin.ts): las consultas de los clientes (quién consultó por botellas), las conversaciones sin respuesta y el
+// estado del resumen diario. Resumir a mano lo que quedó pendiente es de administradores (el cron lo hace a la madrugada).
+api.get('/consultas', async (c) => c.json(await buscarConsultas(c.env.DB, c.get('ctx').user, c.req.query())));
+api.get('/darwin/pendientes', async (c) => c.json(await pendientesDeRespuesta(c.env.DB, c.get('ctx').user, Number(c.req.query('horas')) || 24)));
+api.get('/darwin/estado', async (c) => {
+  const origen = new URL(c.req.url).origin;
+  const webhook = await suscripcionDarwin(c.env, origen).catch((e) => ({ configurada: false, clave: !!c.env.DARWIN_API_KEY, error: (e as Error).message }));
+  return c.json({ configured: !!c.env.ANTHROPIC_API_KEY, webhook, ...(await estadoDarwin(c.env.DB)) });
+});
+api.post('/darwin/conectar', async (c) => c.json(await conectarDarwin(c.env, c.get('ctx'), new URL(c.req.url).origin)));
+api.post('/darwin/resumir', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const b = await c.req.json<{ hasta?: string }>().catch(() => ({} as { hasta?: string }));
+  return c.json(await resumirPendientes(c.env, { hasta: b.hasta }));
+});
+
 api.get('/integrations/pedidos', async (c) => {
   const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
   return c.json({
@@ -1903,7 +1951,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; pipelines?: string[] | null }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -1913,6 +1961,14 @@ api.patch('/users/:id', async (c) => {
       throw new HttpError(400, 'Es el administrador principal del CRM (ADMIN_EMAIL): es superadmin siempre.');
     }
     await c.env.DB.prepare('UPDATE users SET superadmin = ? WHERE id = ?').bind(b.superadmin ? 1 : 0, cur.id).run();
+  }
+  // Dirección: Inicio con los resultados de todo el equipo (direccion.ts).
+  if (b.direccion !== undefined) await c.env.DB.prepare('UPDATE users SET direccion = ? WHERE id = ?').bind(b.direccion ? 1 : 0, cur.id).run();
+  // Gerencia (alcance.ts): el equipo que gerencia (ve y edita lo de ese equipo), o null.
+  if (b.gerencia_team !== undefined) {
+    const t = b.gerencia_team == null ? null : Number(b.gerencia_team);
+    if (t != null && !(await c.env.DB.prepare('SELECT 1 FROM teams WHERE id = ?').bind(t).first())) throw new HttpError(400, 'No existe ese equipo.');
+    await c.env.DB.prepare('UPDATE users SET gerencia_team = ? WHERE id = ?').bind(t, cur.id).run();
   }
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
@@ -2073,6 +2129,39 @@ api.put('/gmail', async (c) => {
 api.post('/gmail/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   return c.json(await syncAll(c.env));
+});
+
+// ---------- Google Calendar (calendar.ts) ----------
+
+api.get('/calendar', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const db = c.env.DB;
+  const { results } = await db.prepare("SELECT key, value FROM settings WHERE key LIKE 'calendar_state:%' OR key = 'calendar_last_run'").all<{ key: string; value: string }>();
+  return c.json({
+    config: await calendarConfig(db), defaults: DEFAULT_CALENDAR, has_credentials: !!c.env.GOOGLE_SA_JSON,
+    state: Object.fromEntries(results.map((r) => [r.key.replace('calendar_state:', ''), JSON.parse(r.value)])),
+  });
+});
+
+api.put('/calendar', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const cfg = { ...(await calendarConfig(c.env.DB)), ...(await c.req.json()) };
+  await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('calendar', ?)").bind(JSON.stringify(cfg)).run();
+  return c.json(cfg);
+});
+
+api.post('/calendar/sync', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await syncCalendars(c.env));
+});
+
+// Para la ficha: si se puede agendar en Google Calendar.
+api.get('/calendar/estado', async (c) => c.json({ agendar: !!c.env.GOOGLE_SA_JSON }));
+
+api.post('/calendar/reunion', async (c) => {
+  const ctx = c.get('ctx');
+  requireRole(ctx, 'admin', 'manager', 'member');
+  return c.json(await agendarReunion(c.env, ctx, await c.req.json<NuevaReunion>()));
 });
 
 // ---------- Avisos a otros sistemas ----------

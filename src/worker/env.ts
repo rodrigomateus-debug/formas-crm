@@ -25,6 +25,7 @@ export interface Env {
   // Solo para pruebas: otras URLs de Google.
   GOOGLE_TOKEN_URL?: string;
   GMAIL_API_URL?: string;
+  CALENDAR_API_URL?: string;   // tests: un Google Calendar falso
   DRIVE_API_URL?: string;          // Drive simulado en las pruebas
   GOOGLE_USERINFO_URL?: string;    // perfil de Google (foto de los usuarios) simulado en las pruebas
   BOCETOS_DRIVE_FOLDER?: string;   // carpeta (o unidad compartida) de los bocetos, si no está en Configuración
@@ -43,6 +44,9 @@ export interface Env {
   GOOGLE_PLACES_API_URL?: string;   // solo para pruebas: Google Maps simulado
   // API de Claude (Anthropic): lee los remitos (remitos.ts). Sin la clave, los remitos se guardan igual y esperan.
   ANTHROPIC_API_KEY?: string;
+  // API de Darwin (darwin.ts): con la clave, «Conectar Darwin» suscribe al CRM a los eventos de las conversaciones.
+  DARWIN_API_KEY?: string;
+  DARWIN_API_URL?: string;   // solo para pruebas: Darwin simulado
   ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado
   // Solo para pruebas: el buscador de direcciones del mapa (cronograma.ts), simulado. Por defecto, Nominatim de OpenStreetMap.
   GEOCODER_URL?: string;
@@ -73,6 +77,8 @@ export interface User {
   photo_url?: string | null;   // foto de su cuenta de Google (fotos.ts)
   avisos_mail?: number;        // 1: recibe los avisos por mail (avisos.ts); apagado por defecto
   superadmin?: number;         // 1: puede «Ver como» otro usuario (auth.ts); el de ADMIN_EMAIL lo es siempre
+  gerencia_team?: number | null; // Ventas: gerenta de ese equipo, ve y edita lo del equipo (alcance.ts)
+  direccion?: number;          // 1: Inicio de Dirección, con los resultados de todo el equipo (direccion.ts)
   deleted_at?: string | null;  // eliminado en Configuración → Usuarios (no entra, no aparece; el historial conserva su nombre)
 }
 

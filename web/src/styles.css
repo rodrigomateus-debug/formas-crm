@@ -2077,3 +2077,35 @@ span.oc-link { color: var(--ui-ink-2); }
 .oc-boton { white-space: nowrap; font-variant-numeric: tabular-nums; }
 span.oc-boton { display: inline-flex; align-items: center; height: 28px; padding: 0 8px; font-size: 12px; color: var(--ui-ink-2); }
 span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
+
+/* ---------- Rendimiento de los recorridos (Rendimiento.tsx) ---------- */
+.rd-que { max-width: 900px; margin: -8px 0 12px; font-size: 13px; }
+.rd-filtros { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; }
+.rd-filtros .chip { cursor: pointer; border: 1px solid transparent; font: inherit; font-size: 12.5px; }
+.rd-sep { width: 1px; height: 18px; background: var(--ui-line); margin: 0 6px; }
+.rd-aviso { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 10px 14px; margin-bottom: 14px; border-radius: var(--r-panel); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 13px; }
+.rd-aviso.mal { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.rd .kpi .value small { font-size: 15px; font-weight: 500; color: var(--text-3); }
+.rd-h { font-size: 14px; font-weight: 600; margin: 22px 0 8px; }
+.rd-tabla th, .rd-tabla td { padding: 0 10px; }
+.rd-tabla th:first-child, .rd-tabla td:first-child { padding-left: 14px; }
+.rd-tabla th.der, .rd-tabla td.der { text-align: right; }
+.rd-tabla td.rd-alto { color: var(--ui-warning-ink); font-weight: 600; }
+.rd-tabla tr.rd-fila { cursor: pointer; }
+.rd-propio { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
+.rd-notas { max-width: none; overflow: visible; }
+.rd-notas .tag + .tag { margin-left: 4px; }
+.rd-tabla tr.rd-detalle td, .rd-tabla tr.rd-detalle:hover td { height: auto; white-space: normal; max-width: none; padding: 14px 18px; background: var(--ui-surface-sunken); }
+.rd-det { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 24px; }
+.rd-det h3 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ui-ink-2); margin: 0 0 8px; }
+.rd-det h3:not(:first-child) { margin-top: 16px; }
+.rd-det p { margin: 0 0 6px; }
+.rd-pasos { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.rd-pasos li { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.rd-paso-hora { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ui-ink-2); }
+.rd-pasos small { display: block; color: var(--text-3); font-size: 12px; }
+.rd-pasos li.mal small { color: var(--ui-negative-ink); }
+.rd-pasos em { font-style: normal; color: var(--ui-warning-ink); }
+.rd-corregir { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 8px; }
+.rd-corregir label { display: grid; gap: 4px; font-size: 12px; color: var(--ui-ink-2); }
+@media (max-width: 800px) { .rd-det { grid-template-columns: minmax(0, 1fr); } }

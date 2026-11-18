@@ -12,6 +12,7 @@ import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
 import RecorridosPage from './pages/Recorridos';
+import RendimientoPage from './pages/Rendimiento';
 import NotasProductosPage from './pages/NotasProductos';
 import ChoferesPage from './pages/Choferes';
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
@@ -77,6 +78,8 @@ export default function App() {
         {!ventas && <NavLink to="/entregas" className="nav-link"><Icon name="truck" />Entregas{remitos ? <span className="count">{remitos}</span> : null}</NavLink>}
         {/* Perfil Logística: el código de cada chofer para su app, a mano (los administradores, en Entregas → Choferes). */}
         {logistica && <NavLink to="/choferes" className="nav-link"><Icon name="volante" />Choferes</NavLink>}
+        {/* Rendimiento de los recorridos (km y tiempo por chofer, rendimiento.ts): Logística, Producción y administradores. */}
+        {(produccion || meta.me.role === 'admin') && meta.me.role !== 'viewer' && <NavLink to="/rendimiento" className="nav-link"><Icon name="timer" />Rendimiento</NavLink>}
         {/* Notas de productos (notasproducto.ts): las ven todos; las escriben Producción y los administradores. */}
         <NavLink to="/productos" className="nav-link"><Icon name="alert" />Notas de productos</NavLink>
         {/* Abajo de todo, aparte del resto del menú: Configuración, justo arriba del usuario. */}
@@ -105,6 +108,7 @@ export default function App() {
           {!ventas && <Route path="/produccion" element={<ProduccionPage />} />}
           {!ventas && <Route path="/cronograma" element={<CronogramaPage />} />}
           <Route path="/recorridos" element={<RecorridosPage />} />
+          {(produccion || meta.me.role === 'admin') && <Route path="/rendimiento" element={<RendimientoPage />} />}
           <Route path="/productos" element={<NotasProductosPage />} />
           {(logistica || meta.me.role === 'admin') && <Route path="/choferes" element={<ChoferesPage />} />}
           <Route path="/settings/*" element={<Settings />} />

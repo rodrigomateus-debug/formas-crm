@@ -5,7 +5,7 @@
 // del tablero de márgenes), la última compra, la compra histórica, el ticket promedio, el ritmo de compra y el saldo.
 // Después lo cruza con las empresas del CRM (código de Finnegans, CUIT o nombre) y lo aplica. Detalle en docs/CLIENTES.md.
 //
-//   CRM_URL=https://hub.formas.workers.dev CRM_TOKEN=fcrm_… FIN_CLIENT_ID=… FIN_SECRET=… node scripts/clientes.mjs
+//   CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… FIN_CLIENT_ID=… FIN_SECRET=… node scripts/clientes.mjs
 //   DRY_RUN=1 calcula y muestra el resumen sin aplicar nada.
 //
 // EL REPO ES PÚBLICO: este script nunca imprime nombres, CUIT ni montos, solo cantidades.

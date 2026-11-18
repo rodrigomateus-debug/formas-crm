@@ -38,7 +38,7 @@ sola. Se puede abrir igual en `/login` para probarla.
    no, **Externo** y publicada (el CRM igual controla el dominio y la lista de usuarios). Nombre «Formas CRM», logo de
    Formas. Después, Credenciales → Crear credenciales → ID de cliente de OAuth → **Aplicación web**, con este URI de
    redireccionamiento autorizado:
-   `https://hub.formas.workers.dev/auth/google/callback`
+   `https://formas-crm.rodrigo-mateus.workers.dev/auth/google/callback`
    (si el CRM pasa a otro dominio, se agrega también el del dominio nuevo).
 2. **Secretos del repo** (GitHub → Settings → Secrets and variables → Actions):
    - `GOOGLE_OAUTH_CLIENT_ID` y `GOOGLE_OAUTH_CLIENT_SECRET`: los del paso 1.
@@ -47,7 +47,7 @@ sola. Se puede abrir igual en `/login` para probarla.
 3. **Publicar**: correr «Probar y publicar» (o mergear cualquier cambio a main); carga los secretos en Cloudflare.
 4. **Probar** con Access todavía adelante: abrir `/login`, tocar «Ingresar con Google» y ver que vuelve al CRM.
 5. **Sacar Cloudflare Access del CRM**: Cloudflare → Zero Trust → Access → Applications → la aplicación de
-   `formas-crm.rodrigo-mateus.workers.dev` (o `hub.formas.workers.dev`) → borrarla. Desde ese momento el que pide el login es el CRM. Si hay una
+   `formas-crm.rodrigo-mateus.workers.dev` → borrarla. Desde ese momento el que pide el login es el CRM. Si hay una
    aplicación aparte que deja pasar `/hooks` (app del chofer), puede quedar o borrarse: `/hooks` tiene su propio control.
    No borrar Access antes de los pasos 2 y 3: sin los secretos no entra nadie.
 

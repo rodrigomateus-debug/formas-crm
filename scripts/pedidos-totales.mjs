@@ -5,7 +5,7 @@
 // pesos) por pedido y le pasa al CRM {"PEDVTASTP - 31277": total, …}. El CRM lo guarda en el «Total sin IVA» de los pedidos
 // con ese pedido de Finnegans; el tablero de pedidos lo suma abajo de cada columna.
 //
-//   CRM_URL=https://hub.formas.workers.dev CRM_TOKEN=fcrm_… FIN_CLIENT_ID=… FIN_SECRET=… node scripts/pedidos-totales.mjs
+//   CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… FIN_CLIENT_ID=… FIN_SECRET=… node scripts/pedidos-totales.mjs
 //   DESDE=2023-01-01 trae desde esa fecha (si no, los últimos 120 días). DRY_RUN=1 calcula sin mandar nada.
 //
 // EL REPO ES PÚBLICO: este script nunca imprime clientes ni montos, solo cantidades.

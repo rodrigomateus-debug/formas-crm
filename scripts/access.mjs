@@ -5,7 +5,7 @@
 // dominios de abajo. No toca las otras políticas: si la aplicación usa la lista «Equipo Formas» del tablero, sigue
 // igual (cambiarla afectaría al tablero). Lo corre el workflow «Login de Cloudflare» con CLOUDFLARE_API_TOKEN.
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-const HOST = process.env.CRM_HOST ?? 'hub.formas.workers.dev';
+const HOST = process.env.CRM_HOST ?? 'formas-crm.rodrigo-mateus.workers.dev';
 const DOMINIOS = (process.env.CRM_DOMINIOS ?? 'formas.ar,formaspublicitarias.com,soutex.com.ar').split(',').map((d) => d.trim()).filter(Boolean);
 const NOMBRE = 'Mails de Formas (CRM)';
 if (!TOKEN) { console.error('Falta CLOUDFLARE_API_TOKEN.'); process.exit(1); }

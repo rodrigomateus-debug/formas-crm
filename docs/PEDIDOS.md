@@ -326,7 +326,7 @@ En GitHub, repositorio `formas-crm` → Settings → Secrets and variables → A
 | `FINNEGANS_CLIENT_ID`, `FINNEGANS_CLIENT_SECRET` (secretos; también sirven con los nombres `FIN_CLIENT_ID` y `FIN_SECRET`) | Leer facturas y clientes | Los mismos del tablero de Formas Shop |
 | `CRM_TOKEN` (secreto) | Que la tarea de los PDF suba al CRM | Un token de un administrador (Configuración → Integraciones → Tokens, tipo «API») |
 | `FINNEGANS_GO_USUARIO`, `FINNEGANS_GO_PASSWORD`, `FINNEGANS_GO_ESPACIO_DE_TRABAJO` (secretos) | Bajar el PDF de Finnegans GO | El usuario de GO que ya usa la facturación |
-| `CRM_URL` (variable) | Dónde está el CRM | `https://hub.formas.workers.dev` |
+| `CRM_URL` (variable) | Dónde está el CRM | `https://formas-crm.rodrigo-mateus.workers.dev` |
 
 Los tres primeros los carga en el CRM el despliegue («Probar y publicar»): después de agregarlos, correrlo de nuevo
 (Actions → Probar y publicar → Run workflow). El estado de cada conexión, la última corrida y los errores se ven en

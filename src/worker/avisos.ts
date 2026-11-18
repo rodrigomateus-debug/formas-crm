@@ -16,7 +16,7 @@ import { textoPlano } from './conversacion';
 export interface AvisosConfig { enabled: boolean; resumen: boolean; asignaciones: boolean; hora: number; desde: string }
 export const DEFAULT_AVISOS = (): AvisosConfig => ({ enabled: true, resumen: true, asignaciones: true, hora: 8, desde: '' });
 const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
-const APP_URL = (env: Env) => (env.APP_URL ?? 'https://hub.formas.workers.dev').replace(/\/$/, '');
+const APP_URL = (env: Env) => (env.APP_URL ?? 'https://formas-crm.rodrigo-mateus.workers.dev').replace(/\/$/, '');
 const ART = -3 * 3600_000;   // Buenos Aires
 const PATHS: Record<string, string> = { contact: 'contacts', company: 'companies', deal: 'deals', order: 'orders' };
 

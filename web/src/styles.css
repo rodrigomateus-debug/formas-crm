@@ -2234,13 +2234,33 @@ span.oc-boton.sin { color: var(--ui-ink-3); font-style: italic; }
 .ds-locmov { display: none; }
 .ds-tabla { max-height: calc(100vh - 220px); overflow: auto; }
 .ds-tabla td { vertical-align: top; }
+/* Con más aire entre renglón y renglón (pedido de Rodrigo del 18/11/2026): cada fila tiene dos o tres líneas. */
+.ds-tabla table.grid td { height: auto; padding-top: 11px; padding-bottom: 11px; line-height: 1.45; }
 .ds-sel { width: 28px; }
-.ds-grupo td { background: var(--ui-surface-sunken); }
-.ds-grupo-nombre, .ds-nombre, .ds-dir, .ds-plegar { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
-.ds-grupo-nombre { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; }
-.ds-plegar { margin-right: 4px; color: var(--ui-ink-2); vertical-align: middle; }
-.ds-hijo td:nth-child(2) { padding-left: 28px; }
-.ds-hijo td:first-child.ds-sel + td { padding-left: 28px; }
+.ds-grupo-nombre, .ds-nombre, .ds-dir, .ds-plegar, .ds-cuantas { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+/* Una empresa con varias direcciones y un destino de una sola están al mismo nivel: el nombre arranca en la misma columna
+   y se ve igual. La empresa lleva la flecha en el margen; el destino suelto, ese mismo margen vacío. */
+.ds-td-nombre, .ds-grupo-celda { position: relative; }
+.ds-nivel { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ds-margen { flex: none; width: 18px; height: 18px; display: inline-grid; place-items: center; color: var(--ui-ink-2); border-radius: 4px; }
+button.ds-margen:hover { background: var(--ui-surface-sunken); color: var(--ui-ink); }
+.ds-grupo-nombre b, .ds-suelto .ds-nombre b { font-size: 13.5px; }
+.ds-cuantas { flex: none; font-size: 12px; color: var(--ui-ink-2); padding: 1px 8px; border-radius: var(--r-pill); background: var(--ui-surface-sunken); }
+.ds-cuantas:hover { color: var(--ui-ink); }
+.ds-suelto .ds-tags, .ds-grupo .ds-tags { margin-left: 26px; }
+/* Las direcciones de una empresa: corridas a la derecha y colgadas de una línea que baja desde la flecha, como los
+   productos de un pedido. La empresa y sus direcciones se leen como un bloque: sin la raya entre ellas y con otro fondo. */
+.ds-tabla table.grid tr.ds-grupo.ds-abierto td, .ds-tabla table.grid tr.ds-hijo:not(.ultimo) td { border-bottom-color: transparent; }
+/* Plegada, la flecha mira a la derecha (hacia lo que se abre); abierta, hacia abajo. */
+.ds-plegar svg { transition: transform .15s ease; }
+.ds-plegar[aria-expanded="false"] svg { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .ds-plegar svg { transition: none; } }
+.ds-tabla table.grid tr.ds-hijo td { background: color-mix(in srgb, var(--ui-surface-sunken) 55%, var(--ui-surface)); padding-top: 8px; padding-bottom: 8px; }
+.ds-tabla table.grid tr.ds-hijo td.ds-td-nombre { padding-left: 64px; }
+.ds-hijo .ds-td-nombre::before { content: ''; position: absolute; left: 22px; top: 0; bottom: 0; border-left: 1.5px solid var(--ui-line-strong); }
+.ds-hijo.ultimo .ds-td-nombre::before { bottom: auto; height: 19px; }
+.ds-hijo .ds-td-nombre::after { content: ''; position: absolute; left: 22px; top: 18px; width: 32px; border-top: 1.5px solid var(--ui-line-strong); }
+.ds-hijo .ds-nombre b { font-weight: 500; }
 .ds-foco td { background: var(--ui-info-soft); }
 .ds-nombre:hover b, .ds-grupo-nombre:hover b { text-decoration: underline; }
 .ds-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }

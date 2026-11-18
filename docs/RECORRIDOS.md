@@ -242,6 +242,12 @@ para este tipo de libretas de direcciones, para que esté completa pero se pueda
   con el botón **WhatsApp** (abre el chat con esa persona, con un saludo de Formas), teléfono y mail, y **viajes**: en los
   últimos 6 meses / en total, el último y si ya hay uno previsto («va el 21/11»). Los grupos se ven como una empresa con
   sus direcciones abajo (se pliegan).
+- **De entrada, los 100 más visitados** (pedido de Rodrigo del 18/11/2026: con los 2.472 a la vez la pantalla se
+  trababa). La tabla y el mapa muestran los 100 destinos (o empresas con sus sucursales) con más viajes; el buscador y
+  los filtros buscan en toda la base, y «Ver todos» los trae completos (`TOPE` en `RecorridosDestinos.tsx`).
+- **Empresa y destino suelto, al mismo nivel**: los dos arrancan en la misma línea y con el mismo peso. Las direcciones
+  de una empresa cuelgan debajo con una línea que las une y un fondo apenas distinto, como los productos de un pedido.
+  Las filas tienen más aire.
 - **El mapa**: todos los destinos con un punto del color de su tipo. Al tocar una dirección, el mapa va a ese lugar y
   muestra la ficha con **«Ver en Google Maps»** (cada dirección tiene además su link «Maps» en la tabla), WhatsApp y
   Editar. Si no está ubicada, Logística la ubica a mano arrastrando el pin («Ubicar a mano» / «Corregir el punto»), y

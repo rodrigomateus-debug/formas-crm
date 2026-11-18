@@ -84,8 +84,9 @@ export function addresses(v?: string) {
 export function personName(raw: string): { firstname?: string; lastname?: string } {
   let n = raw.replace(/['"]/g, '').replace(/\s+/g, ' ').trim();
   if (!n || n.includes('@')) return {};
-  const comma = n.match(/^([^,]+),\s*(.+)$/);
-  if (comma) n = `${comma[2]} ${comma[1]}`;
+  // «Apellido, Nombre» (y Outlook a veces agrega la oficina: «Poloni, Pascual,AR-Santa Fe, Firmat»): se queda con nombre y apellido.
+  const comma = n.match(/^([^,]+),\s*([^,]+)/);
+  if (comma) n = `${comma[2].trim()} ${comma[1].trim()}`;
   const [firstname, ...rest] = n.split(' ');
   return { firstname, lastname: rest.join(' ') || undefined };
 }

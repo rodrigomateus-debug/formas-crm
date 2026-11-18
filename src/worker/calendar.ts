@@ -24,9 +24,12 @@ export interface CalendarConfig {
   create_contacts: boolean;
   users: string[] | 'all';
   lookback_days: number;
+  // Más empresas de afuera que esto en una reunión (un board, un evento, un webinar): no es una reunión con un cliente y no
+  // se registra. Cada mail personal (gmail, hotmail…) cuenta como una empresa.
+  max_empresas: number;
 }
 
-export const DEFAULT_CALENDAR: CalendarConfig = { enabled: false, create_contacts: true, users: 'all', lookback_days: 30 };
+export const DEFAULT_CALENDAR: CalendarConfig = { enabled: false, create_contacts: true, users: 'all', lookback_days: 30, max_empresas: 3 };
 
 export async function calendarConfig(db: D1Database): Promise<CalendarConfig> {
   const row = await db.prepare("SELECT value FROM settings WHERE key = 'calendar'").first<{ value: string }>();
@@ -95,6 +98,15 @@ function metaDe(e: GEvent, user: User, externos: string[]) {
   };
 }
 
+// La descripción del evento sin el texto de la invitación de Teams, Zoom o Meet (links, códigos, teléfonos), ni HTML.
+export function limpiarDescripcion(d: string) {
+  let t = d.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
+  const corte = t.search(/\n?\s*(_{8,}|-::~:~::|Reuni[oó]n de Microsoft Teams|Microsoft Teams meeting|Join Zoom Meeting|Unirse a la reuni[oó]n Zoom|Únase a la reunión de Zoom|Unirse con Google Meet|Join with Google Meet)/i);
+  if (corte >= 0) t = t.slice(0, corte);
+  t = t.split('\n').map((l) => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return t.length > 1500 ? `${t.slice(0, 1500)}…` : t;
+}
+
 // Registra (o actualiza) una reunión del calendario. Devuelve qué hizo.
 export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: CalendarConfig, f?: Awaited<ReturnType<typeof filtros>>): Promise<'nueva' | 'actualizada' | 'archivada' | null> {
   const db = env.DB;
@@ -111,8 +123,10 @@ export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: Cale
   const externos = (e.attendees ?? []).filter((a) => a.email && !a.resource && a.responseStatus !== 'declined')
     .map((a) => ({ email: a.email!.toLowerCase(), name: a.displayName ?? '' }))
     .filter((a) => !f!.internal(a.email) && !f!.ignored(a.email));
-  if (!externos.length) {
-    // Ya no tiene invitados de afuera (los sacaron): si la había registrado el calendario, se archiva.
+  const PERSONALES = /@(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|me|msn|aol|proton(mail)?)\.[a-z.]+$/;
+  const empresas = new Set(externos.map((a) => (PERSONALES.test(a.email) ? a.email : a.email.split('@')[1])));
+  if (!externos.length || empresas.size > (cfg.max_empresas ?? 3)) {
+    // Sin invitados de afuera (o ya no los tiene), o una reunión grupal: si la había registrado el calendario, se archiva.
     if (prev && !prev.archived && prev.source === 'calendar') { await updateActivity(db, ctx, prev.id, { archived: true }); return 'archivada'; }
     return null;
   }
@@ -132,7 +146,7 @@ export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: Cale
   if (!contactos.length) return null;
   const links = contactos.map((c) => c.id);
   for (const c of contactos) { const d = await openDealOf(db, c.id); if (d) links.push(d); }
-  const datos = { subject: e.summary ?? 'Reunión', body: e.description ?? '', occurred_at: inicio, meta: metaDe(e, user, externos.map((a) => a.email)) as Record<string, unknown> };
+  const datos = { subject: e.summary ?? 'Reunión', body: limpiarDescripcion(e.description ?? ''), occurred_at: inicio, meta: metaDe(e, user, externos.map((a) => a.email)) as Record<string, unknown> };
   // Notas de Gemini adjuntas: se leen una vez (si ya hay resumen de esas notas, no se vuelven a pedir).
   const notas = (e.attachments ?? []).find(esNotas);
   const prevMeta = prev ? JSON.parse(prev.meta || '{}') as Record<string, unknown> : {};

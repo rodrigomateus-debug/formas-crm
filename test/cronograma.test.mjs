@@ -312,6 +312,11 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.equal(nueva.sugerencia, null);
   assert.equal(nueva.lat, -34.679);
   assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.direccion_entrega, `Nicaragua ${PDV_V}, Sarandí, Avellaneda`);
+  // En la tarjeta de la semana: la misma dirección, con el tilde de ubicada en el mapa, y se corrige en el pedido.
+  let dirs = (await api('GET', '/cronograma/direcciones?desde=2026-11-16&hasta=2026-11-22')).data;
+  assert.deepEqual(dirs.direcciones[`2026-11-20|${nueva.clave}`] && { ...dirs.direcciones[`2026-11-20|${nueva.clave}`], nombre: undefined, horario: undefined, company_id: undefined },
+    { direccion: `Nicaragua ${PDV_V}, Sarandí, Avellaneda`, origen: 'pedido', estado: 'ok', record_ids: [pedido], expreso: false, otras: 0, nombre: undefined, horario: undefined, company_id: undefined });
+  assert.equal((await api('GET', '/cronograma/direcciones?desde=2026-11-16')).status, 400);
 
   // Retira en Formas (tarjeta «Entrega»): no es una parada del chofer; va aparte, en «Retiran en Formas».
   const dirsUrl = `/records/order/${pedido}/direcciones`;
@@ -634,11 +639,22 @@ test('cronograma: el chofer se elige desde la tarjeta de la semana', async (t) =
   ruta = (await api('GET', `/cronograma/ruta?fecha=${DIA}`)).data;
   assert.deepEqual([[...deCarlos().orden].sort(), deCarlos().a_mano], [[clave(ret.id), clave(egr.id)].sort(), true]);
 
+  // El link de la app del chofer elegido, por su nombre: si no tiene, se crea ahí mismo y desde ahí aparece el suyo.
+  let acc = await api('GET', `/choferes/por-nombre?nombre=${encodeURIComponent(`carlos ${RUN}`)}`);
+  assert.deepEqual([acc.status, acc.data.existe], [200, false]);
+  assert.equal((await api('POST', '/choferes', { name: `Carlos ${RUN}` })).status, 201);
+  acc = await api('GET', `/choferes/por-nombre?nombre=${encodeURIComponent(`CARLOS  ${RUN}`)}`);
+  assert.equal(acc.data.existe, true);
+  assert.equal(acc.data.nombre, `Carlos ${RUN}`);
+  assert.match(acc.data.link, /\/hooks\/chofer\/#t=/);
+  assert.match(acc.data.codigo, /^\d{8}$/);
+
   // Lo que no es una parada, un día roto o quien no edita el cronograma: no.
   assert.equal((await api('PUT', '/cronograma/chofer', { fecha: '2026-11-16', ids: [mov(v, 'ingreso', 'Termo').id], chofer: `Carlos ${RUN}` })).status, 400);
   assert.equal((await api('PUT', '/cronograma/chofer', { fecha: 'mañana', ids: [ret.id], chofer: `Carlos ${RUN}` })).status, 400);
   asUser = `vende.${RUN}@formas.ar`;
   assert.equal((await api('PUT', '/cronograma/chofer', { fecha: DIA, ids: [ret.id], chofer: '' })).status, 403);
+  assert.equal((await api('GET', `/choferes/por-nombre?nombre=${encodeURIComponent(`Carlos ${RUN}`)}`)).status, 403, 'el link del chofer, solo Logística');
   asUser = null;
 });
 

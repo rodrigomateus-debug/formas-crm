@@ -930,6 +930,44 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   };
 }
 
+// La dirección de cada parada de la semana, para la tarjeta (pedido de Rodrigo del 18/11/2026): la misma que usa la Ruta
+// del día (pedido, Finnegans, última entrega, ficha, libreta, expreso) y si está ubicada en el mapa. Va aparte de la vista
+// de la semana para no demorarla. Sale de lo guardado; para quien edita, además se buscan en el mapa unas pocas
+// direcciones que todavía no se buscaron (`buscando` dice cuántas faltan, y la pantalla vuelve a pedir).
+// `estado`: 'ok' (ubicada), 'no_encontrada' (se buscó y no está en el mapa), 'buscando' (todavía no se buscó) o
+// 'sin_direccion'.
+export interface DireccionParada {
+  direccion: string | null; origen: Parada['origen']; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
+  nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
+}
+export async function direccionesSemana(env: Env, user: User, q: { desde?: string; hasta?: string }, buscar: boolean) {
+  if (!esDia(q.desde) || !esDia(q.hasta) || q.hasta < q.desde) throw new HttpError(400, 'Faltan las fechas (desde y hasta, AAAA-MM-DD).');
+  if (Date.parse(q.hasta) - Date.parse(q.desde) > 14 * 86_400_000) throw new HttpError(400, 'El rango es demasiado largo.');
+  const out: Record<string, DireccionParada> = {};
+  const todas: string[] = [];
+  const paradas: Array<{ k: string; p: Parada }> = [];
+  for (let d = q.desde; d <= q.hasta; d = sumarDias(d, 1)) {
+    const r = await rutaDelDia(env, user, d, { buscar: false });
+    for (const p of r.paradas) { paradas.push({ k: `${d}|${p.clave}`, p }); if (p.direccion && p.lat == null) todas.push(p.direccion); }
+  }
+  // Las que no tienen punto: si ya se buscaron y no se encontraron, o si todavía no se buscaron (y, para quien edita, se
+  // buscan unas pocas ahora).
+  const { geo, pendientes } = await ubicar(env, todas, buscar);
+  for (const { k, p } of paradas) {
+    const clave = p.direccion ? claveDireccion(p.direccion) : '';
+    const g = clave ? geo.get(clave) : undefined;
+    const estado: DireccionParada['estado'] = !p.direccion ? 'sin_direccion' : p.lat != null || g ? 'ok' : geo.has(clave) ? 'no_encontrada' : 'buscando';
+    // Un pedido que va a varias direcciones («p:…:2»): la tarjeta muestra la primera y cuántas más hay.
+    const otra = /^(.*):\d+$/.exec(k);
+    if (otra && out[otra[1]]) { out[otra[1]].otras++; continue; }
+    out[k] = {
+      direccion: p.direccion, origen: p.origen, estado, nombre: p.nombre, company_id: p.company_id, horario: p.horario_texto, expreso: !!p.expreso, otras: 0,
+      record_ids: [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],
+    };
+  }
+  return { direcciones: out, buscando: pendientes };
+}
+
 // Desde la Ruta del día. Cada recorrido dice si alguien ordenó sus paradas a mano (`a_mano`); si no lo dice (la pantalla de
 // antes), cuenta como ordenado a mano, como hasta ahora.
 export async function guardarRutas(db: D1Database, ctx: Ctx, b: { fecha?: unknown; rutas?: unknown }) {

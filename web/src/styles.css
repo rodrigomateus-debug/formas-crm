@@ -1620,6 +1620,32 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-check:hover { color: var(--k); }
 .cr-check.on { background: var(--ok-fill); border-color: var(--ok-fill); color: var(--on-ok-fill); }
 .cr-check.solo { position: absolute; top: 6px; right: 6px; cursor: default; }
+/* La dirección de la parada (pedido de Rodrigo del 18/11/2026): una línea, cortada con «…», con el tilde verde si está
+   ubicada en el mapa y en naranja si falta o no se encontró. Si se puede corregir es un botón (abre «Corregir dirección»). */
+.cr-t-dir { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; margin-top: 4px; padding: 1px 4px 1px 2px; border: 1px solid transparent; border-radius: 5px;
+  background: none; font: inherit; font-size: 11px; line-height: 1.4; color: var(--ui-ink-2); text-align: left; }
+.cr-t-dir > svg { flex: none; color: var(--ui-ink-3); }
+.cr-t-dir-txt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-t-dir-mas { flex: none; font-size: 10px; font-weight: 600; color: var(--ui-ink-3); }
+.cr-t-dir-ok { flex: none; width: 14px; height: 14px; border-radius: 50%; display: grid; place-items: center; background: var(--ok-fill); color: var(--on-ok-fill); }
+.cr-t-dir-ok svg { stroke-width: 3; }
+.cr-t-dir-falta { flex: none; display: grid; place-items: center; color: var(--warn); }
+.cr-t-dir-busca { flex: none; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--ui-ink-3); border-top-color: transparent; animation: girar 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .cr-t-dir-busca { animation: none; } }
+.cr-t-dir.falta { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.cr-t-dir.falta > svg { color: var(--warn); }
+button.cr-t-dir { cursor: pointer; }
+button.cr-t-dir:hover { border-color: var(--ui-line); background: var(--ui-surface); }
+button.cr-t-dir.falta:hover { border-color: var(--warn); background: var(--warn-soft); }
+button.cr-t-dir:focus-visible { outline: 2px solid var(--k, var(--ui-ink)); outline-offset: 1px; }
+.modal-body .cr-editar { margin-top: 0; padding-top: 0; border-top: 0; }
+/* El link de la app del chofer elegido, en la Ruta del día: para copiarlo o mandarlo por WhatsApp. */
+.cr-linkchofer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; padding: 7px 10px; border-radius: 8px; background: var(--ui-surface-sunken); font-size: 12.5px; color: var(--ui-ink-2); }
+.cr-linkchofer > svg { flex: none; color: var(--ui-ink-3); }
+.cr-linkchofer b { color: var(--ui-ink); }
+.cr-linkchofer.falta { background: var(--warn-soft); color: var(--warn); }
+.cr-linkchofer.falta > svg { color: var(--warn); }
+.cr-linkchofer > span { min-width: 0; }
 /* El chofer de la tarjeta: el desplegable del Hub en chico, con el camión adelante. Sin chofer, punteado. */
 .cr-t-chofer { display: flex; margin-top: 6px; min-width: 0; }
 .input.select-like.cr-chofer { width: auto; max-width: 100%; height: 24px; padding: 0 24px 0 25px; font-size: 11.5px; font-weight: 600; border-color: transparent; border-radius: 6px; background: var(--ui-surface); color: var(--ui-ink); }

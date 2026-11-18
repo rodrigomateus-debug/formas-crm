@@ -43,6 +43,7 @@ export interface Vista {
 export interface DirParada {
   direccion: string | null; origen: string | null; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
+  detalle: string | null; observaciones: string | null;   // piso, depto, puerta, unidad y las observaciones de entrega
 }
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
@@ -330,7 +331,8 @@ export default function CronogramaPage() {
       )}
       {corrigiendo && (
         <Modal title={`Dirección de ${lindo(corrigiendo.d.nombre)}`} onClose={() => setCorrigiendo(null)}>
-          <EditarDireccion p={{ nombre: corrigiendo.d.nombre, direccion: corrigiendo.d.direccion, horario_texto: corrigiendo.d.horario, company_id: corrigiendo.d.company_id }}
+          <EditarDireccion p={{ nombre: corrigiendo.d.nombre, direccion: corrigiendo.d.direccion, horario_texto: corrigiendo.d.horario, company_id: corrigiendo.d.company_id,
+            detalle: corrigiendo.d.detalle, observaciones: corrigiendo.d.observaciones }}
             pedidos={corrigiendo.d.record_ids} onListo={() => { setCorrigiendo(null); void cargarDirs(); }} />
         </Modal>
       )}
@@ -567,16 +569,20 @@ function LineaDireccion({ d: d0, buscando, puede, onCorregir }: { d: DirParada; 
   const d = d0.estado === 'buscando' && !buscando ? { ...d0, estado: 'no_encontrada' as const } : d0;
   const editable = puede && !d.expreso && d.origen !== 'encargo' && (d.record_ids.length > 0 || !!d.company_id);
   const falta = d.estado === 'no_encontrada' || d.estado === 'sin_direccion';
+  // El piso, depto, puerta o unidad y las observaciones de entrega, en una segunda línea (si no, una dirección larga lo tapa).
   const texto = d.direccion ? lindaDireccion(d.direccion) : 'Sin dirección';
-  const titulo = `${d.direccion ? lindaDireccion(d.direccion) : 'Sin dirección'}${d.otras ? ` (y ${d.otras} dirección${d.otras === 1 ? '' : 'es'} más)` : ''} · ${ubicando ? 'Buscándola en el mapa…' : ESTADO_DIR[d0.estado]}${editable ? ' · clic para corregirla' : ''}`;
+  const titulo = `${texto}${d.detalle ? ` · ${d.detalle}` : ''}${d.observaciones ? ` — ${d.observaciones}` : ''}${d.otras ? ` (y ${d.otras} dirección${d.otras === 1 ? '' : 'es'} más)` : ''} · ${ubicando ? 'Buscándola en el mapa…' : ESTADO_DIR[d0.estado]}${editable ? ' · clic para corregirla' : ''}`;
   const contenido = (
     <>
+      <span className="cr-t-dir-fila">
       <Icon name="pin" size={11} />
       <span className="cr-t-dir-txt">{texto}</span>
       {d.otras > 0 && <span className="cr-t-dir-mas num">+{d.otras}</span>}
       {d.estado === 'ok' ? <span className="cr-t-dir-ok" aria-label="Ubicada en el mapa"><Icon name="check" size={10} /></span>
         : ubicando ? <span className="cr-t-dir-busca" aria-label="Buscándola en el mapa" />
           : <span className="cr-t-dir-falta" aria-label={ESTADO_DIR[d0.estado]}><Icon name="alert" size={11} /></span>}
+      </span>
+      {(d.detalle || d.observaciones) && <span className="cr-t-dir-obs">{d.detalle && <b>{d.detalle}</b>}{d.detalle && d.observaciones ? ' · ' : ''}{d.observaciones && <i>{d.observaciones}</i>}</span>}
     </>
   );
   const cls = `cr-t-dir ${falta ? 'falta' : d.estado}`;

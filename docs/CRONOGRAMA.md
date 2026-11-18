@@ -44,8 +44,13 @@ parada del mismo lugar en la ruta del día.
   desplegable. Un día sin recorridos guardados está todo «Sin chofer».
 - **Dirección en la tarjeta** (pedido de Rodrigo del 18/11/2026): en cada tarjeta que es parada de la ruta (entregas,
   retiros, egresos y encargos), la dirección en una línea, la misma que usa la Ruta del día. Con el **tilde verde** si está
-  ubicada en el mapa; en **naranja** si falta, no se encontró o todavía no se ubicó. Un clic la corrige ahí mismo, con el
-  buscador de la libreta (en el pedido o en la ficha de la empresa, igual que «Corregir dirección» de la ruta). La de un
+  ubicada en el mapa; en **naranja** si falta, no se encontró o todavía no se ubicó. Un clic la corrige ahí mismo (en el
+  pedido o en la ficha de la empresa, igual que «Corregir dirección» de la ruta): se escribe y **se elige de las
+  sugerencias de Google Maps**, como en Uber (queda validada, con el punto exacto en el mapa), o de la libreta.
+  Abajo, **piso, depto, puerta o unidad** y **observaciones de entrega** («tocar timbre de recepción»), que se ven en una
+  segunda línea de la tarjeta, en la parada de la Ruta del día y en la app del chofer. En el pedido van en su dirección
+  (`entrega_direcciones.detalle` y `observaciones`, migración `0091_direccion_observaciones.sql`); en un proveedor o
+  impresor, en la ficha (`direccion_detalle` y `observaciones_entrega`). Cambiar solo la dirección no las borra. La de un
   expreso o la de un encargo sin parada de ClickUp se cambia desde su lugar. Un pedido que va a varias direcciones muestra
   la primera y «+N». Llega aparte de la semana para no demorarla (`GET /api/cronograma/direcciones?desde&hasta`,
   `direccionesSemana`); para quien edita, el servidor busca en el mapa unas pocas que faltan y la pantalla vuelve a pedir

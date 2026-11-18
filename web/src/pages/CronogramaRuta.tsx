@@ -22,6 +22,7 @@ export interface Parada {
   company_id: number | null; record_id: number | null; movimientos: Mov[];
   encargos?: Encargo[];   // lo que pidió alguien para ese día en ese lugar (Recorridos)
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
+  detalle?: string | null; observaciones?: string | null;   // piso, depto, puerta, unidad y observaciones de entrega
   // La hora fijada a mano (pedido de Rodrigo del 16/11/2026): `horario` ya es esa ventana y el orden más corto la cumple.
   pactada?: { modo: ModoHora; min: number; texto: string } | null; estricto?: boolean;
   fotos?: number;   // las fotos del remito que mandó el chofer de esta parada (obligatoria en todas)
@@ -442,8 +443,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                     {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia
                       ? <> · guía {seguimientoExpreso(p.expreso.nombre, p.expreso.guia) ? <a className="cr-link num" href={seguimientoExpreso(p.expreso.nombre, p.expreso.guia)!} target="_blank" rel="noreferrer" title="Ver el seguimiento del envío">{p.expreso.guia} ↗</a> : <b className="num">{p.expreso.guia}</b>}</>
                       : ' · sin guía todavía'}</div>}
-                    <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ? lindaDireccion(p.direccion) : 'Sin dirección cargada'}
+                    <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ? lindaDireccion(p.direccion) : 'Sin dirección cargada'}{p.detalle ? ` · ${p.detalle}` : ''}
                       {p.direccion && p.origen && ORIGEN_DUDOSO[p.origen] && <span className="cr-origen"> · {ORIGEN_DUDOSO[p.origen]}</span>}</div>
+                    {p.observaciones && <div className="cr-p-sub cr-p-obs" title="Observaciones de entrega">{p.observaciones}</div>}
                   </div>
                   <div className={`cr-eta${s.tarde ? ' tarde' : ''}`} role="group" aria-label={etaTexto} title={s.incierta ? 'Aproximada: antes hay una dirección sin ubicar, así que no cuenta ese viaje' : undefined}>
                     <b className="num" aria-hidden="true">{s.tramo.sinUbicar ? '—' : `${s.incierta ? '≈' : ''}${hhmm(atiende)}`}</b>

@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { http, qs, useToast, Icon } from '../lib';
 import { alEsc } from '../components';
+import { BuscarDireccion, nuevaSesion } from './Direcciones';
 
 // Lo que comparten la Ruta del día (CronogramaRuta.tsx) y las tarjetas de la semana (Cronograma.tsx): escribir lindo una
 // dirección, corregirla (en el pedido o en la ficha de la empresa) y el link de la app del chofer. Va aparte para que la
 // semana no cargue el mapa.
 
 // Lo que hace falta de una parada para corregir su dirección.
-export interface ParadaDir { nombre: string; direccion: string | null; horario_texto: string | null; company_id: number | null }
+export interface ParadaDir { nombre: string; direccion: string | null; horario_texto: string | null; company_id: number | null; detalle?: string | null; observaciones?: string | null }
 
 // La dirección como viene de las fichas y los pedidos («domingo prat 2260, 1603 villa rosa, VILLA ROSA PILAR»): cada parte
 // toda en minúscula o toda en mayúscula pasa a «Domingo Prat 2260»; las que ya vienen bien escritas quedan como están.
@@ -27,7 +28,15 @@ export function lindaDireccion(d: string) {
 export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos: number[]; onListo: () => void }) {
   const toast = useToast();
   const [direccion, setDireccion] = useState(p.direccion ?? '');
+  // La que se eligió de las sugerencias de Google Maps (como en Uber): queda validada, con el punto exacto en el mapa.
+  const [placeId, setPlaceId] = useState<string | null>(null);
+  const sesion = useRef(nuevaSesion()).current;
+  const [maps, setMaps] = useState(true);
+  useEffect(() => { http<{ maps: boolean }>('GET', `/maps/sugerencias${qs({ q: '' })}`).then((r) => setMaps(r.maps !== false), () => undefined); }, []);
   const [horario, setHorario] = useState(p.horario_texto ?? '');
+  // Lo que completa la dirección (piso, depto, puerta, unidad) y lo que tiene que saber el chofer al llegar.
+  const [detalle, setDetalle] = useState(p.detalle ?? '');
+  const [observaciones, setObservaciones] = useState(p.observaciones ?? '');
   const [guardando, setGuardando] = useState(false);
   const esEntrega = pedidos.length > 0;
   // La libreta: al abrir, los lugares de ese cliente o proveedor; al escribir, lo que coincida.
@@ -41,33 +50,41 @@ export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setGuardando(true);
+    const dir = { direccion, detalle, observaciones, ...(placeId ? { place_id: placeId, sesion } : {}) };
     try {
-      if (esEntrega) { for (const id of pedidos) await http('PUT', '/cronograma/direccion', { record_id: id, direccion }); }
-      if (p.company_id && (!esEntrega || horario !== (p.horario_texto ?? ''))) await http('PUT', '/cronograma/direccion', { company_id: p.company_id, ...(esEntrega ? {} : { direccion }), horario });
-      toast(esEntrega ? 'Dirección de entrega guardada en el pedido.' : 'Dirección guardada en la ficha de la empresa.');
+      if (esEntrega) { for (const id of pedidos) await http('PUT', '/cronograma/direccion', { record_id: id, ...dir }); }
+      if (p.company_id && (!esEntrega || horario !== (p.horario_texto ?? ''))) await http('PUT', '/cronograma/direccion', { company_id: p.company_id, ...(esEntrega ? {} : dir), horario });
+      toast(`${esEntrega ? 'Dirección de entrega guardada en el pedido' : 'Dirección guardada en la ficha de la empresa'}${placeId ? ', validada con Google Maps' : ''}.`);
       onListo();
     } catch (err) { toast((err as Error).message, true); setGuardando(false); }
   }
   return (
     <form className="cr-editar" onKeyDown={alEsc(onListo)} onSubmit={guardar}>
-      <label>{esEntrega ? 'Dirección de entrega de este pedido' : 'Dirección de la empresa'}
-        <input className="input sm" autoFocus value={direccion} onChange={(e) => setDireccion(e.target.value)} placeholder="Calle y altura, localidad" /></label>
-      <label>Buscar en la libreta de direcciones
-        <input className="input sm" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar, calle o localidad" /></label>
-      {lugares.length > 0 && (
-        <ul className="cr-lugares">
-          {lugares.map((l) => (
-            <li key={l.id}><button type="button" onClick={() => { setDireccion(l.direccion); if (p.company_id && !horario && l.horario && /\d\s*(a|-|hasta)\s*\d/i.test(l.horario)) setHorario(l.horario); }}>
-              <b>{l.nombre}</b><span>{l.direccion}{l.horario ? ` · ${l.horario}` : ''}</span></button></li>
-          ))}
-        </ul>
-      )}
-      {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
+      <BuscarDireccion etiqueta={esEntrega ? 'Dirección de entrega de este pedido' : 'Dirección de la empresa'} valor={direccion} validada={!!placeId} sesion={sesion} maps={maps} sugerida={null}
+        onTexto={(t) => { setDireccion(t); setPlaceId(null); }} onElegir={(s) => { setDireccion(s.texto); setPlaceId(s.place_id); }} />
+      <details className="cr-libreta">
+        <summary className="small">O elegila de la libreta de direcciones</summary>
+        <label>Buscar en la libreta
+          <input className="input sm" value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre del lugar, calle o localidad" /></label>
+        {lugares.length > 0 && (
+          <ul className="cr-lugares">
+            {lugares.map((l) => (
+              <li key={l.id}><button type="button" onClick={() => { setDireccion(l.direccion); setPlaceId(null); if (p.company_id && !horario && l.horario && /\d\s*(a|-|hasta)\s*\d/i.test(l.horario)) setHorario(l.horario); }}>
+                <b>{l.nombre}</b><span>{l.direccion}{l.horario ? ` · ${l.horario}` : ''}</span></button></li>
+            ))}
+          </ul>
+        )}
+      </details>
+      <div className="cr-editar-fila">
+        <label>Piso, depto, puerta o unidad<input className="input sm" value={detalle} onChange={(e) => setDetalle(e.target.value)} placeholder="Piso 4 B, nave 3, puerta 2…" maxLength={200} /></label>
+        {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
+      </div>
+      <label>Observaciones de entrega
+        <textarea className="input sm" rows={2} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Tocar timbre de recepción, entrar por el portón de atrás, preguntar por Ana…" maxLength={500} /></label>
       <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando || !direccion.trim()}>Guardar</button></div>
     </form>
   );
 }
-
 
 // El link de la app del chofer (pedido de Rodrigo del 18/11/2026), al lado del chofer elegido en la Ruta del día: para
 // copiarlo o mandarlo por WhatsApp. Si el chofer ya tiene link, aparece el suyo; si no, se crea ahí mismo con su nombre

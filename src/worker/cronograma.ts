@@ -6,7 +6,7 @@ import { norm } from './clickup';
 import { CERRADOS, claveProveedor, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
 import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
-import { direccionDesdeRuta, direccionesDePedidos } from './direcciones';
+import { direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
 import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
@@ -554,16 +554,33 @@ export async function resolverSugerencia(env: Env, ctx: Ctx, recordId: number, a
 }
 
 // Corregir una dirección desde la ruta: la de entrega del pedido, o la de la empresa (proveedor o impresor).
-export async function guardarDireccion(env: Env, ctx: Ctx, b: { record_id?: unknown; company_id?: unknown; direccion?: unknown; horario?: unknown }) {
+// Con `place_id` (la eligió de las sugerencias de Google Maps, como en Uber): en el pedido queda validada; en la empresa se
+// guarda como la escribe Google y su punto queda fijo en el mapa (no se vuelve a buscar).
+// `detalle` (piso, depto, puerta, unidad) y `observaciones` (de entrega): en el pedido, de su dirección; en la empresa, de su ficha.
+export async function guardarDireccion(env: Env, ctx: Ctx, b: { record_id?: unknown; company_id?: unknown; direccion?: unknown; horario?: unknown; place_id?: unknown; sesion?: unknown;
+  detalle?: unknown; observaciones?: unknown }) {
   exigir(ctx);
-  const direccion = b.direccion === undefined ? undefined : String(b.direccion ?? '').trim();
+  let direccion = b.direccion === undefined ? undefined : String(b.direccion ?? '').trim();
+  const placeId = typeof b.place_id === 'string' && b.place_id ? b.place_id : null;
+  const sesion = typeof b.sesion === 'string' ? b.sesion : undefined;
+  const texto = (x: unknown, max: number) => (x === undefined ? undefined : String(x ?? '').trim().slice(0, max) || null);
+  const detalle = texto(b.detalle, 200), observaciones = texto(b.observaciones, 500);
   if (b.record_id) {
-    if (direccion === undefined) throw new HttpError(400, 'Falta la dirección.');
+    if (direccion === undefined && !placeId) throw new HttpError(400, 'Falta la dirección.');
     // La dirección del pedido vive en su tarjeta «Entrega» (direcciones.ts): se cambia por ahí, así queda una sola.
-    await direccionDesdeRuta(env, ctx, Number(b.record_id), direccion || null);
+    await direccionDesdeRuta(env, ctx, Number(b.record_id), direccion || null, placeId, sesion, { detalle, observaciones });
   } else if (b.company_id) {
     const cambios: Record<string, unknown> = {};
-    if (direccion !== undefined) {
+    if (detalle !== undefined) cambios.direccion_detalle = detalle;
+    if (observaciones !== undefined) cambios.observaciones_entrega = observaciones;
+    if (placeId) {
+      const l = await lugarGoogle(env, placeId, sesion);
+      if (!l.direccion) throw new HttpError(400, 'Google Maps no encontró esa dirección.');
+      direccion = l.direccion;
+      if (l.lat != null && l.lng != null) await env.DB.prepare('INSERT OR REPLACE INTO geocodigos (clave, direccion, lat, lng, ok, manual, at) VALUES (?, ?, ?, ?, 1, 1, ?)')
+        .bind(claveDireccion(l.direccion), l.direccion, l.lat, l.lng, now()).run();
+      cambios.address = l.direccion; cambios.city = null;
+    } else if (direccion !== undefined) {
       // La pantalla muestra «dirección, ciudad»: si lo que se guarda termina con la ciudad de la ficha, la ciudad queda
       // en su campo; si no, la dirección nueva manda entera.
       const e = await env.DB.prepare("SELECT json_extract(props, '$.city') AS city FROM records WHERE id = ?").bind(Number(b.company_id)).first<{ city: string | null }>();
@@ -706,6 +723,8 @@ export interface Parada {
   remito?: number | null;   // el número del remito de traslado del egreso, si ya se imprimió (se numera la primera vez)
   estricto?: boolean;
   espera_hasta?: number | null;   // con una hora fijada «a las 12:00», se espera hasta esa hora (ruta.ts)
+  detalle?: string | null;         // piso, depto, puerta, unidad (de la dirección del pedido o de la ficha de la empresa)
+  observaciones?: string | null;   // observaciones de entrega: lo que tiene que saber el chofer al llegar
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
@@ -744,8 +763,9 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   const pedidoDe = new Map(pedidos.map((p) => [p.id, p]));
   const empresasIds = [...new Set([...viajes.map((m) => m.company_id), ...pedidos.map((p) => p.company_id)].filter((x): x is number => !!x))];
   const empresas = new Map(empresasIds.length ? (await db.prepare(`SELECT id, name, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city,
-      json_extract(props, '$.horario_recepcion') AS horario FROM records WHERE id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(empresasIds))
-    .all<{ id: number; name: string; address: string | null; city: string | null; horario: string | null }>()).results.map((e) => [e.id, e]) : []);
+      json_extract(props, '$.horario_recepcion') AS horario,
+      json_extract(props, '$.direccion_detalle') AS detalle, json_extract(props, '$.observaciones_entrega') AS observaciones FROM records WHERE id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(empresasIds))
+    .all<{ id: number; name: string; address: string | null; city: string | null; horario: string | null; detalle: string | null; observaciones: string | null }>()).results.map((e) => [e.id, e]) : []);
   const dirEmpresa = (id: number | null) => { const e = id ? empresas.get(id) : null; return e?.address ? [e.address, e.city].filter(Boolean).join(', ') : null; };
 
   // Las direcciones cargadas en la tarjeta «Entrega» de cada pedido (direcciones.ts): con varias, una parada por dirección.
@@ -769,6 +789,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     let sugerencia: Parada['sugerencia'] = null;
     // Un pedido que va a varias direcciones: una parada por cada una (con el mismo movimiento).
     let otras: string[] = [];
+    // El piso, depto, puerta o unidad y las observaciones de entrega de cada dirección (en el orden de `[direccion, ...otras]`).
+    let extras: Array<{ detalle: string | null; observaciones: string | null }> = [];
     if (m.tipo === 'entrega') {
       const p = m.record_id ? pedidoDe.get(m.record_id) : undefined;
       nombre = m.cliente ?? `PDV ${m.npdv ?? ''}`; companyId = p?.company_id ?? null; recordId = m.record_id;
@@ -784,7 +806,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
         if (!enTarjeta.length) continue;
       }
       for (const d of enTarjeta) if (d.validada && d.lat != null && d.lng != null) puntoGoogle.set(claveDireccion(d.direccion), { lat: d.lat, lng: d.lng });
-      if (enTarjeta.length) { direccion = enTarjeta[0].direccion; origen = 'pedido'; otras = enTarjeta.slice(1).map((d) => d.direccion); }
+      if (enTarjeta.length) { direccion = enTarjeta[0].direccion; origen = 'pedido'; otras = enTarjeta.slice(1).map((d) => d.direccion); extras = enTarjeta; }
       else if (p?.manual) { direccion = p.manual; origen = 'pedido'; }
       else if (deFinnegans) {
         direccion = deFinnegans; origen = 'finnegans';
@@ -798,6 +820,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
       } else if (previas.length) { direccion = previas[0].direccion; origen = 'ultima_entrega'; }
       else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
     } else if (dirEmpresa(companyId)) { direccion = dirEmpresa(companyId); origen = 'empresa'; }
+    if (origen === 'empresa' && companyId) { const e = empresas.get(companyId); extras = [{ detalle: e?.detalle ?? null, observaciones: e?.observaciones ?? null }]; }
     // Sin dirección: la de la libreta, si ese nombre tiene un solo lugar (o todos sus lugares son la misma dirección).
     let delLugar: Lugar | null = null;
     if (!direccion) { delLugar = unicoLugar(libreta.get(nombre)?.exactos ?? []); if (delLugar) { direccion = direccionLugar(delLugar); origen = 'libreta'; } }
@@ -809,7 +832,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     for (const [i, dir] of [direccion, ...otras].entries()) {
       const clave = i ? `${base}:${i + 1}` : base;
       const par = paradas.get(clave) ?? { clave, nombre, direccion: dir, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
-        company_id: companyId, record_id: recordId, movimientos: [], encargos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null };
+        company_id: companyId, record_id: recordId, movimientos: [], encargos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null,
+        detalle: extras[i]?.detalle || null, observaciones: extras[i]?.observaciones || null };
       par.movimientos.push(m);
       if (sugerencia && !par.sugerencia) par.sugerencia = sugerencia;
       if (!par.horario && horarioDe(horarioTexto)) { par.horario = horarioDe(horarioTexto); par.horario_texto = horarioTexto; }
@@ -829,7 +853,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     const deLibreta = t?.direccion ? null : unicoLugar((await lugaresPara(db, [e.expreso])).get(e.expreso)?.exactos ?? []);
     p.expreso = { nombre: e.expreso, guia: e.guia, cliente: p.nombre };
     p.nombre = e.expreso; p.direccion = t?.direccion || (deLibreta ? direccionLugar(deLibreta) : null); p.origen = p.direccion ? 'expreso' : null;
-    p.sugerencia = null; p.lugar = deLibreta ? infoLugar(deLibreta) : null; p.horario = null; p.horario_texto = null; p.company_id = null;
+    p.sugerencia = null; p.lugar = deLibreta ? infoLugar(deLibreta) : null; p.horario = null; p.horario_texto = null; p.company_id = null; p.detalle = null; p.observaciones = null;
   }
   // Los encargos del día (Recorridos): van en la parada del mismo lugar si ese día ya se va ahí (un retiro de ClickUp en el
   // mismo impresor, la entrega a ese cliente, otro encargo); si no, son una parada propia. Los cancelados no.
@@ -939,6 +963,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
 export interface DireccionParada {
   direccion: string | null; origen: Parada['origen']; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
+  detalle: string | null; observaciones: string | null;
 }
 export async function direccionesSemana(env: Env, user: User, q: { desde?: string; hasta?: string }, buscar: boolean) {
   if (!esDia(q.desde) || !esDia(q.hasta) || q.hasta < q.desde) throw new HttpError(400, 'Faltan las fechas (desde y hasta, AAAA-MM-DD).');
@@ -962,6 +987,7 @@ export async function direccionesSemana(env: Env, user: User, q: { desde?: strin
     if (otra && out[otra[1]]) { out[otra[1]].otras++; continue; }
     out[k] = {
       direccion: p.direccion, origen: p.origen, estado, nombre: p.nombre, company_id: p.company_id, horario: p.horario_texto, expreso: !!p.expreso, otras: 0,
+      detalle: p.detalle ?? null, observaciones: p.observaciones ?? null,
       record_ids: [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],
     };
   }
@@ -1058,7 +1084,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
         fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
-          clave: p.clave, nombre: p.nombre, direccion: p.direccion, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
+          clave: p.clave, nombre: p.nombre, direccion: p.direccion, detalle: p.detalle ?? null, observaciones: p.observaciones ?? null, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,

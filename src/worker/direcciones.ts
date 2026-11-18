@@ -98,7 +98,7 @@ export async function productosDelPedido(db: D1Database, orderId: number): Promi
 
 // ---------- Lo guardado ----------
 
-interface FilaDireccion { id: number; position: number; direccion: string; detalle: string | null; place_id: string | null; lat: number | null; lng: number | null;
+interface FilaDireccion { id: number; position: number; direccion: string; detalle: string | null; observaciones: string | null; place_id: string | null; lat: number | null; lng: number | null;
   precisa: number; localidad: string | null; provincia: string | null; codigo_postal: string | null; retira: string | null; user_id: number | null; updated_at: string }
 
 // El nombre de la base de Formas donde retira el cliente (si la sacaron de la configuración, la dirección que quedó guardada).
@@ -149,7 +149,8 @@ export async function direccionesDe(env: Env, orderId: number) {
 // ---------- Guardar ----------
 
 // `retira`: el id de una base de Formas (lo retira el cliente ahí); entonces no hace falta ni dirección ni place_id.
-export interface DireccionInput { id?: number; place_id?: string | null; direccion?: string; detalle?: string | null; retira?: string | null }
+// `observaciones`: lo que tiene que saber el chofer al llegar; si no viene, queda la que tenía esa dirección.
+export interface DireccionInput { id?: number; place_id?: string | null; direccion?: string; detalle?: string | null; observaciones?: string | null; retira?: string | null }
 export interface GuardarInput { direcciones: DireccionInput[]; cantidades?: Array<{ direccion: number; clave: string; cantidad: number }>; sesion?: string }
 
 const redondo = (n: number) => Math.round(n * 1000) / 1000;
@@ -171,20 +172,21 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
   for (const [i, d] of lista.entries()) {
     const detalle = d.detalle?.toString().trim().slice(0, 300) || null;
     const previa = d.id != null ? actuales.get(Number(d.id)) : undefined;
+    const observaciones = d.observaciones === undefined ? previa?.observaciones ?? null : d.observaciones?.toString().trim().slice(0, 500) || null;
     if (d.retira) {
       const base = bases.find((x) => x.id === d.retira);
       if (!base) throw new HttpError(400, `No hay una dirección de Formas «${d.retira}» para retirar.`);
-      nuevas.push({ direccion: base.direccion, detalle, place_id: null, lat: null, lng: null, precisa: 0, localidad: null, provincia: null, codigo_postal: null, retira: base.id });
+      nuevas.push({ direccion: base.direccion, detalle, observaciones, place_id: null, lat: null, lng: null, precisa: 0, localidad: null, provincia: null, codigo_postal: null, retira: base.id });
     } else if (d.place_id) {
       // Si es la misma que ya estaba validada, no hace falta volver a preguntarle a Google.
-      if (previa?.place_id === d.place_id) { nuevas.push({ ...previa, detalle, retira: null }); continue; }
+      if (previa?.place_id === d.place_id) { nuevas.push({ ...previa, detalle, observaciones, retira: null }); continue; }
       const l = await lugar(env, d.place_id, b.sesion);
       if (!l.direccion) throw new HttpError(400, `Google Maps no encontró la dirección ${i + 1}.`);
-      nuevas.push({ direccion: l.direccion, detalle, place_id: l.place_id, lat: l.lat, lng: l.lng, precisa: l.precisa ? 1 : 0, localidad: l.localidad, provincia: l.provincia, codigo_postal: l.codigo_postal, retira: null });
+      nuevas.push({ direccion: l.direccion, detalle, observaciones, place_id: l.place_id, lat: l.lat, lng: l.lng, precisa: l.precisa ? 1 : 0, localidad: l.localidad, provincia: l.provincia, codigo_postal: l.codigo_postal, retira: null });
     } else {
       const texto = d.direccion?.toString().trim().slice(0, 300) ?? '';
       if (texto.length < 5) throw new HttpError(400, `Falta la dirección ${lista.length > 1 ? `${i + 1} ` : ''}(calle, número y localidad).`);
-      nuevas.push({ direccion: texto, detalle, place_id: null, lat: null, lng: null, precisa: 0, localidad: null, provincia: null, codigo_postal: null, retira: null });
+      nuevas.push({ direccion: texto, detalle, observaciones, place_id: null, lat: null, lng: null, precisa: 0, localidad: null, provincia: null, codigo_postal: null, retira: null });
     }
   }
   const repetida = nuevas.findIndex((d, i) => nuevas.findIndex((x) => (x.retira && x.retira === d.retira && x.detalle === d.detalle) || (x.place_id && x.place_id === d.place_id && x.detalle === d.detalle)
@@ -220,8 +222,8 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
   ];
   const base = (await db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM entrega_direcciones').first<{ m: number }>())!.m + 1;
   nuevas.forEach((d, i) => {
-    stmts.push(db.prepare(`INSERT INTO entrega_direcciones (id, record_id, position, direccion, detalle, place_id, lat, lng, precisa, localidad, provincia, codigo_postal, retira, user_id, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(base + i, orderId, i, d.direccion, d.detalle, d.place_id, d.lat, d.lng, d.precisa, d.localidad, d.provincia, d.codigo_postal, d.retira, ctx.user.id, ts));
+    stmts.push(db.prepare(`INSERT INTO entrega_direcciones (id, record_id, position, direccion, detalle, observaciones, place_id, lat, lng, precisa, localidad, provincia, codigo_postal, retira, user_id, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(base + i, orderId, i, d.direccion, d.detalle, d.observaciones, d.place_id, d.lat, d.lng, d.precisa, d.localidad, d.provincia, d.codigo_postal, d.retira, ctx.user.id, ts));
   });
   for (const f of filas) stmts.push(db.prepare('INSERT INTO entrega_cantidades (direccion_id, clave, cantidad) VALUES (?, ?, ?)').bind(base + f.direccion, f.clave, f.cantidad));
   // El punto de Google va al mapa de la ruta del cronograma (geocodigos), salvo que alguien ya haya corrido el punto a mano.
@@ -243,28 +245,34 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
 
 // Desde la parada del cronograma: una sola dirección, escrita (queda sin validar, salvo que sea la misma que ya estaba).
 // Si el pedido va a varias direcciones, se cambian en la tarjeta «Entrega» del pedido, donde está el reparto.
-export async function direccionDesdeRuta(env: Env, ctx: Ctx, orderId: number, texto: string | null) {
-  const actuales = (await env.DB.prepare('SELECT id, direccion, detalle, place_id FROM entrega_direcciones WHERE record_id = ? ORDER BY position, id').bind(orderId)
-    .all<{ id: number; direccion: string; detalle: string | null; place_id: string | null }>()).results;
+// `placeId`: la eligió de las sugerencias de Google (queda validada, con el punto de Google en el mapa).
+// `extra`: el piso, depto, puerta o unidad (`detalle`) y las observaciones de entrega; sin `extra`, quedan las que tenía.
+export async function direccionDesdeRuta(env: Env, ctx: Ctx, orderId: number, texto: string | null, placeId?: string | null, sesion?: string,
+  extra: { detalle?: string | null; observaciones?: string | null } = {}) {
+  const actuales = (await env.DB.prepare('SELECT id, direccion, detalle, observaciones, place_id FROM entrega_direcciones WHERE record_id = ? ORDER BY position, id').bind(orderId)
+    .all<{ id: number; direccion: string; detalle: string | null; observaciones: string | null; place_id: string | null }>()).results;
   if (actuales.length > 1) throw new HttpError(409, 'Este pedido se entrega en varias direcciones: cambialas en la tarjeta «Entrega» del pedido.');
   const t = texto?.trim() ?? '';
+  const detalle = extra.detalle === undefined ? actuales[0]?.detalle ?? null : extra.detalle;
+  const observaciones = extra.observaciones === undefined ? actuales[0]?.observaciones ?? null : extra.observaciones;
+  if (placeId) return guardarDirecciones(env, ctx, orderId, { sesion, direcciones: [{ place_id: placeId, direccion: t, detalle, observaciones }] });
   const misma = actuales[0] && actuales[0].direccion.trim().toLowerCase() === t.toLowerCase();
   return guardarDirecciones(env, ctx, orderId, {
-    direcciones: !t ? [] : [misma ? { id: actuales[0].id, place_id: actuales[0].place_id, direccion: actuales[0].direccion, detalle: actuales[0].detalle } : { direccion: t, detalle: actuales[0]?.detalle ?? null }],
+    direcciones: !t ? [] : [misma ? { id: actuales[0].id, place_id: actuales[0].place_id, direccion: actuales[0].direccion, detalle, observaciones } : { direccion: t, detalle, observaciones }],
   });
 }
 
 // Las direcciones guardadas de varios pedidos (para la ruta del cronograma), en orden. `retira`: la base de Formas donde lo
 // retira el cliente (no es una parada del recorrido).
 export async function direccionesDePedidos(db: D1Database, ids: number[]) {
-  const out = new Map<number, Array<{ direccion: string; detalle: string | null; lat: number | null; lng: number | null; validada: boolean; retira: string | null }>>();
+  const out = new Map<number, Array<{ direccion: string; detalle: string | null; observaciones: string | null; lat: number | null; lng: number | null; validada: boolean; retira: string | null }>>();
   if (!ids.length) return out;
-  const { results } = await db.prepare(`SELECT record_id, direccion, detalle, lat, lng, place_id, retira FROM entrega_direcciones
+  const { results } = await db.prepare(`SELECT record_id, direccion, detalle, observaciones, lat, lng, place_id, retira FROM entrega_direcciones
     WHERE record_id IN (SELECT value FROM json_each(?)) ORDER BY record_id, position, id`).bind(JSON.stringify(ids))
-    .all<{ record_id: number; direccion: string; detalle: string | null; lat: number | null; lng: number | null; place_id: string | null; retira: string | null }>();
+    .all<{ record_id: number; direccion: string; detalle: string | null; observaciones: string | null; lat: number | null; lng: number | null; place_id: string | null; retira: string | null }>();
   for (const r of results) {
     const l = out.get(r.record_id) ?? [];
-    l.push({ direccion: r.direccion, detalle: r.detalle, lat: r.lat, lng: r.lng, validada: !!r.place_id, retira: r.retira });
+    l.push({ direccion: r.direccion, detalle: r.detalle, observaciones: r.observaciones, lat: r.lat, lng: r.lng, validada: !!r.place_id, retira: r.retira });
     out.set(r.record_id, l);
   }
   return out;

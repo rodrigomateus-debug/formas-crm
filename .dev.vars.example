@@ -23,6 +23,8 @@ SESSION_SECRET=clave-de-prueba-para-firmar-la-sesion
 GOOGLE_OAUTH_TOKEN_URL=http://localhost:8795/google/token
 # Cronograma (test/cronograma.test.mjs): el buscador de direcciones del mapa, simulado.
 GEOCODER_URL=http://localhost:8797/geo
+# Rendimiento de los recorridos (test/rendimiento.test.mjs): el servicio de rutas (OSRM), simulado.
+OSRM_URL=http://localhost:8797/osrm
 # La libreta de direcciones del cronograma: la planilla publicada como CSV, simulada.
 LUGARES_CSV_URL=http://localhost:8797/lugares.csv
 # Recorridos (test/recorridos.test.mjs): la Sheets API (el historial de la planilla vieja), simulada.

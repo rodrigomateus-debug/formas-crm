@@ -46,6 +46,8 @@ export interface Env {
   ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado
   // Solo para pruebas: el buscador de direcciones del mapa (cronograma.ts), simulado. Por defecto, Nominatim de OpenStreetMap.
   GEOCODER_URL?: string;
+  // El servicio de rutas para medir los recorridos (rendimiento.ts). Por defecto, el público de OSRM; en las pruebas, simulado.
+  OSRM_URL?: string;
   // Solo para pruebas: la planilla de la libreta de direcciones (cronograma.ts), simulada.
   LUGARES_CSV_URL?: string;
   // Solo para pruebas: la Sheets API de Google (el historial de la planilla de Recorridos, recorridos.ts), simulada.

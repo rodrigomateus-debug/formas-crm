@@ -14,6 +14,7 @@ import { autoAssociateCompany, upsertCompany, upsertContact } from './upsert';
 import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
+import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
 import { asignarChofer, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
@@ -1538,6 +1539,12 @@ api.put('/cronograma/config', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   return c.json(await guardarCronogramaConfig(c.env.DB, await c.req.json()));
 });
+
+// Rendimiento de los choferes (rendimiento.ts): km y tiempo de cada recorrido, medidos.
+api.get('/rendimiento', async (c) => c.json(await rendimiento(c.env, c.get('ctx').user, { desde: c.req.query('desde'), hasta: c.req.query('hasta') })));
+api.post('/rendimiento/medir', async (c) => c.json(await medirAMano(c.env, c.get('ctx'), await c.req.json())));
+api.put('/rendimiento/chofer', async (c) => c.json(await marcarPropio(c.env, c.get('ctx'), await c.req.json())));
+api.patch('/rendimiento/:fecha/:n', async (c) => c.json(await corregir(c.env, c.get('ctx'), c.req.param('fecha'), Number(c.req.param('n')), await c.req.json())));
 
 api.get('/records/company/:id/produccion', async (c) => c.json(await produccionDeEmpresa(c.env.DB, Number(c.req.param('id')))));
 

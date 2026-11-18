@@ -20,6 +20,7 @@ import { reatarPendientes } from './productos';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
 import { leerPendientes } from './remitos';
+import { cerrarPendientes } from './rendimiento';
 import { login } from './login';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
@@ -115,6 +116,8 @@ export default {
         await safe(() => procesarSalidaClickup(env, b));   // lo que quedó pendiente para ClickUp (pedidos a «pdv»)
         await safe(() => actualizarFotos(env, b));          // fotos de Google de los usuarios: unas pocas, una vez por semana
         await safe(() => leerPendientes(env, b, 2));        // remitos sin leer (los del chofer se leen al llegar; acá los reintentos y ClickUp)
+        // Rendimiento de los choferes: a los :45 se cierra un día que haya quedado sin medir (el de ayer, a la noche).
+        if (turno === 4) await safe(() => cerrarPendientes(env, b));
         await safe(() => syncAll(env, b));
       }
       else {

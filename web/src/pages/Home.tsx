@@ -4,6 +4,7 @@ import { UnidadFilter } from './QuickFilters';
 import { http, qs, useMeta, esVentas, esOperaciones, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
+import InicioDireccion from './InicioDireccion';
 
 interface Dash {
   open: Array<{ pipeline_id: string; stage_id: string; n: number; amount: number }>;
@@ -14,6 +15,12 @@ interface Dash {
 }
 
 export default function Home() {
+  const { meta } = useMeta();
+  // Dirección (Configuración → Usuarios): resultados de todo el equipo, sin tareas (InicioDireccion.tsx).
+  return meta.me.direccion ? <InicioDireccion /> : <InicioEquipo />;
+}
+
+function InicioEquipo() {
   const { meta } = useMeta();
   // Perfil Ventas: siempre sus números (el servidor no le da los del equipo).
   const ventas = esVentas(meta.me);

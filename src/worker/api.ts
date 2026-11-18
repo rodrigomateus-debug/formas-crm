@@ -38,6 +38,7 @@ import { actualizarFotos, fotosEstado } from './fotos';
 import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
+import { resumenDireccion } from './direccion';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esOperaciones, esVentas, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
@@ -125,7 +126,7 @@ api.get('/meta', async (c) => {
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
-    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin, direccion FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -882,6 +883,9 @@ api.get('/dashboard', async (c) => {
   ]);
   return c.json({ month: m, open: open.results, won: won.results, created: created.results, lost: lost.results, tasks: tasks.results[0] });
 });
+
+// Inicio de Dirección (direccion.ts): solo para los usuarios con la marca «Dirección».
+api.get('/dashboard/direccion', async (c) => c.json(await resumenDireccion(c.env.DB, c.get('ctx'), c.req.query())));
 
 function todayBounds(): [string, string, string] {
   const start = new Date(); start.setUTCHours(3, 0, 0, 0);
@@ -1941,7 +1945,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; pipelines?: string[] | null }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; pipelines?: string[] | null }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -1952,6 +1956,8 @@ api.patch('/users/:id', async (c) => {
     }
     await c.env.DB.prepare('UPDATE users SET superadmin = ? WHERE id = ?').bind(b.superadmin ? 1 : 0, cur.id).run();
   }
+  // Dirección: Inicio con los resultados de todo el equipo (direccion.ts).
+  if (b.direccion !== undefined) await c.env.DB.prepare('UPDATE users SET direccion = ? WHERE id = ?').bind(b.direccion ? 1 : 0, cur.id).run();
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();

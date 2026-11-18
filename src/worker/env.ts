@@ -77,6 +77,7 @@ export interface User {
   photo_url?: string | null;   // foto de su cuenta de Google (fotos.ts)
   avisos_mail?: number;        // 1: recibe los avisos por mail (avisos.ts); apagado por defecto
   superadmin?: number;         // 1: puede «Ver como» otro usuario (auth.ts); el de ADMIN_EMAIL lo es siempre
+  direccion?: number;          // 1: Inicio de Dirección, con los resultados de todo el equipo (direccion.ts)
   deleted_at?: string | null;  // eliminado en Configuración → Usuarios (no entra, no aparece; el historial conserva su nombre)
 }
 

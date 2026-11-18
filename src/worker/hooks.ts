@@ -421,7 +421,7 @@ hooks.get('/chofer/api/ruta', async (c) => {
   const ctx = await chofer(c.env, c.req.raw);
   const r = await rutaDelChofer(c.env, ctx.user, ctx.sourceDetail ?? '');
   // Con si ya avisó que salió y que terminó cada recorrido (rendimiento.ts).
-  return c.json({ ...r, recorridos: await conMedicion(c.env.DB, r.fecha, r.recorridos) });
+  return c.json({ ...r, recorridos: await conMedicion(c.env.DB, r.fecha, ctx.sourceDetail ?? '', r.recorridos) });
 });
 // El chofer marca una parada: hecha, no se pudo (con el motivo) o la deja para más tarde.
 hooks.post('/chofer/api/ruta/parada', async (c) => {

@@ -107,10 +107,12 @@ const leer = (db: D1Database, fecha: string, n: number) => db.prepare('SELECT * 
 // La fila del recorrido, con la foto del plan la primera vez (cuando el chofer avisa que sale o marca la primera parada).
 async function asegurar(env: Env, fecha: string, n: number, chofer: string): Promise<Fila | null> {
   const ya = await leer(env.DB, fecha, n);
-  if (ya) return ya;
+  if (ya && norm(ya.chofer) === norm(chofer)) return ya;
   const r = await rutaDelDia(env, HUB, fecha);
   const x = r.guardada ? r.rutas.find((y) => y.n === n && y.chofer && norm(y.chofer) === norm(chofer)) : null;
   if (!x) return null;
+  // Logística le pasó ese recorrido a este chofer durante el día: lo que había anotado era del otro.
+  if (ya) await env.DB.prepare('DELETE FROM recorridos_medidos WHERE fecha = ? AND n = ?').bind(fecha, n).run();
   const plan = planDe(r, x);
   await env.DB.prepare('INSERT OR IGNORE INTO recorridos_medidos (fecha, n, chofer, plan, plan_at, plan_paradas) VALUES (?, ?, ?, ?, ?, ?)')
     .bind(fecha, n, x.chofer, JSON.stringify(plan), now(), plan.paradas.length).run();
@@ -153,9 +155,10 @@ const medicionDe = (f: Fila | null | undefined) => ({
   salida_at: f && (f.salida_origen === 'gps' || f.salida_origen === 'boton' || f.salida_origen === 'manual') ? f.salida_at : null,
   llegada_at: f && (f.llegada_origen === 'gps' || f.llegada_origen === 'boton' || f.llegada_origen === 'manual') ? f.llegada_at : null,
 });
-export async function conMedicion<T extends { n: number }>(db: D1Database, fecha: string, recorridos: T[]) {
+export async function conMedicion<T extends { n: number }>(db: D1Database, fecha: string, chofer: string, recorridos: T[]) {
   if (!recorridos.length) return recorridos.map((r) => ({ ...r, medicion: medicionDe(null) }));
-  const filas = (await db.prepare('SELECT * FROM recorridos_medidos WHERE fecha = ?').bind(fecha).all<Fila>()).results;
+  // Solo lo anotado de este chofer: si el recorrido era de otro hasta hace un rato, lo del otro no cuenta.
+  const filas = (await db.prepare('SELECT * FROM recorridos_medidos WHERE fecha = ?').bind(fecha).all<Fila>()).results.filter((f) => norm(f.chofer) === norm(chofer));
   return recorridos.map((r) => ({ ...r, medicion: medicionDe(filas.find((f) => f.n === r.n)) }));
 }
 
@@ -192,8 +195,11 @@ export async function medirDia(env: Env, fecha: string, b: Budget = Budget.of(en
   let medidos = 0;
   for (const x of r.guardada ? r.rutas : []) {
     if (!x.chofer || expresos.has(norm(x.chofer))) continue;
-    const previa = await leer(db, fecha, x.n);
-    const delPlan = previa && norm(previa.chofer) === norm(x.chofer) && previa.plan ? (JSON.parse(previa.plan) as Plan) : null;
+    // Lo anotado de ese recorrido vale si es del mismo chofer; si Logística lo cambió de chofer, se empieza de nuevo.
+    const anotada = await leer(db, fecha, x.n);
+    const previa = anotada && norm(anotada.chofer) === norm(x.chofer) ? anotada : null;
+    if (anotada && !previa) await db.prepare('DELETE FROM recorridos_medidos WHERE fecha = ? AND n = ?').bind(fecha, x.n).run();
+    const delPlan = previa?.plan ? (JSON.parse(previa.plan) as Plan) : null;
     const paradas = x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p);
     if (!paradas.length && !delPlan) continue;   // un recorrido vacío: nada que medir
     const plan = delPlan ?? planDe(r, x);
@@ -246,20 +252,32 @@ export async function medirDia(env: Env, fecha: string, b: Budget = Budget.of(en
         llegada = { at: minutos(ultima.visita!.at, vuelta), origen: 'estimada' };
       }
     }
-    const quitarPuntos = (antes: Origen | null | undefined, ahora: Origen | null) => antes !== ahora;
+    // Mientras se hacía la cuenta pudo llegar un aviso de la app (salió, llegó): si lo que se va a guardar es una estimación
+    // y la fila ya tiene un aviso firme, el aviso queda. El punto del aviso se borra solo si cambia de dónde sale la hora.
+    const FIRME = "('gps', 'boton', 'manual')";
+    const blanda = (o: Origen | null) => (o === 'gps' || o === 'boton' || o === 'manual' ? 0 : 1);
+    const dejaS = `(?21 = 1 AND recorridos_medidos.salida_origen IN ${FIRME})`;
+    const dejaL = `(?22 = 1 AND recorridos_medidos.llegada_origen IN ${FIRME})`;
+    const previaFirme = previa?.llegada_origen === 'gps' || previa?.llegada_origen === 'boton' || previa?.llegada_origen === 'manual';
     await db.prepare(`INSERT INTO recorridos_medidos (fecha, n, chofer, plan, plan_at, plan_km, plan_min, plan_paradas, salida_at, salida_origen, llegada_at, llegada_origen,
         km, min_manejo, hechas, no_se_pudo, sin_visitar, estimado, detalle, cerrado_at)
       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
       ON CONFLICT(fecha, n) DO UPDATE SET chofer = excluded.chofer, plan = excluded.plan, plan_at = excluded.plan_at, plan_km = excluded.plan_km, plan_min = excluded.plan_min,
-        plan_paradas = excluded.plan_paradas, salida_at = excluded.salida_at, salida_origen = excluded.salida_origen, llegada_at = excluded.llegada_at, llegada_origen = excluded.llegada_origen,
-        salida_lat = CASE WHEN ?21 THEN NULL ELSE salida_lat END, salida_lng = CASE WHEN ?21 THEN NULL ELSE salida_lng END,
-        llegada_lat = CASE WHEN ?22 THEN NULL ELSE llegada_lat END, llegada_lng = CASE WHEN ?22 THEN NULL ELSE llegada_lng END,
+        plan_paradas = excluded.plan_paradas,
+        salida_lat = CASE WHEN ${dejaS} OR excluded.salida_origen IS recorridos_medidos.salida_origen THEN recorridos_medidos.salida_lat ELSE NULL END,
+        salida_lng = CASE WHEN ${dejaS} OR excluded.salida_origen IS recorridos_medidos.salida_origen THEN recorridos_medidos.salida_lng ELSE NULL END,
+        salida_at = CASE WHEN ${dejaS} THEN recorridos_medidos.salida_at ELSE excluded.salida_at END,
+        salida_origen = CASE WHEN ${dejaS} THEN recorridos_medidos.salida_origen ELSE excluded.salida_origen END,
+        llegada_lat = CASE WHEN ${dejaL} OR excluded.llegada_origen IS recorridos_medidos.llegada_origen THEN recorridos_medidos.llegada_lat ELSE NULL END,
+        llegada_lng = CASE WHEN ${dejaL} OR excluded.llegada_origen IS recorridos_medidos.llegada_origen THEN recorridos_medidos.llegada_lng ELSE NULL END,
+        llegada_at = CASE WHEN ${dejaL} THEN recorridos_medidos.llegada_at ELSE excluded.llegada_at END,
+        llegada_origen = CASE WHEN ${dejaL} THEN recorridos_medidos.llegada_origen ELSE excluded.llegada_origen END,
         km = excluded.km, min_manejo = excluded.min_manejo, hechas = excluded.hechas, no_se_pudo = excluded.no_se_pudo, sin_visitar = excluded.sin_visitar,
         estimado = excluded.estimado, detalle = excluded.detalle, cerrado_at = excluded.cerrado_at`)
       .bind(fecha, x.n, x.chofer, JSON.stringify(plan), delPlan ? previa!.plan_at : now(), redondo(planMedido.km, 2), redondo(planMedido.min), plan.paradas.length,
         salida.at, salida.origen, llegada.at, llegada.origen, seq.length ? redondo(km, 2) : null, seq.length ? redondo(manejo) : null, hechas, noSePudo,
         pasos.filter((p) => p.resultado === 'sin_visitar').length, estimado || planMedido.estimado ? 1 : 0, JSON.stringify(pasos), cerrar,
-        quitarPuntos(previa?.salida_origen, salida.origen) ? 1 : 0, quitarPuntos(previa?.llegada_origen, llegada.origen) ? 1 : 0).run();
+        blanda(salida.origen), blanda(llegada.origen) && !previaFirme ? 1 : 0).run();
     medidos++;
   }
   // Lo que quedó de un recorrido que ya no existe o cambió de chofer (y no era de nadie que haya avisado algo) se saca.

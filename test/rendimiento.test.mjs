@@ -159,6 +159,22 @@ test('rendimiento: plan, lo que pasó, salida y llegada, estimaciones, correcci�
   x = await api('GET', `/rendimiento?desde=${HOY}&hasta=${HOY}`);
   assert.equal(x.data.choferes.find((c) => c.nombre === nombre).propio, true);
 
+  // ---------- Logística le pasa el recorrido a otro chofer: lo anotado del primero no le queda al segundo ----------
+  assert.equal((await api('PUT', '/cronograma/ruta', { fecha: HOY, rutas: [
+    { chofer: null, base: 'roca', salida: 510, orden: [] },
+    { chofer: `Otro Chofer ${RUN}`, base: 'otro', base_otro: { nombre: 'Salida de prueba', direccion: dir.base }, salida: 540, a_mano: true, orden: [clave.a, clave.b, clave.c] },
+  ] })).status, 200);
+  rc = await (await chofer('/ruta', undefined, otro.token)).json();
+  assert.deepEqual(rc.recorridos.find((y) => y.n === 2).medicion, { salida_at: null, llegada_at: null }, 'no hereda la salida del otro');
+  r = await evento({ n: 2, tipo: 'salida', origen: 'boton' }, otro.token);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.medicion.salida_at);
+  assert.equal((await evento({ n: 2, tipo: 'llegada', origen: 'boton' })).status, 404, 'el primero ya no puede avisar nada de ese recorrido');
+  await api('POST', '/rendimiento/medir', { fecha: HOY });
+  x = await api('GET', `/rendimiento?desde=${HOY}&hasta=${HOY}`);
+  assert.ok(!x.data.filas.some((y) => y.chofer === nombre), 'el recorrido ya no figura a nombre del primero');
+  assert.equal(x.data.filas.find((y) => y.chofer === `Otro Chofer ${RUN}`).salida_origen, 'boton');
+
   // ---------- Lo ven Logística, Producción y los administradores ----------
   const vera = (await api('POST', '/users', { email: `vera.rinde.${RUN}@formas.ar`, name: `Vera Rinde ${RUN}`, profile: 'comercial', role: 'member' })).data;
   assert.equal((await api('GET', '/rendimiento', undefined, vera.email)).status, 403);

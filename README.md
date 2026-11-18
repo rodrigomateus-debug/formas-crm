@@ -281,4 +281,8 @@ Workspace (Seguridad → Controles de API → Delegación de todo el dominio) ha
   ignorados de la configuración de Gmail.
 - **Agendar:** en la ficha, «Reunión» → «Agendar en Google Calendar y mandar la invitación» la crea en el calendario de
   quien la arma, con los invitados (los contactos con mail de la ficha y otros mails) y, si se pide, el link de Meet.
+- **Resumen:** si la reunión se hizo con «Tomar notas con Gemini» en Meet, Meet adjunta al evento el documento de notas;
+  la pasada del calendario lo lee por Drive (permiso `drive`, que la cuenta ya tiene) y guarda la sección «Resumen» en
+  la reunión. Claude lo carga con la herramienta `resumen_reunion` del conector (por id de la reunión, o por contacto,
+  empresa o negocio y día). En la ficha se ve como «Resumen (Gemini)» / «Resumen (Claude)».
 - Prueba: `test/calendar.test.mjs` (contra un Google simulado; ver `test/gmail-dev-vars.mjs`).

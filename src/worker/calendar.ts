@@ -39,6 +39,30 @@ export interface GEvent {
   id: string; iCalUID?: string; status?: string; summary?: string; description?: string; location?: string; htmlLink?: string; hangoutLink?: string;
   start?: GDate; end?: GDate; originalStartTime?: GDate; recurringEventId?: string; attendees?: GAttendee[]; organizer?: { email?: string; self?: boolean };
   conferenceData?: { entryPoints?: Array<{ entryPointType?: string; uri?: string }> };
+  attachments?: Array<{ fileId?: string; fileUrl?: string; title?: string; mimeType?: string }>;
+}
+
+// ---------- Resumen de la reunión (Gemini en Meet) ----------
+// Cuando la reunión se graba con «Tomar notas con Gemini», Meet adjunta al evento un documento («Notas de Gemini» /
+// «Notes by Gemini»). La pasada del calendario lo ve (el evento cambia), lo lee por Drive como quien tiene el calendario y
+// guarda un resumen breve en la reunión. Los resúmenes de Claude llegan por el conector (herramienta resumen_reunion, mcp.ts).
+const DRIVE_LECTURA = 'https://www.googleapis.com/auth/drive';
+const esNotas = (a: { title?: string; mimeType?: string }) => a.mimeType === 'application/vnd.google-apps.document' && /gemini|notas|notes|resumen|summary|transcri/i.test(a.title ?? '');
+
+// Del texto del documento: la sección de resumen («Resumen» / «Summary»), sin los detalles ni la transcripción.
+export function resumenDeNotas(texto: string, max = 900) {
+  const t = texto.replace(/\r/g, '').replace(/\u00a0/g, ' ');
+  const m = t.match(/(?:^|\n)\s*(?:resumen|summary)\s*\n([\s\S]*?)(?:\n\s*(?:detalles|details|pr[oó]ximos pasos(?: sugeridos)?|suggested next steps|next steps|transcripci[oó]n|transcript)\s*\n|$)/i);
+  const cuerpo = (m ? m[1] : t).split('\n').map((l) => l.trim()).filter(Boolean).join('\n');
+  return cuerpo.length > max ? `${cuerpo.slice(0, max).replace(/\s+\S*$/, '')}…` : cuerpo;
+}
+
+async function leerNotas(env: Env, user: User, fileId: string) {
+  const token = await serviceToken(env, user.email, DRIVE_LECTURA);
+  const drive = (env.DRIVE_API_URL ?? 'https://www.googleapis.com').replace(/\/$/, '');
+  const res = await fetch(`${drive}/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=text/plain`, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Drive no dejó leer las notas de la reunión (${res.status})`);
+  return res.text();
 }
 
 const api = (env: Env) => `${env.CALENDAR_API_URL ?? 'https://www.googleapis.com'}/calendar/v3`;
@@ -108,14 +132,23 @@ export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: Cale
   if (!contactos.length) return null;
   const links = contactos.map((c) => c.id);
   for (const c of contactos) { const d = await openDealOf(db, c.id); if (d) links.push(d); }
-  const datos = { subject: e.summary ?? 'Reunión', body: e.description ?? '', occurred_at: inicio, meta: metaDe(e, user, externos.map((a) => a.email)) };
+  const datos = { subject: e.summary ?? 'Reunión', body: e.description ?? '', occurred_at: inicio, meta: metaDe(e, user, externos.map((a) => a.email)) as Record<string, unknown> };
+  // Notas de Gemini adjuntas: se leen una vez (si ya hay resumen de esas notas, no se vuelven a pedir).
+  const notas = (e.attachments ?? []).find(esNotas);
+  const prevMeta = prev ? JSON.parse(prev.meta || '{}') as Record<string, unknown> : {};
+  if (notas?.fileId && prevMeta.notas_id !== notas.fileId) {
+    try {
+      const resumen = resumenDeNotas(await leerNotas(env, user, notas.fileId));
+      if (resumen) Object.assign(datos.meta, { resumen, resumen_de: 'Gemini', notas_url: notas.fileUrl ?? null, notas_id: notas.fileId });
+    } catch (err) { console.error((err as Error).message); }
+  }
   if (prev) {
     const cambio = prev.subject !== datos.subject || prev.occurred_at !== datos.occurred_at || prev.archived || (prev.body ?? '') !== datos.body
-      || JSON.parse(prev.meta || '{}').end_at !== datos.meta.end_at;
+      || prevMeta.end_at !== datos.meta.end_at || (!!datos.meta.resumen && prevMeta.resumen !== datos.meta.resumen);
     // Los vínculos nuevos (un invitado que se sumó) se agregan con createActivity, que con el mismo external_id solo suma vínculos.
     await createActivity(db, ctx, { type: 'meeting', external_id: clave, links, ...datos, owner_id: owner });
     if (!cambio) return null;
-    await updateActivity(db, ctx, prev.id, { ...datos, meta: { ...JSON.parse(prev.meta || '{}'), ...datos.meta }, ...(prev.archived ? { archived: false } : {}) });
+    await updateActivity(db, ctx, prev.id, { ...datos, meta: { ...prevMeta, ...datos.meta }, ...(prev.archived ? { archived: false } : {}) });
     return 'actualizada';
   }
   await createActivity(db, ctx, { type: 'meeting', external_id: clave, links, owner_id: owner, ...datos });

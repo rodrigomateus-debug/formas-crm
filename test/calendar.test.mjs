@@ -15,6 +15,7 @@ const enHora = (h) => new Date(Date.now() + h * 3_600_000).toISOString();
 const eventos = [];   // lo que «hay» en el calendario
 const creados = [];   // lo que el CRM pidió crear
 let server;
+const NOTAS = `Notas de Gemini\nReunión con cliente\n\nResumen\nSe acordó cotizar 500 tazas con logo a una tinta.\nEl cliente pide entrega antes del 15/12.\n\nDetalles\nMuchos detalles que no van.\n\nPróximos pasos sugeridos\nMandar cotización.`;
 
 before(async () => {
   me = (await api('GET', '/me')).email;
@@ -25,6 +26,9 @@ before(async () => {
     req.on('end', () => {
       const send = (b, st = 200) => { res.writeHead(st, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
       if (url.pathname === '/token') return send({ access_token: 'fake', expires_in: 3600 });
+      // Drive: las notas de Gemini como texto.
+      const notas = url.pathname.match(/^\/drive\/v3\/files\/([^/]+)\/export$/);
+      if (notas) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end(NOTAS); }
       if (url.pathname === '/calendar/v3/calendars/primary/events' && req.method === 'GET') return send({ items: eventos });
       if (url.pathname === '/calendar/v3/calendars/primary/events' && req.method === 'POST') {
         const b = JSON.parse(Buffer.concat(chunks).toString());
@@ -111,4 +115,31 @@ test('calendario: agendar desde la ficha crea el evento con invitados y Meet, y 
 
   const mal = await fetch(`${CRM}/api/calendar/reunion`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subject: 'x', start: enHora(2), end: enHora(1), attendees: [mail] }) });
   assert.equal(mal.status, 400, 'fin antes del comienzo');
+});
+
+test('calendario: el resumen de Gemini (notas adjuntas) y el de Claude (conector) quedan en la reunión', async (t) => {
+  const st = await api('GET', '/calendar');
+  if (!st.has_credentials) { t.skip('wrangler dev sin GOOGLE_SA_JSON de prueba'); return; }
+  const mail = `gerencia@notas-${run}.com.ar`;
+  const contacto = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Linkedin', firstname: 'Gerencia', email: mail } });
+  eventos.push({ id: `e3${run}`, iCalUID: `e3${run}@google.com`, status: 'confirmed', summary: 'Seguimiento', start: { dateTime: enHora(-3) }, end: { dateTime: enHora(-2) },
+    organizer: { email: me, self: true }, attendees: [{ email: me }, { email: mail }],
+    attachments: [{ fileId: `doc${run}`, title: 'Seguimiento – Notas de Gemini', mimeType: 'application/vnd.google-apps.document', fileUrl: `https://docs.google.com/document/d/doc${run}` }] });
+  await api('PUT', '/calendar', { enabled: true, users: [me] });
+  await api('POST', '/calendar/sync');
+  await api('PUT', '/calendar', { enabled: false });
+  const r = (await api('GET', `/records/contact/${contacto.id}/timeline?types=meeting`)).activities[0];
+  assert.equal(r.meta.resumen, 'Se acordó cotizar 500 tazas con logo a una tinta.\nEl cliente pide entrega antes del 15/12.', 'solo la sección «Resumen»');
+  assert.equal(r.meta.resumen_de, 'Gemini');
+  assert.ok(r.meta.notas_url);
+
+  // Claude, por el conector: busca la reunión del día en el contacto y le pone el resumen.
+  const tok = await (await fetch(`${CRM}/api/tokens`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: `Claude cal ${run}`, source: 'mcp' }) })).json();
+  const rpc = async (params) => (await (await fetch(`${CRM}/mcp/${tok.token}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params }) })).json());
+  const out = JSON.parse((await rpc({ name: 'resumen_reunion', arguments: { record_id: contacto.id, resumen: 'Quedamos en mandar la cotización el lunes.' } })).result.content[0].text);
+  assert.equal(out.id, r.id, 'la misma reunión');
+  assert.equal(out.creada, false);
+  const r2 = (await api('GET', `/records/contact/${contacto.id}/timeline?types=meeting`)).activities[0];
+  assert.equal(r2.meta.resumen, 'Quedamos en mandar la cotización el lunes.');
+  assert.equal(r2.meta.resumen_de, 'Claude');
 });

@@ -554,6 +554,12 @@ function ActivityItem({ a, currentId, onChange }: { a: Activity; currentId: numb
           {a.meta.html_link && <a href={a.meta.html_link} target="_blank" rel="noopener noreferrer"><Icon name="external" size={12} /> Ver en Calendar</a>}
         </div>
       )}
+      {/* Resumen de la reunión (Gemini en Meet, leído por calendar.ts; o Claude, por el conector). */}
+      {a.type === 'meeting' && a.meta?.resumen && (
+        <div className="tl-resumen"><b>Resumen{a.meta.resumen_de ? ` (${a.meta.resumen_de})` : ''}</b>
+          {a.meta.notas_url && <> · <a href={a.meta.notas_url} target="_blank" rel="noopener noreferrer">Ver notas completas</a></>}
+          <div>{a.meta.resumen}</div></div>
+      )}
       {a.body && <div className={`b${open ? ' open' : ''}`} onClick={() => setOpen(true)}>{a.body}</div>}
       {a.links.filter((l) => l.id !== currentId).length > 0 && (
         <div className="links">{a.links.filter((l) => l.id !== currentId).map((l) => <Link key={l.id} className="chip" to={recordUrl(l.type, l.id)}>{l.name}</Link>)}</div>

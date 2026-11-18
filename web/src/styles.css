@@ -1602,6 +1602,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-tag.late { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
 .cr-tag.ev { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .cr-tag.riesgo { background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-weight: 500; }
+.cr-tag.warn { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .cr-t-acc { position: absolute; top: 5px; right: 5px; display: flex; align-items: center; gap: 2px; }
 .cr-mini { width: 22px; height: 22px; border-radius: 50%; border: 0; background: none; padding: 0; display: grid; place-items: center; color: var(--k, var(--ui-ink-2)); cursor: pointer; opacity: 0; transition: opacity var(--dur-fast) var(--ease); }
 .cr-tarjeta:hover .cr-mini, .cr-mini:focus-visible, .cr-mini[aria-expanded="true"], .cr-feriado .cr-mini { opacity: 1; }
@@ -1837,6 +1838,8 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 /* ---------- Recorridos (pages/Recorridos.tsx): los encargos al recorrido y la base de destinos ---------- */
 .rc-page .page-head { margin-bottom: 4px; }
 .rc-intro { margin: 0 0 12px; max-width: 760px; }
+.rc-ia { padding: 8px 10px; border-radius: var(--r-2, 8px); background: var(--ui-surface-sunken); }
+.rc-ia.warn { background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
 .rc-estado { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; border-radius: var(--r-pill); padding: 1px 7px; margin-right: 6px;
   background: var(--ui-info-soft); color: var(--ui-info-ink); }
 .rc-estado.ok { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }

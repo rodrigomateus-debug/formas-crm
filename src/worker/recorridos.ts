@@ -97,10 +97,10 @@ async function resolverDestino(env: Env, ctx: Ctx, d: DestinoInput) {
   const lugar = d.guardar && nombre && direccion ? await crearLugar(db, ctx, { nombre, direccion }) : null;
   return { lugar_id: lugar, company_id: null, destino: nombre ?? direccion!, direccion };
 }
-async function crearLugar(db: D1Database, ctx: Ctx, l: { nombre: string; direccion: string; company_id?: number | null; localidad?: string | null; horario?: string | null; contacto?: string | null; telefono?: string | null; observaciones?: string | null }) {
-  const r = await db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, horario, contacto, telefono, observaciones, clave_dir, origen, activo, company_id, created_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'hub', 1, ?, ?, ?) RETURNING id`)
-    .bind(l.nombre.slice(0, 160), l.direccion.slice(0, 300), l.localidad ?? null, l.horario ?? null, l.contacto ?? null, l.telefono ?? null, l.observaciones ?? null,
+async function crearLugar(db: D1Database, ctx: Ctx, l: { nombre: string; direccion: string; company_id?: number | null; localidad?: string | null; provincia?: string | null; horario?: string | null; contacto?: string | null; telefono?: string | null; observaciones?: string | null }) {
+  const r = await db.prepare(`INSERT INTO lugares (nombre, direccion, localidad, provincia, horario, contacto, telefono, observaciones, clave_dir, origen, activo, company_id, created_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'hub', 1, ?, ?, ?) RETURNING id`)
+    .bind(l.nombre.slice(0, 160), l.direccion.slice(0, 300), l.localidad ?? null, l.provincia ?? null, l.horario ?? null, l.contacto ?? null, l.telefono ?? null, l.observaciones ?? null,
       claveCalle(l.direccion) || null, l.company_id ?? null, ctx.user.id, now()).first<{ id: number }>();
   await reindexarLugares(db, [r!.id]);
   return r!.id;
@@ -293,7 +293,7 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   exigirPedir(ctx);
   const db = env.DB;
   const nombre = texto(b.nombre, 160), direccion = texto(b.direccion, 300);
-  const campos = { localidad: texto(b.localidad, 80), horario: texto(b.horario, 160), contacto: texto(b.contacto, 160), telefono: texto(b.telefono, 60), observaciones: texto(b.observaciones, 600) };
+  const campos = { localidad: texto(b.localidad, 80), provincia: texto(b.provincia, 80), horario: texto(b.horario, 160), contacto: texto(b.contacto, 160), telefono: texto(b.telefono, 60), observaciones: texto(b.observaciones, 600) };
   if (id == null) {
     if (!nombre || !direccion) throw new HttpError(400, 'El destino necesita el nombre y la dirección.');
     const nuevo = await crearLugar(db, ctx, { nombre, direccion, ...campos, company_id: organiza(ctx.user) ? Number(b.company_id) || null : null });
@@ -310,24 +310,30 @@ export async function guardarDestino(env: Env, ctx: Ctx, id: number | null, b: R
   if (b.company_id !== undefined && organiza(ctx.user)) { sets.push('company_id = ?'); vals.push(Number(b.company_id) || null); }
   if (b.activo !== undefined) { if (!organiza(ctx.user)) throw new HttpError(403, 'Sacar un destino de la libreta es de Logística.'); sets.push('activo = ?'); vals.push(b.activo ? 1 : 0); }
   if (!sets.length) return { id };
+  // Corregido a mano: lo que había dicho la IA ya no vale (si quedó incompleto, la IA lo vuelve a mirar).
+  if (b.direccion !== undefined || b.localidad !== undefined || b.provincia !== undefined) sets.push('ia_estado = NULL', 'ia_nota = NULL', 'ia_sugerida = NULL');
   await db.prepare(`UPDATE lugares SET ${sets.join(', ')}, editado = 1, updated_at = ? WHERE id = ?`).bind(...vals, now(), id).run();
   await reindexarLugares(db, [id]);
   return { id };
 }
 
 // La libreta para la pestaña «Destinos»: buscar, con cuántas veces se fue a cada uno en los últimos 6 meses.
-export async function listarDestinos(env: Env, user: User, q: string) {
+export async function listarDestinos(env: Env, user: User, q: string, revisar = false) {
   const db = env.DB;
   const cfg = await actualizarLugares(env, organiza(user));
   const t = norm(q).replace(/[%_]/g, ' ').trim();
   const desde = sumarDias(hoyBsAs(), -182);
   const { results } = await db.prepare(`SELECT l.*, (SELECT COUNT(*) FROM encargos e WHERE e.lugar_id = l.id AND e.fecha >= ?2 AND e.estado <> 'cancelado') AS veces
-    FROM lugares l WHERE l.activo = 1 ${t ? "AND (lower(l.nombre) LIKE ?1 OR lower(COALESCE(l.direccion, '')) LIKE ?1 OR lower(COALESCE(l.localidad, '')) LIKE ?1)" : ''}
-    ORDER BY veces DESC, l.nombre LIMIT 100`).bind(`%${t}%`, desde).all<Lugar & { company_id: number | null; origen: string; editado: number; veces: number; localidad: string | null; zona: string | null; telefono: string | null; created_by: number | null }>();
+    FROM lugares l WHERE l.activo = 1 ${revisar ? "AND l.ia_estado = 'dudoso'" : ''} ${t ? "AND (lower(l.nombre) LIKE ?1 OR lower(COALESCE(l.direccion, '')) LIKE ?1 OR lower(COALESCE(l.localidad, '')) LIKE ?1)" : ''}
+    ORDER BY veces DESC, l.nombre LIMIT ${revisar ? 500 : 100}`).bind(`%${t}%`, desde).all<Lugar & { company_id: number | null; origen: string; editado: number; veces: number; localidad: string | null; zona: string | null; telefono: string | null; created_by: number | null;
+      provincia: string | null; ia_estado: string | null; ia_nota: string | null; ia_antes: string | null; ia_sugerida: string | null }>();
   const total = await db.prepare('SELECT COUNT(*) AS n FROM lugares WHERE activo = 1').first<{ n: number }>();
+  const dudosos = await db.prepare("SELECT COUNT(*) AS n FROM lugares WHERE activo = 1 AND ia_estado = 'dudoso'").first<{ n: number }>();
+  const json = (v: string | null) => { try { return v ? JSON.parse(v) : null; } catch { return null; } };
   return {
-    total: total?.n ?? 0, copia: { at: cfg.at, filas: cfg.filas, error: cfg.error ?? null },
-    destinos: results.map((l) => ({ id: l.id, nombre: l.nombre, direccion: l.direccion, localidad: l.localidad, zona: l.zona, horario: l.horario, contacto: l.contacto,
+    total: total?.n ?? 0, para_revisar: dudosos?.n ?? 0, ia: !!env.ANTHROPIC_API_KEY, copia: { at: cfg.at, filas: cfg.filas, error: cfg.error ?? null },
+    destinos: results.map((l) => ({ id: l.id, nombre: l.nombre, direccion: l.direccion, localidad: l.localidad, provincia: l.provincia, zona: l.zona,
+      ia_estado: l.ia_estado, ia_nota: l.ia_nota, ia_antes: json(l.ia_antes), ia_sugerida: json(l.ia_sugerida), horario: l.horario, contacto: l.contacto,
       telefono: l.telefono, observaciones: l.observaciones, company_id: l.company_id, origen: l.origen, editado: !!l.editado, veces: l.veces,
       puede_editar: organiza(user) || (l.origen === 'hub' && l.created_by === user.id) })),
   };

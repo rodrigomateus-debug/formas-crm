@@ -319,20 +319,45 @@ function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: nu
 
 // ---------- Destinos ----------
 
-interface DestinoFila { id: number; nombre: string; direccion: string | null; localidad: string | null; zona: string | null; horario: string | null; contacto: string | null;
-  telefono: string | null; observaciones: string | null; company_id: number | null; origen: string; editado: boolean; veces: number; puede_editar: boolean }
+interface DirIA { direccion: string | null; localidad: string | null; provincia: string | null; confianza?: number }
+interface DestinoFila { id: number; nombre: string; direccion: string | null; localidad: string | null; provincia: string | null; zona: string | null; horario: string | null; contacto: string | null;
+  telefono: string | null; observaciones: string | null; company_id: number | null; origen: string; editado: boolean; veces: number; puede_editar: boolean;
+  ia_estado: 'corregido' | 'ok' | 'dudoso' | null; ia_nota: string | null; ia_antes: DirIA | null; ia_sugerida: DirIA | null }
+interface ResultadoIA { revisados: number; corregidos: Array<{ id: number; nombre: string; antes: string; ahora: string; motivo: string }>;
+  dudosos: Array<{ id: number; nombre: string; sugerida: string; confianza: number; motivo: string }>; pendientes: number; google: boolean }
+const textoDir = (d: DirIA) => [d.direccion, d.localidad, d.provincia].filter(Boolean).join(', ');
 function Destinos() {
   const { meta } = useMeta();
   const toast = useToast();
   const [q, setQ] = useState('');
-  const [datos, setDatos] = useState<{ total: number; copia: { at: number; filas: number; error: string | null }; destinos: DestinoFila[] } | null>(null);
+  const [datos, setDatos] = useState<{ total: number; para_revisar: number; ia: boolean; copia: { at: number; filas: number; error: string | null }; destinos: DestinoFila[] } | null>(null);
   const [editando, setEditando] = useState<DestinoFila | 'nuevo' | null>(null);
   const [v, setV] = useState(0);
+  const [revisar, setRevisar] = useState(false);
+  // Completar con IA: tanda por tanda (15 por vez) hasta que no quede ninguno; se puede frenar.
+  const [ia, setIa] = useState<{ corriendo: boolean; corregidos: ResultadoIA['corregidos']; dudosos: ResultadoIA['dudosos']; pendientes: number; google: boolean } | null>(null);
+  const frenar = useRef(false);
   useEffect(() => {
     let vivo = true;
-    const t = window.setTimeout(() => http<NonNullable<typeof datos>>('GET', `/recorridos/libreta${qs({ q })}`).then((d) => { if (vivo) setDatos(d); }, (e) => toast((e as Error).message, true)), q ? 250 : 0);
+    const t = window.setTimeout(() => http<NonNullable<typeof datos>>('GET', `/recorridos/libreta${qs({ q, revisar: revisar ? '1' : undefined })}`).then((d) => { if (vivo) setDatos(d); }, (e) => toast((e as Error).message, true)), q ? 250 : 0);
     return () => { vivo = false; window.clearTimeout(t); };
-  }, [q, v, toast]);
+  }, [q, v, revisar, toast]);
+  const completarIA = async () => {
+    frenar.current = false;
+    const acum = { corriendo: true, corregidos: [] as ResultadoIA['corregidos'], dudosos: [] as ResultadoIA['dudosos'], pendientes: 0, google: false };
+    setIa({ ...acum });
+    try {
+      for (let vuelta = 0; vuelta < 200 && !frenar.current; vuelta++) {
+        const r = await http<ResultadoIA>('POST', '/recorridos/libreta/ia', {});
+        acum.corregidos.push(...r.corregidos); acum.dudosos.push(...r.dudosos); acum.pendientes = r.pendientes; acum.google = r.google;
+        setIa({ ...acum });
+        setV((x) => x + 1);
+        if (!r.pendientes || !r.revisados) break;
+      }
+      toast(`Listo: ${acum.corregidos.length} destinos corregidos, ${acum.dudosos.length} para revisar.`);
+    } catch (e) { toast((e as Error).message, true); }
+    setIa({ ...acum, corriendo: false });
+  };
   const organiza = meta.me.role === 'admin' || (meta.me.role !== 'viewer' && ['logistica', 'produccion'].includes(meta.me.profile));
   const actualizar = async () => {
     try { const r = await http<{ filas: number; error: string | null }>('POST', '/cronograma/lugares/actualizar'); toast(r.error ? `No se pudo traer la planilla: ${r.error}` : `Listo: ${r.filas} destinos de la planilla.`, !!r.error); setV((x) => x + 1); }
@@ -353,6 +378,16 @@ function Destinos() {
           {datos.copia.at > 0 && ` Última copia de la planilla: ${fmtRelative(new Date(datos.copia.at).toISOString())}.`}{datos.copia.error ? ` (${datos.copia.error})` : ''}
           {organiza && <> <button type="button" className="cr-link" onClick={actualizar}>Traer la planilla ahora</button></>}</p>
       )}
+      {datos && organiza && datos.ia && (
+        <div className="rc-intro small row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <button type="button" className="btn sm" disabled={ia?.corriendo} onClick={completarIA} title="Claude completa la localidad, la provincia y la dirección para el mapa. Solo cambia lo que está al menos 90 % seguro; lo demás queda «Para revisar».">
+            <Icon name="spark" size={14} />{ia?.corriendo ? 'Revisando destinos…' : 'Completar direcciones con IA'}</button>
+          {ia?.corriendo && <button type="button" className="cr-link" onClick={() => { frenar.current = true; }}>Frenar</button>}
+          {ia && <span className="muted">{ia.corregidos.length} corregidos · {ia.dudosos.length} para revisar{ia.corriendo && ia.pendientes ? ` · faltan ${ia.pendientes}` : ''}
+            {!ia.corriendo && !ia.google && ' · Sin Google Maps conectado: el punto del mapa se busca solo al abrir la ruta.'}</span>}
+          {datos.para_revisar > 0 && <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={revisar} onChange={(e) => setRevisar(e.target.checked)} />Solo los {datos.para_revisar} para revisar</label>}
+        </div>
+      )}
       {!datos && <Cargando />}
       {datos && (
         <div className="table-wrap rc-tabla">
@@ -361,8 +396,10 @@ function Destinos() {
             <tbody>
               {datos.destinos.map((d) => (
                 <tr key={d.id} onClick={() => d.puede_editar && setEditando(d)} style={d.puede_editar ? undefined : { cursor: 'default' }} title={d.puede_editar ? undefined : 'Los destinos de la libreta los corrige Logística'}>
-                  <td><b>{lindo(d.nombre)}</b>{d.origen === 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }}>Nuevo en el Hub</span>}{d.editado && d.origen !== 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }} title="Lo que se corrigió acá la planilla ya no lo pisa">Corregido</span>}</td>
-                  <td>{[d.direccion, d.localidad].filter(Boolean).join(', ')}</td>
+                  <td><b>{lindo(d.nombre)}</b>{d.origen === 'hub' && <span className="cr-tag" style={{ marginLeft: 6 }}>Nuevo en el Hub</span>}{d.editado && d.origen !== 'hub' && d.ia_estado !== 'corregido' && <span className="cr-tag" style={{ marginLeft: 6 }} title="Lo que se corrigió acá la planilla ya no lo pisa">Corregido</span>}
+                    {d.ia_estado === 'corregido' && <span className="cr-tag" style={{ marginLeft: 6 }} title={`${d.ia_nota ?? ''}${d.ia_antes ? `\nAntes: ${textoDir(d.ia_antes) || '(vacío)'}` : ''}`}>Completado con IA</span>}
+                    {d.ia_estado === 'dudoso' && <span className="cr-tag warn" style={{ marginLeft: 6 }} title={`${d.ia_nota ?? ''}${d.ia_sugerida ? `\nSugerencia: ${textoDir(d.ia_sugerida)}` : ''}`}>Para revisar</span>}</td>
+                  <td>{[d.direccion, d.localidad, d.provincia].filter(Boolean).join(', ')}</td>
                   <td>{d.horario}</td>
                   <td>{[d.contacto, d.telefono].filter(Boolean).join(' · ')}</td>
                   <td className="numcell">{d.veces || ''}</td>
@@ -380,7 +417,7 @@ function Destinos() {
 
 function EditarDestino({ d, puedeSacar, onClose, onListo }: { d: DestinoFila | null; puedeSacar: boolean; onClose: () => void; onListo: () => void }) {
   const toast = useToast();
-  const [f, setF] = useState({ nombre: d?.nombre ?? '', direccion: d?.direccion ?? '', localidad: d?.localidad ?? '', horario: d?.horario ?? '', contacto: d?.contacto ?? '', telefono: d?.telefono ?? '', observaciones: d?.observaciones ?? '' });
+  const [f, setF] = useState({ nombre: d?.nombre ?? '', direccion: d?.direccion ?? '', localidad: d?.localidad ?? '', provincia: d?.provincia ?? '', horario: d?.horario ?? '', contacto: d?.contacto ?? '', telefono: d?.telefono ?? '', observaciones: d?.observaciones ?? '' });
   const [ocupado, setOcupado] = useState(false);
   const guardar = async (extra: Record<string, unknown> = {}) => {
     setOcupado(true);
@@ -396,7 +433,17 @@ function EditarDestino({ d, puedeSacar, onClose, onListo }: { d: DestinoFila | n
       <div className="rc-form">
         {campo('nombre', 'Nombre', 'IMPREFAS, Nestlé (Vicente López)…')}
         {campo('direccion', 'Dirección', 'Calle y altura')}
-        <div className="rc-2">{campo('localidad', 'Localidad')}{campo('horario', 'Horario de atención', '9 a 13')}</div>
+        <div className="rc-2">{campo('localidad', 'Localidad')}{campo('provincia', 'Provincia', 'Buenos Aires, CABA…')}</div>
+        {d?.ia_estado === 'dudoso' && d.ia_sugerida && (
+          <div className="rc-ia warn small"><b>La IA no está segura{d.ia_sugerida.confianza != null ? ` (${d.ia_sugerida.confianza} %)` : ''}:</b> {textoDir(d.ia_sugerida)}.
+            {d.ia_nota && <span className="muted"> {d.ia_nota}</span>}{' '}
+            <button type="button" className="cr-link" onClick={() => setF({ ...f, direccion: d.ia_sugerida!.direccion ?? f.direccion, localidad: d.ia_sugerida!.localidad ?? '', provincia: d.ia_sugerida!.provincia ?? '' })}>Usar la sugerencia</button></div>
+        )}
+        {d?.ia_estado === 'corregido' && d.ia_antes && (
+          <div className="rc-ia small"><b>Completado con IA.</b>{d.ia_nota && <span className="muted"> {d.ia_nota}</span>} Antes: {textoDir(d.ia_antes) || '(vacío)'}.{' '}
+            <button type="button" className="cr-link" onClick={() => setF({ ...f, direccion: d.ia_antes!.direccion ?? '', localidad: d.ia_antes!.localidad ?? '', provincia: d.ia_antes!.provincia ?? '' })}>Volver a como estaba</button></div>
+        )}
+        <div className="rc-2">{campo('horario', 'Horario de atención', '9 a 13')}<span /></div>
         <div className="rc-2">{campo('contacto', 'Contacto')}{campo('telefono', 'Teléfono')}</div>
         {campo('observaciones', 'Observaciones para el chofer', 'Tocar timbre 2, entrar por el portón gris…')}
         {d && d.origen !== 'hub' && <p className="muted small">Viene de la planilla DESTINOS. Lo que cambies acá queda en el Hub y la copia de la planilla ya no lo pisa.</p>}

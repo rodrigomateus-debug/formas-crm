@@ -189,3 +189,25 @@ API (todo con la sesión del Hub):
 - Avisar al cliente por WhatsApp cuando sale el encargo.
 - Sugerir la parada siguiente de un circuito («si va a Lavita, también pasa por Novatampo»: juntos 49 veces).
 - Que Claude pueda cargar encargos desde el conector.
+
+## Completar las direcciones con IA
+
+Pedido de Rodrigo del 18/11/2026: muchos destinos de la libreta no tenían la localidad o la provincia, o no aparecían en
+el mapa. En la pestaña **Destinos**, Logística (y quien edita el cronograma) tiene **«Completar direcciones con IA»**:
+
+- Claude revisa los destinos a los que les falta la localidad, la provincia o el punto en el mapa (de a 15, hasta
+  terminar; se puede frenar) y propone la dirección prolija (calle y altura), la localidad y la provincia, con cuán seguro
+  está. **Nunca inventa** una calle ni una altura que no estén en los datos.
+- **Solo se corrige lo que está al menos 90 % seguro.** Con Google Maps conectado, además Google tiene que ubicarlo en la
+  misma altura, localidad y provincia; entonces su punto va al mapa de la ruta. Sin Google Maps, el punto se busca solo al
+  abrir la ruta, como siempre.
+- Lo demás queda **«Para revisar»** (con la sugerencia, el porcentaje y el motivo): en el destino, «Usar la sugerencia»
+  la carga en el formulario para confirmarla o corregirla. Hay un filtro «Solo los N para revisar».
+- Lo corregido dice **«Completado con IA»**, queda como corregido en el Hub (la copia de la planilla ya no lo pisa) y
+  guarda cómo estaba: en el destino, «Volver a como estaba».
+- Cada destino se revisa una vez; si alguien lo cambia, se vuelve a mirar la próxima vez.
+- Los destinos ahora tienen **provincia** (se ve en la tabla y se carga en el formulario); la dirección completa que va
+  al mapa y al chofer la incluye.
+
+Código: `src/worker/destinosia.ts` (`POST /api/recorridos/libreta/ia`), migración `0078_destinos_ia.sql`, prueba
+`test/destinos-ia.test.mjs`.

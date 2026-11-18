@@ -15,6 +15,7 @@ import { gmailConfig, syncAll, DEFAULT_GMAIL } from './gmail';
 import { assertDealVisible, canSee, companiesFor, requireCompany, teamsOf, visiblePipelineIds } from './pipelines';
 import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from './clickup';
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
+import { completarDestinos } from './destinosia';
 import { asignarChofer, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
@@ -1457,7 +1458,9 @@ api.get('/recorridos/agenda', async (c) => c.json(await agenda(c.env, c.get('ctx
 api.get('/recorridos/sugerencias', async (c) => c.json(await sugerenciasRecorrido(c.env, c.get('ctx').user, (p) => c.executionCtx.waitUntil(p))));
 api.get('/recorridos/destinos', async (c) => c.json(await buscarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
 api.get('/recorridos/destino', async (c) => c.json(await diasDelDestino(c.env, c.get('ctx').user, c.req.query(), (p) => c.executionCtx.waitUntil(p))));
-api.get('/recorridos/libreta', async (c) => c.json(await listarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''))));
+api.get('/recorridos/libreta', async (c) => c.json(await listarDestinos(c.env, c.get('ctx').user, String(c.req.query('q') ?? ''), c.req.query('revisar') === '1')));
+// Completar con IA las direcciones de la libreta (localidad, provincia, el punto en el mapa): solo lo que está ≥ 90 % seguro.
+api.post('/recorridos/libreta/ia', async (c) => c.json(await completarDestinos(c.env, c.get('ctx'), await c.req.json().catch(() => ({})))));
 api.post('/recorridos/libreta', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), null, await c.req.json())));
 api.patch('/recorridos/libreta/:id', async (c) => c.json(await guardarDestino(c.env, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 api.get('/recorridos/encargos', async (c) => {

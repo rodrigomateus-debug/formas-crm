@@ -88,13 +88,22 @@ vendedora, con un resumen por día en el contacto y los datos duros de lo que co
 botellas»). Código: `src/worker/darwin.ts`; pantalla: **Consultas** (menú CRM) y la tarjeta «Consultas por WhatsApp» en la
 ficha del contacto y de la empresa; para Claude, las herramientas `buscar_consultas` y `pendientes_de_respuesta` del MCP.
 
-**De dónde salen los datos.** Darwin no tiene una acción de workflow para leer los mensajes, así que el CRM no va a
-buscarlos: Darwin se los manda. Un workflow nuevo, «Formas Shop → CRM: actividad»:
+**De dónde salen los datos.** La API REST de Darwin (`api.getdarwin.ai`, spec revisada el 18/11/2026) **no tiene un
+endpoint para leer mensajes ni para listar las conversaciones**: `GET /v1/sessions?id=<teléfono>` da las sesiones de un
+contacto con sus campos inteligentes (sin resumen) y `GET /v1/webhook/events` devuelve eventos de ejemplo, no los reales.
+Por eso es Darwin el que le avisa al CRM: el CRM se suscribe a los eventos de las conversaciones con `POST /v1/webhook`.
 
-1. Disparador `darwin-event` con `session.opened`, `session.replied`, `session.forwarded`, `session.analyzed`,
-   `session.closed` y `session.stage.transitioned` (todas las conversaciones del workspace: Maru y cada vendedora).
-2. Un paso `http-request`: `POST https://<crm>/hooks/darwin/evento`, header `Authorization: Bearer <token>` (el mismo
-   token tipo «Darwin»), body `json` con `evento` = `{{eventType}}`, `timestamp` = `{{timestamp}}` y `data` = `{{data}}`.
+Para conectarlo:
+
+1. En Darwin (Configuración → Claves API, workspace Formas Shop) hay una clave propia del Hub, «FORMAS HUB CRM». Se
+   carga en el Worker: `npx wrangler secret put DARWIN_API_KEY`.
+2. En el Hub, Configuración → Integraciones → «Darwin: resumen del día y consultas» → **Conectar Darwin**. Crea un token
+   propio del CRM y suscribe `https://<hub>/hooks/darwin/evento?token=…` a `session.*` (abierta, pasada a una vendedora,
+   analizada con resumen y campos, cambio de etapa, cerrada). «Volver a conectar» reemplaza la suscripción y revoca el token
+   anterior; las otras suscripciones de Darwin (Zapier, Pipedream, etc.) no se tocan.
+
+Darwin entrega cada evento «al menos una vez»: el CRM guarda cada uno una sola vez (clave: tipo + sesión + `forwardedAt` /
+`summarizedAt` / etapa).
 
 Cada evento trae el resumen que hace Darwin de la sesión (`summary`), sus campos inteligentes (`producto`, `cantidad`,
 `Categoria`, `presupuesto`, `fecha_estimada`…), a quién se asignó y cuándo respondió el equipo (`lastHumanActivityAt`). El
@@ -125,9 +134,10 @@ Reglas:
 
 **Sin respuesta.** La pestaña «Sin respuesta» de Consultas lista las conversaciones que Maru ya pasó a una vendedora donde el
 cliente escribió (`session.replied`) después de la última respuesta del equipo (`lastHumanActivityAt`) y nadie le contestó en
-las últimas 4, 12, 24, 48 o 72 horas. El perfil Ventas ve las suyas. **A confirmar con eventos reales**: que
-`session.replied` sea la respuesta del cliente y que `lastHumanActivityAt` se actualice cuando contesta la vendedora.
+las últimas 4, 12, 24, 48 o 72 horas. El perfil Ventas ve las suyas. **A confirmar con eventos reales**: `session.replied`
+existe en los workflows de Darwin pero no figura en la lista de eventos de `POST /v1/webhook`; si con `session.*` no llega,
+esta pestaña queda vacía y hay que mandarlo con un workflow (disparador `darwin-event` `session.replied` → `http-request` a la
+misma URL, con `eventType`, `timestamp` y `data`).
 
-**Lo que falta para leer los mensajes uno por uno.** Hoy el resumen sale de los resúmenes y campos que arma Darwin, no del
-texto de cada mensaje. La API pública de Darwin (`api.getdarwin.ai`, con `X-API-KEY`) tendría que permitir leer los mensajes
-de una conversación; con una clave (`DARWIN_API_KEY`) se le puede pasar a Claude el texto del día y el resumen gana detalle.
+**Los mensajes uno por uno.** El resumen sale de los resúmenes y campos que arma Darwin en cada evento, no del texto de cada
+mensaje: la API no los da. Si Darwin suma un endpoint de mensajes, se le pasa a Claude el texto del día en `datosParaClaude`.

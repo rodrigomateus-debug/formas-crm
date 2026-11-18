@@ -43,6 +43,9 @@ export interface Env {
   GOOGLE_PLACES_API_URL?: string;   // solo para pruebas: Google Maps simulado
   // API de Claude (Anthropic): lee los remitos (remitos.ts). Sin la clave, los remitos se guardan igual y esperan.
   ANTHROPIC_API_KEY?: string;
+  // API de Darwin (darwin.ts): con la clave, «Conectar Darwin» suscribe al CRM a los eventos de las conversaciones.
+  DARWIN_API_KEY?: string;
+  DARWIN_API_URL?: string;   // solo para pruebas: Darwin simulado
   ANTHROPIC_BASE_URL?: string;   // solo para pruebas: Claude simulado
   // Solo para pruebas: el buscador de direcciones del mapa (cronograma.ts), simulado. Por defecto, Nominatim de OpenStreetMap.
   GEOCODER_URL?: string;

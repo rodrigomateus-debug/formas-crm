@@ -18,12 +18,26 @@ const api = (m, p, b) => call(m, `/api${p}`, b);
 
 // Claude: con datos de esta corrida, un resumen y dos consultas; con cualquier otra cosa (corridas viejas en la misma base), nada nuevo.
 const pedidos = [];
+const darwin = { webhooks: [], llamadas: [] };
 let claude;
 before(async () => {
   claude = http.createServer(async (req, res) => {
     let body = '';
     for await (const ch of req) body += ch;
     res.setHeader('content-type', 'application/json');
+    if (req.url.startsWith('/darwin/')) {
+      darwin.llamadas.push({ method: req.method, url: req.url, key: req.headers['x-api-key'], body: body ? JSON.parse(body) : null });
+      if (req.headers['x-api-key'] !== 'prueba') { res.statusCode = 401; return res.end('{}'); }
+      if (req.method === 'GET' && req.url === '/darwin/v1/webhook') return res.end(JSON.stringify(darwin.webhooks));
+      if (req.method === 'POST' && req.url === '/darwin/v1/webhook') {
+        const w = { id: 9000 + darwin.llamadas.length, url: JSON.parse(body).webhookUrl, enabled_events: JSON.parse(body).types };
+        darwin.webhooks.push(w);
+        return res.end(JSON.stringify({ webhookId: w.id, secret: 'secreto' }));
+      }
+      const m = req.url.match(/^\/darwin\/v1\/webhook\/(\d+)$/);
+      if (req.method === 'DELETE' && m) { darwin.webhooks = darwin.webhooks.filter((w) => w.id !== Number(m[1])); return res.end('{}'); }
+      res.statusCode = 404; return res.end('{}');
+    }
     if (!req.url.startsWith('/anthropic/v1/messages')) { res.statusCode = 404; return res.end('{}'); }
     const p = JSON.parse(body);
     const datos = p.messages[0].content;
@@ -166,4 +180,33 @@ test('estado del resumen diario', async () => {
   assert.equal(e.status, 200);
   assert.ok(e.data.consultas >= 2);
   assert.ok(e.data.sin_contacto >= 1);
+});
+
+test('Conectar Darwin: suscribe al Hub a session.* con un token propio; reconectar reemplaza la suscripción', async () => {
+  // Una suscripción ajena (Zapier) no se toca.
+  darwin.webhooks = [{ id: 1, url: 'https://hooks.zapier.com/x', enabled_events: ['session.forwarded'] }];
+  const r = await api('POST', '/darwin/conectar', {});
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const nuestra = darwin.webhooks.find((w) => w.url.includes('/hooks/darwin/evento?token=fcrm_'));
+  assert.ok(nuestra, JSON.stringify(darwin.webhooks));
+  assert.deepEqual(nuestra.enabled_events, ['session.*']);
+  const est = await api('GET', '/darwin/estado');
+  assert.equal(est.data.webhook.configurada, true);
+
+  // Darwin manda el evento como lo documenta su API: {eventType, timestamp, agentId, data}. Repetido, se guarda una vez.
+  const url = new URL(nuestra.url);
+  const ev = { eventType: 'session.analyzed', timestamp: ayer, agentId: 1986, data: { ...evento('x', {}).data, sessionId: 77, summarizedAt: ayer, summary: `Repetido ${RUN}` } };
+  const uno = await call('POST', url.pathname + url.search, ev);
+  assert.equal(uno.status, 200, JSON.stringify(uno.data));
+  assert.equal(uno.data.tipo, 'session.analyzed');
+  const dos = await call('POST', url.pathname + url.search, ev);
+  assert.equal(dos.data.repetido, true);
+
+  const r2 = await api('POST', '/darwin/conectar', {});
+  assert.equal(r2.status, 200);
+  assert.equal(darwin.webhooks.filter((w) => w.url.includes('/hooks/darwin/evento')).length, 1, 'una sola suscripción del Hub');
+  assert.ok(darwin.webhooks.some((w) => w.id === 1), 'la de Zapier sigue');
+  const vieja = await call('POST', url.pathname + url.search, { ...ev, data: { ...ev.data, summarizedAt: new Date().toISOString() } });
+  assert.equal(vieja.status, 401, 'el token anterior se revocó');
+  assert.ok(darwin.llamadas.every((l) => l.key === 'prueba'));
 });

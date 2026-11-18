@@ -7,6 +7,7 @@ import { primaryCompanyId } from './associations';
 import { systemCtx, usuarioPorNombre } from './clickup';
 import { Budget, OutOfBudget } from './budget';
 import { visibleSql } from './alcance';
+import { newToken, sha256 } from './auth';
 
 // Actividad diaria de Darwin en el CRM (pedido de Rodrigo del 18/11/2026; docs/DARWIN.md § 4).
 //
@@ -73,14 +74,22 @@ export async function guardarEvento(env: Env, raw: Record<string, any>) {
   const sessionId = Number(d.sessionId) || null;
   const link = `https://app.getdarwin.ai/agent/${Number(raw.agentId ?? (body as Record<string, unknown>).agentId) || 1986}/conversations/all/${conv}`;
 
+  // La clave de cada evento (Darwin puede mandarlo más de una vez): la sesión y el dato propio del evento.
+  // (sin ese dato, la hora del evento: mejor guardar uno de más que perder uno).
+  const propio = tipo.startsWith('session.opened') || tipo.startsWith('session.closed') ? ''
+    : (tipo.startsWith('session.forwarded') ? d.forwardedAt : tipo === 'session.analyzed' ? d.summarizedAt
+      : tipo === 'session.stage.transitioned' ? (d.stageId ?? d.toStageId ?? d.stage?.id) : null) || ts;
+  const clave = `${tipo}|${sessionId ?? conv}|${propio ?? ''}`;
   const db = env.DB;
+  const ya = await db.prepare('SELECT 1 FROM darwin_eventos WHERE clave = ?').bind(clave).first();
+  if (ya) return { conversation_id: conv, tipo, dia, repetido: true };
   const asignadaUser = d.forwardedToName || d.forwardedToEmail ? await usuarioDeDarwin(db, d.forwardedToName, d.forwardedToEmail) : null;
   const esCliente = EVENTOS_CLIENTE.some((t) => tipo.startsWith(t));
   const camposLimpios = Object.fromEntries(Object.entries(sf).map(([k, v]) => [k, dato(v)]).filter(([, v]) => v !== ''));
 
   await db.batch([
-    db.prepare('INSERT INTO darwin_eventos (conversation_id, session_id, tipo, dia, ocurrido_at, telefono, payload) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .bind(conv, sessionId, tipo, dia, ts, telefono, JSON.stringify(raw).slice(0, 60000)),
+    db.prepare('INSERT OR IGNORE INTO darwin_eventos (conversation_id, session_id, tipo, dia, ocurrido_at, telefono, payload, clave) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .bind(conv, sessionId, tipo, dia, ts, telefono, JSON.stringify(raw).slice(0, 60000), clave),
     db.prepare(`INSERT INTO darwin_conversaciones (conversation_id, telefono, email, titulo, link, asignada_a, asignada_user_id, asignada_at,
         ultima_respuesta_cliente, ultima_actividad_equipo, cerrada_at, abierta_at, campos, updated_at)
       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
@@ -397,4 +406,54 @@ export async function estadoDarwin(db: D1Database) {
       (SELECT COUNT(*) FROM darwin_resumenes WHERE estado = 'error') AS errores,
       (SELECT COUNT(*) FROM consultas) AS consultas`).first<Record<string, unknown>>();
   return r;
+}
+
+// ---------- 4. Conectar Darwin (API REST con DARWIN_API_KEY) ----------
+// «Conectar Darwin» (Configuración, administradores): suscribe al CRM a los eventos de las conversaciones del workspace
+// (POST /v1/webhook, `session.*`) con un token propio del CRM en la URL. Si ya hay una suscripción al CRM, se reemplaza
+// (token nuevo; el anterior se revoca). Así no hace falta armar un workflow en Darwin.
+
+const DARWIN_API = (env: Env) => env.DARWIN_API_URL ?? 'https://api.getdarwin.ai';
+const TIPOS_WEBHOOK = ['session.*'];
+interface Suscripcion { id: number; url: string; enabled_events: string[] }
+
+async function darwinApi<T>(env: Env, method: string, path: string, body?: unknown): Promise<T> {
+  if (!env.DARWIN_API_KEY) throw new HttpError(503, 'Falta la clave de la API de Darwin (DARWIN_API_KEY).');
+  // Darwin acepta «X-API-KEY» o «x-api-key», no «X-Api-Key» (fetch los manda en minúsculas).
+  let res: Response;
+  try {
+    res = await fetch(`${DARWIN_API(env)}${path}`, { method, headers: { 'x-api-key': env.DARWIN_API_KEY, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined });
+  } catch (e) { throw new HttpError(502, `No se pudo hablar con Darwin (${(e as Error).message}).`); }
+  const text = await res.text();
+  if (!res.ok) throw new HttpError(502, res.status === 401 ? 'Darwin rechazó la clave de la API (DARWIN_API_KEY).' : `Darwin contestó ${res.status}: ${text.slice(0, 200)}`);
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+const esDelCrm = (url: string, origen: string) => url.startsWith(`${origen}/hooks/darwin/evento`);
+
+export async function suscripcionDarwin(env: Env, origen: string) {
+  if (!env.DARWIN_API_KEY) return { configurada: false, clave: false };
+  const lista = await darwinApi<Suscripcion[]>(env, 'GET', '/v1/webhook');
+  const nuestra = lista.find((w) => esDelCrm(w.url, origen));
+  return { configurada: !!nuestra, clave: true, id: nuestra?.id ?? null, eventos: nuestra?.enabled_events ?? [] };
+}
+
+export async function conectarDarwin(env: Env, ctx: Ctx, origen: string) {
+  if (ctx.user.role !== 'admin') throw new HttpError(403, 'Conectar Darwin es de administradores.');
+  const db = env.DB;
+  const token = newToken();
+  const row = await db.prepare('INSERT INTO api_tokens (name, token_hash, user_id, source) VALUES (?, ?, ?, ?) RETURNING id')
+    .bind('Darwin: actividad de las conversaciones', await sha256(token), ctx.user.id, 'darwin').first<{ id: number }>();
+  const url = `${origen}/hooks/darwin/evento?token=${token}`;
+  const lista = await darwinApi<Suscripcion[]>(env, 'GET', '/v1/webhook');
+  for (const w of lista.filter((x) => esDelCrm(x.url, origen))) await darwinApi(env, 'DELETE', `/v1/webhook/${w.id}`);
+  const r = await darwinApi<{ webhookId: number; secret?: string }>(env, 'POST', '/v1/webhook', { webhookUrl: url, types: TIPOS_WEBHOOK });
+  // El token de la suscripción anterior ya no sirve.
+  const previa = await db.prepare("SELECT value FROM settings WHERE key = 'darwin_webhook'").first<{ value: string }>();
+  const prevToken = previa ? (JSON.parse(previa.value) as { token_id?: number }).token_id : null;
+  if (prevToken) await db.prepare('UPDATE api_tokens SET revoked = 1 WHERE id = ?').bind(prevToken).run();
+  await db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('darwin_webhook', ?)")
+    .bind(JSON.stringify({ id: r.webhookId, token_id: row!.id, tipos: TIPOS_WEBHOOK, secret: r.secret ?? null, at: now() })).run();
+  return { ok: true, id: r.webhookId, eventos: TIPOS_WEBHOOK };
 }

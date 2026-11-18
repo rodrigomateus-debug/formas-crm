@@ -1,5 +1,5 @@
 import { procesarSalidaClickup } from './clickup';
-import { buscarConsultas, estadoDarwin, pendientesDeRespuesta, resumirPendientes } from './darwin';
+import { buscarConsultas, conectarDarwin, estadoDarwin, pendientesDeRespuesta, resumirPendientes, suscripcionDarwin } from './darwin';
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType, User } from './env';
@@ -1643,7 +1643,12 @@ api.get('/records/company/:id/produccion', async (c) => c.json(await produccionD
 // estado del resumen diario. Resumir a mano lo que quedó pendiente es de administradores (el cron lo hace a la madrugada).
 api.get('/consultas', async (c) => c.json(await buscarConsultas(c.env.DB, c.get('ctx').user, c.req.query())));
 api.get('/darwin/pendientes', async (c) => c.json(await pendientesDeRespuesta(c.env.DB, c.get('ctx').user, Number(c.req.query('horas')) || 24)));
-api.get('/darwin/estado', async (c) => c.json({ configured: !!c.env.ANTHROPIC_API_KEY, ...(await estadoDarwin(c.env.DB)) }));
+api.get('/darwin/estado', async (c) => {
+  const origen = new URL(c.req.url).origin;
+  const webhook = await suscripcionDarwin(c.env, origen).catch((e) => ({ configurada: false, clave: !!c.env.DARWIN_API_KEY, error: (e as Error).message }));
+  return c.json({ configured: !!c.env.ANTHROPIC_API_KEY, webhook, ...(await estadoDarwin(c.env.DB)) });
+});
+api.post('/darwin/conectar', async (c) => c.json(await conectarDarwin(c.env, c.get('ctx'), new URL(c.req.url).origin)));
 api.post('/darwin/resumir', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   const b = await c.req.json<{ hasta?: string }>().catch(() => ({} as { hasta?: string }));

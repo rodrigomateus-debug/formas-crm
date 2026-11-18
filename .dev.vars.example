@@ -29,3 +29,6 @@ OSRM_URL=http://localhost:8797/osrm
 LUGARES_CSV_URL=http://localhost:8797/lugares.csv
 # Recorridos (test/recorridos.test.mjs): la Sheets API (el historial de la planilla vieja), simulada.
 SHEETS_API_URL=http://localhost:8797/sheets
+# Darwin (test/darwin.test.mjs): la API de Darwin simulada en el mismo puerto que Claude.
+DARWIN_API_KEY=prueba
+DARWIN_API_URL=http://localhost:8797/darwin

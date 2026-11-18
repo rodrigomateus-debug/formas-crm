@@ -495,6 +495,7 @@ function Integrations() {
       <Pedidos />
       <BocetosDrive />
       <Gmail />
+      <DarwinActividad />
       <OutboundHooks />
       <div className="panel"><div className="panel-head"><h2>Claude (MCP)</h2></div><div className="panel-body stack">
         <p style={{ margin: 0 }}>Para que Claude y Cowork lean y actualicen el CRM: creá un token de tipo «Claude (MCP)» y cargá esta URL como conector personalizado en claude.ai (Configuración → Conectores → Agregar conector personalizado):</p>
@@ -533,6 +534,41 @@ function Integrations() {
           ))}</tbody>
         </table></div>
       </div></div>
+    </div>
+  );
+}
+
+// Darwin → resumen del día y consultas (darwin.ts, docs/DARWIN.md § 4).
+function DarwinActividad() {
+  const toast = useToast();
+  const st = useAsync(() => http<{ configured: boolean; webhook: { configurada: boolean; clave: boolean; eventos?: string[]; error?: string }; eventos_24h: number; ultimo_evento: string | null;
+    pendientes: number; hechos: number; sin_contacto: number; errores: number; consultas: number }>('GET', '/darwin/estado'), []);
+  const [busy, setBusy] = useState(false);
+  const d = st.data;
+  const accion = async (path: string, ok: (r: Record<string, unknown>) => string) => {
+    setBusy(true);
+    try { const r = await http<Record<string, unknown>>('POST', path, {}); toast(ok(r)); st.reload(); } catch (e) { toast((e as Error).message, true); } finally { setBusy(false); }
+  };
+  return (
+    <div className="panel"><div className="panel-head"><h2>Darwin: resumen del día y consultas</h2>
+      {d && (d.webhook.configurada ? <span className="tag ok">Conectado</span> : <span className="tag warn">Sin conectar</span>)}</div>
+      <div className="panel-body stack small">
+        <p style={{ margin: 0 }}>Darwin le avisa al Hub cada movimiento de las conversaciones (con Maru y con cada vendedora). A la madrugada el Hub deja en cada contacto un resumen del día con IA y anota lo que consultó en <a href="/consultas">Consultas</a>.</p>
+        {d && <>
+          {!d.webhook.clave && <div className="tag warn">Falta la clave de la API de Darwin en el Worker: <code>npx wrangler secret put DARWIN_API_KEY</code>.</div>}
+          {d.webhook.error && <div className="tag bad">{d.webhook.error}</div>}
+          {!d.configured && <div className="tag warn">Falta la clave de Claude (ANTHROPIC_API_KEY): los eventos se guardan y se resumen cuando esté.</div>}
+          <div className="muted">
+            Eventos en las últimas 24 h: <b>{d.eventos_24h}</b>{d.ultimo_evento ? ` (el último ${fmtDate(d.ultimo_evento, true)})` : ''} · días resumidos: <b>{d.hechos}</b> · por resumir: <b>{d.pendientes}</b>
+            {' '}· sin contacto en el Hub: {d.sin_contacto} · con error: {d.errores} · consultas: <b>{d.consultas}</b>
+          </div>
+        </>}
+        <div className="row wrap">
+          <button className="btn primary sm" disabled={busy || !d?.webhook.clave} onClick={() => accion('/darwin/conectar', () => 'Darwin conectado: manda los eventos de las conversaciones al Hub')}>
+            {d?.webhook.configurada ? 'Volver a conectar' : 'Conectar Darwin'}</button>
+          <button className="btn sm" disabled={busy || !d?.pendientes} onClick={() => accion('/darwin/resumir', (r) => `Resumidos: ${Number(r.hecho ?? 0)} · sin novedad: ${Number(r.sin_novedad ?? 0)} · quedan ${Number(r.quedan ?? 0)}`)}>Resumir ahora lo de días anteriores</button>
+        </div>
+      </div>
     </div>
   );
 }

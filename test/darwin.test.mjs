@@ -210,3 +210,51 @@ test('Conectar Darwin: suscribe al Hub a session.* con un token propio; reconect
   assert.equal(vieja.status, 401, 'el token anterior se revocó');
   assert.ok(darwin.llamadas.every((l) => l.key === 'prueba'));
 });
+
+test('Claude carga los mensajes del día (cargar_conversacion_darwin) y el resumen los usa', async () => {
+  const tok = await api('POST', '/tokens', { name: `Claude mensajes ${RUN}`, source: 'mcp' });
+  const rpc = (args) => call('POST', `/mcp/${tok.data.token}`, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cargar_conversacion_darwin', arguments: args } });
+  const tel2 = `549341${String(Date.now()).slice(-7)}`;
+  const conv2 = `22953-${tel2}`;
+  const ct = await api('POST', '/records/contact', { props: { origen_del_contacto: 'Contacto por Whatsapp', firstname: 'Beto', lastname: RUN, mobilephone: `+${tel2}` } });
+  const hace = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  const mensajes = [
+    { created_at: hace(30), source: 'human', source_name: 'Beto', message_text: `<<<UNTRUSTED_DATA>>>\nHola, soy Beto ${RUN}, necesito 300 botellas con logo\n<<<UNTRUSTED_DATA>>>`, message_external_id: `w1-${RUN}` },
+    { created_at: hace(29.9), source: 'ai', message_text: '¡Hola Beto! ¿Para cuándo las necesitás?', message_external_id: `w2-${RUN}` },
+    { created_at: hace(29.5), source: 'user', source_name: 'Rodrigo Mateus', message_text: 'Te paso la cotización mañana', message_external_id: `w3-${RUN}` },
+    { created_at: hace(29), source: 'human', source_name: 'Beto', message_text: '¿Me mandás también precio de mochilas?', message_external_id: `w4-${RUN}` },
+  ];
+  const r = await rpc({ conversation_id: conv2, titulo: `Beto ${RUN}`, atendio: 'Rodrigo Mateus', mensajes });
+  const out = JSON.parse(r.data.result.content[0].text);
+  assert.equal(out.mensajes, 4, r.data.result.content[0].text);
+  // Otra vez lo mismo (la tarea se corrió dos veces): no se duplica.
+  await rpc({ conversation_id: conv2, mensajes });
+  const malo = await rpc({ conversation_id: '5491100000000', mensajes });
+  assert.equal(malo.data.result.isError, true, 'el id completo de Darwin');
+
+  pedidos.length = 0;
+  const res = await api('POST', '/darwin/resumir', {});
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  const p = pedidos.find((x) => x.datos.includes(`Beto ${RUN}`));
+  assert.ok(p, 'Claude recibió la conversación');
+  assert.match(p.datos, /Mensajes del día:\n\d\d:\d\d Cliente: Hola, soy Beto .* 300 botellas con logo/);
+  assert.match(p.datos, /Maru \(IA\): ¡Hola Beto!/);
+  assert.match(p.datos, /Rodrigo Mateus: Te paso la cotización mañana/);
+  assert.ok(!p.datos.includes('UNTRUSTED_DATA'));
+  assert.equal(p.datos.match(/300 botellas con logo/g).length, 1, 'sin mensajes repetidos');
+
+  const tl = await api('GET', `/records/contact/${ct.data.id}/timeline`);
+  assert.equal((tl.data.activities ?? tl.data).filter((a) => a.type === 'whatsapp' && a.meta?.darwin).length, 1);
+  // El cliente escribió después de la última respuesta de la vendedora, hace 29 h: sin respuesta.
+  const pend = await api('GET', '/darwin/pendientes?horas=24');
+  assert.ok(pend.data.pendientes.some((x) => x.conversation_id === conv2), JSON.stringify(pend.data));
+});
+
+test('el conector del Hub tiene su ícono (claude.ai lo muestra)', async () => {
+  const tok = await api('POST', '/tokens', { name: `Claude icono ${RUN}`, source: 'mcp' });
+  const init = await call('POST', `/mcp/${tok.data.token}`, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } });
+  assert.match(init.data.result.serverInfo.icons[0].src, /\/hub-192\.png$/);
+  const fav = await fetch(`${CRM}/favicon.ico`);
+  assert.equal(fav.status, 200);
+  assert.equal(fav.headers.get('content-type'), 'image/png');
+});

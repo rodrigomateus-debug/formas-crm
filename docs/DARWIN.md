@@ -139,5 +139,14 @@ existe en los workflows de Darwin pero no figura en la lista de eventos de `POST
 esta pestaña queda vacía y hay que mandarlo con un workflow (disparador `darwin-event` `session.replied` → `http-request` a la
 misma URL, con `eventType`, `timestamp` y `data`).
 
-**Los mensajes uno por uno.** El resumen sale de los resúmenes y campos que arma Darwin en cada evento, no del texto de cada
-mensaje: la API no los da. Si Darwin suma un endpoint de mensajes, se le pasa a Claude el texto del día en `datosParaClaude`.
+**Los mensajes uno por uno (Claude).** La API de Darwin no da los mensajes, pero el conector de Darwin en Claude sí
+(`darwin_conversation__events`). Una **tarea programada de Claude**, todas las noches, busca las conversaciones del workspace
+1986 con actividad el día anterior, lee sus mensajes (`types: ['message']`, `since` = el comienzo del día) y los carga en el Hub
+con la herramienta `cargar_conversacion_darwin` del conector «Formas Hub» (solo administradores). Cada mensaje se guarda una
+vez (`darwin_mensajes`, por su id de WhatsApp), con quién lo escribió: `human` es el cliente, `user` alguien del equipo (desde el
+inbox o el WhatsApp del celular), el resto Maru. El resumen del día usa esos mensajes como fuente principal (hasta ~15.000
+caracteres por conversación y día; si son más, los últimos) y la pestaña «Sin respuesta» sale de ellos: el último mensaje del
+cliente contra el último del equipo. Si la tarea no corrió, el resumen sale igual de los eventos.
+
+**Ícono del conector.** El MCP declara el ícono del Hub (`serverInfo.icons`, `hub-192.png`) y `/favicon.ico` devuelve ese
+mismo ícono, para que claude.ai lo muestre en el conector.

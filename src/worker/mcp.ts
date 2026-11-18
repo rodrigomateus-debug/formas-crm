@@ -8,7 +8,7 @@ import { applyBundle, autoAssociateCompany, type Bundle } from './upsert';
 import { orderProducts } from './productos';
 import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
-import { buscarConsultas, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
+import { buscarConsultas, cargarConversacion, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
 import { assertActividadVisible, assertVisible, esOperaciones, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
@@ -450,6 +450,21 @@ const TOOLS: Tool[] = [
     },
   },
   {
+    name: 'cargar_conversacion_darwin',
+    description: 'Carga en el Hub los mensajes de UNA conversación de Darwin (WhatsApp), leídos con el conector de Darwin (darwin_conversation__events con types ["message"]). Solo administradores. Pasá cada mensaje tal cual viene de Darwin: created_at, source («human» es el cliente, «user» alguien del equipo, otro valor la IA Maru), source_name, message_text y message_external_id. Cada mensaje se guarda una vez; el día queda para el resumen nocturno (resumen en el contacto y consultas). Hasta 1000 mensajes por llamada.',
+    inputSchema: { type: 'object', properties: {
+      conversation_id: { type: 'string', description: 'El id completo de Darwin: <canal>-<teléfono>.' },
+      titulo: { type: 'string', description: 'El título de la conversación en Darwin (nombre del cliente).' },
+      atendio: { type: 'string', description: 'Nombre de la vendedora que tiene asignada la conversación, si hay; vacío si la atiende solo Maru.' },
+      atendio_email: { type: 'string' },
+      campos: { type: 'object', description: 'Los campos inteligentes de la última sesión (smart_fields), tal cual.' },
+      mensajes: { type: 'array', items: { type: 'object', properties: {
+        created_at: { type: 'string' }, source: { type: 'string' }, source_name: { type: 'string' }, message_text: { type: 'string' }, message_external_id: { type: 'string' },
+      } } },
+    }, required: ['conversation_id', 'mensajes'] },
+    run: async (a, ctx, env) => cargarConversacion(env, ctx, a),
+  },
+  {
     name: 'pendientes_de_respuesta',
     description: 'Conversaciones de WhatsApp (Darwin) que Maru ya pasó a una vendedora donde el cliente escribió y nadie del equipo le contestó en las últimas `horas` (24 por defecto).',
     readOnly: true,
@@ -556,7 +571,9 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
       return ok({
         protocolVersion: msg.params?.protocolVersion && ['2025-06-18', '2025-03-26', '2024-11-05'].includes(msg.params.protocolVersion) ? msg.params.protocolVersion : PROTOCOL,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'formas-crm', title: 'Formas Hub', version: '1.0.0' },
+        // El ícono del Hub, para que el conector se distinga en claude.ai (MCP: serverInfo.icons).
+        serverInfo: { name: 'formas-crm', title: 'Formas Hub', version: '1.0.0', websiteUrl: base,
+          icons: [{ src: `${base}/hub-192.png`, mimeType: 'image/png', sizes: ['192x192'] }, { src: `${base}/hub-512.png`, mimeType: 'image/png', sizes: ['512x512'] }] },
         instructions: 'CRM propio de Formas Publicitarias (reemplazo de HubSpot). Objetos: contact, company, deal, order. '
           + 'Antes de crear, buscá (search_records) para no duplicar, o usá upsert_bundle. Usá list_properties para nombres internos y opciones válidas, '
           + 'list_pipelines para etapas y list_users para propietarios. Todo lo que hagas queda en el historial con origen "mcp". '

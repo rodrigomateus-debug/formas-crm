@@ -94,6 +94,15 @@ app.get('/contacts/:portal/record/:typeId/:id', (c) => {
 
 app.get('/health', (c) => c.json({ ok: true }));
 
+// El ícono del Hub en /favicon.ico (y .png): lo buscan claude.ai (para el conector) y otros servicios que muestran el ícono
+// del sitio. Sin esto devolvía la página del CRM.
+const icono = async (c: { env: Env; req: { url: string } }) => {
+  const r = await c.env.ASSETS.fetch(new Request(new URL('/hub-192.png', c.req.url)));
+  return new Response(r.body, { status: r.status, headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+};
+app.get('/favicon.ico', icono);
+app.get('/favicon.png', icono);
+
 // Login propio con Google (login.ts): /login, /auth/google, /auth/google/callback y /auth/salir.
 app.route('/', login);
 

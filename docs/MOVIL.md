@@ -1,13 +1,41 @@
 # Versión celular
 
-Pedido de Rodrigo del 18/11/2026. En el celular, el perfil **Ventas** no ve el CRM de escritorio achicado sino una app
-simple, con lo esencial para cargar desde la calle. Misma dirección, mismo login y la misma API: no hay nada nuevo del
-lado del servidor.
+Pedido de Rodrigo del 18/11/2026. En el celular, los perfiles **Ventas** y **Logística** no ven el CRM de escritorio
+achicado sino una app simple, con lo esencial de cada uno (Logística, más abajo). Misma dirección, mismo login y la misma
+API.
+
+
+## Logística (pedido de Rodrigo del 18/11/2026)
+
+El perfil **Logística** también tiene su versión celular (`LogisticaMovil.tsx`), con lo que hace quien organiza el
+recorrido mientras se mueve. Mismos permisos que en la compu. Barra abajo: **Hoy · Día · ＋ · Entregas · Chat** (Entregas
+con cuántos remitos hay para revisar).
+
+- **Hoy**: el recorrido de hoy, chofer por chofer (paradas hechas sobre el total, con barra, «sin foto» y «no se pudo»);
+  **Para resolver**: remitos para revisar, paradas hechas sin foto del remito, encargos sin chofer, movimientos atrasados de
+  la última semana y lo listo para entregar sin fecha (cada uno lleva adonde se resuelve); sus tareas y «Te escribieron».
+- **Día** (el Cronograma del teléfono): la semana en una tira, con lo pendiente de cada día (en rojo si hay atrasos).
+  - **Movimientos**: Entregas, Ingresos, Retiros, Egresos y Encargos del día. Cada tarjeta se marca **hecha** (el artículo
+    cambia de estado en ClickUp, como en la compu), se le elige el **chofer** (pasa toda la parada; también «Agregar
+    chofer o expreso…») y se pasa a **otro día**. Búsqueda y «Solo lo pendiente». Las notas del día arriba.
+  - **Ruta**: un recorrido por chofer, con su avance; las paradas en su orden (el que arma el servidor), con lo que hay
+    que hacer, horario o hora fijada, «no se pudo» con el motivo y si tiene la foto del remito. **Hecha**, **Llamar** (el
+    teléfono de la libreta), **Cómo llegar** y **Otro chofer**. Abajo, lo que llega al depósito y lo que retiran en Formas.
+  - «Listos para entregar sin fecha», para ponerles día.
+- **Entregas**: los remitos para revisar con la foto grande (se abre con «Ver el remito»), lo leído y por qué hay que
+  revisarlo; **Es de {pedido}** (los posibles), **Es de otro pedido** (buscador), **Leer de nuevo** y **Descartar**. La
+  pestaña **Revisados** muestra qué se decidió y quién.
+- **＋**: encargo al recorrido y tarea. **Menú**: Tareas, Recorridos y encargos (de todos), Choferes (crear el código y
+  mandarlo por WhatsApp), Pedidos (todos, sin «Míos»), Producción (en la versión completa) y Notas de productos.
+
+Queda en la compu: ordenar las paradas arrastrando, el mapa, corregir puntos, fijar horas, el remito de traslado y
+asignar a mano los renglones de un remito (o repartir uno de varios pedidos; la tarjeta lo avisa). Producción sigue con la
+versión de escritorio hasta su turno.
 
 ## Cuándo aparece
 
-- Pantalla angosta (hasta 760 px) **y** perfil Ventas (`esVentas`). Los demás perfiles siguen con la versión de siempre,
-  que se adapta sola a la pantalla chica.
+- Teléfono (hasta 760 px, o acostado) **y** perfil Ventas o Logística (`perfilMovil` en `modo.ts`). Producción y los
+  administradores siguen con la versión de siempre, que se adapta sola a la pantalla chica.
 - Desde el avatar → **Ver versión completa** se pasa a la de siempre; queda recordado en ese navegador
   (`crm-version-completa`). Para volver, el botón **Versión celular** arriba.
 - Se puede instalar en la pantalla de inicio («Agregar a inicio»): `web/public/hub.webmanifest` y los íconos `hub-*.png`.

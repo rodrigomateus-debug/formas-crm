@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { esVentas, type User } from '../lib';
 
+// Qué versión celular: la de Ventas o la de Logística (cada una con lo suyo). Producción, por ahora, la de escritorio.
+export type PerfilMovil = 'ventas' | 'logistica';
+export function perfilMovil(me: Pick<User, 'profile' | 'role'>): PerfilMovil | null {
+  if (esVentas(me)) return 'ventas';
+  if (me.profile === 'logistica' && me.role !== 'admin') return 'logistica';
+  return null;
+}
+
 // Cuándo se usa la versión celular (docs/MOVIL.md). Va aparte de Movil.tsx para que el escritorio no tenga que bajar la
 // versión celular solo para saber si la necesita.
 
@@ -16,7 +24,7 @@ export function usarVersionCompleta(si: boolean, a = '/') {
   window.location.assign(a);
 }
 
-// ¿Esta pantalla va con la versión celular? Celular, perfil Ventas y sin haber pedido la completa.
+// ¿Esta pantalla va con la versión celular (y cuál)? Celular, perfil Ventas o Logística y sin haber pedido la completa.
 export function useModoMovil(me: Pick<User, 'profile' | 'role'>) {
   const [celular, setCelular] = useState(() => typeof matchMedia === 'function' && matchMedia(CELULAR).matches);
   useEffect(() => {
@@ -25,7 +33,7 @@ export function useModoMovil(me: Pick<User, 'profile' | 'role'>) {
     m.addEventListener('change', h);
     return () => m.removeEventListener('change', h);
   }, []);
-  const ventas = esVentas(me);
+  const perfil = perfilMovil(me);
   const completa = leerCompleta();
-  return { movil: celular && ventas && !completa, puedeVolver: celular && ventas && completa };
+  return { movil: celular && perfil && !completa ? perfil : null, puedeVolver: celular && !!perfil && completa };
 }

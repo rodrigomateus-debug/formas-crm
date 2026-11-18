@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, useToast, useDebounced, Icon, Cargando, fmtDate, fmtMoney, fmtMoneyExact, fmtRelative, formatValue, propOf, recordUrl, stageOf, canSeePipeline, defaultPipeline,
+  esOperaciones, http, qs, useMeta, useToast, useDebounced, Icon, Cargando, fmtDate, fmtMoney, fmtMoneyExact, fmtRelative, formatValue, propOf, recordUrl, stageOf, canSeePipeline, defaultPipeline,
   missingFor, faltaDato, keyPropsFor, type CrmRecord, type ObjectType, type Pipeline, type Property, type Stage,
 } from '../lib';
 import { EtapaPedido } from '../components';
@@ -23,7 +23,10 @@ type Ref = { id: number; name: string };
 
 function Segmento() {
   const [sp] = useSearchParams();
+  const { meta } = useMeta();
   const q = sp.get('q');
+  // Producción y Logística no ven negocios: solo Pedidos.
+  if (esOperaciones(meta.me)) return null;
   return (
     <nav className="m-seg" aria-label="Negocios o pedidos">
       <NavLink to={`/deals${q ? `?q=${encodeURIComponent(q)}` : ''}`} className="m-seg-op">Negocios</NavLink>
@@ -368,7 +371,9 @@ export function PedidosLista() {
   const { meta } = useMeta();
   const [sp, setSp] = useSearchParams();
   const q = sp.get('q') ?? '';
-  const mios = sp.get('todos') !== '1';
+  // Producción y Logística trabajan con todos los pedidos (no son suyos): sin «Míos».
+  const operaciones = esOperaciones(meta.me);
+  const mios = !operaciones && sp.get('todos') !== '1';
   const cambiar = (k: string, v: string | null) => setSp((p) => { const n = new URLSearchParams(p); if (v) n.set(k, v); else n.delete(k); return n; }, { replace: true });
   const [texto, setTexto] = useState(q);
   const dq = useDebounced(texto, 250);
@@ -385,10 +390,12 @@ export function PedidosLista() {
     <div className="m-pag">
       <Segmento />
       <div className="search"><Icon name="search" /><input className="input" type="search" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="PDV, cliente…" aria-label="Buscar pedido" enterKeyHint="search" /></div>
-      <div className="m-chips" role="group" aria-label="De quién">
-        <button type="button" className={`chip${mios ? ' on' : ''}`} aria-pressed={mios} onClick={() => cambiar('todos', null)}>Míos</button>
-        <button type="button" className={`chip${!mios ? ' on' : ''}`} aria-pressed={!mios} onClick={() => cambiar('todos', '1')}>Todos los que veo</button>
-      </div>
+      {!operaciones && (
+        <div className="m-chips" role="group" aria-label="De quién">
+          <button type="button" className={`chip${mios ? ' on' : ''}`} aria-pressed={mios} onClick={() => cambiar('todos', null)}>Míos</button>
+          <button type="button" className={`chip${!mios ? ' on' : ''}`} aria-pressed={!mios} onClick={() => cambiar('todos', '1')}>Todos los que veo</button>
+        </div>
+      )}
       {carga.error && <Fallo error={carga.error} onReintentar={carga.recargar} />}
       {!lista && !carga.error && <Cargando />}
       {lista && !lista.length && <div className="m-vacio m-vacio-solo">{q ? `No hay pedidos con «${q}».` : 'No hay pedidos.'}</div>}

@@ -12,6 +12,7 @@ type Encontrado = CrmRecord & { ajeno?: boolean };
 const RELACION_MARCA: Record<string, string> = { proveedor: 'Proveedor', equipo: 'Equipo Formas', otro: 'Otro' };
 
 export function GlobalSearch({ corto }: { corto?: boolean }) {
+  const operaciones = esOperaciones(useMeta().meta.me);
   const [q, setQ] = useState('');
   const dq = useDebounced(q, 200);
   const [open, setOpen] = useState(false);
@@ -38,7 +39,7 @@ export function GlobalSearch({ corto }: { corto?: boolean }) {
   return (
     <div className="gsearch" ref={ref}>
       <div className="search"><Icon name="search" />
-        <input ref={input} className="input" placeholder={corto ? 'Buscar clientes, negocios…' : esOperaciones(useMeta().meta.me) ? 'Buscar pedidos, clientes, proveedores… (Ctrl+K)' : 'Buscar contactos, empresas, negocios… (Ctrl+K)'} value={q}
+        <input ref={input} className="input" placeholder={corto ? (operaciones ? 'Buscar pedidos, proveedores…' : 'Buscar clientes, negocios…') : operaciones ? 'Buscar pedidos, clientes, proveedores… (Ctrl+K)' : 'Buscar contactos, empresas, negocios… (Ctrl+K)'} value={q}
           onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
           onKeyDown={(e) => { if (e.key === 'Enter' && primero) go(primero[0], primero[1]); }} />
       </div>

@@ -7,28 +7,32 @@ import { Campanita } from '../Notificaciones';
 import { GlobalSearch } from '../Buscador';
 import NotasProductosPage from '../pages/NotasProductos';
 import { useNoLeidas } from '../pages/Conversacion';
-import { usarVersionCompleta } from './modo';
+import { usarVersionCompleta, type PerfilMovil } from './modo';
 import { useCerrarConAtras, usePuedeEscribir, useVolver } from './base';
 import Hoy from './Hoy';
 import { RecorridosMovil, EncargoAsistente } from './RecorridosMovil';
 import { ClientesLista, FichaCliente, AltaCliente, PreguntaLlamada } from './ClientesMovil';
 import { NegociosLista, FichaNegocio, AltaNegocio, PedidosLista, FichaPedido } from './VentasMovil';
 import { TareasMovil, ChatMovil, ChatAbierto } from './TareasChatMovil';
+import { HoyLogistica, DiaMovil, EntregasMovil, ChoferesMovil } from './LogisticaMovil';
 import './movil.css';
 
-// Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en el teléfono, el perfil Ventas no ve el CRM de
-// escritorio achicado sino una app simple, con lo esencial para cargar desde la calle. Misma dirección, mismo login y la
-// misma API; lo que no está acá se abre con «Ver versión completa». Barra abajo: Hoy · Clientes · ＋ · Ventas · Chat.
+// Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en el teléfono, los perfiles Ventas y Logística no ven el
+// CRM de escritorio achicado sino una app simple, con lo esencial de cada uno. Misma dirección, mismo login y la
+// misma API; lo que no está acá se abre con «Ver versión completa». Barra abajo, Ventas: Hoy · Clientes · ＋ · Ventas ·
+// Chat; Logística: Hoy · Día · ＋ · Entregas · Chat (LogisticaMovil.tsx).
 // Raiz.tsx decide cuál se dibuja (modo.ts). Ver docs/MOVIL.md.
 
 // Las fichas: arriba, en vez del avatar, la flecha para volver a su lista.
 const FICHAS: Array<[RegExp, string]> = [[/^\/companies\/\d+$/, '/companies'], [/^\/contacts\/\d+$/, '/contacts'], [/^\/deals\/\d+$/, '/deals'], [/^\/orders\/\d+$/, '/orders']];
 // Las pantallas con lista ya tienen su buscador: arriba va el nombre, no un segundo buscador.
-const TITULOS: Array<[RegExp, string]> = [[/^\/(companies|contacts)$/, 'Clientes'], [/^\/(deals|orders)$/, 'Ventas'], [/^\/tasks$/, 'Tareas'],
-  [/^\/conversaciones$/, 'Chat'], [/^\/recorridos$/, 'Recorridos'], [/^\/productos$/, 'Notas de productos']];
+const TITULOS: Array<[RegExp, string]> = [[/^\/(companies|contacts)$/, 'Clientes'], [/^\/deals$/, 'Ventas'], [/^\/orders$/, 'Pedidos'], [/^\/tasks$/, 'Tareas'],
+  [/^\/conversaciones$/, 'Chat'], [/^\/recorridos$/, 'Recorridos'], [/^\/productos$/, 'Notas de productos'], [/^\/cronograma$/, 'Día'], [/^\/entregas$/, 'Entregas'],
+  [/^\/choferes$/, 'Choferes']];
 const TIPO_DE: Record<string, ObjectType> = { companies: 'company', contacts: 'contact', deals: 'deal', orders: 'order' };
 
-export default function AppMovil() {
+export default function AppMovil({ perfil }: { perfil: PerfilMovil }) {
+  const logistica = perfil === 'logistica';
   const { meta } = useMeta();
   const loc = useLocation();
   const volver = useVolver();
@@ -40,6 +44,9 @@ export default function AppMovil() {
   useEffect(() => { document.body.classList.add('movil'); return () => document.body.classList.remove('movil'); }, []);
   useAltoVisible();
   const sinLeer = useNoLeidas();
+  // Logística: cuántos remitos hay para revisar (el número de la pestaña Entregas), al moverse por la app.
+  const [remitos, setRemitos] = useState(0);
+  useEffect(() => { if (logistica) http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total), () => undefined); }, [logistica, loc.pathname]);
 
   // El link de una mención (campanita o mail: …/deals/123?conversacion=1&mensaje=45) abre la conversación, en el mensaje.
   const sp = new URLSearchParams(loc.search);
@@ -68,19 +75,22 @@ export default function AppMovil() {
       )}
       <main className="m-main">
         <Routes>
-          <Route path="/" element={<Hoy />} />
+          <Route path="/" element={logistica ? <HoyLogistica /> : <Hoy />} />
+          {logistica && <Route path="/cronograma" element={<DiaMovil />} />}
+          {logistica && <Route path="/entregas" element={<EntregasMovil />} />}
+          {logistica && <Route path="/choferes" element={<ChoferesMovil />} />}
           <Route path="/recorridos" element={<RecorridosMovil />} />
           <Route path="/recorridos/nuevo" element={<EncargoAsistente />} />
           <Route path="/tasks" element={<TareasMovil />} />
           <Route path="/conversaciones" element={<ChatMovil />} />
           <Route path="/conversaciones/:tipo/:id" element={<ConKey><ChatAbierto /></ConKey>} />
           <Route path="/productos" element={<NotasProductosPage />} />
-          <Route path="/companies" element={<ClientesLista key="company" tipo="company" />} />
-          <Route path="/contacts" element={<ClientesLista key="contact" tipo="contact" />} />
+          {!logistica && <Route path="/companies" element={<ClientesLista key="company" tipo="company" />} />}
+          {!logistica && <Route path="/contacts" element={<ClientesLista key="contact" tipo="contact" />} />}
           <Route path="/companies/:id" element={<ConKey><FichaCliente tipo="company" /></ConKey>} />
           <Route path="/contacts/:id" element={<ConKey><FichaCliente tipo="contact" /></ConKey>} />
-          <Route path="/deals" element={<NegociosLista />} />
-          <Route path="/deals/:id" element={<ConKey><FichaNegocio /></ConKey>} />
+          {!logistica && <Route path="/deals" element={<NegociosLista />} />}
+          {!logistica && <Route path="/deals/:id" element={<ConKey><FichaNegocio /></ConKey>} />}
           <Route path="/orders" element={<PedidosLista />} />
           <Route path="/orders/:id" element={<ConKey><FichaPedido /></ConKey>} />
           <Route path="*" element={<EnLaCompleta />} />
@@ -89,16 +99,21 @@ export default function AppMovil() {
       {!completa && (
         <nav className={`m-tabs${puede ? '' : ' sin-mas'}`} aria-label="Menú principal">
           <NavLink to="/" end className="m-tab"><Icon name="home" size={22} /><span>Hoy</span></NavLink>
-          <NavLink to="/companies" className={`m-tab${activo(['/companies', '/contacts']) ? ' active' : ''}`}><Icon name="company" size={22} /><span>Clientes</span></NavLink>
+          {logistica
+            ? <NavLink to="/cronograma" className="m-tab"><Icon name="calendar" size={22} /><span>Día</span></NavLink>
+            : <NavLink to="/companies" className={`m-tab${activo(['/companies', '/contacts']) ? ' active' : ''}`}><Icon name="company" size={22} /><span>Clientes</span></NavLink>}
           {puede && <button type="button" className="m-tab m-mas" onClick={() => setCrear(true)} aria-label="Cargar algo nuevo"><span className="m-mas-btn"><Icon name="plus" size={24} /></span></button>}
-          <NavLink to="/deals" className={`m-tab${activo(['/deals', '/orders']) ? ' active' : ''}`}><Icon name="deal" size={22} /><span>Ventas</span></NavLink>
+          {logistica
+            ? <NavLink to="/entregas" className="m-tab"><Icon name="truck" size={22} /><span>Entregas</span>
+                {remitos ? <span className="m-badge" aria-label={`${remitos} remitos para revisar`}>{remitos}</span> : null}</NavLink>
+            : <NavLink to="/deals" className={`m-tab${activo(['/deals', '/orders']) ? ' active' : ''}`}><Icon name="deal" size={22} /><span>Ventas</span></NavLink>}
           <NavLink to="/conversaciones" className="m-tab"><Icon name="chat" size={22} /><span>Chat</span>
             {sinLeer.no_leidos ? <span className={`m-badge${sinLeer.menciones ? ' mencion' : ''}`} aria-label={`${sinLeer.no_leidos} sin leer`}>{sinLeer.no_leidos}</span> : null}</NavLink>
         </nav>
       )}
-      {crear && <MenuCrear onClose={() => setCrear(false)} />}
-      {mas && <MenuMas onClose={() => setMas(false)} />}
-      {puede && <PreguntaLlamada />}
+      {crear && <MenuCrear perfil={perfil} onClose={() => setCrear(false)} />}
+      {mas && <MenuMas perfil={perfil} onClose={() => setMas(false)} />}
+      {puede && !logistica && <PreguntaLlamada />}
     </div>
   );
 }
@@ -194,7 +209,7 @@ export function Hoja({ titulo, onClose, children }: { titulo: string; onClose: (
 }
 
 // ＋: lo que un vendedor carga en la calle.
-function MenuCrear({ onClose }: { onClose: () => void }) {
+function MenuCrear({ perfil, onClose }: { perfil: PerfilMovil; onClose: () => void }) {
   const navigate = useNavigate();
   const [tipo, setTipo] = useState<ObjectType | null>(null);
   const [tarea, setTarea] = useState(false);
@@ -210,9 +225,11 @@ function MenuCrear({ onClose }: { onClose: () => void }) {
       <div className="m-ops">
         {op('route', 'Encargo al recorrido', 'Que el chofer lleve o retire algo', () => navigate('/recorridos/nuevo'))}
         {op('task', 'Tarea', 'Un recordatorio para vos', () => setTarea(true))}
-        {op('deal', 'Negocio', 'Una oportunidad nueva', () => setTipo('deal'))}
-        {op('company', 'Empresa', 'Un cliente nuevo', () => setTipo('company'))}
-        {op('contact', 'Contacto', 'Una persona', () => setTipo('contact'))}
+        {perfil === 'ventas' && <>
+          {op('deal', 'Negocio', 'Una oportunidad nueva', () => setTipo('deal'))}
+          {op('company', 'Empresa', 'Un cliente nuevo', () => setTipo('company'))}
+          {op('contact', 'Contacto', 'Una persona', () => setTipo('contact'))}
+        </>}
       </div>
     </Hoja>
   );
@@ -260,7 +277,7 @@ export function TareaRapida({ onClose, onCreada, linkId, sobre }: { onClose: () 
 }
 
 // El menú del avatar: lo que no entra en la barra de abajo (Contactos y Pedidos ya están en Clientes y Ventas).
-function MenuMas({ onClose }: { onClose: () => void }) {
+function MenuMas({ perfil, onClose }: { perfil: PerfilMovil; onClose: () => void }) {
   const { meta } = useMeta();
   const { tema, elegir } = useTema();
   const navigate = useNavigate();
@@ -269,7 +286,12 @@ function MenuMas({ onClose }: { onClose: () => void }) {
     <Hoja titulo={meta.me.name} onClose={onClose}>
       <div className="m-lista-menu">
         <button type="button" onClick={() => ir('/tasks')}><Icon name="task" size={18} />Tareas</button>
-        <button type="button" onClick={() => ir('/recorridos')}><Icon name="route" size={18} />Recorridos y mis encargos</button>
+        {perfil === 'logistica' ? <>
+          <button type="button" onClick={() => ir('/recorridos')}><Icon name="route" size={18} />Recorridos y encargos</button>
+          <button type="button" onClick={() => ir('/choferes')}><Icon name="volante" size={18} />Choferes</button>
+          <button type="button" onClick={() => ir('/orders')}><Icon name="order" size={18} />Pedidos</button>
+          <button type="button" onClick={() => usarVersionCompleta(true, '/produccion')}><Icon name="printer" size={18} />Producción (en la versión completa)</button>
+        </> : <button type="button" onClick={() => ir('/recorridos')}><Icon name="route" size={18} />Recorridos y mis encargos</button>}
         <button type="button" onClick={() => ir('/productos')}><Icon name="alert" size={18} />Notas de productos</button>
       </div>
       <div className="m-sub">Tema</div>

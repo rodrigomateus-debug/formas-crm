@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, Cargando, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
@@ -60,31 +60,6 @@ export function BotonVacias({ value, onChange }: { value: boolean; onChange?: (v
   );
 }
 
-// El tablero ocupa el alto que queda en la pantalla (aunque la barra de filtros ocupe dos renglones), así el pie de
-// cada columna siempre se ve y cada columna se desplaza por dentro.
-export function useFillHeight() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [h, setH] = useState<number>();
-  useLayoutEffect(() => {
-    // Hasta la barra de las vistas al pie (#barra-vista, en App), si la hay; si no, hasta el final de la ventana.
-    const pie = document.getElementById('barra-vista');
-    const calc = () => {
-      const el = ref.current;
-      if (!el) return;
-      const hasta = pie && pie.offsetHeight ? pie.getBoundingClientRect().top : window.innerHeight;
-      setH(Math.max(360, Math.floor(hasta - el.getBoundingClientRect().top - 12)));
-    };
-    calc();
-    window.addEventListener('resize', calc);
-    const ro = new ResizeObserver(calc);
-    const prev = ref.current?.previousElementSibling;
-    if (prev) ro.observe(prev);
-    if (pie) ro.observe(pie);
-    return () => { window.removeEventListener('resize', calc); ro.disconnect(); };
-  }, []);
-  return [ref, h ? { height: h } : undefined] as const;
-}
-
 export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact' | 'company' | 'order'; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void }) {
   const { meta } = useMeta();
   const opts = type === 'deal' ? BOARD_SORTS : BOARD_SORTS.filter(([k]) => ['hs_lastmodifieddate', 'createdate', 'notes_last_updated'].includes(k));
@@ -117,7 +92,6 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
   const [ask, setAsk] = useState<{ deal: CrmRecord; stage: Stage; missing: string[] } | null>(null);
   const [loadingMore, setLoadingMore] = useState<string | null>(null);
   const colapso = useColapso(`crm.board.collapsed.${pipelineId}`, vacias);
-  const [boardRef, boardStyle] = useFillHeight();
   const params = { pipeline: pipelineId, q, closed_days: closedDays, groups: groups?.length ? groups : undefined, sort, dir };
   const url = `/board${qs(params)}`;
   const board = useAsync(() => http<{ pipeline: Pipeline; columns: Column[] }>('GET', url),
@@ -190,7 +164,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
           <span className="sep">·</span>Ponderado <b className="num">{fmtMoney(sum.weighted) || '$ 0'}</b>
         </span>
       </div>
-      <div className={`board${boardStyle ? ' fill' : ''}${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading} ref={boardRef} style={boardStyle}>
+      <div className={`board${!board.data || board.fresh ? '' : ' cargando'}`} aria-busy={board.loading}>
         {!board.data && !board.error && <Cargando />}
         {cols.map((c) => (colapso.cerrada(c.stage.id, c.total) ? (
           <div key={c.stage.id} className={`col collapsed${over === c.stage.id ? ' over' : ''}`} {...drop(c)} onClick={() => colapso.alternar(c.stage.id, c.total)}

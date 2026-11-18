@@ -380,8 +380,6 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: stretch; min-height: calc(100vh - 250px); }
 .col { flex: 0 0 272px; min-width: 0; background: var(--ui-surface-sunken); border-radius: var(--r-panel); display: flex; flex-direction: column; max-height: calc(100vh - 240px); }
 .col.over { outline: 2px dashed var(--accent-ink); outline-offset: -2px; }
-.board.fill { min-height: 0; }
-.board.fill .col { max-height: none; min-height: 0; }
 .col-head { padding: 12px 12px 10px; border-bottom: 1px solid var(--ui-line); }
 .col-head .t { font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center; }
 .col-head .t .n { margin-left: auto; color: var(--text-3); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -748,6 +746,16 @@ table.grid th .col-menu:hover { background: var(--ui-line); color: var(--accent-
   .content.list-fixed { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 6px; }
   .content.list-fixed > * { flex: none; }
   .content.list-fixed > .table-wrap { flex: 1 1 auto; min-height: 200px; }
+}
+/* Tableros (Negocios, Pedidos, Producción, Tareas…): la página no se desplaza para abajo. El tablero ocupa el alto que
+   queda en la ventana (hasta la barra del pie, si la hay) y se adapta al cambiar el tamaño; cada columna se desplaza
+   adentro y la barra para los costados queda siempre a la vista, al pie del tablero (pedido de Rodrigo del 18/11/2026).
+   En el celular la página se desplaza entera. */
+@media (min-width: 861px) {
+  .content:has(> .board) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
+  .content:has(> .board) > * { flex: none; }
+  .content:has(> .board) > .board { flex: 1 1 0; height: auto !important; min-height: 240px; padding-bottom: 8px; }
+  .content:has(> .board) > .board .col { max-height: none; min-height: 0; }
 }
 /* Barras de desplazamiento visibles en la tabla (en Mac se esconden si no se fuerzan). */
 .table-wrap::-webkit-scrollbar { width: 12px; height: 12px; }
@@ -2350,7 +2358,6 @@ thead .ds-acciones { z-index: 2; }
 .estado-tarea.hecha::before { background: var(--ui-positive); }
 
 .tareas-tablero { display: flex; flex-direction: column; min-height: 0; }
-.board.tareas { min-height: calc(100vh - 220px); }
 .board.tareas.cargando { opacity: .7; }
 .tarea-col .col-head .t { gap: 8px; }
 .tarea-col.vencidas .col-head .t { color: var(--bad); }

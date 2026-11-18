@@ -100,6 +100,8 @@ export async function listarDestinos(env: Env, user: User) {
     for (const r of results) puntos.set(r.clave, r);
   }
   const json = (s: string | null) => { try { return s ? JSON.parse(s) : null; } catch { return null; } };
+  // Sin los campos vacíos: son miles de destinos y la mitad de los datos son null.
+  const sinVacios = <T extends Record<string, unknown>>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v != null && v !== false && v !== '')) as T;
   const destinos = filas.map((l) => {
     const dir = dirs.get(l.id)!, k = claveDireccion(dir), g = k ? puntos.get(k) : undefined;
     const mapa = !k ? 'sin_direccion' : !g ? 'sin_buscar' : g.ok && g.lat != null ? 'ok' : 'no_encontrado';
@@ -120,8 +122,11 @@ export async function listarDestinos(env: Env, user: User) {
       origen: l.origen, editado: !!l.editado, faltan,
       ia_estado: l.ia_estado, ia_nota: l.ia_nota, ia_antes: json(l.ia_antes), ia_sugerida: json(l.ia_sugerida),
       puede_editar: organiza(user) || (l.origen === 'hub' && l.created_by === user.id),
+      // Borrar es sacarlo de la libreta (activo = 0): los encargos viejos lo siguen nombrando.
+      puede_borrar: organiza(user) || (l.origen === 'hub' && l.created_by === user.id),
     };
   });
+  const salida = destinos.map(sinVacios);
 
   // Qué conviene juntar: los sueltos de la misma empresa del CRM o con el mismo nombre («ZECAT (DEPÓSITO)» y «ZECAT
   // OFICINA»). Si ya hay un grupo con ese nombre, se suman ahí.
@@ -151,7 +156,7 @@ export async function listarDestinos(env: Env, user: User) {
     },
     grupos: gruposLista.map((g) => ({ ...g, n: filas.filter((l) => l.grupo_id === g.id).length })).filter((g) => g.n > 0),
     sugeridos: organiza(user) ? sugeridos.slice(0, 40) : [],
-    destinos,
+    destinos: salida,
   };
 }
 

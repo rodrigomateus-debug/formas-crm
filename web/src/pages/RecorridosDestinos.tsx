@@ -31,7 +31,7 @@ export interface Destino {
   horario: string | null; contacto: string | null; telefono: string | null; whatsapp: string | null; email: string | null; observaciones: string | null;
   viajes: { seis: number; total: number; ultimo: string | null; proximo: string | null };
   origen: string; editado: boolean; faltan: string[];
-  ia_estado: 'corregido' | 'ok' | 'dudoso' | null; ia_nota: string | null; ia_antes: DirIA | null; ia_sugerida: DirIA | null; puede_editar: boolean;
+  ia_estado: 'corregido' | 'ok' | 'dudoso' | null; ia_nota: string | null; ia_antes: DirIA | null; ia_sugerida: DirIA | null; puede_editar: boolean; puede_borrar: boolean;
 }
 interface Grupo { id: number; nombre: string; tipo: Tipo | null; company_id: number | null; n: number }
 interface Datos {
@@ -75,6 +75,7 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
   const [foco, setFoco] = useState<number | null>(null);
   const [ubicando, setUbicando] = useState<{ id: number; lat: number; lng: number } | null>(null);
   const [editando, setEditando] = useState<Destino | 'nuevo' | null>(null);
+  const [borrando, setBorrando] = useState<Destino | null>(null);
   const [grupoAbierto, setGrupoAbierto] = useState<Grupo | null>(null);
   const [agrupando, setAgrupando] = useState<{ ids: number[]; nombre: string; grupo_id: number | null } | null>(null);
   const [verSugeridos, setVerSugeridos] = useState(false);
@@ -130,7 +131,6 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
     ];
     return lista.sort((a, b) => orden(b.destinos) - orden(a.destinos) || (a.grupo?.nombre ?? a.destinos[0].nombre).localeCompare(b.grupo?.nombre ?? b.destinos[0].nombre));
   }, [datos, visibles]);
-  const sugeridos = (datos?.sugeridos ?? []).filter((s) => !descartados.has(s.ids.join(',')));
   // Por defecto se ven los más visitados (pedido de Rodrigo del 18/11/2026): con los miles de destinos a la vez, la lista y
   // el mapa (que vuelve a dibujar todos sus puntos en cada clic) se ponían lentos. Los bloques ya vienen con los más
   // visitados primero; el buscador y los filtros siguen buscando en todos. El elegido se ve siempre, aunque no esté entre ellos.
@@ -141,7 +141,18 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
     return elegido ? [...top, elegido] : top;
   }, [bloques, verTodos, foco]);
   const enMapa = useMemo(() => mostrados.flatMap((b) => b.destinos), [mostrados]);
-
+  // De a 40 por página (un grupo cuenta como uno): dibujar miles de filas de una traba la página. La búsqueda y los
+  // filtros buscan en todos.
+  const POR_PAGINA = 40;
+  const [pagina, setPagina] = useState(1);
+  useEffect(() => setPagina(1), [q, filtro, incompletos, revisar, verTodos]);
+  const paginas = Math.max(1, Math.ceil(mostrados.length / POR_PAGINA));
+  const pag = Math.min(pagina, paginas);
+  const enPagina = mostrados.slice((pag - 1) * POR_PAGINA, pag * POR_PAGINA);
+  // Tocar un punto del mapa lleva a la página donde está ese destino.
+  const irA = (id: number) => { const i = mostrados.findIndex((b) => b.destinos.some((d) => d.id === id)); if (i >= 0) setPagina(Math.floor(i / POR_PAGINA) + 1); };
+  useEffect(() => { document.querySelector('.ds-tabla')?.scrollTo({ top: 0 }); }, [pag]);
+  const sugeridos = (datos?.sugeridos ?? []).filter((s) => !descartados.has(s.ids.join(',')));
   const completarIA = async () => {
     frenar.current = false;
     const acum = { corriendo: true, corregidos: 0, dudosos: 0, pendientes: 0, google: false };
@@ -266,21 +277,33 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
               {organiza && <th className="nosort ds-sel" aria-label="Elegir" />}
               <th className="nosort">Destino</th><th className="nosort">Dirección</th><th className="nosort ds-col-loc">Localidad</th><th className="nosort ds-col-loc">Provincia</th>
               <th className="nosort">Contacto</th><th className="nosort numcol" title="Viajes en los últimos 6 meses (y en total)">Viajes</th>
+              <th className="nosort ds-acciones" aria-label="Acciones" />
             </tr></thead>
             <tbody>
-              {mostrados.map((b) => b.grupo ? (
+              {enPagina.map((b) => b.grupo ? (
                 <GrupoFilas key={`g${b.grupo.id}`} grupo={b.grupo} destinos={b.destinos} organiza={organiza} sel={sel} foco={foco} onMarcar={marcar} onFoco={enfocar}
-                  onEditar={setEditando} onGrupo={() => setGrupoAbierto(b.grupo)} />
+                  onEditar={setEditando} onBorrar={setBorrando} onGrupo={() => setGrupoAbierto(b.grupo)} />
               ) : (
                 <FilaDestino key={b.destinos[0].id} d={b.destinos[0]} organiza={organiza} sel={sel.has(b.destinos[0].id)} foco={foco === b.destinos[0].id}
-                  onMarcar={(on) => marcar([b.destinos[0].id], on)} onFoco={() => enfocar(b.destinos[0])} onEditar={() => setEditando(b.destinos[0])} />
+                  onMarcar={(on) => marcar([b.destinos[0].id], on)} onFoco={() => enfocar(b.destinos[0])} onEditar={() => setEditando(b.destinos[0])} onBorrar={() => setBorrando(b.destinos[0])} />
               ))}
-              {!bloques.length && <tr><td colSpan={organiza ? 7 : 6} className="muted" style={{ textAlign: 'center', padding: 24 }}>No hay destinos con ese filtro.</td></tr>}
+              {!bloques.length && <tr><td colSpan={organiza ? 8 : 7} className="muted" style={{ textAlign: 'center', padding: 24 }}>No hay destinos con ese filtro.</td></tr>}
             </tbody>
           </table>
+          {paginas > 1 && (
+            <nav className="ds-paginas" aria-label="Páginas">
+              <span className="small muted">{(pag - 1) * POR_PAGINA + 1}–{Math.min(pag * POR_PAGINA, mostrados.length)} de {mostrados.length}</span>
+              <span className="grow" />
+              <button type="button" className="btn sm ghost" disabled={pag <= 1} onClick={() => setPagina(pag - 1)}>Anterior</button>
+              <Select className="input sm" value={String(pag)} onChange={(e) => setPagina(Number(e.target.value))} aria-label="Página">
+                {Array.from({ length: paginas }, (_, i) => <option key={i} value={String(i + 1)}>Página {i + 1} de {paginas}</option>)}
+              </Select>
+              <button type="button" className="btn sm ghost" disabled={pag >= paginas} onClick={() => setPagina(pag + 1)}>Siguiente</button>
+            </nav>
+          )}
         </div>
         <aside className="ds-mapa-col">
-          <MapaDestinos destinos={enMapa} foco={enfocado} ubicando={ubicando} onElegir={(id) => { const d = porId.get(id); if (d) { enfocar(d, true); document.getElementById(`ds-fila-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }}
+          <MapaDestinos destinos={enMapa} foco={enfocado} ubicando={ubicando} onElegir={(id) => { const d = porId.get(id); if (d) { enfocar(d, true); irA(id); document.getElementById(`ds-fila-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }}
             onMover={(lat, lng) => setUbicando((u) => (u ? { ...u, lat, lng } : u))} />
           {enfocado ? (
             <FichaMapa d={enfocado} organiza={organiza} ubicando={ubicando?.id === enfocado.id} onUbicar={(lat, lng) => setUbicando({ id: enfocado.id, lat, lng })}
@@ -294,7 +317,8 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
         {organiza && <> <button type="button" className="cr-link" onClick={traerPlanilla}>Traer la planilla ahora</button></>}</p>
 
       {editando && <EditarDestino d={editando === 'nuevo' ? null : editando} grupos={datos.grupos} organiza={organiza} maps={datos.maps}
-        onClose={() => setEditando(null)} onListo={(id) => { setEditando(null); if (id) setFoco(id); recargar(); }} />}
+        onClose={() => setEditando(null)} onListo={(id) => { setEditando(null); if (id) setFoco(id); recargar(); }} onBorrar={(d) => { setEditando(null); setBorrando(d); }} />}
+      {borrando && <BorrarDestino d={borrando} onClose={() => setBorrando(null)} onListo={() => { if (foco === borrando.id) setFoco(null); setSel((s) => { const n = new Set(s); n.delete(borrando.id); return n; }); setBorrando(null); recargar(); }} />}
       {grupoAbierto && <EditarGrupo g={grupoAbierto} destinos={datos.destinos.filter((d) => d.grupo_id === grupoAbierto.id)} onClose={() => setGrupoAbierto(null)} onListo={() => { setGrupoAbierto(null); recargar(); }} />}
       {agrupando && <Agrupar ini={agrupando} grupos={datos.grupos} destinos={agrupando.ids.map((id) => porId.get(id)).filter((d): d is Destino => !!d)} onClose={() => setAgrupando(null)} onAgrupar={agruparYa} />}
       {admin}
@@ -304,11 +328,11 @@ export function DestinosTab({ admin }: { admin?: ReactNode }) {
 
 // ---------- La tabla ----------
 
-function GrupoFilas({ grupo, destinos, organiza, sel, foco, onMarcar, onFoco, onEditar, onGrupo }: {
+function GrupoFilas({ grupo, destinos, organiza, sel, foco, onMarcar, onFoco, onEditar, onBorrar, onGrupo }: {
   grupo: Grupo; destinos: Destino[]; organiza: boolean; sel: Set<number>; foco: number | null; onMarcar: (ids: number[], on: boolean) => void; onFoco: (d: Destino) => void;
-  onEditar: (d: Destino) => void; onGrupo: () => void;
+  onEditar: (d: Destino) => void; onBorrar: (d: Destino) => void; onGrupo: () => void;
 }) {
-  const [abierto, setAbierto] = useState(true);
+  const [abierto, setAbierto] = useState(destinos.length <= 6);   // las empresas con muchas sucursales arrancan plegadas
   const seis = destinos.reduce((s, d) => s + d.viajes.seis, 0), total = destinos.reduce((s, d) => s + d.viajes.total, 0);
   const tipos = [...new Set(destinos.map((d) => d.tipo))];
   return (
@@ -325,16 +349,17 @@ function GrupoFilas({ grupo, destinos, organiza, sel, foco, onMarcar, onFoco, on
           <div className="ds-tags">{tipos.length === 1 ? <TipoTag tipo={tipos[0]} /> : <span className="muted small">Varios tipos</span>}</div>
         </td>
         <td className="numcell">{seis || ''}{total > seis && <span className="muted small"> / {total}</span>}</td>
+        <td className="ds-acciones">{organiza && <button type="button" className="btn ghost sm icon" onClick={onGrupo} title="Editar la empresa" aria-label={`Editar la empresa ${grupo.nombre}`}><Icon name="edit" size={15} /></button>}</td>
       </tr>
-      {abierto && destinos.map((d, i) => <FilaDestino key={d.id} d={d} enGrupo ultimo={i === destinos.length - 1} organiza={organiza} sel={sel.has(d.id)} foco={foco === d.id} onMarcar={(on) => onMarcar([d.id], on)} onFoco={() => onFoco(d)} onEditar={() => onEditar(d)} />)}
+      {abierto && destinos.map((d, i) => <FilaDestino key={d.id} d={d} enGrupo ultimo={i === destinos.length - 1} organiza={organiza} sel={sel.has(d.id)} foco={foco === d.id} onMarcar={(on) => onMarcar([d.id], on)} onFoco={() => onFoco(d)} onEditar={() => onEditar(d)} onBorrar={() => onBorrar(d)} />)}
     </>
   );
 }
 
 // Un destino: suelto (al mismo nivel que una empresa con varias direcciones) o, `enGrupo`, una de las direcciones de una
 // empresa: va corrida a la derecha, colgada de la línea que baja desde su empresa (`ultimo` la corta).
-function FilaDestino({ d, enGrupo, ultimo, organiza, sel, foco, onMarcar, onFoco, onEditar }: {
-  d: Destino; enGrupo?: boolean; ultimo?: boolean; organiza: boolean; sel: boolean; foco: boolean; onMarcar: (on: boolean) => void; onFoco: () => void; onEditar: () => void;
+function FilaDestino({ d, enGrupo, ultimo, organiza, sel, foco, onMarcar, onFoco, onEditar, onBorrar }: {
+  d: Destino; enGrupo?: boolean; ultimo?: boolean; organiza: boolean; sel: boolean; foco: boolean; onMarcar: (on: boolean) => void; onFoco: () => void; onEditar: () => void; onBorrar: () => void;
 }) {
   const wa = linkWhatsapp(d);
   const faltan = d.faltan.filter((f) => f !== 'tipo' || !enGrupo);
@@ -382,6 +407,10 @@ function FilaDestino({ d, enGrupo, ultimo, organiza, sel, foco, onMarcar, onFoco
         {d.viajes.ultimo && <div className="muted small">últ. {fechaCorta(d.viajes.ultimo)}</div>}
         {d.viajes.proximo && <div className="small ok-text">va el {fechaCorta(d.viajes.proximo)}</div>}
       </td>
+      <td className="ds-acciones">
+        {d.puede_editar && <button type="button" className="btn ghost sm icon" onClick={onEditar} title="Editar" aria-label={`Editar ${d.nombre}`}><Icon name="edit" size={15} /></button>}
+        {d.puede_borrar && <button type="button" className="btn ghost sm icon ds-borrar" onClick={onBorrar} title="Borrar" aria-label={`Borrar ${d.nombre}`}><Icon name="trash" size={15} /></button>}
+      </td>
     </tr>
   );
 }
@@ -394,13 +423,14 @@ function MapaDestinos({ destinos, foco, ubicando, onElegir, onMover }: {
   const caja = useRef<HTMLDivElement>(null);
   const mapa = useRef<L.Map | null>(null);
   const capa = useRef<L.LayerGroup | null>(null);
-  const pines = useRef(new Map<number, L.Marker>());
+  const pines = useRef(new Map<number, L.CircleMarker>());
   const cb = useRef({ onElegir, onMover });
   cb.current = { onElegir, onMover };
   const encuadrado = useRef(false);
 
   useEffect(() => {
-    const m = L.map(caja.current!, { zoomControl: true, attributionControl: true, scrollWheelZoom: true }).setView([-34.6, -58.45], 10);
+    // En canvas: miles de puntos sin trabar la página (con marcadores HTML, cada punto es un elemento más).
+    const m = L.map(caja.current!, { zoomControl: true, attributionControl: true, scrollWheelZoom: true, preferCanvas: true }).setView([-34.6, -58.45], 10);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>' }).addTo(m);
     capa.current = L.layerGroup().addTo(m);
     mapa.current = m;
@@ -420,12 +450,17 @@ function MapaDestinos({ destinos, foco, ubicando, onElegir, onMover }: {
       if (d.lat == null || d.lng == null || ubicando?.id === d.id) continue;
       todos.push([d.lat, d.lng]);
       const color = tipoDe(d.tipo)?.[2] ?? '#6b7280', on = foco?.id === d.id;
-      const mk = L.marker([d.lat, d.lng], {
-        icon: L.divIcon({ className: 'ds-pin-wrap', html: `<span class="ds-pin${on ? ' on' : ''}" style="--c:${color}"></span>`, iconSize: on ? [22, 22] : [14, 14], iconAnchor: on ? [11, 11] : [7, 7] }),
-        zIndexOffset: on ? 2000 : 0, keyboard: false,
-      }).bindTooltip(esc(`${lindo(d.nombre)}${d.sucursal ? ` · ${d.sucursal}` : ''} — ${d.completa}`), { direction: 'top', offset: [0, -8] }).addTo(g);
+      if (on) continue;   // el elegido va al final, arriba de todos
+      const mk = L.circleMarker([d.lat, d.lng], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 1 })
+        .bindTooltip(() => esc(`${lindo(d.nombre)}${d.sucursal ? ` · ${d.sucursal}` : ''} — ${d.completa}`), { direction: 'top', offset: [0, -6] }).addTo(g);
       mk.on('click', () => cb.current.onElegir(d.id));
       pines.current.set(d.id, mk);
+    }
+    if (foco && foco.lat != null && foco.lng != null && ubicando?.id !== foco.id && destinos.some((d) => d.id === foco.id)) {
+      const mk = L.circleMarker([foco.lat, foco.lng], { radius: 10, color: '#fff', weight: 3, fillColor: tipoDe(foco.tipo)?.[2] ?? '#6b7280', fillOpacity: 1 })
+        .bindTooltip(esc(`${lindo(foco.nombre)}${foco.sucursal ? ` · ${foco.sucursal}` : ''} — ${foco.completa}`), { direction: 'top', offset: [0, -10] }).addTo(g);
+      mk.on('click', () => cb.current.onElegir(foco.id));
+      pines.current.set(foco.id, mk);
     }
     if (ubicando) {
       const mk = L.marker([ubicando.lat, ubicando.lng], { draggable: true, zIndexOffset: 5000, icon: L.divIcon({ className: 'ds-pin-wrap', html: '<span class="ds-pin on ubicando"></span>', iconSize: [26, 26], iconAnchor: [13, 13] }) }).addTo(g);
@@ -473,8 +508,8 @@ function FichaMapa({ d, organiza, ubicando, onUbicar, onGuardar, onCancelar, onE
 
 // ---------- Editar un destino ----------
 
-function EditarDestino({ d, grupos, organiza, maps, onClose, onListo }: {
-  d: Destino | null; grupos: Grupo[]; organiza: boolean; maps: boolean; onClose: () => void; onListo: (id: number | null) => void;
+function EditarDestino({ d, grupos, organiza, maps, onClose, onListo, onBorrar }: {
+  d: Destino | null; grupos: Grupo[]; organiza: boolean; maps: boolean; onClose: () => void; onListo: (id: number | null) => void; onBorrar: (d: Destino) => void;
 }) {
   const toast = useToast();
   const [f, setF] = useState({
@@ -502,7 +537,7 @@ function EditarDestino({ d, grupos, organiza, maps, onClose, onListo }: {
   const wa = whatsappUrl(f.whatsapp || f.telefono);
   return (
     <Modal wide title={d ? lindo(d.nombre) : 'Nuevo destino'} onClose={onClose} footer={<>
-      {d && organiza && <button type="button" className="btn ghost danger" disabled={ocupado} onClick={() => guardar({ activo: false })}>Sacar de la libreta</button>}
+      {d?.puede_borrar && <button type="button" className="btn ghost danger" disabled={ocupado} onClick={() => onBorrar(d)}><Icon name="trash" size={14} />Borrar destino</button>}
       <span className="grow" /><button type="button" className="btn" onClick={onClose}>Cancelar</button>
       <button type="button" className="btn primary" disabled={ocupado || !f.nombre.trim() || !(f.direccion.trim() || google)} onClick={() => guardar()}>Guardar</button></>}>
       <div className="rc-form ds-form">
@@ -561,6 +596,36 @@ function EditarDestino({ d, grupos, organiza, maps, onClose, onListo }: {
           {campo('observaciones', 'Observaciones', 'Tocar timbre 2, entrar por el portón gris…')}
         </fieldset>
         {d && d.origen !== 'hub' && <p className="muted small">Viene de la planilla DESTINOS. Lo que cambies acá queda en el Hub y la copia de la planilla ya no lo pisa.</p>}
+      </div>
+    </Modal>
+  );
+}
+
+// ---------- Borrar un destino (con confirmación) ----------
+
+// Borrar es sacarlo de la libreta: deja de ofrecerse y de verse acá, pero los encargos que ya lo nombran (los viejos y los
+// que están por hacerse) no cambian. Si viene de la planilla DESTINOS, la copia diaria no lo vuelve a traer.
+function BorrarDestino({ d, onClose, onListo }: { d: Destino; onClose: () => void; onListo: () => void }) {
+  const toast = useToast();
+  const [ocupado, setOcupado] = useState(false);
+  const borrar = async () => {
+    setOcupado(true);
+    try { await http('PATCH', `/recorridos/libreta/${d.id}`, { activo: false }); toast(`«${lindo(d.nombre)}» se borró de los destinos.`); onListo(); }
+    catch (e) { toast((e as Error).message, true); setOcupado(false); }
+  };
+  return (
+    <Modal title="¿Borrar este destino?" onClose={onClose} footer={<><span className="grow" />
+      <button type="button" className="btn" onClick={onClose} autoFocus>Cancelar</button>
+      <button type="button" className="btn danger" disabled={ocupado} onClick={borrar}><Icon name="trash" size={14} />{ocupado ? 'Borrando…' : 'Sí, borrar'}</button></>}>
+      <div className="rc-form">
+        <div className="ds-ficha" style={{ margin: 0 }}>
+          <div><b>{lindo(d.nombre)}</b>{d.sucursal && <span className="muted"> · {d.sucursal}</span>}</div>
+          <div className="small">{d.completa || 'Sin dirección'}</div>
+          {d.viajes.total > 0 && <div className="small muted">{d.viajes.total} {d.viajes.total === 1 ? 'viaje' : 'viajes'}{d.viajes.ultimo ? `, el último el ${fechaCorta(d.viajes.ultimo)}` : ''}.</div>}
+        </div>
+        {d.viajes.proximo && <div className="rc-ia warn small"><b>Tiene un encargo para el {fechaCorta(d.viajes.proximo)}.</b> Ese encargo no se borra y sigue yendo a esta dirección; si no tiene que ir, cancelalo en Encargos.</div>}
+        <p className="small" style={{ margin: 0 }}>Deja de aparecer en Destinos y al cargar encargos. Los encargos que ya lo nombran no cambian.
+          {d.origen !== 'hub' && ' Viene de la planilla DESTINOS: la copia diaria no lo vuelve a traer.'}</p>
       </div>
     </Modal>
   );

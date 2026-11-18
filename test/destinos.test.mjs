@@ -82,7 +82,7 @@ test('destinos: la IA completa solo lo que está ≥ 90 % seguro y Google confir
   assert.equal(imp.ia_antes.direccion, 'nicaragua 1651', 'guarda cómo estaba para volver atrás');
   const taller = lista.find((d) => d.id === ids[`Taller ${RUN}`]);
   assert.equal(taller.direccion, 'Mitre 500', 'lo dudoso no se toca');
-  assert.equal(taller.localidad, null);
+  assert.equal(taller.localidad ?? null, null);
   assert.equal(taller.ia_estado, 'dudoso');
   assert.equal(taller.ia_sugerida.localidad, 'Avellaneda');
 
@@ -94,7 +94,7 @@ test('destinos: la IA completa solo lo que está ≥ 90 % seguro y Google confir
   // Corregido a mano: deja de estar «Para revisar».
   await call('PATCH', `/recorridos/libreta/${ids[`Taller ${RUN}`]}`, { localidad: 'Avellaneda', provincia: 'Buenos Aires' });
   const t2 = (await call('GET', `/recorridos/libreta?q=${RUN}`)).data.destinos.find((d) => d.id === ids[`Taller ${RUN}`]);
-  assert.equal(t2.ia_estado, null);
+  assert.equal(t2.ia_estado ?? null, null);
   assert.equal(t2.provincia, 'Buenos Aires');
 });
 
@@ -145,6 +145,15 @@ test('destinos: tipo, sucursales agrupadas, contacto y la dirección elegida de 
   await call('POST', `/recorridos/grupos/${g.data.grupo_id}/sacar`, { ids: [dep] });
   await call('POST', `/recorridos/grupos/${g.data.grupo_id}/sacar`, {});
   l = (await call('GET', '/recorridos/libreta')).data;
-  assert.equal(d(ofi).grupo_id, null);
+  assert.equal(d(ofi).grupo_id ?? null, null);
   assert.ok(!l.grupos.some((x) => x.id === g.data.grupo_id));
+
+  // Borrar: deja de estar en la lista, pero el encargo que lo nombra no cambia.
+  assert.equal(d(ofi).puede_borrar, true);
+  const b = await call('PATCH', `/recorridos/libreta/${ofi}`, { activo: false });
+  assert.equal(b.status, 200, JSON.stringify(b.data));
+  l = (await call('GET', '/recorridos/libreta')).data;
+  assert.equal(d(ofi), undefined);
+  const e = (await call('GET', `/recorridos/encargos/${enc.data.id}`)).data;
+  assert.equal(e.lugar_id ?? e.encargo?.lugar_id, ofi);
 });

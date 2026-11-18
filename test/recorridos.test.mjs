@@ -345,6 +345,16 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   // Y cuenta para los frecuentes de quien lo pidió.
   r = await api('GET', '/recorridos/sugerencias', undefined, wanda.email);
   assert.ok(r.data.frecuentes.some((d) => d.lugar_id === ceramica.lugar_id), JSON.stringify(r.data.frecuentes));
+  assert.ok(!(r.data.generales ?? []).some((d) => r.data.frecuentes.some((f) => f.key === d.key)), 'lo general no repite lo suyo');
+  // Alguien nuevo, sin encargos ni pedidos: le recomienda a dónde más va el recorrido (MAD, todos los jueves).
+  const nueva = (await api('POST', '/users', { email: `nueva.rc.${RUN}@formas.ar`, name: `Nueva Rc ${RUN}`, profile: 'comercial', role: 'member' })).data;
+  r = await api('GET', '/recorridos/sugerencias', undefined, nueva.email);
+  assert.equal(r.data.frecuentes.length, 0);
+  const general = r.data.generales.find((d) => d.lugar_id === mad.lugar_id);
+  assert.ok(general, JSON.stringify(r.data.generales));
+  assert.match(general.motivo, /viajes del recorrido/);
+  assert.deepEqual(general.habitual.dias, [4], 'y qué día se suele ir');
+  assert.ok(r.data.generales.length <= 9);
   const suyos = (await api('GET', `/recorridos/encargos?desde=${dia(HOY, -10)}&hasta=${HOY}`, undefined, wanda.email)).data.encargos;
   assert.ok(suyos.some((e) => e.estado === 'cancelado' && e.origen === 'planilla'), '«NO HABIA QUE IR» queda cancelado');
   const urgente = suyos.find((e) => e.destino === `CERAMICA ${RUN}`);

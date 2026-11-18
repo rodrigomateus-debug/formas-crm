@@ -396,7 +396,7 @@ async function historial(db: D1Database, hasta: string) {
       JOIN produccion_opciones o ON o.campo = x.campo AND o.option_id = x.op`).bind(desde, hasta).all<{ fecha: string; nombre: string; company_id: number | null }>(),
   ]);
   return [...encs.results.map((e) => ({ fecha: e.fecha, nombre: e.destino, direccion: e.direccion, lugar_id: e.lugar_id, company_id: e.company_id })),
-    ...prod.results.map((p) => ({ fecha: p.fecha, nombre: p.nombre, company_id: p.company_id, direccion: null }))];
+    ...prod.results.map((p) => ({ fecha: p.fecha, nombre: p.nombre, company_id: p.company_id, direccion: null, lugar_id: null as number | null }))];
 }
 const NOMBRE_DIA = ['domingos', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados'];
 function habitualDe(dias: Set<string>): Habitual | null {
@@ -577,12 +577,62 @@ export async function sugerencias(env: Env, user: User, enFondo?: (p: Promise<un
     for (const o of opsDe(p.ops)) agregar(empresaOpcion(o.company_id, { motivo: `${o.campo === 'impresor' ? 'Impresor' : 'Proveedor'} de tu ${pdv}`, record_id: p.id }));
   }
   for (const n of negocios.results) if (n.company_id) agregar(empresaOpcion(n.company_id, { motivo: `Negocio abierto: ${n.name}`, record_id: n.id }));
+  // Quien todavía no tiene destinos propios (recién empieza, no tiene pedidos abiertos): a dónde más va el recorrido, para
+  // todos. A medida que carga encargos y pedidos, se achica hasta desaparecer y queda solo lo suyo.
+  const propios = frecuentes.length + Math.min(dePedidos.length, 14);
+  const generales = await masVisitados(db, user, new Set([...frecuentes, ...dePedidos].map((d) => d.key)), propios === 0 ? 9 : propios < 4 ? 6 : propios < 8 ? 3 : 0);
+  const todos = [...frecuentes, ...dePedidos.slice(0, 14), ...generales];
   const { viajes } = await viajesEntre(db, user, hoy, sumarDias(hoy, 21));
-  await enriquecer(db, user, [...frecuentes, ...dePedidos], viajes);
-  await cercanias(env, [...frecuentes, ...dePedidos.slice(0, 14)], viajes, enFondo);
-  await decorar(db, [...frecuentes, ...dePedidos]);
+  await enriquecer(db, user, todos, viajes);
+  await cercanias(env, todos, viajes, enFondo);
+  await decorar(db, todos);
   const cfg = await cronogramaConfig(db);
-  return { frecuentes, de_pedidos: dePedidos.slice(0, 14), bases: cfg.bases.map((x) => ({ id: x.id, nombre: x.nombre })), organiza: organiza(user) };
+  return { frecuentes, de_pedidos: dePedidos.slice(0, 14), generales, bases: cfg.bases.map((x) => ({ id: x.id, nombre: x.nombre })), organiza: organiza(user) };
+}
+// Los lugares a los que más fue el recorrido en las últimas semanas (contando días, de todos): los encargos, el historial de
+// la planilla y los retiros y egresos de ClickUp. Para el perfil Ventas, solo lugares de la libreta y proveedores: nunca
+// el cliente de otra vendedora.
+async function masVisitados(db: D1Database, user: User, excluir: Set<string>, cuantos: number): Promise<DestinoOpcion[]> {
+  if (cuantos <= 0) return [];
+  const hist = await historial(db, sumarDias(hoyBsAs(), -1));
+  const grupos = new Map<string, { lugar_id: number | null; company_id: number | null; nombre: string; dias: Set<string> }>();
+  for (const h of hist) {
+    const k = h.lugar_id ? `l:${h.lugar_id}` : h.company_id ? `c:${h.company_id}` : `n:${norm(h.nombre)}`;
+    const g = grupos.get(k) ?? { lugar_id: h.lugar_id ?? null, company_id: h.company_id ?? null, nombre: h.nombre, dias: new Set<string>() };
+    g.dias.add(h.fecha);
+    grupos.set(k, g);
+  }
+  const top = [...grupos.values()].filter((g) => g.dias.size >= 2).sort((a, b) => b.dias.size - a.dias.size).slice(0, 40);
+  if (!top.length) return [];
+  const ids = [...new Set(top.map((g) => g.company_id).filter((x): x is number => !!x))];
+  const [lugares, deEmpresa, empresas, porNombre] = await Promise.all([
+    lugaresPorId(db, top.map((g) => g.lugar_id)),
+    ids.length ? db.prepare('SELECT * FROM lugares WHERE activo = 1 AND company_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<Lugar & { company_id: number }>().then((r) => r.results)
+      : Promise.resolve([] as Array<Lugar & { company_id: number }>),
+    ids.length ? db.prepare(`SELECT id, name, json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city, json_extract(props, '$.tipo_de_relacion') AS rel
+        FROM records WHERE archived = 0 AND id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(ids))
+      .all<{ id: number; name: string; address: string | null; city: string | null; rel: string | null }>().then((r) => new Map(r.results.map((e) => [e.id, e])))
+      : Promise.resolve(new Map<number, { id: number; name: string; address: string | null; city: string | null; rel: string | null }>()),
+    lugaresPara(db, [...new Set(top.filter((g) => !g.lugar_id && !g.company_id).map((g) => g.nombre))]),
+  ]);
+  const ventas = esVentas(user);
+  // Un mismo lugar puede venir como encargo (lugar) y como retiro (empresa): se juntan los días.
+  const porOpcion = new Map<string, { o: DestinoOpcion; dias: Set<string> }>();
+  for (const g of top) {
+    let o: DestinoOpcion | null = null;
+    const l = g.lugar_id ? lugares.get(g.lugar_id) : g.company_id ? deEmpresa.find((x) => x.company_id === g.company_id) : unicoLugar(porNombre.get(g.nombre)?.exactos ?? []);
+    if (l) o = opcionLugar(l as Lugar & { company_id: number | null });
+    else if (g.company_id) {
+      const e = empresas.get(g.company_id);
+      const dir = e ? [e.address, e.city].filter(Boolean).join(', ') : '';
+      if (e && dir && (!ventas || e.rel === 'proveedor')) o = { tipo: 'empresa', key: `c:${e.id}`, nombre: e.name, direccion: dir, detalle: null, lugar_id: null, company_id: e.id };
+    }
+    if (!o || excluir.has(o.key)) continue;
+    const ya = porOpcion.get(o.key);
+    if (ya) for (const d of g.dias) ya.dias.add(d); else porOpcion.set(o.key, { o, dias: new Set(g.dias) });
+  }
+  return [...porOpcion.values()].sort((a, b) => b.dias.size - a.dias.size).slice(0, cuantos)
+    .map(({ o, dias }) => ({ ...o, veces: dias.size, motivo: `${dias.size} viajes del recorrido en ${SEMANAS} semanas` }));
 }
 const opsDe = (s: string | null) => {
   try { return (JSON.parse(s ?? '[]') as string[]).map((x) => { const [campo, id] = String(x).split(':'); return { campo, company_id: Number(id) }; }).filter((x) => x.company_id); }

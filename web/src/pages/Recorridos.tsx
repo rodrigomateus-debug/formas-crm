@@ -466,7 +466,7 @@ function AdminRecorridos() {
 interface DiaDestino { fecha: string; feriado: string | null; viajes: string[]; propios: number; habitual: boolean; cuantos: number; cerca: Cerca | null }
 interface InfoDestino { destino: DestinoOpcion; lugar: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null; localidad: string | null } | null;
   dias: DiaDestino[]; habitual: Habitual | null; ultimos: Encargo[] }
-interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; bases: Base[]; organiza: boolean }
+interface Sugerencias { frecuentes: DestinoOpcion[]; de_pedidos: DestinoOpcion[]; generales?: DestinoOpcion[]; bases: Base[]; organiza: boolean }
 // En la pantalla la cantidad es el texto que se escribe («2,5»); el servidor la pasa a número.
 type ItemForm = Omit<ItemEnc, 'cant'> & { cant: number | string | null };
 const vacio = (): ItemForm => ({ cant: null, que: '', pdv: null });
@@ -621,10 +621,11 @@ function ElegirDestino({ sug, onElegir }: { sug: Sugerencias | null; onElegir: (
           {!res.length && <li className="muted small">No está en la base. Cargalo como «Otro lugar».</li>}
         </ul>
       )}
-      {!res && sug && (sug.frecuentes.length > 0 || sug.de_pedidos.length > 0) && (
+      {!res && sug && (sug.frecuentes.length > 0 || sug.de_pedidos.length > 0 || !!sug.generales?.length) && (
         <>
           {sug.frecuentes.length > 0 && <Sugeridos titulo="A donde más mandás" items={sug.frecuentes} onElegir={onElegir} />}
           {sug.de_pedidos.length > 0 && <Sugeridos titulo="De tus pedidos y negocios" items={sug.de_pedidos} onElegir={onElegir} />}
+          {!!sug.generales?.length && <Sugeridos titulo={sug.frecuentes.length || sug.de_pedidos.length ? 'Donde más va el recorrido' : 'Donde más va el recorrido (cuando cargues encargos, acá van a aparecer los tuyos)'} items={sug.generales} onElegir={onElegir} />}
         </>
       )}
       {!res && !sug && <div className="muted small">Buscando tus destinos de siempre…</div>}

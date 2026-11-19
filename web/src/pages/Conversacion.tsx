@@ -6,6 +6,7 @@ import { RecordPreview } from './RecordPage';
 import { VistaPdf } from './Bocetos';
 import { EstadoCurvas, LogoMini, type Curvas, type Logo } from './Logos';
 import { CrearTareaDesdeMensaje } from '../TareaDesdeMensaje';
+import { CargarAdjunto, sePuedeCargar, type AdjuntoRef } from './CargarAdjunto';
 
 // Conversación de un pedido o negocio (src/worker/conversacion.ts): un chat grupal entre el vendedor, producción y
 // logística, con @menciones, y entremezclada la actividad del pedido (cambios de estado, de cada artículo, bocetos,
@@ -484,12 +485,13 @@ function MiniPdf({ id }: { id: number }) {
 
 // Los archivos de un mensaje: las imágenes (una sola, grande, con su proporción para que la lista no salte al cargar;
 // varias, en grilla) y abajo los demás como tarjetas. Un PDF se abre en el visor; el resto se descarga.
-function Adjuntos({ adjuntos, onAbrir }: { adjuntos: Adjunto[]; onAbrir: (id: number) => void }) {
+// `onCargar`: en la conversación de un pedido, cargar el archivo como boceto o logo de un producto (CargarAdjunto.tsx).
+function Adjuntos({ adjuntos, onAbrir, onCargar }: { adjuntos: Adjunto[]; onAbrir: (id: number) => void; onCargar?: (a: Adjunto) => void }) {
   if (!adjuntos.length) return null;
   const imgs = adjuntos.filter((a) => esImagen(a.mime));
   const otros = adjuntos.filter((a) => !esImagen(a.mime));
   return <>
-    {imgs.length > 0 && <Imagenes adjuntos={imgs} onAbrir={onAbrir} />}
+    {imgs.length > 0 && <Imagenes adjuntos={imgs} onAbrir={onAbrir} onCargar={onCargar} />}
     {otros.length > 0 && (
       <div className="msg-archivos">
         {otros.map((a) => {
@@ -503,6 +505,7 @@ function Adjuntos({ adjuntos, onAbrir }: { adjuntos: Adjunto[]; onAbrir: (id: nu
             <div key={a.id} className="msg-archivo">
               {pdf ? <button type="button" className="arch-abrir" onClick={() => onAbrir(a.id)} aria-label={`Ver ${a.nombre}`}>{cuerpo}</button>
                 : <a className="arch-abrir" href={urlImagen(a.id, true)} aria-label={`Descargar ${a.nombre}`}>{cuerpo}</a>}
+              {onCargar && sePuedeCargar(a) && <button type="button" className="btn ghost sm icon" title="Cargar en un producto (boceto o logo)" aria-label={`Cargar ${a.nombre} en un producto`} onClick={() => onCargar(a)}><Icon name="boceto" size={15} /></button>}
               <a className="btn ghost sm icon" href={urlImagen(a.id, true)} title="Descargar" aria-label={`Descargar ${a.nombre}`}><Icon name="download" size={15} /></a>
             </div>
           );
@@ -512,23 +515,26 @@ function Adjuntos({ adjuntos, onAbrir }: { adjuntos: Adjunto[]; onAbrir: (id: nu
   </>;
 }
 
-function Imagenes({ adjuntos, onAbrir }: { adjuntos: Adjunto[]; onAbrir: (id: number) => void }) {
+function Imagenes({ adjuntos, onAbrir, onCargar }: { adjuntos: Adjunto[]; onAbrir: (id: number) => void; onCargar?: (a: Adjunto) => void }) {
   if (!adjuntos.length) return null;
   const una = adjuntos.length === 1;
   return (
     <div className={`msg-imagenes${una ? ' una' : ''}`}>
       {adjuntos.map((a) => (
-        <button key={a.id} type="button" className="msg-img" onClick={() => onAbrir(a.id)} title={a.nombre} aria-label={`Ver ${a.nombre}`}
-          style={una && a.ancho && a.alto ? { aspectRatio: `${a.ancho} / ${a.alto}`, width: `min(100%, ${Math.round(240 * a.ancho / a.alto)}px, ${a.ancho}px)` } : undefined}>
-          <img src={urlImagen(a.id)} alt={a.nombre} loading="lazy" draggable={false} />
-        </button>
+        <span key={a.id} className="msg-img-caja">
+          <button type="button" className="msg-img" onClick={() => onAbrir(a.id)} title={a.nombre} aria-label={`Ver ${a.nombre}`}
+            style={una && a.ancho && a.alto ? { aspectRatio: `${a.ancho} / ${a.alto}`, width: `min(100%, ${Math.round(240 * a.ancho / a.alto)}px, ${a.ancho}px)` } : undefined}>
+            <img src={urlImagen(a.id)} alt={a.nombre} loading="lazy" draggable={false} />
+          </button>
+          {onCargar && <button type="button" className="msg-img-cargar" title="Cargar en un producto (boceto o logo)" aria-label={`Cargar ${a.nombre} en un producto`} onClick={() => onCargar(a)}><Icon name="boceto" size={14} /></button>}
+        </span>
       ))}
     </div>
   );
 }
 
 // Una imagen o un PDF a pantalla completa, con las flechas para pasar a los otros de la conversación.
-function Visor({ imagenes, inicio, onClose }: { imagenes: Array<Adjunto & { autor: string; at: string }>; inicio: number; onClose: () => void }) {
+function Visor({ imagenes, inicio, onClose, onCargar }: { imagenes: Array<Adjunto & { autor: string; at: string }>; inicio: number; onClose: () => void; onCargar?: (a: Adjunto) => void }) {
   const [i, setI] = useState(Math.max(0, imagenes.findIndex((a) => a.id === inicio)));
   const a = imagenes[i];
   useEffect(() => {
@@ -547,6 +553,7 @@ function Visor({ imagenes, inicio, onClose }: { imagenes: Array<Adjunto & { auto
       <div className="visor-barra">
         <span className="grow ellipsis"><b>{a.autor}</b> · {fmtDate(a.at, true)} · {a.nombre}</span>
         {imagenes.length > 1 && <span className="num">{i + 1} de {imagenes.length}</span>}
+        {onCargar && <button className="btn sm" onClick={() => { onCargar(a); onClose(); }} title="Cargarlo como boceto o logo de un producto del pedido"><Icon name="boceto" size={14} />Cargar en un producto</button>}
         <a className="btn sm" href={urlImagen(a.id, true)}><Icon name="download" size={14} />Descargar</a>
         <a className="btn sm" href={urlImagen(a.id)} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Abrir</a>
         <button className="btn ghost icon visor-x" onClick={onClose} aria-label="Cerrar"><Icon name="x" size={20} /></button>
@@ -612,9 +619,9 @@ function ElegirEmoji({ onElegir, chico }: { onElegir: (emoji: string) => void; c
   );
 }
 
-function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen, onTarea }: {
+function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPor, onResponder, onEditado, onIrA, onAbrirImagen, onTarea, onCargar }: {
   m: Mensaje; cont: boolean; citado?: Mensaje; meId: number; esAdmin: boolean; puedeReaccionar: boolean; vistoPor?: User[];
-  onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void; onAbrirImagen: (id: number) => void; onTarea?: () => void;
+  onResponder: () => void; onEditado: (m: Mensaje) => void; onIrA: (id: number) => void; onAbrirImagen: (id: number) => void; onTarea?: () => void; onCargar?: (a: Adjunto) => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
@@ -652,7 +659,7 @@ function MensajeVista({ m, cont, citado, meId, esAdmin, puedeReaccionar, vistoPo
             catch (e) { toast((e as Error).message, true); return false; }
           }} />
           : m.body ? <Cuerpo body={m.body} meId={meId} /> : null}
-        {!editando && <Adjuntos adjuntos={m.adjuntos ?? []} onAbrir={onAbrirImagen} />}
+        {!editando && <Adjuntos adjuntos={m.adjuntos ?? []} onAbrir={onAbrirImagen} onCargar={onCargar} />}
         {!editando && <Reacciones m={m} meId={meId} puede={puedeReaccionar} onReaccionar={reaccionar} />}
         {(m.editado_at || (vistoPor && vistoPor.length > 0)) && !editando && (
           <div className="msg-pie">
@@ -710,6 +717,8 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
   const pegado = useRef(true);
   const marcado = useRef(0);
   const [visor, setVisor] = useState<number | null>(null);
+  // Cargar un archivo de la conversación en un producto del pedido (CargarAdjunto.tsx).
+  const [cargar, setCargar] = useState<AdjuntoRef | null>(null);
   const [nombre, setNombre] = useState('');
   const [tarea, setTarea] = useState<Mensaje | null>(null);
   // Los grupos de actualizaciones que se abrieron (por la primera de cada uno).
@@ -828,6 +837,8 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
   const vistoUltimo = ultimo ? estado.participantes.filter((p) => p.user_id !== ultimo.user_id && p.leido_hasta >= ultimo.id)
     .map((p) => userOf(meta, p.user_id)).filter((u): u is User => !!u) : [];
   const puedeEscribir = me.role !== 'viewer';
+  // Solo en pedidos (los productos con boceto y logo) y para quien puede cambiar cosas.
+  const puedeCargar = type === 'order' && puedeEscribir && !meta.real_user;
   // Lo que se ve en el visor: las imágenes y los PDF (lo demás se descarga).
   const imagenes = mensajes.filter((m) => !m.borrado_at).flatMap((m) => (m.adjuntos ?? []).filter((a) => esImagen(a.mime) || esPdf(a.mime))
     .map((a) => ({ ...a, autor: userOf(meta, m.user_id)?.name ?? 'Alguien', at: m.created_at })));
@@ -843,7 +854,8 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
       onDragOver={(e) => { if (puedeEscribir && conArchivos(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
       onDrop={(e) => { if (!conArchivos(e)) return; e.preventDefault(); setEncima(0); soltar.current?.([...e.dataTransfer.files]); }}>
       {encima > 0 && <div className="conv-soltar"><Icon name="clip" size={28} />Soltá los archivos para adjuntarlos</div>}
-      {visor != null && <Visor imagenes={imagenes} inicio={visor} onClose={() => setVisor(null)} />}
+      {visor != null && <Visor imagenes={imagenes} inicio={visor} onClose={() => setVisor(null)} onCargar={puedeCargar ? setCargar : undefined} />}
+      {cargar && <CargarAdjunto recordId={recordId} adjunto={cargar} onClose={() => setCargar(null)} />}
       <header className="conv-head">
         <Icon name="chat" size={16} />
         <h3>Conversación</h3>
@@ -902,7 +914,7 @@ export function ConversacionPanel({ type, recordId, onClose, className = '', men
               <MensajeVista key={it.key} m={it} cont={cont} citado={it.responde_a ? porId.get(it.responde_a) : undefined} meId={me.id} esAdmin={me.role === 'admin'} puedeReaccionar={puedeEscribir && !meta.real_user}
                 vistoPor={ultimo && it.id === ultimo.id ? vistoUltimo : undefined}
                 onResponder={() => setRespondiendo(it)} onIrA={irA} onAbrirImagen={setVisor}
-                onEditado={(m) => mezclar([m])} onTarea={() => setTarea(it)} />,
+                onEditado={(m) => mezclar([m])} onTarea={() => setTarea(it)} onCargar={puedeCargar ? setCargar : undefined} />,
             );
           }
           vaciar();

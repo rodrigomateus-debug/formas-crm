@@ -14,7 +14,7 @@ import { ConsultasCard } from './Consultas';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { TareaPanel } from '../TareaPanel';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
-import { siGano } from '../Chispin';
+import { siEntroAnticipo, siGano } from '../Chispin';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
@@ -187,6 +187,7 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
       await http('PATCH', `/records/${type}/${record.id}`, { props: { [name]: value } });
       toast('Guardado');
       onChange();
+      siEntroAnticipo(type, name, record.props[name], value, record);
     } catch (e) { toast((e as Error).message, true); throw e; }
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record.props.pipeline)?.config.key_props : undefined;
@@ -1267,6 +1268,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
       await http('PATCH', `/records/${type}/${id}`, { props: { [name]: value } });
       toast('Guardado');
       changed();
+      if (record) siEntroAnticipo(type, name, record.props[name], value, record);
     } catch (e) { toast((e as Error).message, true); throw e; }
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;

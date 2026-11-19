@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSPrope
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, fmtMoney, userOf, CINTA, type Stage } from './lib';
-import { UserAvatar } from './components';
+import { UserAvatar, etapaPedidoSlug } from './components';
 
 // Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
 // que junta las ideas para mejorarlo. Es una «forma» que cambia de forma (Formas), con una lamparita arriba que se prende
@@ -85,7 +85,7 @@ export function festejar(desde?: HTMLElement | null) {
 // pantalla y Chispín salta y te felicita por tu nombre. Si el negocio es de otra persona (una gerente que lo mueve),
 // felicita a esa persona.
 export interface NegocioGanado { nombre: string; monto?: unknown; moneda?: string; duenio?: unknown }
-let ganadoDesdeAfuera: ((n: NegocioGanado) => void) | null = null;
+let ganadoDesdeAfuera: ((n: NegocioGanado, tipo: 'ganado' | 'anticipo') => void) | null = null;
 // Solo «Cierre ganado» (no otras etapas que cuentan como ganadas, como «Lead calificado» o «Pedido completo»).
 export const esGanada = (s?: Stage | null) => !!s?.is_closed && !!s?.is_won && /ganad/i.test(s.label);
 // Para llamar después de guardar el cambio de etapa: festeja solo si entra a ganada desde una que no lo era.
@@ -94,26 +94,68 @@ export function siGano(antes: Stage | null | undefined, despues: Stage | null | 
 }
 export function festejarGanado(n: NegocioGanado) {
   lluvia();
-  ganadoDesdeAfuera?.(n);
+  ganadoDesdeAfuera?.(n, 'ganado');
 }
-function lluvia() {
+
+// ---------- Entró el anticipo (pedido de Rodrigo del 19/11/2026) ----------
+// Cuando un pedido sale de «$ Pendiente de anticipo» hacia una etapa posterior (boceto, producción, entrega…), Chispín se
+// pone los anteojos de sol, saca un fajo y tira billetes como en el meme, mientras llueve plata por toda la pantalla.
+// No festeja si vuelve a «Pedido confirmado» ni si se anula.
+const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
+const DESPUES_DEL_ANTICIPO = new Set(['boceto-digital', 'listo-produccion', 'esperando', 'produccion', 'listo-entregar', 'parcial', 'entregado']);
+// Para llamar después de guardar una propiedad de un registro (tablero, ficha, vista previa, lista, celular).
+export function siEntroAnticipo(tipo: string, prop: string, antes: unknown, despues: unknown, rec: { name: string; props: Record<string, any> }) {
+  if (tipo !== 'order' || prop !== 'hs_pipeline_stage' || String(antes ?? '') !== ANTICIPO) return;
+  if (!DESPUES_DEL_ANTICIPO.has(etapaPedidoSlug(despues) ?? '')) return;
+  lluvia(true);
+  ganadoDesdeAfuera?.({ nombre: rec.name, monto: rec.props.hs_total_price, moneda: rec.props.hs_currency_code, duenio: rec.props.owner_id }, 'anticipo');
+}
+
+function lluvia(plata = false) {
   if (reducido()) return;
   const capa = document.createElement('div');
-  capa.className = 'chispin-lluvia';
-  const cuantos = Math.max(50, Math.min(150, Math.round(innerWidth / 9)));
+  capa.className = `chispin-lluvia${plata ? ' plata' : ''}`;
+  const cuantos = plata ? Math.max(24, Math.min(60, Math.round(innerWidth / 26))) : Math.max(50, Math.min(150, Math.round(innerWidth / 9)));
   for (let k = 0; k < cuantos; k++) {
     const p = document.createElement('i');
     p.style.left = `${Math.random() * 100}%`;
     p.style.setProperty('--x', `${Math.random() * 160 - 80}px`);
-    p.style.setProperty('--r', `${Math.random() * 1080 - 540}deg`);
-    p.style.setProperty('--d', `${Math.random() * 900}ms`);
-    p.style.setProperty('--t', `${2 + Math.random() * 1.6}s`);
-    p.dataset.c = String(k % 5);
+    p.style.setProperty('--r', `${(Math.random() * 1080 - 540) * (plata ? 0.4 : 1)}deg`);
+    p.style.setProperty('--d', `${Math.random() * (plata ? 2600 : 900)}ms`);
+    p.style.setProperty('--t', `${(plata ? 3 : 2) + Math.random() * 1.6}s`);
+    if (plata) p.textContent = '$'; else p.dataset.c = String(k % 5);
     capa.appendChild(p);
   }
   document.body.appendChild(capa);
-  setTimeout(() => capa.remove(), 4800);
+  setTimeout(() => capa.remove(), plata ? 7600 : 4800);
 }
+
+// Un puñado de billetes que salen de la mano de Chispín (o de la esquina, si no está), suben en arco y caen.
+function tirarPlata(desde?: HTMLElement | null) {
+  if (reducido()) return;
+  const r = desde?.getBoundingClientRect();
+  const x = r ? r.left + r.width * 0.85 : innerWidth - 40, y = r ? r.top + r.height * 0.55 : innerHeight - 70;
+  const capa = document.createElement('div');
+  capa.className = 'chispin-plata';
+  capa.style.left = `${x}px`; capa.style.top = `${y}px`;
+  for (let k = 0; k < 5; k++) {
+    const b = document.createElement('i');
+    b.textContent = '$';
+    b.style.setProperty('--dx', `${-(60 + Math.random() * Math.min(420, innerWidth * 0.45))}px`);
+    b.style.setProperty('--alto', `${-(110 + Math.random() * 200)}px`);
+    b.style.setProperty('--cae', `${innerHeight - y + 40}px`);
+    b.style.setProperty('--r', `${Math.random() * 500 - 250}deg`);
+    b.style.setProperty('--d', `${k * 40}ms`);
+    capa.appendChild(b);
+  }
+  document.body.appendChild(capa);
+  setTimeout(() => capa.remove(), 2600);
+}
+const ANTICIPOS: Array<(n: string, pedido: string) => string> = [
+  (n, x) => `😎💸 ¡Entró el anticipo, ${n}! ${x}. ¡A producir!`,
+  (n, x) => `😎💸 Llueve plata, ${n}: se cobró el anticipo de ${x}.`,
+  (n, x) => `😎💸 ¡Cash! Anticipo adentro, ${n}: ${x} sigue camino.`,
+];
 const primerNombre = (s?: string | null) => (s ?? '').trim().split(/\s+/)[0] || '';
 const FELICITACIONES: Array<(n: string, negocio: string) => string> = [
   (n, x) => `¡Vamos, ${n}! 🏆 Cerraste ${x}.`,
@@ -160,7 +202,7 @@ function Personaje({ animo, lampara, ojosRef, anteojos = false, acomoda = false 
           <path className="chispin-marco" d={CINTA} />
         </svg>
       </span>
-      <span className="chispin-mano izq" /><span className="chispin-mano der" />
+      <span className="chispin-mano izq"><span className="chispin-fajo" /></span><span className="chispin-mano der" />
       <span className="chispin-zzz"><i>z</i><i>z</i><i>z</i></span>
     </span>
   );
@@ -190,6 +232,7 @@ export default function Chispin() {
   const [anteojos, setAnteojos] = useState(false);
   const [acomoda, setAcomoda] = useState(false);
   const anteojosRef = useRef(false);
+  const fachaHasta = useRef<ReturnType<typeof setTimeout>>();   // cuándo se los saca (votos, ideas)
   const ponerAnteojos = useCallback((v: boolean) => {
     if (anteojosRef.current === v) return;
     anteojosRef.current = v;
@@ -216,11 +259,29 @@ export default function Chispin() {
   // Un negocio ganado: sale (aunque esté escondido), salta, tira papelitos y felicita por el nombre.
   const festejoT = useRef<ReturnType<typeof setTimeout>[]>([]);
   useEffect(() => {
-    ganadoDesdeAfuera = (n) => {
+    ganadoDesdeAfuera = (n, tipo) => {
       festejoT.current.forEach(clearTimeout);
       const duenio = userOf(meta, n.duenio);
       const ajeno = duenio && duenio.id !== yo ? duenio : null;
       const negocio = `«${n.nombre.length > 60 ? `${n.nombre.slice(0, 58)}…` : n.nombre}»${n.monto ? ` por ${fmtMoney(n.monto, n.moneda)}` : ''}`;
+      if (tipo === 'anticipo') {
+        // Se pone los anteojos, saca el fajo y tira billetes, una vez por cada vez que mueve la mano.
+        const texto = ajeno
+          ? `😎💸 ¡Entró el anticipo de ${negocio}! Pedido de ${primerNombre(ajeno.name)}. ¡A producir!`
+          : ANTICIPOS[Math.floor(Math.random() * ANTICIPOS.length)](primerNombre(meta.me.name) || 'crack', negocio);
+        clearTimeout(fachaHasta.current);
+        setAbierto(false); setFestejando(true); setAnimo('');
+        setGlobo({ tipo: 'festejo', texto });
+        ponerAnteojos(true);
+        festejoT.current = [
+          setTimeout(() => setAnimo('tira'), 850),
+          ...Array.from({ length: 9 }, (_, k) => setTimeout(() => tirarPlata(botonRef.current), 1150 + k * 500)),
+          setTimeout(() => setAnimo(''), 850 + 9 * 500),
+          setTimeout(() => ponerAnteojos(false), 8200),
+          setTimeout(() => { setFestejando(false); setGlobo((g) => (g?.texto === texto ? null : g)); }, 9000),
+        ];
+        return;
+      }
       const texto = ajeno
         ? `¡Ganó ${primerNombre(ajeno.name)}! 🏆 ${negocio}. ¡Mandale un aplauso!`
         : FELICITACIONES[Math.floor(Math.random() * FELICITACIONES.length)](primerNombre(meta.me.name) || 'campeón/a', negocio);
@@ -234,7 +295,7 @@ export default function Chispin() {
       ];
     };
     return () => { ganadoDesdeAfuera = null; };
-  }, [meta, yo]);
+  }, [meta, yo, ponerAnteojos]);
   useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
   // El link de una idea (…?idea=12, el que da Claude): abre el buzón en esa idea y se saca de la dirección.
   useEffect(() => {
@@ -288,7 +349,6 @@ export default function Chispin() {
 
   // Se los pone «con facha» solo cuando alguien propone una idea o vota una (pedido de Rodrigo del 19/11/2026): unos segundos,
   // inclinado y sonriendo de costado. Otro voto mientras los tiene puestos los deja un rato más. Dormido, sin anteojos.
-  const fachaHasta = useRef<ReturnType<typeof setTimeout>>();
   const facha = useCallback(() => {
     setAnimo((a) => (a === 'duerme' ? '' : a));
     ponerAnteojos(true);

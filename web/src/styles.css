@@ -2803,8 +2803,37 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 .chispin-lluvia i { position: absolute; top: -16px; width: 8px; height: 13px; border-radius: 2px; opacity: 0; animation: chispin-cae var(--t) cubic-bezier(.3, .1, .6, 1) var(--d) forwards; }
 .chispin-lluvia i[data-c="0"] { background: #000085; } .chispin-lluvia i[data-c="1"] { background: #8ee021; } .chispin-lluvia i[data-c="2"] { background: #65a7dd; }
 .chispin-lluvia i[data-c="3"] { background: #f0b45a; } .chispin-lluvia i[data-c="4"] { background: #ff7d74; border-radius: 50%; width: 9px; height: 9px; }
+.chispin-zona.festejando { z-index: 310; }   /* el globo y Chispín, por encima de los papelitos y la plata */
 .chispin-zona.festejando .chispin-globo { max-width: 300px; font-size: 14px; font-weight: 600; }
 .chispin-zona.festejando .chispin-lampara { background: var(--chispin-lampara); box-shadow: 0 0 0 4px rgba(142, 224, 33, .3), 0 0 22px 8px rgba(142, 224, 33, .7); }
+/* Entró el anticipo (siEntroAnticipo en Chispin.tsx): con los anteojos puestos saca un fajo con la mano izquierda y con la
+   derecha tira billetes, como en el meme; mientras, llueve plata. */
+.chispin-fajo { position: absolute; left: -9px; top: -5px; width: 17px; height: 9px; border-radius: 2px; background: #6cc25a; border: 1px solid #2f7a2c;
+  box-shadow: 0 -2px 0 -1px #4fa043, 0 -4px 0 -1px #8fd977; transform: rotate(-18deg) scale(0); transition: transform 250ms var(--ease-out); }
+.chispin-bicho.tira .chispin-fajo { transform: rotate(-18deg) scale(1); }
+.chispin-bicho.tira { animation: chispin-mece .5s ease-in-out infinite; }
+.chispin-bicho.tira .chispin-mano.izq { z-index: 1; transform: translate(-3px, -13px); }
+.chispin-bicho.tira .chispin-mano.der { z-index: 1; background: var(--chispin-brillo); animation: chispin-tira .5s ease-in-out infinite; }
+@keyframes chispin-mece { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes chispin-tira { 0%, 100% { transform: translate(3px, -6px) rotate(25deg); } 55% { transform: translate(-5px, -24px) rotate(-35deg); } }
+.chispin-plata { position: fixed; z-index: 300; width: 0; height: 0; pointer-events: none; }
+.chispin-plata i, .chispin-lluvia.plata i { width: 30px; height: 15px; border-radius: 2px; background: linear-gradient(135deg, #9be283, #5cb84e); border: 1.5px solid #2f7a2c;
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .3); color: #1f5a1d; font: 800 10px/12px system-ui, sans-serif; text-align: center; font-style: normal; }
+.chispin-plata i { position: absolute; left: -15px; top: -8px; opacity: 0; animation: chispin-billete 2.1s linear var(--d) forwards; }
+.chispin-lluvia.plata i { top: -24px; animation: chispin-cae-plata var(--t) linear var(--d) forwards; }
+@keyframes chispin-billete {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0) scale(.5); animation-timing-function: cubic-bezier(.2, .7, .4, 1); }
+  30% { transform: translate(calc(var(--dx) * .45), var(--alto)) rotate(calc(var(--r) * .35)) rotateX(160deg) scale(1); animation-timing-function: cubic-bezier(.5, 0, .8, .6); }
+  92% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--cae)) rotate(var(--r)) rotateX(520deg) scale(1); }
+}
+@keyframes chispin-cae-plata {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0) rotateX(0); }
+  33% { transform: translate(var(--x), 34vh) rotate(calc(var(--r) * .4)) rotateX(200deg); }
+  66% { transform: translate(calc(var(--x) * -.6), 70vh) rotate(calc(var(--r) * .7)) rotateX(380deg); }
+  90% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(var(--x) * .3), 105vh) rotate(var(--r)) rotateX(540deg); }
+}
 @keyframes chispin-cae { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), 105vh) rotate(var(--r)); } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {

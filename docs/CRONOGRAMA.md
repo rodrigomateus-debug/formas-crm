@@ -131,6 +131,44 @@ parada del mismo lugar en la ruta del día.
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque
   producción lo siga trabajando en ClickUp). El perfil Ventas no lo ve (igual que Producción y Entregas); el resto mira.
 
+## Estados de despacho
+
+Pedido de Logística (Rodrigo, 19/11/2026). Reemplaza los colores que Logística pintaba a mano en la planilla. El estado
+**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Primera etapa: el estado,
+los puntitos y el filtro «Le toca a» en la semana (la semana llena, la sección «Despacho» en la vista previa del pedido y
+los colgados mejorados vienen después; la maqueta con las ideas está en el artifact «Estados de despacho»).
+
+| Estado | Color | Cuándo | Le toca a |
+|---|---|---|---|
+| Entregado / Llegó / Retirado / Llevado | verde | hecho (como siempre) | — |
+| No pagó | amarillo flúor | el pedido está en «$ Pendiente de Anticipo» **o** tiene saldo en Finnegans (lo que falta cobrar más lo que falta facturar) | la vendedora (propietaria del pedido) |
+| Falta información | rojo | la dirección de la parada falta o no se encontró en el mapa | la vendedora (en un retiro o un egreso, Logística: es la dirección del proveedor o el impresor) |
+| No llegó | gris | lo que tenía que llegar antes (ingreso o retiro del proveedor, vuelta del impresor) tiene fecha pasada, no se marcó y el artículo sigue antes de ese paso; o un ingreso con fecha pasada | el proveedor o el impresor (Compras) |
+| En cola de producción | violeta | algún artículo todavía no está «listo para entregar»; en un egreso, la mercadería todavía no llegó al depósito | Producción |
+| Remitido | naranja | el remito ya está en Finnegans; en un egreso, el remito de traslado ya está armado | Logística |
+| Listo para despachar | azul | todo lo demás bien | Logística |
+| Programado | sin color | un ingreso que todavía no tenía que llegar | el proveedor |
+
+- **Si aplican varios, gana el que traba**: no pagó > falta información > no llegó > en cola > remitido > listo.
+- **Los puntitos** (checklist de salida): en las entregas, producción completa · mercadería en el depósito · pago ·
+  dirección · remito; en los egresos, mercadería en el depósito · dirección · remito de traslado; en los retiros, la
+  dirección. Los ingresos no tienen (llegan o no). Verde sí, rojo no, violeta en parte (2 de 3 productos listos), gris
+  pendiente. Al lado, lo que falta en pocas palabras; con el mouse encima, el detalle («Saldo de $ 1.240.000 en Finnegans»).
+- **Le toca a**: en la barra, Producción · Ventas · Proveedor · Logística con cuántas tarjetas tiene cada uno (también las
+  colgadas); un clic deja solo esas.
+- **Cómo está hecho**: el servidor arma el despacho de cada movimiento (`despachoDe` en `cronograma.ts`, campo `despacho`
+  de cada movimiento) y la pantalla junta los de una tarjeta y suma la dirección de la parada, que llega aparte
+  (`web/src/despacho.ts`). El orden de los estados de ClickUp dice si un artículo ya pasó por el depósito («en control de
+  depósito») o volvió del impresor («articulo con logo»); con un estado desconocido no se marca «No llegó».
+- **El remito en Finnegans** (`revisarRemitos` en `finnegans.ts`): puede salir del pedido (lo habitual en Corporate:
+  pedido → remito → factura) o de la factura (lo habitual en Formas Shop: pedido → factura → remito). Se pregunta solo por
+  los pedidos con algún producto listo y entrega entre hace 15 días y dentro de 7, que todavía no tienen remito: a los
+  :30, de lunes a viernes de 9 a 20, hasta 15 pedidos por vez y cada pedido como mucho cada 2 horas (Finnegans cobra por
+  consulta; una por pedido y, si no aparece, una por factura). «Sincronizar» en Configuración → Integraciones vuelve a
+  preguntar sin esperar. Queda en el pedido: `remito_finnegans` y `remito_finnegans_fecha` (migración
+  `0099_remito_finnegans.sql`). **A verificar con datos reales**: que el informe de documentos destino de una factura de
+  Formas Shop traiga su remito.
+
 ## Ruta del día
 
 Las paradas del día en el mapa: **una por proveedor o impresor** (tres retiros en el mismo impresor son una parada) y

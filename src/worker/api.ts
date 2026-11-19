@@ -35,7 +35,7 @@ import { borrarComentario, comentar, comentarios, editarComentario, guardarColab
 import { actualizarLogo, elegidosDe, elegirLogo, empresaDe, logoPorId, logosDe, quitarLogo, subirLogo } from './logos';
 import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoceto, subirBoceto, usarEnPedido } from './bocetos';
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
-import { fin, finnegansState, finnegansToken, pedidoIds, syncFacturas, type Destino } from './finnegans';
+import { fin, finnegansState, finnegansToken, pedidoIds, revisarRemitos, syncFacturas, type Destino } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
 import { agregarFotosNota, borrarFotoNota, borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, primeraFotoNota, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
@@ -1799,7 +1799,9 @@ api.post('/integrations/finnegans/sync', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   // El botón recorre también los pedidos abiertos; {barrido: false} lee solo los que tienen una factura nueva avisada.
   const b = await c.req.json<{ barrido?: boolean }>().catch(() => ({} as { barrido?: boolean }));
-  return c.json(await syncFacturas(c.env, { barrido: b.barrido !== false }));
+  const facturas = await syncFacturas(c.env, { barrido: b.barrido !== false });
+  // Y los remitos de los pedidos listos con entrega cercana (estados de despacho del cronograma).
+  return c.json({ ...facturas, remitos: await revisarRemitos(c.env, { forzar: true }) });
 });
 
 // ---------- Administración ----------

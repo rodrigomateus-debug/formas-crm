@@ -3,9 +3,9 @@ import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { Budget } from './budget';
 import { norm } from './clickup';
-import { CERRADOS, claveProveedor, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
+import { CERRADOS, ESTADOS_PEC, claveProveedor, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
 import { finnegansPedidoVenta, finnegansToken } from './finnegans';
-import { updateRecord } from './records';
+import { ORDER_ANTICIPO, updateRecord } from './records';
 import { clavesDeTareas, direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle, type DireccionPedido } from './direcciones';
 import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
@@ -91,6 +91,72 @@ export interface Movimiento {
   colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»: por qué, desde cuándo y quién
   notas?: NotaLogistica[];   // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar (logistica.ts)
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó, si no es la cantidad del pedido (demasía)
+  despacho?: Despacho;       // si está listo para salir, qué falta y a quién le toca (ver «Estados de despacho» en docs/CRONOGRAMA.md)
+}
+
+// ---------- Estados de despacho ----------
+// Pedido de Logística (Rodrigo, 19/11/2026): reemplaza los colores que Logística pintaba a mano en la planilla. El estado
+// sale de los datos: los controles de cada movimiento (producción, depósito, pago, remito) y, en la pantalla, la dirección
+// de la parada (que llega aparte, `direccionesSemana`). Si varios aplican, gana el que traba la entrega:
+//   hecho > no pagó > falta información (la dirección, en la pantalla) > no llegó > en cola > remitido > listo
+// `prog`: un ingreso que todavía no tenía que llegar.
+export type EstadoDespacho = 'hecho' | 'nopago' | 'nollego' | 'cola' | 'remitido' | 'listo' | 'prog';
+export type Control = 'prod' | 'dep' | 'pago' | 'remito';
+export interface Despacho {
+  estado: EstadoDespacho;
+  checks: Array<{ k: Control; v: 'ok' | 'no' | 'pend'; t?: string }>;   // t: el detalle («Saldo de $ 1.240.000 en Finnegans»)
+  quien: 'produccion' | 'ventas' | 'proveedor' | 'logistica' | null;    // a quién le toca el próximo paso
+  owner_id: number | null;   // la vendedora (el propietario del pedido), para «le toca a» cuando es de Ventas
+  lugar: string | null;      // el proveedor o el impresor que no trajo (o al que se espera)
+}
+const POS = new Map(ESTADOS_PEC.map((e, i) => [e.status, i]));
+const pos = (estado: string) => POS.get(estado) ?? -1;
+// Ya pasó por el depósito; ya volvió del impresor.
+const EN_DEPOSITO = pos('en control de depósito'), DE_VUELTA = pos('articulo con logo');
+const LISTOS_DESP = ['listo para entergar', 'listo para entregar', 'parcial entregado', 'entregados'];
+const plata = (n: number) => `$ ${Math.round(n).toLocaleString('es-AR')}`;
+type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
+type Check = Despacho['checks'][number];
+
+export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolean, hechos: Map<string, unknown>, hoy: string,
+  extra: { lugar: (rol: 'proveedor' | 'impresor') => string | null; traslado: boolean }): Despacho {
+  const owner_id = f.owner_id ?? null;
+  if (hecho) return { estado: 'hecho', checks: [], quien: null, owner_id, lugar: null };
+  const p = pos(f.estado);
+  // Lo que tenía que llegar antes y no llegó: un ingreso o retiro del proveedor, o la vuelta del impresor, con fecha pasada,
+  // sin marcar y con el artículo todavía antes de ese paso. Con un estado desconocido no se marca nada.
+  const fechaDe: Partial<Record<Tipo, string | null>> = { ingreso: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor, retiro_impresor: f.retiro_impresor, ingreso_impresor: f.ingreso_impresor };
+  const falta = (t: Tipo, hasta: number) => { const d = fechaDe[t];
+    return !!d && d < hoy && d <= fecha && !hechos.has(`${f.task_id}:${t}`) && p >= 0 && p < hasta; };
+  const noVinoProv = falta('ingreso', EN_DEPOSITO) || falta('retiro_proveedor', EN_DEPOSITO);
+  const noVinoImp = falta('retiro_impresor', DE_VUELTA) || falta('ingreso_impresor', DE_VUELTA);
+  if (tipo === 'ingreso' || tipo === 'ingreso_impresor') {
+    return { estado: fecha < hoy ? 'nollego' : 'prog', checks: [], quien: 'proveedor', owner_id, lugar: extra.lugar(tipo === 'ingreso' ? 'proveedor' : 'impresor') };
+  }
+  if (tipo === 'retiro_proveedor' || tipo === 'retiro_impresor') return { estado: 'listo', checks: [], quien: 'logistica', owner_id, lugar: null };
+  if (tipo === 'egreso') {
+    const dep: Check = noVinoProv ? { k: 'dep', v: 'no', t: 'No llegó del proveedor' } : p >= EN_DEPOSITO ? { k: 'dep', v: 'ok' } : { k: 'dep', v: 'pend', t: 'Todavía no llegó al depósito' };
+    const checks: Check[] = [dep, extra.traslado ? { k: 'remito', v: 'ok', t: 'Remito de traslado hecho' } : { k: 'remito', v: 'pend' }];
+    if (dep.v === 'no') return { estado: 'nollego', checks, quien: 'proveedor', owner_id, lugar: extra.lugar('proveedor') };
+    if (dep.v === 'pend') return { estado: 'cola', checks, quien: 'produccion', owner_id, lugar: null };
+    return { estado: extra.traslado ? 'remitido' : 'listo', checks, quien: 'logistica', owner_id, lugar: null };
+  }
+  // Entrega.
+  const saldo = Number(f.saldo) || 0;
+  const pago: Check = f.etapa === ORDER_ANTICIPO ? { k: 'pago', v: 'no', t: 'Pendiente de anticipo' }
+    : saldo > 0.5 ? { k: 'pago', v: 'no', t: `Saldo de ${plata(saldo)} en Finnegans` } : { k: 'pago', v: 'ok' };
+  const listo = LISTOS_DESP.includes(f.estado);
+  const noVino = !listo && (noVinoProv || noVinoImp);
+  const checks: Check[] = [
+    listo ? { k: 'prod', v: 'ok' } : { k: 'prod', v: 'no', t: f.estado },
+    noVino ? { k: 'dep', v: 'no', t: noVinoProv ? 'No llegó del proveedor' : 'No volvió del impresor' } : { k: 'dep', v: 'ok' },
+    pago,
+    f.remito_fin ? { k: 'remito', v: 'ok', t: String(f.remito_fin) } : { k: 'remito', v: 'pend' },
+  ];
+  if (pago.v === 'no') return { estado: 'nopago', checks, quien: 'ventas', owner_id, lugar: null };
+  if (noVino) return { estado: 'nollego', checks, quien: 'proveedor', owner_id, lugar: extra.lugar(noVinoProv ? 'proveedor' : 'impresor') };
+  if (!listo) return { estado: 'cola', checks, quien: 'produccion', owner_id, lugar: null };
+  return { estado: f.remito_fin ? 'remitido' : 'listo', checks, quien: 'logistica', owner_id, lugar: null };
 }
 // La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
 // esa empresa (tres retiros en el mismo impresor son una parada). No depende de la dirección. Un pedido que va a varias
@@ -98,7 +164,7 @@ export interface Movimiento {
 export const claveParada = (m: Pick<Movimiento, 'tipo' | 'pdv_task' | 'company_id' | 'lugar'>) =>
   m.tipo === 'entrega' ? `p:${m.pdv_task}` : m.company_id ? `e:${m.company_id}` : `o:${norm(m.lugar ?? 'Sin proveedor')}`;
 export const esDeLaParada = (clave: string, base: string) => clave === base || clave.startsWith(`${base}:`);
-type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null; pactada: string | null };
+type FilaMov = FilaDesp & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null; pactada: string | null };
 interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
 
 export const sumarDias = (dia: string, n: number) => new Date(Date.parse(`${dia}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -108,7 +174,9 @@ export const hoyBsAs = () => new Date(Date.now() - 3 * 3600_000).toISOString().s
 const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stock)\s*$/i, '').trim();
 
 const SELECT_MOV = `SELECT a.*, p.npdv AS pdv_npdv, p.cliente AS pdv_cliente, p.unidad AS pdv_unidad, p.record_id AS pdv_record, p.entrega_real AS pdv_entrega,
-    json_extract(r.props, '$.tipo_de_pedido') AS evento, json_extract(r.props, '$.fecha_de_entrega') AS pactada
+    json_extract(r.props, '$.tipo_de_pedido') AS evento, json_extract(r.props, '$.fecha_de_entrega') AS pactada,
+    json_extract(r.props, '$.hs_pipeline_stage') AS etapa, json_extract(r.props, '$.saldo_pendiente_de_pago_mxn') AS saldo,
+    json_extract(r.props, '$.remito_finnegans') AS remito_fin, r.owner_id AS owner_id
   FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0
   WHERE (a.es_pdv = 0 OR NOT EXISTS (SELECT 1 FROM produccion h WHERE h.pdv_task = a.task_id AND h.es_pdv = 0))
     AND a.estado NOT IN ('anulado', 'anulada', 'cancelado') AND p.estado NOT IN ('anulado', 'anulada', 'cancelado')`;
@@ -119,8 +187,10 @@ async function opciones(db: D1Database) {
   return new Map(results.map((o) => [`${o.campo}:${o.option_id}`, o]));
 }
 
-function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, { user_id: number | null }>, feriados: Map<string, string>, desde: string, hasta: string) {
+function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, { user_id: number | null }>, feriados: Map<string, string>, desde: string, hasta: string,
+  traslados: Set<string> = new Set()) {
   const out: Movimiento[] = [];
+  const hoy = hoyBsAs();
   for (const f of filas) {
     const fechas: Record<Tipo, string | null> = {
       entrega: f.entrega_real ?? f.pdv_entrega, ingreso: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
@@ -149,7 +219,12 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
       if (tipo === 'ingreso_impresor' && fechas.egreso && fechas.egreso > fecha) avisos.push('El ingreso del impresor es anterior al egreso');
       // Lo trae el impresor o se lo va a buscar: es uno o el otro.
       if ((tipo === 'ingreso_impresor' || tipo === 'retiro_impresor') && fechas.ingreso_impresor && fechas.retiro_impresor) avisos.push('Tiene ingreso y retiro del impresor: es uno o el otro');
+      const lugarDe = (r: 'proveedor' | 'impresor') => { const o = ops.get(`${r}:${f[r] ?? ''}`); return o?.empresa ?? o?.nombre ?? null; };
+      const hecho = !!marca || implicito;
+      const companyId = op?.company_id ?? null, lugarMov = rol ? op?.empresa ?? op?.nombre ?? null : null;
+      const traslado = tipo === 'egreso' && traslados.has(`${fecha}|${claveParada({ tipo, pdv_task: f.pdv_task, company_id: companyId, lugar: lugarMov })}`);
       out.push({
+        despacho: despachoDe(f, tipo, fecha, hecho, hechos, hoy, { lugar: lugarDe, traslado }),
         id: `${f.task_id}:${tipo}`, tipo, fecha, task_id: f.task_id, pdv_task: f.pdv_task, npdv: f.pdv_npdv ?? f.npdv, cliente: f.cliente ?? f.pdv_cliente,
         unidad: f.pdv_unidad ?? f.unidad, record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
         estado: f.estado, lugar: rol ? op?.empresa ?? op?.nombre ?? null : null, company_id: op?.company_id ?? null,
@@ -172,7 +247,9 @@ export async function movimientos(db: D1Database, desde: string, hasta: string) 
   const fer = new Map(feriados.results.map((x) => [x.fecha, x.nombre]));
   // Lo colgado no está en su día ni en la ruta: va en su columna (colgados).
   const colg = new Set((await db.prepare('SELECT task_id, tipo FROM cronograma_colgados').all<{ task_id: string; tipo: string }>()).results.map((c) => `${c.task_id}:${c.tipo}`));
-  const movs = armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta);
+  // Los egresos con su remito de traslado ya armado (el de todo lo que va a ese impresor ese día).
+  const tras = await db.prepare('SELECT fecha, clave FROM remitos_traslado WHERE fecha BETWEEN ? AND ?').bind(desde, hasta).all<{ fecha: string; clave: string }>();
+  const movs = armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta, new Set(tras.results.map((t) => `${t.fecha}|${t.clave}`)));
   const vistos = colg.size ? movs.filter((m) => !colg.has(m.id)) : movs;
   await ponerExtras(db, vistos);
   return { movs: vistos, feriados: fer };

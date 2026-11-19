@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
-import { Avatar, EditarEnLinea, Modal, QuienPidio, alEsc } from '../components';
+import { Avatar, EditarEnLinea, Modal, QuienPidio, UserChip, alEsc } from '../components';
+import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, faltaTexto, nombreEstado, type DespachoMov, type DespachoTarjeta, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -35,6 +36,7 @@ export interface Mov {
   colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»
   notas?: NotaLogistica[];    // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó (demasía)
+  despacho?: DespachoMov;     // si está listo para salir, qué falta y a quién le toca (despacho.ts)
 }
 export interface Nota { id: number; fecha: string; texto: string; hecho: number }
 export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -136,6 +138,7 @@ export default function CronogramaPage() {
   const [buscar, setBuscar] = useState('');
   const [unidad, setUnidad] = useState('');
   const [pendientes, setPendientes] = useState(false);
+  const [toca, setToca] = useState<Rol | ''>('');   // «Le toca a»: solo las tarjetas de Producción, Ventas, el proveedor o Logística
   const [preview, setPreview] = useState<number | null>(null);
   const [nuevoPara, setNuevoPara] = useState<Tarjeta | Encargo | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo abierto
@@ -194,6 +197,17 @@ export default function CronogramaPage() {
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
   const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad)), [v, q, unidad]);
+  // Estados de despacho: la dirección de la parada de una tarjeta (llega aparte) y a quién le toca cada una.
+  const dirDe = (t: Tarjeta) => (t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined);
+  const pasaToca = (t: Tarjeta) => !toca || despachoTarjeta(t, dirDe(t))?.quien === toca;
+  const porRol = useMemo(() => {
+    const n: Partial<Record<Rol, number>> = {};
+    for (const t of [...tarjetas(movs), ...tarjetas(colg).map((x) => ({ ...x, parada: false }))]) {
+      const r = despachoTarjeta(t, t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined)?.quien;
+      if (r) n[r] = (n[r] ?? 0) + 1;
+    }
+    return n;
+  }, [movs, colg, dirs]);
 
   async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string) {
     setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === tipo ? { ...m, fecha } : m)), sin_fecha: d.sin_fecha.filter((s) => !ids.includes(s.task_id)),
@@ -302,6 +316,11 @@ export default function CronogramaPage() {
               </div>
             )}
             <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)} />Solo lo pendiente</label>
+            <div className="row cr-toca" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Le toca a">
+              <span className="small muted">Le toca a</span>
+              {(Object.keys(NOMBRE_ROL) as Rol[]).map((r) => <button key={r} type="button" className={`chip${toca === r ? ' on' : ''}`} aria-pressed={toca === r} onClick={() => setToca(toca === r ? '' : r)}
+                title={`Solo lo que le toca a ${NOMBRE_ROL[r]}`}>{NOMBRE_ROL[r]} <span className="num">{porRol[r] ?? 0}</span></button>)}
+            </div>
             <span className="grow" />
             <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}<span className="cr-k-X" title="Lo que alguien pidió en Recorridos"><i />Encargos</span></div>
           </div>
@@ -328,7 +347,7 @@ export default function CronogramaPage() {
                       </header>
                       <div className="cr-carriles">
                         {CARRILES.map((c) => {
-                          const ts = tarjetas(delDia.filter((m) => c.tipos.includes(m.tipo)));
+                          const ts = tarjetas(delDia.filter((m) => c.tipos.includes(m.tipo))).filter(pasaToca);
                           if (!ts.length) return null;
                           return (
                             <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
@@ -370,7 +389,7 @@ export default function CronogramaPage() {
                   </header>
                   <div className="cr-carriles">
                     {CARRILES.map((c) => {
-                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false }));
+                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false })).filter(pasaToca);
                       if (!ts.length) return null;
                       return (
                         <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
@@ -540,8 +559,9 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
   const prods = t.movs.filter((m) => m.articulo);
   const ver = todo ? prods : prods.slice(0, TOPE);
   const marca = t.tipo === 'entrega' ? null : marcaProveedor(t.crudo);
+  const desp = t.hecho ? null : despachoTarjeta(t, dir);
   return (
-    <article className={`cr-tarjeta${t.hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}${onAbrir ? ' abre' : ''}`} draggable={puede}
+    <article className={`cr-tarjeta${t.hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}${onAbrir ? ' abre' : ''}${desp ? ` cr-d cr-d-${desp.estado}` : ''}`} draggable={puede}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.key); } catch { /* no hace falta */ } onArrastrar(true); e.currentTarget.classList.add('arrastrando'); }}
       onDragEnd={(e) => { e.currentTarget.classList.remove('arrastrando'); onArrastrar(false); }}
       onClick={(e) => { if (onAbrir && !(e.target as HTMLElement).closest('button, a, .popover, .select-pop, [role="dialog"]')) onAbrir(); }}>
@@ -563,6 +583,7 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
         {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
+      {desp && <FilaDespacho d={desp} tipo={t.tipo} />}
       {colgado && (
         <div className="cr-t-motivo">
           {motivos.map((m) => <p key={m}>{m}</p>)}
@@ -615,6 +636,33 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
       )}
       {!puede && t.hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
+  );
+}
+
+// El estado de despacho de una tarjeta: el estado, a quién le toca y los puntitos del checklist con lo que falta.
+const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8' };
+const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente' } as const;
+function FilaDespacho({ d, tipo }: { d: DespachoTarjeta; tipo: Tipo }) {
+  const falta = faltaTexto(d);
+  return (
+    <div className="cr-t-desp">
+      <div className="cr-t-desp-l1">
+        <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={11} />{nombreEstado(d.estado, tipo)}</span>
+        {d.quien && <span className="cr-desp-quien" title="A quién le toca el próximo paso">
+          {d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>}
+        </span>}
+      </div>
+      {d.checks.length > 0 && (
+        <div className="cr-t-desp-l2">
+          <span className="cr-puntos" role="list" aria-label="Checklist de salida">
+            {d.checks.map((c) => <i key={c.k} role="listitem" className={`cr-punto ${c.v}`} title={`${c.nombre}: ${V_TXT[c.v]}${c.t ? ` · ${c.t}` : ''}`} aria-label={`${c.nombre}: ${V_TXT[c.v]}`}>
+              <svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </i>)}
+          </span>
+          {falta && <small title={d.checks.filter((c) => c.t && c.v !== 'ok').map((c) => `${c.nombre}: ${c.t}`).join(' · ') || undefined}>{falta}</small>}
+        </div>
+      )}
+    </div>
   );
 }
 

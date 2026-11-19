@@ -15,7 +15,7 @@ import { correrAvisos } from './avisos';
 import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup } from './clickup';
-import { syncFacturas } from './finnegans';
+import { revisarRemitos, syncFacturas } from './finnegans';
 import { sincronizarOrdenesCompra } from './ordenescompra';
 import { reatarPendientes } from './productos';
 import { refrescarFce } from './facturar';
@@ -152,6 +152,8 @@ export default {
           if (dia >= 1 && dia <= 5 && hora >= 12 && hora <= 23) await safe(() => sincronizarOrdenesCompra(env, { budget: b }));
           else if (barrido) await safe(() => sincronizarOrdenesCompra(env, { dias: 60, budget: b }));
           await safe(() => syncFacturas(env, { barrido, budget: b }));
+          // Los remitos en Finnegans de los pedidos listos con entrega cercana (estados de despacho del cronograma), en horario de trabajo.
+          if (dia >= 1 && dia <= 5 && hora >= 12 && hora <= 23) await safe(() => revisarRemitos(env, { budget: b }));
         }
         else await safe(() => (turno === 0 ? syncFacturas(env, { barrido }) : syncClickup(env)));
         if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día

@@ -1099,7 +1099,7 @@ export interface DireccionParada {
   direccion: string | null; origen: Parada['origen']; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
   detalle: string | null; observaciones: string | null;
-  sitios: string[];   // un pedido que va a varias direcciones: cada lugar con lo que va ahí («Central: 250»)
+  sitios?: string[];   // solo en un pedido que va a varias direcciones: cada lugar con lo que va ahí («Central: 250»)
 }
 const cantTexto = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 export async function direccionesSemana(env: Env, user: User, q: { desde?: string; hasta?: string }, buscar: boolean) {
@@ -1123,9 +1123,9 @@ export async function direccionesSemana(env: Env, user: User, q: { desde?: strin
     const otra = /^(.*):\d+$/.exec(k);
     // Cada lugar con lo que va ahí («Central: 250»), para verlo en la tarjeta.
     const sitio = p.clave.startsWith('p:') && (p.sitio || otra) ? `${p.sitio ?? limpiarDireccion(p.direccion ?? '').split(',')[0]}${p.repartida ? `: ${cantTexto(p.movimientos.reduce((s, m) => s + (m.cantidad ?? 0), 0))}` : ''}` : null;
-    if (otra && out[otra[1]]) { out[otra[1]].otras++; if (sitio) out[otra[1]].sitios.push(sitio); continue; }
+    if (otra && out[otra[1]]) { out[otra[1]].otras++; if (sitio) (out[otra[1]].sitios ??= []).push(sitio); continue; }
     out[k] = {
-      sitios: sitio ? [sitio] : [],
+      ...(sitio ? { sitios: [sitio] } : {}),
       direccion: p.direccion, origen: p.origen, estado, nombre: p.nombre, company_id: p.company_id, horario: p.horario_texto, expreso: !!p.expreso, otras: 0,
       detalle: p.detalle ?? null, observaciones: p.observaciones ?? null,
       record_ids: [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],

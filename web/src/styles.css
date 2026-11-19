@@ -1552,6 +1552,27 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-punto.ok { background: var(--d-hecho-bg); color: var(--d-hecho); } .cr-punto.no { background: var(--d-info-bg); color: var(--d-info); }
 .cr-punto.medio { background: var(--d-cola-bg); color: var(--d-cola); }
 .cr-toca .chip .num { color: var(--text-3); font-weight: 500; } .cr-toca .chip.on .num { color: inherit; }
+/* Si llega a tiempo: solo cuando hay riesgo. */
+.cr-desp-reloj { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--ui-warning-ink); }
+.cr-desp-reloj.atrasado { color: var(--d-info); }
+/* Lo hecho, en una línea. */
+.cr-tarjeta.compacta { display: flex; align-items: center; gap: 6px; padding: 4px 6px; opacity: .7; background: transparent; border: 1px dashed var(--ui-line-strong); }
+.cr-tarjeta.compacta .cr-check { position: static; flex: none; }
+.cr-compacta-tit { flex: 1; min-width: 0; font-size: 12px; color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-compacta-pdv { font-size: 11px; color: var(--text-3); flex: none; }
+.cr-tarjeta.compacta .cr-mini { opacity: 1; flex: none; }
+/* La barrita del día. */
+.cr-dia-mezcla { display: flex; gap: 1px; height: 6px; border-radius: var(--r-pill); overflow: hidden; background: var(--ui-surface-sunken); margin-top: 2px; }
+.cr-dia-mezcla i { display: block; background: var(--d); min-width: 4px; }
+.cr-dia-mezcla .cr-d-nopago { background: var(--d-nopago-flu); }
+/* El despacho en la vista previa del pedido. */
+.cr-pv-desp .panel-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cr-pv-desp .panel-head .small { margin-left: auto; }
+.cr-pv-desp-body { padding: 12px 20px 14px; display: flex; flex-direction: column; gap: 10px; }
+.cr-pv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.cr-pv-checks li { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cr-pv-checks .cr-punto { margin-top: 2px; background: var(--ui-surface-sunken); }
+.cr-pv-checks .cr-punto.ok { background: var(--d-hecho-bg); } .cr-pv-checks .cr-punto.no { background: var(--d-info-bg); } .cr-pv-checks .cr-punto.medio { background: var(--d-cola-bg); }
 .cr-page .page-head { margin-bottom: 12px; }
 .cr-leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ui-ink-2); }
 .cr-leyenda i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--k); margin-right: 6px; }

@@ -134,9 +134,9 @@ parada del mismo lugar en la ruta del día.
 ## Estados de despacho
 
 Pedido de Logística (Rodrigo, 19/11/2026). Reemplaza los colores que Logística pintaba a mano en la planilla. El estado
-**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Primera etapa: el estado,
-los puntitos y el filtro «Le toca a» en la semana (la semana llena, la sección «Despacho» en la vista previa del pedido y
-los colgados mejorados vienen después; la maqueta con las ideas está en el artifact «Estados de despacho»).
+**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Etapas 1 y 2: el estado,
+los puntitos, el reloj, el filtro «Le toca a», la semana llena y la sección «Despacho» en la vista previa del pedido (los
+colgados mejorados vienen después; la maqueta con las ideas está en el artifact «Estados de despacho»).
 
 | Estado | Color | Cuándo | Le toca a |
 |---|---|---|---|
@@ -154,6 +154,14 @@ los colgados mejorados vienen después; la maqueta con las ideas está en el art
   dirección · remito; en los egresos, mercadería en el depósito · dirección · remito de traslado; en los retiros, la
   dirección. Los ingresos no tienen (llegan o no). Verde sí, rojo no, violeta en parte (2 de 3 productos listos), gris
   pendiente. Al lado, lo que falta en pocas palabras; con el mouse encima, el detalle («Saldo de $ 1.240.000 en Finnegans»).
+- **Si llega a tiempo** (el reloj): solo cuando algo traba (no pagó, falta información, no llegó, en cola). Cuenta días
+  hábiles hasta el día del movimiento (sin fines de semana ni feriados): «Atrasado · es mañana» (o hoy, o ya pasó) en rojo,
+  «Justo · en 2 días hábiles» en ámbar. Lo listo, remitido o programado no lo lleva.
+- **La semana llena**: lo hecho ocupa una línea punteada (✓, el lugar y el PDV; la flecha abre la tarjeta entera) y cada
+  día tiene arriba una barrita con cuánto hay de cada estado.
+- **En la vista previa del pedido**: al tocar la tarjeta se abre la vista previa de siempre con la sección «Despacho»
+  arriba (el estado, el reloj, a quién le toca, el motivo si está colgado y el checklist entero con el detalle de cada
+  control). `RecordPreview` recibe `arriba` (lo que quiera mostrar primero la pantalla que la abre).
 - **Le toca a**: en la barra, Producción · Ventas · Proveedor · Logística con cuántas tarjetas tiene cada uno (también las
   colgadas); un clic deja solo esas.
 - **Cómo está hecho**: el servidor arma el despacho de cada movimiento (`despachoDe` en `cronograma.ts`, campo `despacho`

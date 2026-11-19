@@ -78,3 +78,27 @@ export function faltaTexto(d: DespachoTarjeta): string {
   if (!d.checks.length) return '';
   return d.checks.every((c) => c.v === 'ok') ? 'Todo listo' : `Falta: ${d.checks.filter((c) => c.v === 'pend').map((c) => c.nombre.toLowerCase()).join(', ')}`;
 }
+
+// Avance contra el reloj: si lo que todavía traba llega para el día. Solo cuando hay riesgo: lo listo, remitido o
+// programado no lo lleva. Cuenta días hábiles (sin sábados, domingos ni feriados) desde hoy hasta el día del movimiento.
+export type Riesgo = { nivel: 'atrasado' | 'justo'; texto: string };
+const mediodia = (d: string) => new Date(`${d}T12:00:00`);
+export function diasHabiles(hoy: string, dia: string, feriados: Record<string, string> = {}): number {
+  if (dia <= hoy) return dia === hoy ? 0 : -Math.round((mediodia(hoy).getTime() - mediodia(dia).getTime()) / 86_400_000);
+  let n = 0;
+  for (const d = mediodia(hoy); ;) {
+    d.setDate(d.getDate() + 1);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (d.getDay() !== 0 && d.getDay() !== 6 && !feriados[iso]) n++;
+    if (iso >= dia) return n;
+  }
+}
+export function riesgo(d: DespachoTarjeta, dia: string, hoy: string, feriados?: Record<string, string>): Riesgo | null {
+  if (!['nopago', 'info', 'nollego', 'cola'].includes(d.estado)) return null;
+  const n = diasHabiles(hoy, dia, feriados);
+  if (n < 0) return { nivel: 'atrasado', texto: `Atrasado · era hace ${-n} día${n === -1 ? '' : 's'}` };
+  if (n === 0) return { nivel: 'atrasado', texto: 'Atrasado · es hoy' };
+  if (n === 1) return { nivel: 'atrasado', texto: 'Atrasado · es mañana' };
+  if (n === 2) return { nivel: 'justo', texto: 'Justo · en 2 días hábiles' };
+  return null;
+}

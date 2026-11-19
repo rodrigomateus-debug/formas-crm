@@ -69,86 +69,111 @@ export function ViewMenu({ type, view, onDeleted, onRenombrar, onMover, puedeIzq
   );
 }
 
-// ---------- La barra de abajo de las vistas (como la de HubSpot) ----------
-// Siempre a la vista al pie de la pantalla, sin ventanas que se abran: cuántos hay, el paginado de la tabla, actualizar,
-// exportar (a quien puede), descartar los cambios, duplicar la vista con otro nombre y guardar (pedido de Rodrigo del
-// 17/11/2026). Duplicar, guardar una vista nueva y renombrar o compartir (desde el menú de la pestaña) piden el nombre
-// ahí mismo, en la barra. Se dibuja en el hueco que
-// App deja al pie (#barra-vista), así queda abajo de todo y el resto de la página ocupa lo que sobra.
+// ---------- Nombrar una vista en la pestaña misma ----------
+// «+ Agregar vista», duplicar, guardar lo que ves como vista nueva y «Renombrar o compartir…» abren el nombre ahí mismo,
+// en la fila de pestañas (como HubSpot o una planilla): aparece la pestaña «Nueva vista» con el nombre elegido para
+// escribir encima. Enter la guarda, Esc la descarta; al hacer clic afuera se guarda si se escribió algo y si no se descarta.
+// Antes esto pasaba en la barra de abajo y parecía que «Agregar vista» no hacía nada (pedido de Rodrigo del 19/11/2026).
 export type CrearVista = '' | 'nueva' | 'duplicar' | 'renombrar';
-export function BarraVista<C>({ tipo, total, centro, abierta, cambiada, filtrosCambiados, puedeGuardar, onDescartar, onGuardar, actual, onCreada,
-  crear, setCrear, onRecargar, onExportar, ayudaGuardar, onRenombrada }: {
-  tipo: string; total?: ReactNode; centro?: ReactNode; abierta?: VistaGuardada; cambiada: boolean; filtrosCambiados: boolean; puedeGuardar: boolean;
-  onDescartar: () => void; onGuardar: () => void; actual: C; onCreada: (id: number) => void;
-  crear: CrearVista; setCrear: (c: CrearVista) => void; onRecargar?: () => void; onExportar?: () => void; ayudaGuardar?: string;
-  onRenombrada: () => void;
+export function PestanaNombre<C>({ tipo, crear, abierta, actual, onCerrar, onCreada, onRenombrada, ayuda }: {
+  tipo: string; crear: Exclude<CrearVista, ''>; abierta?: VistaGuardada; actual: C; onCerrar: () => void;
+  onCreada: (id: number) => void; onRenombrada: () => void; ayuda?: string;
 }) {
   const toast = useToast();
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => { setSlot(document.getElementById('barra-vista')); }, []);
-  const [nombre, setNombre] = useState('');
-  const [share, setShare] = useState('me');
+  const base = crear !== 'nueva' ? abierta : undefined;
+  const [inicial] = useState(() => ({
+    nombre: !base ? 'Nueva vista' : crear === 'duplicar' ? `${base.name} (copia)` : base.name,
+    share: base ? shareOf(base) : 'me',
+  }));
+  const [nombre, setNombre] = useState(inicial.nombre);
+  const [share, setShare] = useState(inicial.share);
   const [yendo, setYendo] = useState(false);
-  // Al abrir el nombre: vacío para una vista nueva; para duplicar, el de la vista con «(copia)» y compartida igual; para
-  // renombrar, el que tiene.
-  useEffect(() => {
-    if (!crear) return;
-    setNombre(!abierta || crear === 'nueva' ? '' : crear === 'duplicar' ? `${abierta.name} (copia)` : abierta.name);
-    setShare(abierta && crear !== 'nueva' ? shareOf(abierta) : 'me');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [crear]);
-  // Al pasar a otra pestaña se cierra lo que se estaba nombrando de la anterior (renombrar o duplicar).
-  useEffect(() => { if (crear === 'renombrar' || crear === 'duplicar') setCrear(''); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [abierta?.id]);
-  const hayCambios = cambiada || filtrosCambiados;
-  const crearla = async () => {
-    if (!nombre.trim() || yendo) return;
+  const ref = useRef<HTMLFormElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const tocado = nombre !== inicial.nombre || share !== inicial.share;
+  // El nombre queda elegido, listo para escribir encima, y la pestaña a la vista aunque la fila esté desplazada.
+  useEffect(() => { input.current?.select(); ref.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, []);
+  // Al pasar a otra pestaña se descarta lo que se estaba nombrando de la anterior (renombrar o duplicar).
+  const desde = useRef(abierta?.id);
+  useEffect(() => { if (crear !== 'nueva' && abierta?.id !== desde.current) onCerrar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [abierta?.id]);
+  const guardar = async () => {
+    const n = nombre.trim();
+    if (!n || yendo) return;
     setYendo(true);
     try {
       if (crear === 'renombrar' && abierta) {
-        await http('PATCH', `/views/${tipo}/${abierta.id}`, { name: nombre.trim(), ...shareBody(share) });
-        toast('Vista actualizada');
-        setCrear('');
-        onRenombrada();
+        if (tocado) {
+          await http('PATCH', `/views/${tipo}/${abierta.id}`, { name: n, ...shareBody(share) });
+          toast('Vista actualizada');
+          onRenombrada();
+        }
+        onCerrar();
         return;
       }
-      const v = await http<{ id: number }>('POST', `/views/${tipo}`, { name: nombre.trim(), ...shareBody(share), config: actual });
-      toast(crear === 'duplicar' ? `Vista duplicada como «${nombre.trim()}»` : `Vista «${nombre.trim()}» guardada`);
-      setCrear('');
+      const v = await http<{ id: number }>('POST', `/views/${tipo}`, { name: n, ...shareBody(share), config: actual });
+      toast(crear === 'duplicar' ? `Vista duplicada como «${n}»` : `Vista «${n}» guardada`);
+      onCerrar();
       onCreada(v.id);
-    } catch (e) { toast((e as Error).message, true); } finally { setYendo(false); }
+    } catch (e) { toast((e as Error).message, true); setYendo(false); }
   };
+  // Clic afuera: se guarda si se escribió algo; si no, se descarta (no se crea una «Nueva vista» por tocar otra cosa).
+  const alSalir = useRef(() => {});
+  alSalir.current = () => { if (yendo) return; if (tocado && nombre.trim()) guardar(); else onCerrar(); };
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) alSalir.current(); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const verbo = crear === 'duplicar' ? 'Duplicar' : crear === 'renombrar' ? 'Guardar' : 'Crear vista';
+  return (
+    <form ref={ref} className="tab-wrap on tab-nombre" onSubmit={(e) => { e.preventDefault(); guardar(); }}
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); onCerrar(); } }}>
+      <span className="tab on">
+        <input ref={input} className="tab-nombre-input" value={nombre} onChange={(e) => setNombre(e.target.value)} disabled={yendo}
+          aria-label={crear === 'renombrar' ? 'Nuevo nombre de la vista' : 'Nombre de la vista'} maxLength={80}
+          style={{ width: `${Math.min(Math.max(nombre.length, 10), 40) + 1}ch` }}
+          title={ayuda ?? `Guarda filtros, propietario, columnas, orden, búsqueda y si se ve en tabla o tablero${tipo === 'deal' ? ', con el pipeline' : ''}. Enter para ${verbo.toLowerCase()}, Esc para cancelar.`} />
+      </span>
+      <ShareSelect value={share} onChange={setShare} compacto />
+      <button type="submit" className="view-menu-btn" disabled={!nombre.trim() || yendo} aria-label={verbo} title={`${verbo} (Enter)`}><Icon name="check" size={14} /></button>
+      <button type="button" className="view-menu-btn" onClick={onCerrar} aria-label="Cancelar" title="Cancelar (Esc)"><Icon name="x" size={14} /></button>
+    </form>
+  );
+}
+
+// ---------- La barra de abajo de las vistas (como la de HubSpot) ----------
+// Siempre a la vista al pie de la pantalla, sin ventanas que se abran: cuántos hay, el paginado de la tabla, actualizar,
+// exportar (a quien puede), descartar los cambios, duplicar la vista y guardar (pedido de Rodrigo del 17/11/2026).
+// Duplicar y guardar una vista nueva piden el nombre en la fila de pestañas (PestanaNombre). Se dibuja en el hueco que
+// App deja al pie (#barra-vista), así queda abajo de todo y el resto de la página ocupa lo que sobra.
+export function BarraVista({ total, centro, abierta, cambiada, filtrosCambiados, puedeGuardar, onDescartar, onGuardar, crear, setCrear, onRecargar, onExportar }: {
+  total?: ReactNode; centro?: ReactNode; abierta?: VistaGuardada; cambiada: boolean; filtrosCambiados: boolean; puedeGuardar: boolean;
+  onDescartar: () => void; onGuardar: () => void;
+  crear: CrearVista; setCrear: (c: CrearVista) => void; onRecargar?: () => void; onExportar?: () => void;
+}) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSlot(document.getElementById('barra-vista')); }, []);
+  const hayCambios = cambiada || filtrosCambiados;
   const guardar = () => (cambiada ? onGuardar() : setCrear('nueva'));
   const barra = (
     <div className={`barra-vista${hayCambios ? ' con-cambios' : ''}`} role="region" aria-label="Vista: guardar, duplicar y exportar">
       {total != null && <span className="bv-total">{total}</span>}
-      {crear ? (
-        <form className="bv-crear" onSubmit={(e) => { e.preventDefault(); crearla(); }} onKeyDown={(e) => { if (e.key === 'Escape') setCrear(''); }}>
-          <span className="bv-crear-t">{crear === 'duplicar' && abierta ? <>Duplicar <b>{abierta.name}</b> como</> : crear === 'renombrar' && abierta ? <>Renombrar o compartir <b>{abierta.name}</b></> : 'Nueva vista'}</span>
-          <input className="input sm" autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} aria-label="Nombre de la vista"
-            placeholder="Nombre, ej.: Corporate sin actividad 30 días"
-            title={ayudaGuardar ?? `Guarda filtros, propietario, columnas, orden, búsqueda y si se ve en tabla o tablero${tipo === 'deal' ? ', con el pipeline' : ''}.`} />
-          <ShareSelect value={share} onChange={setShare} compacto />
-          <button type="button" className="btn sm ghost" onClick={() => setCrear('')}>Cancelar</button>
-          <button type="submit" className="btn sm primary" disabled={!nombre.trim() || yendo}>{crear === 'duplicar' ? 'Duplicar' : crear === 'renombrar' ? 'Guardar' : 'Crear vista'}</button>
-        </form>
-      ) : <>
-        {centro && <div className="bv-centro">{centro}</div>}
-        <span className="bv-estado" aria-live="polite">{cambiada && abierta ? <>Cambios sin guardar en <b>{abierta.name}</b></> : filtrosCambiados ? 'Filtros sin guardar' : ''}</span>
-        <div className="bv-acciones">
-          {onRecargar && <button type="button" className="btn sm icon" title="Actualizar" aria-label="Actualizar" onClick={onRecargar}><Icon name="refresh" size={15} /></button>}
-          {onExportar && <button type="button" className="btn sm" onClick={onExportar} title="Descarga lo que ves (con estos filtros y columnas) en un CSV"><Icon name="download" size={15} />Exportar</button>}
-          <div className="btn-group bv-grupo" role="group" aria-label="Guardar la vista">
-            <button type="button" className="btn sm icon" disabled={!hayCambios} onClick={onDescartar}
-              title={hayCambios ? 'Descartar los cambios (vuelve a como estaba guardada)' : 'No hay cambios para descartar'} aria-label="Descartar los cambios"><Icon name="undo" size={15} /></button>
-            <button type="button" className="btn sm icon" onClick={() => setCrear(abierta ? 'duplicar' : 'nueva')}
-              title={abierta ? `Duplicar «${abierta.name}» con otro nombre (con lo que ves ahora)` : 'Guardar lo que ves como una vista nueva'} aria-label="Duplicar la vista"><Icon name="copy" size={15} /></button>
-            <button type="button" className={`btn sm${hayCambios ? ' primary' : ''}`} onClick={guardar}
-              disabled={!hayCambios || (cambiada && !puedeGuardar)}
-              title={!hayCambios ? 'No hay cambios para guardar' : cambiada && !puedeGuardar ? 'Solo quien creó la vista (o un administrador) la puede cambiar: duplicala para guardar tus cambios' : cambiada ? `Guardar los cambios en «${abierta?.name}»` : 'Guardar estos filtros como una vista nueva'}>
-              Guardar</button>
-          </div>
+      {centro && <div className="bv-centro">{centro}</div>}
+      <span className="bv-estado" aria-live="polite">{crear && crear !== 'renombrar' ? 'Poné el nombre en la pestaña nueva, arriba' : cambiada && abierta ? <>Cambios sin guardar en <b>{abierta.name}</b></> : filtrosCambiados ? 'Filtros sin guardar' : ''}</span>
+      <div className="bv-acciones">
+        {onRecargar && <button type="button" className="btn sm icon" title="Actualizar" aria-label="Actualizar" onClick={onRecargar}><Icon name="refresh" size={15} /></button>}
+        {onExportar && <button type="button" className="btn sm" onClick={onExportar} title="Descarga lo que ves (con estos filtros y columnas) en un CSV"><Icon name="download" size={15} />Exportar</button>}
+        <div className="btn-group bv-grupo" role="group" aria-label="Guardar la vista">
+          <button type="button" className="btn sm icon" disabled={!hayCambios} onClick={onDescartar}
+            title={hayCambios ? 'Descartar los cambios (vuelve a como estaba guardada)' : 'No hay cambios para descartar'} aria-label="Descartar los cambios"><Icon name="undo" size={15} /></button>
+          <button type="button" className="btn sm icon" onClick={() => setCrear(abierta ? 'duplicar' : 'nueva')}
+            title={abierta ? `Duplicar «${abierta.name}» con otro nombre (con lo que ves ahora)` : 'Guardar lo que ves como una vista nueva'} aria-label="Duplicar la vista"><Icon name="copy" size={15} /></button>
+          <button type="button" className={`btn sm${hayCambios ? ' primary' : ''}`} onClick={guardar}
+            disabled={!hayCambios || (cambiada && !puedeGuardar)}
+            title={!hayCambios ? 'No hay cambios para guardar' : cambiada && !puedeGuardar ? 'Solo quien creó la vista (o un administrador) la puede cambiar: duplicala para guardar tus cambios' : cambiada ? `Guardar los cambios en «${abierta?.name}»` : 'Guardar estos filtros como una vista nueva'}>
+            Guardar</button>
         </div>
-      </>}
+      </div>
     </div>
   );
   return slot ? createPortal(barra, slot) : null;
@@ -237,11 +262,13 @@ export function PestanasVistas<C>({ tipo, vistas, pestanas, guardarOrden, activa
       recargar();
     } catch (e) { toast((e as Error).message, true); }
   };
+  const nombrar = { tipo, abierta, actual, ayuda: ayudaGuardar, onCerrar: () => setCrear(''), onCreada: (id: number) => { recargar(); onElegir(String(id)); }, onRenombrada: recargar };
   return (
     <>
       <div className="tabs">
         {visibles.map((k, i) => {
           const v = vistaDe(k);
+          if (v && activa === k && crear === 'renombrar') return <PestanaNombre key={k} {...nombrar} crear="renombrar" />;
           return (
             <div key={k} className={clase(k)} {...arrastre(k)}>
               <button className={`tab ${activa === k ? 'on' : ''}`} onClick={() => onElegir(k)}
@@ -255,11 +282,11 @@ export function PestanasVistas<C>({ tipo, vistas, pestanas, guardarOrden, activa
             </div>
           );
         })}
-        <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>
+        {crear === 'nueva' || crear === 'duplicar' ? <PestanaNombre key={crear} {...nombrar} crear={crear} />
+          : <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>}
       </div>
-      <BarraVista tipo={tipo} total={total} abierta={abierta} cambiada={cambiada} filtrosCambiados={esFija(activa) && filtrosCambiados} puedeGuardar={puedeGuardar}
-        onDescartar={() => onElegir(activa)} onGuardar={guardar} actual={actual} onCreada={(id) => { recargar(); onElegir(String(id)); }}
-        crear={crear} setCrear={setCrear} onRecargar={onActualizar} ayudaGuardar={ayudaGuardar} onRenombrada={recargar} />
+      <BarraVista total={total} abierta={abierta} cambiada={cambiada} filtrosCambiados={esFija(activa) && filtrosCambiados} puedeGuardar={puedeGuardar}
+        onDescartar={() => onElegir(activa)} onGuardar={guardar} crear={crear} setCrear={setCrear} onRecargar={onActualizar} />
     </>
   );
 }

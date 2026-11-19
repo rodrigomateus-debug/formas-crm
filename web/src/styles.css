@@ -272,6 +272,15 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .tab-wrap { display: inline-flex; align-items: center; gap: 2px; }
 .tab-wrap .tab svg { margin-right: 2px; vertical-align: -2px; }
 .view-menu { position: relative; display: inline-flex; }
+/* Nombrar una vista en la pestaña misma (PestanaNombre en vistas.tsx): el nombre se escribe sobre la pestaña, con quién
+   la ve y ✓ / ✕ al lado. */
+.tab-nombre { gap: 6px; flex: none; }
+.tab-nombre .tab { cursor: text; }
+.tab-nombre-input { font: inherit; color: inherit; height: 26px; padding: 0 6px; margin: 0 -6px; border: 1px solid var(--accent-ink); border-radius: var(--r-control);
+  background: var(--ui-surface); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); max-width: 40ch; }
+.tab-nombre .select-like { height: 26px; width: auto !important; min-width: 0; font-size: 12px; }
+.tab-nombre .view-menu-btn[type=submit] { color: var(--accent-ink); }
+.tab-nombre .view-menu-btn:disabled { opacity: .4; cursor: default; }
 /* Opciones de la vista guardada: la flechita al lado de la pestaña activa. */
 .view-menu-btn { width: 22px; height: 22px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-control); background: none;
   color: var(--ui-ink-3); cursor: pointer; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
@@ -284,9 +293,6 @@ label.field, div.field { display: flex; flex-direction: column; gap: 6px; font-s
 .barra-vista.con-cambios .bv-estado { color: var(--accent-ink); }
 .barra-vista .bv-acciones { flex: none; display: flex; align-items: center; gap: 8px; }
 .barra-vista .bv-grupo { flex-wrap: nowrap; }
-.barra-vista .bv-crear { flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
-.barra-vista .bv-crear-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink-2); }
-.barra-vista .bv-crear .input:not(select) { width: 280px; min-width: 120px; flex: 0 1 auto; }
 body:has(.barra-vista) .toast { bottom: 76px; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-ink); display: inline-grid; place-items: center; font-size: 11px; font-weight: 600; flex: none; }
 .avatar.lg { width: 48px; height: 48px; font-size: 17px; }
@@ -696,8 +702,6 @@ table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { disp
   .barra-vista { flex-wrap: wrap; padding: 8px 16px; gap: 8px; }
   .barra-vista .bv-estado:empty { display: none; }
   .barra-vista .bv-centro { order: 9; flex-basis: 100%; }
-  .barra-vista .bv-crear { flex-wrap: wrap; justify-content: flex-start; }
-  .barra-vista .bv-crear .input:not(select) { width: 100%; }
   body:has(.barra-vista) .toast { bottom: 120px; }
   .grid-2 { grid-template-columns: 1fr; }
   .filter-row { grid-template-columns: 1fr 1fr; }

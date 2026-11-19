@@ -1,7 +1,7 @@
 import type { Ctx, User } from './env';
 import { HttpError, now } from './env';
 
-// Buzón de ideas (pedido de Rodrigo del 19/11/2026): lo que dibuja Formi, el personaje de abajo a la derecha del Hub.
+// Buzón de ideas (pedido de Rodrigo del 19/11/2026): lo que dibuja Chispín, el personaje de abajo a la derecha del Hub.
 // - Cualquiera propone una mejora y vota las de los demás (un voto por persona; quien propone ya la vota).
 // - El ranking: las que están en marcha arriba y después las pendientes, de más votos a menos.
 // - Los administradores las van haciendo: «en marcha», «hecha» o «no va», con una respuesta opcional. Al pasar de estado,

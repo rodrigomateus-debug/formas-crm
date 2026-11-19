@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, userOf } from './lib';
 import { UserAvatar } from './components';
 
-// Formi (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
+// Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
 // que junta las ideas para mejorarlo. Es una «forma» que cambia de forma (Formas), con una lamparita arriba que se prende
 // cuando hay ideas nuevas. Sigue el mouse con los ojos, parpadea, se duerme si nadie lo mira, festeja cuando se hace una
 // idea tuya y, de vez en cuando, dice algo. Se puede esconder (queda espiando desde el borde).
@@ -19,12 +19,12 @@ export interface Idea {
 type Pestana = 'ranking' | 'hechas' | 'mias';
 
 // ---------- Lo que se recuerda en este navegador (si no se puede, se arranca de cero) ----------
-const leer = (k: string) => { try { return localStorage.getItem(`formi.${k}`); } catch { return null; } };
-const guardar = (k: string, v: string) => { try { localStorage.setItem(`formi.${k}`, v); } catch { /* sin almacenamiento */ } };
+const leer = (k: string) => { try { return localStorage.getItem(`chispin.${k}`); } catch { return null; } };
+const guardar = (k: string, v: string) => { try { localStorage.setItem(`chispin.${k}`, v); } catch { /* sin almacenamiento */ } };
 
 // ---------- Abrir el buzón desde otro lado (la campanita) ----------
 let abrirDesdeAfuera: ((id?: number) => void) | null = null;
-export function abrirFormi(id?: number) { abrirDesdeAfuera?.(id); }
+export function abrirChispin(id?: number) { abrirDesdeAfuera?.(id); }
 
 const FRASES = [
   '¿Algo del Hub te hace renegar? Contámelo y lo arreglamos.',
@@ -61,7 +61,7 @@ export function festejar(desde?: HTMLElement | null) {
   const r = desde?.getBoundingClientRect();
   const x = r ? r.left + r.width / 2 : innerWidth - 60, y = r ? r.top + r.height / 2 : innerHeight - 60;
   const capa = document.createElement('div');
-  capa.className = 'formi-papelitos';
+  capa.className = 'chispin-papelitos';
   capa.style.left = `${x}px`; capa.style.top = `${y}px`;
   for (let k = 0; k < 34; k++) {
     const p = document.createElement('i');
@@ -80,23 +80,23 @@ export function festejar(desde?: HTMLElement | null) {
 // ---------- El personaje ----------
 function Personaje({ animo, lampara, ojosRef }: { animo: string; lampara: boolean; ojosRef: React.RefObject<HTMLSpanElement> }) {
   return (
-    <span className={`formi-bicho ${animo}`} aria-hidden="true">
-      <span className={`formi-antena${lampara ? ' prendida' : ''}`}><span className="formi-lampara" /></span>
-      <span className="formi-cuerpo">
-        <span className="formi-ojos" ref={ojosRef}>
-          <span className="formi-ojo"><span className="formi-pupila" /></span>
-          <span className="formi-ojo"><span className="formi-pupila" /></span>
+    <span className={`chispin-bicho ${animo}`} aria-hidden="true">
+      <span className={`chispin-antena${lampara ? ' prendida' : ''}`}><span className="chispin-lampara" /></span>
+      <span className="chispin-cuerpo">
+        <span className="chispin-ojos" ref={ojosRef}>
+          <span className="chispin-ojo"><span className="chispin-pupila" /></span>
+          <span className="chispin-ojo"><span className="chispin-pupila" /></span>
         </span>
-        <span className="formi-cachetes"><span /><span /></span>
-        <span className="formi-boca" />
+        <span className="chispin-cachetes"><span /><span /></span>
+        <span className="chispin-boca" />
       </span>
-      <span className="formi-mano izq" /><span className="formi-mano der" />
-      <span className="formi-zzz"><i>z</i><i>z</i><i>z</i></span>
+      <span className="chispin-mano izq" /><span className="chispin-mano der" />
+      <span className="chispin-zzz"><i>z</i><i>z</i><i>z</i></span>
     </span>
   );
 }
 
-export default function Formi() {
+export default function Chispin() {
   const { meta } = useMeta();
   const yo = meta.me.id;
   const toast = useToast();
@@ -159,7 +159,7 @@ export default function Formi() {
       g = { tipo: 'festejo', texto: `${hecha.user_id === yo ? '¡Se hizo tu idea!' : '¡Se hizo una idea que votaste!'} «${corto}»` };
     } else if (!leer('hola')) {
       guardar('hola', '1');
-      g = { tipo: 'hola', texto: '¡Hola! Soy Formi 👋 Guardo las ideas para mejorar el Hub. Proponé las tuyas y votá las de los demás.' };
+      g = { tipo: 'hola', texto: '¡Hola! Soy Chispín 👋 Guardo las ideas para mejorar el Hub. Proponé las tuyas y votá las de los demás.' };
     } else if (nuevas > 0 && leer('aviso_nuevas') !== `${hoy}:${maxId}`) {
       guardar('aviso_nuevas', `${hoy}:${maxId}`);
       g = { tipo: 'nuevas', texto: nuevas === 1 ? 'Hay una idea nueva esperando tu voto 👀' : `Hay ${nuevas} ideas nuevas esperando tu voto 👀` };
@@ -209,8 +209,8 @@ export default function Formi() {
   const lampara = abierto || nuevas > 0 || globo?.tipo === 'festejo';
 
   return createPortal(
-    <div className={`formi-zona${(escondido || estorba) && !abierto ? ' escondido' : ''}${abierto ? ' abierto' : ''}`}>
-      {abierto && <div className="formi-velo" onClick={() => setAbierto(false)} aria-hidden="true" />}
+    <div className={`chispin-zona${(escondido || estorba) && !abierto ? ' escondido' : ''}${abierto ? ' abierto' : ''}`}>
+      {abierto && <div className="chispin-velo" onClick={() => setAbierto(false)} aria-hidden="true" />}
       {abierto && ideas && (
         <Buzon ideas={ideas} admin={admin} yo={yo} resaltar={resaltar} onResaltado={() => setResaltar(null)} cerrar={() => setAbierto(false)}
           cambiar={(i) => setIdeas((l) => (l ?? []).map((x) => (x.id === i.id ? i : x)))}
@@ -219,23 +219,23 @@ export default function Formi() {
           festejo={() => { setAnimo('feliz'); festejar(botonRef.current); setTimeout(() => setAnimo(''), 2000); }}
           toast={toast} />
       )}
-      {abierto && !ideas && <div className="formi-panel cargando" role="dialog" aria-label="Buzón de ideas"><div className="muted small">Buscando las ideas…</div></div>}
+      {abierto && !ideas && <div className="chispin-panel cargando" role="dialog" aria-label="Buzón de ideas"><div className="muted small">Buscando las ideas…</div></div>}
       {globo && !abierto && !estorba && (
-        <div className={`formi-globo ${globo.tipo}`} role="status">
-          <button type="button" className="formi-globo-texto" onClick={() => abrir()}>{globo.texto}</button>
-          <button type="button" className="formi-globo-x" onClick={() => setGlobo(null)} aria-label="Cerrar"><Icon name="x" size={12} /></button>
+        <div className={`chispin-globo ${globo.tipo}`} role="status">
+          <button type="button" className="chispin-globo-texto" onClick={() => abrir()}>{globo.texto}</button>
+          <button type="button" className="chispin-globo-x" onClick={() => setGlobo(null)} aria-label="Cerrar"><Icon name="x" size={12} /></button>
         </div>
       )}
-      <div className="formi-lugar">
-        <button ref={botonRef} type="button" className="formi" onClick={() => (abierto ? setAbierto(false) : escondido && !estorba ? esconder(false) : abrir())}
+      <div className="chispin-lugar">
+        <button ref={botonRef} type="button" className="chispin" onClick={() => (abierto ? setAbierto(false) : escondido && !estorba ? esconder(false) : abrir())}
           onPointerEnter={() => setAnimo((a) => (a === '' || a === 'duerme' ? 'mira' : a))} onPointerLeave={() => setAnimo((a) => (a === 'mira' ? '' : a))}
-          aria-expanded={abierto} aria-label={escondido ? 'Mostrar a Formi (buzón de ideas)' : nuevas ? `Buzón de ideas: ${nuevas} nuevas` : 'Buzón de ideas para mejorar el Hub'}
-          title={escondido ? 'Volver a mostrar a Formi' : 'Ideas para mejorar el Hub'}>
+          aria-expanded={abierto} aria-label={escondido ? 'Mostrar a Chispín (buzón de ideas)' : nuevas ? `Buzón de ideas: ${nuevas} nuevas` : 'Buzón de ideas para mejorar el Hub'}
+          title={escondido ? 'Volver a mostrar a Chispín' : 'Ideas para mejorar el Hub'}>
           <Personaje animo={animo} lampara={lampara} ojosRef={ojosRef} />
-          {nuevas > 0 && !abierto && <span className="formi-n">{nuevas > 9 ? '9+' : nuevas}</span>}
+          {nuevas > 0 && !abierto && <span className="chispin-n">{nuevas > 9 ? '9+' : nuevas}</span>}
         </button>
         {!escondido && !estorba && !abierto && (
-          <button type="button" className="formi-esconder" onClick={() => esconder(true)} aria-label="Esconder a Formi" title="Esconder a Formi (queda espiando en el borde)">
+          <button type="button" className="chispin-esconder" onClick={() => esconder(true)} aria-label="Esconder a Chispín" title="Esconder a Chispín (queda espiando en el borde)">
             <Icon name="x" size={10} />
           </button>
         )}
@@ -283,7 +283,7 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
     if (!i) { onResaltado(); return; }
     setPestana(i.estado === 'hecha' || i.estado === 'descartada' ? 'hechas' : 'ranking');
     const t = setTimeout(() => {
-      document.getElementById(`formi-idea-${resaltar}`)?.scrollIntoView({ block: 'center', behavior: reducido() ? 'auto' : 'smooth' });
+      document.getElementById(`chispin-idea-${resaltar}`)?.scrollIntoView({ block: 'center', behavior: reducido() ? 'auto' : 'smooth' });
       setTimeout(onResaltado, 2600);
     }, 60);
     return () => clearTimeout(t);
@@ -296,12 +296,12 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
       const i = await http<Idea>('POST', '/ideas', { texto });
       agregar(i); setTexto(''); setPestana('ranking');
       toast('¡Ñam! Idea guardada. Ahora a juntar votos 🗳️');
-      setTimeout(() => document.getElementById(`formi-idea-${i.id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 80);
+      setTimeout(() => document.getElementById(`chispin-idea-${i.id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 80);
     } catch (e) {
       const err = e as Error & { data?: { idea_id?: number } };
       toast(err.message, true);
       const id = err.data?.idea_id;
-      if (id) { setPestana('ranking'); setTimeout(() => document.getElementById(`formi-idea-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60); }
+      if (id) { setPestana('ranking'); setTimeout(() => document.getElementById(`chispin-idea-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 60); }
     } finally { setMandando(false); }
   };
 
@@ -316,65 +316,65 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
     <Tarjeta key={i.id} idea={i} puesto={puesto} admin={admin} yo={yo} resaltada={resaltar === i.id} cambiar={cambiar} quitar={quitar} festejo={festejo} toast={toast} />
   );
   return (
-    <div className="formi-panel" role="dialog" aria-label="Buzón de ideas">
-      <div className="formi-cab">
-        <div className="formi-cab-txt">
+    <div className="chispin-panel" role="dialog" aria-label="Buzón de ideas">
+      <div className="chispin-cab">
+        <div className="chispin-cab-txt">
           <b>Buzón de ideas</b>
           <span>Proponé mejoras para el Hub y votá las de los demás: las más votadas se hacen primero.</span>
         </div>
         <button type="button" className="btn ghost icon sm" onClick={cerrar} aria-label="Cerrar el buzón"><Icon name="x" size={16} /></button>
       </div>
 
-      <div className="formi-escribir">
+      <div className="chispin-escribir">
         <textarea ref={areaRef} className="input" rows={2} maxLength={1000} placeholder={ejemplo} value={texto} onChange={(e) => setTexto(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); proponer(); } }} aria-label="Tu idea para mejorar el Hub" />
         {similares.length > 0 && (
-          <div className="formi-parecidas">
+          <div className="chispin-parecidas">
             <span className="small">¿Es alguna de estas? <b>Votala</b> en vez de repetirla:</span>
             {similares.map((i) => (
-              <div key={i.id} className="formi-parecida">
+              <div key={i.id} className="chispin-parecida">
                 <span className="grow">{i.texto.length > 90 ? `${i.texto.slice(0, 88)}…` : i.texto}</span>
                 <BotonVoto idea={i} cambiar={cambiar} toast={toast} chico />
               </div>
             ))}
           </div>
         )}
-        <div className="formi-escribir-pie">
-          {texto.length > 800 ? <span className="small muted">{1000 - texto.length} caracteres más</span> : <span className="small muted formi-atajo">Ctrl + Enter para mandar</span>}
+        <div className="chispin-escribir-pie">
+          {texto.length > 800 ? <span className="small muted">{1000 - texto.length} caracteres más</span> : <span className="small muted chispin-atajo">Ctrl + Enter para mandar</span>}
           <button type="button" className="btn primary sm" onClick={proponer} disabled={mandando || !texto.trim()}>
             <Icon name="spark" size={14} />{mandando ? 'Mandando…' : 'Proponer'}
           </button>
         </div>
       </div>
 
-      <div className="formi-pestanas seg sm" role="tablist">
+      <div className="chispin-pestanas seg sm" role="tablist">
         <button role="tab" aria-selected={pestana === 'ranking'} className={pestana === 'ranking' ? 'on' : ''} onClick={() => setPestana('ranking')}>Ranking · {pendientes.length + enMarcha.length}</button>
         <button role="tab" aria-selected={pestana === 'hechas'} className={pestana === 'hechas' ? 'on' : ''} onClick={() => setPestana('hechas')}>Hechas · {hechas.length}</button>
         <button role="tab" aria-selected={pestana === 'mias'} className={pestana === 'mias' ? 'on' : ''} onClick={() => setPestana('mias')}>Mías · {mias.length}</button>
       </div>
 
-      <div className="formi-lista" ref={listaRef}>
+      <div className="chispin-lista" ref={listaRef}>
         {pestana === 'ranking' && <>
           {(pendientes.length + enMarcha.length) > 0 && (
-            <div className="formi-ayuda-voto">
-              <span className="formi-ayuda-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width={14} height={14}><path d="M12 5l7 9h-4.5v5h-5v-5H5z" fill="currentColor" /></svg></span>
+            <div className="chispin-ayuda-voto">
+              <span className="chispin-ayuda-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width={14} height={14}><path d="M12 5l7 9h-4.5v5h-5v-5H5z" fill="currentColor" /></svg></span>
               <span><b>Votá las ideas que te sirven</b> con el botón <b>Votar</b>: las más votadas se hacen primero. Podés votar todas las que quieras.
-                {' '}{sinVotar > 0 ? <b className="formi-faltan">{sinVotar === 1 ? 'Te queda 1 por votar.' : `Te quedan ${sinVotar} por votar.`}</b> : <span className="formi-faltan listo">Ya votaste todas 🙌</span>}</span>
+                {' '}{sinVotar > 0 ? <b className="chispin-faltan">{sinVotar === 1 ? 'Te queda 1 por votar.' : `Te quedan ${sinVotar} por votar.`}</b> : <span className="chispin-faltan listo">Ya votaste todas 🙌</span>}</span>
             </div>
           )}
-          {enMarcha.length > 0 && <div className="formi-grupo"><span className="formi-grupo-ic en_curso"><Icon name="settings" size={12} /></span>En marcha</div>}
+          {enMarcha.length > 0 && <div className="chispin-grupo"><span className="chispin-grupo-ic en_curso"><Icon name="settings" size={12} /></span>En marcha</div>}
           {enMarcha.map((i) => tarjeta(i))}
-          {enMarcha.length > 0 && pendientes.length > 0 && <div className="formi-grupo"><span className="formi-grupo-ic"><Icon name="star" size={12} /></span>Para votar</div>}
+          {enMarcha.length > 0 && pendientes.length > 0 && <div className="chispin-grupo"><span className="chispin-grupo-ic"><Icon name="star" size={12} /></span>Para votar</div>}
           {pendientes.map((i, k) => tarjeta(i, k + 1))}
           {!pendientes.length && !enMarcha.length && <Vacio texto="No hay ideas pendientes. ¡Sé la primera persona en proponer algo!" />}
         </>}
         {pestana === 'hechas' && <>
           {fama.length > 0 && (
-            <div className="formi-fama">
+            <div className="chispin-fama">
               <span className="small"><b>Salón de la fama</b> · ideas hechas por persona</span>
-              <div className="formi-fama-lista">
+              <div className="chispin-fama-lista">
                 {fama.map(([u, n]) => (
-                  <span key={u} className="formi-fama-u" title={`${userOf(meta, u)?.name ?? 'Alguien'}: ${n} ${n === 1 ? 'idea hecha' : 'ideas hechas'}`}>
+                  <span key={u} className="chispin-fama-u" title={`${userOf(meta, u)?.name ?? 'Alguien'}: ${n} ${n === 1 ? 'idea hecha' : 'ideas hechas'}`}>
                     <UserAvatar id={u} size="sm" /><b>{n}</b>
                   </span>
                 ))}
@@ -384,7 +384,7 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
           {hechas.map((i) => tarjeta(i))}
           {!hechas.length && <Vacio texto="Todavía no se hizo ninguna. La primera va a tener papelitos 🎉" />}
           {noVan.length > 0 && <>
-            <div className="formi-grupo"><span className="formi-grupo-ic descartada"><Icon name="x" size={12} /></span>No van (por ahora)</div>
+            <div className="chispin-grupo"><span className="chispin-grupo-ic descartada"><Icon name="x" size={12} /></span>No van (por ahora)</div>
             {noVan.map((i) => tarjeta(i))}
           </>}
         </>}
@@ -398,7 +398,7 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
 }
 
 function Vacio({ texto }: { texto: string }) {
-  return <div className="formi-vacio"><Personaje animo="mira" lampara={false} ojosRef={{ current: null }} /><span>{texto}</span></div>;
+  return <div className="chispin-vacio"><Personaje animo="mira" lampara={false} ojosRef={{ current: null }} /><span>{texto}</span></div>;
 }
 
 const ESTADO_LABEL: Record<Idea['estado'], string> = { pendiente: 'Pendiente', en_curso: 'En marcha', hecha: 'Hecha', descartada: 'No va' };
@@ -416,7 +416,7 @@ function BotonVoto({ idea, cambiar, toast, chico }: { idea: Idea; cambiar: (i: I
     catch (e) { cambiar(idea); toast((e as Error).message, true); }
   };
   return (
-    <button type="button" className={`formi-voto${idea.votada ? ' on' : ''}${chico ? ' chico' : ''}${pop ? ' pop' : ''}`} onClick={votar} disabled={!abierta}
+    <button type="button" className={`chispin-voto${idea.votada ? ' on' : ''}${chico ? ' chico' : ''}${pop ? ' pop' : ''}`} onClick={votar} disabled={!abierta}
       aria-pressed={idea.votada} title={!abierta ? `${idea.votos} ${idea.votos === 1 ? 'voto' : 'votos'}` : idea.votada ? 'Sacar mi voto' : 'Votar esta idea'}
       aria-label={`${idea.votada ? 'Sacar mi voto' : 'Votar'} (${idea.votos} ${idea.votos === 1 ? 'voto' : 'votos'})`}>
       {idea.votada && abierta
@@ -424,8 +424,8 @@ function BotonVoto({ idea, cambiar, toast, chico }: { idea: Idea; cambiar: (i: I
         : <svg viewBox="0 0 24 24" width={chico ? 12 : 15} height={chico ? 12 : 15} aria-hidden="true"><path d="M12 5l7 9h-4.5v5h-5v-5H5z" fill="currentColor" /></svg>}
       {/* Que se lea que es un voto (pedido de Rodrigo): «Votar» / «Votaste» y el número; cerrada, solo cuántos votos tuvo. */}
       {chico
-        ? <span className="formi-voto-txt">{idea.votada ? 'Votaste' : 'Votar'} · <b>{idea.votos}</b></span>
-        : <><b>{idea.votos}</b><span className="formi-voto-txt">{!abierta ? (idea.votos === 1 ? 'voto' : 'votos') : idea.votada ? 'Votaste' : 'Votar'}</span></>}
+        ? <span className="chispin-voto-txt">{idea.votada ? 'Votaste' : 'Votar'} · <b>{idea.votos}</b></span>
+        : <><b>{idea.votos}</b><span className="chispin-voto-txt">{!abierta ? (idea.votos === 1 ? 'voto' : 'votos') : idea.votada ? 'Votaste' : 'Votar'}</span></>}
     </button>
   );
 }
@@ -466,45 +466,45 @@ function Tarjeta({ idea, puesto, admin, yo, resaltada, cambiar, quitar, festejo,
   };
 
   return (
-    <article id={`formi-idea-${idea.id}`} className={`formi-idea ${idea.estado}${resaltada ? ' resaltada' : ''}`} style={{ '--i': puesto ?? 0 } as CSSProperties}>
+    <article id={`chispin-idea-${idea.id}`} className={`chispin-idea ${idea.estado}${resaltada ? ' resaltada' : ''}`} style={{ '--i': puesto ?? 0 } as CSSProperties}>
       <BotonVoto idea={idea} cambiar={cambiar} toast={toast} />
-      <div className="formi-idea-cuerpo">
+      <div className="chispin-idea-cuerpo">
         {editando
-          ? <div className="formi-editar">
+          ? <div className="chispin-editar">
               <textarea className="input" rows={3} maxLength={1000} value={texto} onChange={(e) => setTexto(e.target.value)} autoFocus />
-              <div className="formi-acciones">
+              <div className="chispin-acciones">
                 <button type="button" className="btn sm" onClick={() => { setEditando(false); setTexto(idea.texto); }}>Cancelar</button>
                 <button type="button" className="btn primary sm" onClick={guardarTexto} disabled={ocupado || texto.trim().length < 8}>Guardar</button>
               </div>
             </div>
-          : <p className="formi-idea-texto">
-              {puesto && puesto <= 3 && idea.votos > 1 && <span className={`formi-puesto p${puesto}`} title={`Puesto ${puesto} del ranking`}>{puesto === 1 ? '👑' : `#${puesto}`}</span>}
+          : <p className="chispin-idea-texto">
+              {puesto && puesto <= 3 && idea.votos > 1 && <span className={`chispin-puesto p${puesto}`} title={`Puesto ${puesto} del ranking`}>{puesto === 1 ? '👑' : `#${puesto}`}</span>}
               {idea.texto}
             </p>}
-        <div className="formi-idea-meta">
+        <div className="chispin-idea-meta">
           <UserAvatar id={idea.user_id} size="xs" />
           <span>{quien}</span>
           <span className="muted" title={fmtDate(idea.created_at, true)}>· {fmtRelative(idea.created_at, true)}</span>
-          {nueva && <span className="formi-chip nueva">Nueva</span>}
-          {idea.estado !== 'pendiente' && <span className={`formi-chip ${idea.estado}`}>{ESTADO_LABEL[idea.estado]}{idea.estado_at && idea.estado !== 'en_curso' ? ` el ${fmtDate(idea.estado_at)}` : ''}</span>}
+          {nueva && <span className="chispin-chip nueva">Nueva</span>}
+          {idea.estado !== 'pendiente' && <span className={`chispin-chip ${idea.estado}`}>{ESTADO_LABEL[idea.estado]}{idea.estado_at && idea.estado !== 'en_curso' ? ` el ${fmtDate(idea.estado_at)}` : ''}</span>}
           {otros.length > 0 && (
-            <span className="formi-votantes" title={`La votaron: ${otros.map((u) => userOf(meta, u)?.name ?? 'Alguien').join(', ')}`}>
+            <span className="chispin-votantes" title={`La votaron: ${otros.map((u) => userOf(meta, u)?.name ?? 'Alguien').join(', ')}`}>
               {otros.slice(0, 3).map((u) => <UserAvatar key={u} id={u} size="xs" />)}
-              {otros.length > 3 && <span className="formi-mas">+{otros.length - 3}</span>}
+              {otros.length > 3 && <span className="chispin-mas">+{otros.length - 3}</span>}
             </span>
           )}
         </div>
         {idea.respuesta && !marcar && (
-          <div className="formi-respuesta">
+          <div className="chispin-respuesta">
             {idea.estado_por && <UserAvatar id={idea.estado_por} size="xs" />}
             <span><b>{idea.estado_por ? userOf(meta, idea.estado_por)?.name.split(' ')[0] ?? 'Admin' : 'Respuesta'}:</b> {idea.respuesta}</span>
           </div>
         )}
         {marcar && (
-          <div className="formi-editar">
+          <div className="chispin-editar">
             <textarea className="input" rows={2} maxLength={1000} value={respuesta} onChange={(e) => setRespuesta(e.target.value)} autoFocus
               placeholder={marcar === 'hecha' ? 'Contales qué se hizo y dónde está (opcional)' : marcar === 'descartada' ? '¿Por qué no va? (opcional, pero ayuda)' : 'Un comentario para el equipo (opcional)'} />
-            <div className="formi-acciones">
+            <div className="chispin-acciones">
               <button type="button" className="btn sm" onClick={() => { setMarcar(null); setRespuesta(idea.respuesta ?? ''); }}>Cancelar</button>
               <button type="button" className={`btn sm ${marcar === 'descartada' ? 'danger' : 'primary'}`} onClick={() => cambiarEstado(marcar)} disabled={ocupado}>
                 {marcar === idea.estado ? 'Guardar respuesta' : marcar === 'hecha' ? '¡Marcar hecha!' : marcar === 'en_curso' ? 'Poner en marcha' : marcar === 'descartada' ? 'No va' : 'Volver a pendiente'}
@@ -513,9 +513,9 @@ function Tarjeta({ idea, puesto, admin, yo, resaltada, cambiar, quitar, festejo,
           </div>
         )}
         {!editando && !marcar && (admin || idea.puede_editar) && (
-          <div className="formi-acciones">
+          <div className="chispin-acciones">
             {admin && idea.estado === 'pendiente' && <button type="button" className="btn ghost sm" onClick={() => setMarcar('en_curso')}><Icon name="settings" size={12} />En marcha</button>}
-            {admin && idea.estado !== 'hecha' && <button type="button" className="btn ghost sm formi-hecha" onClick={() => setMarcar('hecha')}><Icon name="check" size={12} />Hecha</button>}
+            {admin && idea.estado !== 'hecha' && <button type="button" className="btn ghost sm chispin-hecha" onClick={() => setMarcar('hecha')}><Icon name="check" size={12} />Hecha</button>}
             {admin && idea.estado !== 'descartada' && idea.estado !== 'hecha' && <button type="button" className="btn ghost sm" onClick={() => setMarcar('descartada')}>No va</button>}
             {admin && idea.estado !== 'pendiente' && <button type="button" className="btn ghost sm" onClick={() => setMarcar('pendiente')}>A pendiente</button>}
             {admin && <button type="button" className="btn ghost sm" onClick={() => setMarcar(idea.estado)}>{idea.respuesta ? 'Cambiar respuesta' : 'Responder'}</button>}

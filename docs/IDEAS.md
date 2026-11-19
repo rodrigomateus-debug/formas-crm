@@ -1,4 +1,4 @@
-# Buzón de ideas: Formi
+# Buzón de ideas: Chispín
 
 Pedido de Rodrigo del 19/11/2026: un personaje divertido, siempre abajo a la derecha del Hub, donde cualquiera propone
 mejoras, las demás personas proponen otras o votan las que les sirven, quedan rankeadas, y los administradores las van
@@ -6,10 +6,11 @@ haciendo y marcando como completadas.
 
 ## Para el equipo
 
-**Formi** es una «forma» que cambia de forma (es de Formas): pasa de gota a casi cuadrado, a huevo y a círculo. Tiene una
-lamparita arriba que se prende cuando hay ideas nuevas, con un número rojo de cuántas son.
+**Chispín** es una «forma» que cambia de forma (es de Formas): pasa de gota a casi cuadrado, a huevo y a círculo. Tiene una
+lamparita arriba que se prende cuando hay ideas nuevas, con un número rojo de cuántas son. Se llama así por la chispa de una idea, que
+es lo que se prende en esa lamparita.
 
-- **Un clic en Formi** abre el buzón. Arriba se escribe la idea y **Proponer** (o Ctrl + Enter). Mientras se escribe, si
+- **Un clic en Chispín** abre el buzón. Arriba se escribe la idea y **Proponer** (o Ctrl + Enter). Mientras se escribe, si
   ya hay una parecida, la muestra: «¿Es alguna de estas? Sumale tu voto en vez de repetirla». La misma idea dos veces no
   entra: el Hub lleva a la que ya está.
 - **Ranking**: arriba lo que está **en marcha**; abajo, **para votar**, de más votos a menos (la primera con 👑, después
@@ -21,7 +22,7 @@ lamparita arriba que se prende cuando hay ideas nuevas, con un número rojo de c
   la fama** (cuántas ideas de cada uno se hicieron) y, al final, las que **no van** (por ahora).
 - **Mías**: las que propuso cada uno. Mientras está pendiente se puede **corregir** o **borrar**.
 
-Formi también tiene vida propia: sigue el mouse con los ojos, parpadea, saluda al pasar por encima, se duerme si nadie
+Chispín también tiene vida propia: sigue el mouse con los ojos, parpadea, saluda al pasar por encima, se duerme si nadie
 mueve el mouse un buen rato y salta con papelitos cuando se hace una idea tuya (o una que votaste). Una vez por día dice
 algo (la primera vez se presenta; después avisa si hay ideas nuevas o tira una frase). Con la ✕ que aparece al pasar
 por encima se **esconde** y queda espiando desde el borde; un clic lo vuelve a traer. En Conversaciones (y con la
@@ -59,7 +60,7 @@ contales dónde está». El link de cada idea es `https://<hub>/?idea=<id>`: abr
   misma idea abierta no se repite), corregir y borrar (autor mientras está pendiente, o administrador), votar (solo
   abiertas) y cambiar de estado (administradores, con los avisos). Rutas en `api.ts` (`/api/ideas…`); los de solo lectura
   también proponen y votan; mirando «Ver como», no.
-- `web/src/Formi.tsx`: el personaje (HTML y CSS, sin imágenes), el globito, el buzón y los papelitos. Lo que recuerda
+- `web/src/Chispin.tsx`: el personaje (HTML y CSS, sin imágenes), el globito, el buzón y los papelitos. Lo que recuerda
   cada navegador (lo último visto, si está escondido, el borrador, qué ya festejó) va en `localStorage` con prefijo
-  `formi.`; sin eso, arranca de cero. Estilos al final de `web/src/styles.css` (claro, oscuro y alto contraste).
+  `chispin.`; sin eso, arranca de cero. Estilos al final de `web/src/styles.css` (claro, oscuro y alto contraste).
 - Prueba: `test/ideas.test.mjs`.

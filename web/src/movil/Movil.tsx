@@ -16,7 +16,7 @@ import { NegociosLista, FichaNegocio, AltaNegocio, PedidosLista, FichaPedido } f
 import { TareasMovil, ChatMovil, ChatAbierto } from './TareasChatMovil';
 import { HoyLogistica, DiaMovil, EntregasMovil, ChoferesMovil } from './LogisticaMovil';
 import { HoyProduccion, ProduccionLista, FichaPdv } from './ProduccionMovil';
-import Formi from '../Formi';
+import Chispin from '../Chispin';
 import './movil.css';
 
 // Versión celular del Hub (pedido de Rodrigo del 18/11/2026): en el teléfono, los perfiles Ventas, Logística y Producción
@@ -123,8 +123,8 @@ export default function AppMovil({ perfil }: { perfil: PerfilMovil }) {
       {crear && <MenuCrear perfil={perfil} onClose={() => setCrear(false)} />}
       {mas && <MenuMas perfil={perfil} onClose={() => setMas(false)} />}
       {puede && !operaciones && <PreguntaLlamada />}
-      {/* Formi, el buzón de ideas (Formi.tsx): arriba de la barra de abajo, salvo donde se escribe (un chat, un encargo). */}
-      {!completa && !/^\/conversaciones\/|\/nuevo$/.test(loc.pathname) && <Formi />}
+      {/* Chispín, el buzón de ideas (Chispin.tsx): arriba de la barra de abajo, salvo donde se escribe (un chat, un encargo). */}
+      {!completa && !/^\/conversaciones\/|\/nuevo$/.test(loc.pathname) && <Chispin />}
     </div>
   );
 }

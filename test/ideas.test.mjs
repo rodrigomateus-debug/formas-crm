@@ -1,4 +1,4 @@
-// Buzón de ideas (ideas.ts, Formi): todos proponen y votan, el ranking por votos, los administradores las marcan y la
+// Buzón de ideas (ideas.ts, Chispín): todos proponen y votan, el ranking por votos, los administradores las marcan y la
 // campanita avisa a quien la propuso y a los que la votaron.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

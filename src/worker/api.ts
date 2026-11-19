@@ -1570,7 +1570,7 @@ api.delete('/productos/notas/:id', async (c) => {
 });
 api.get('/productos/notas/:id/foto', async (c) => fotoNotaProducto(c.env, Number(c.req.param('id'))));
 
-// ---------- Buzón de ideas (ideas.ts): Formi, abajo a la derecha. Todos proponen y votan; los administradores las marcan ----------
+// ---------- Buzón de ideas (ideas.ts): Chispín, abajo a la derecha. Todos proponen y votan; los administradores las marcan ----------
 
 api.get('/ideas', async (c) => c.json(await listarIdeas(c.env.DB, c.get('ctx').user)));
 api.post('/ideas', async (c) => c.json(await crearIdea(c.env.DB, c.get('ctx'), await c.req.json()), 201));

@@ -1,4 +1,4 @@
--- Buzón de ideas (pedido de Rodrigo del 19/11/2026): Formi, el personaje de abajo a la derecha del Hub, junta las propuestas de
+-- Buzón de ideas (pedido de Rodrigo del 19/11/2026): Chispín, el personaje de abajo a la derecha del Hub, junta las propuestas de
 -- mejora de todos. Cualquiera propone y vota las de los demás; las más votadas van primero; los administradores las van
 -- haciendo y las marcan («en marcha», «hecha» o «no va», con una respuesta). Ver src/worker/ideas.ts y docs/IDEAS.md.
 CREATE TABLE ideas (

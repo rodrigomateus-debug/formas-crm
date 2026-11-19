@@ -491,7 +491,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'ideas_del_hub',
-    description: 'El buzón de ideas del Hub (Formi, abajo a la derecha): las mejoras que propone el equipo, en el orden del ranking (en marcha, después las pendientes de más votos a menos, '
+    description: 'El buzón de ideas del Hub (Chispín, abajo a la derecha): las mejoras que propone el equipo, en el orden del ranking (en marcha, después las pendientes de más votos a menos, '
       + 'después las hechas y las descartadas). Cada una con su texto, quién la propuso, votos y estado. `estado` filtra: pendiente, en_curso, hecha, descartada o abiertas (pendientes y en marcha).',
     readOnly: true,
     inputSchema: { type: 'object', properties: { estado: { type: 'string', enum: ['abiertas', 'pendiente', 'en_curso', 'hecha', 'descartada'] } } },

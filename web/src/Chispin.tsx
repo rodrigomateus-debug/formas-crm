@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, fmtMoney, userOf, CINTA, type Stage } from './lib';
 import { UserAvatar, etapaPedidoSlug } from './components';
+import { agruparProductos, svgIcono, type Subcategoria } from './iconosProducto';
 
 // Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
 // que junta las ideas para mejorarlo. Es una «forma» que cambia de forma (Formas), con una lamparita arriba que se prende
@@ -104,9 +105,11 @@ export function festejarGanado(n: NegocioGanado) {
 const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
 const DESPUES_DEL_ANTICIPO = new Set(['boceto-digital', 'listo-produccion', 'esperando', 'produccion', 'listo-entregar', 'parcial', 'entregado']);
 // Para llamar después de guardar una propiedad de un registro (tablero, ficha, vista previa, lista, celular).
-export function siEntroAnticipo(tipo: string, prop: string, antes: unknown, despues: unknown, rec: { name: string; props: Record<string, any> }) {
-  if (tipo !== 'order' || prop !== 'hs_pipeline_stage' || String(antes ?? '') !== ANTICIPO) return;
-  if (!DESPUES_DEL_ANTICIPO.has(etapaPedidoSlug(despues) ?? '')) return;
+export function siFestejaPedido(tipo: string, prop: string, antes: unknown, despues: unknown, rec: { name: string; props: Record<string, any> }) {
+  if (tipo !== 'order' || prop !== 'hs_pipeline_stage' || String(antes ?? '') === String(despues ?? '')) return;
+  // Listo para entregar o entregado: si es suyo, Chispín lo encuentra enseguida (y si es de otra, en la pantalla de ella).
+  if (['listo-entregar', 'entregado'].includes(etapaPedidoSlug(despues) ?? '')) { setTimeout(() => revisarDesdeAfuera?.(), 600); return; }
+  if (String(antes ?? '') !== ANTICIPO || !DESPUES_DEL_ANTICIPO.has(etapaPedidoSlug(despues) ?? '')) return;
   lluvia(true);
   ganadoDesdeAfuera?.({ nombre: rec.name, monto: rec.props.hs_total_price, moneda: rec.props.hs_currency_code, duenio: rec.props.owner_id }, 'anticipo');
 }
@@ -151,6 +154,164 @@ function tirarPlata(desde?: HTMLElement | null) {
   document.body.appendChild(capa);
   setTimeout(() => capa.remove(), 2600);
 }
+// ---------- Pedido listo para entregar: la caja / entregado: el camión (pedido de Rodrigo del 19/11/2026) ----------
+// Los mueve casi siempre ClickUp, así que Chispín los busca (GET /pedidos/festejos, src/worker/festejos.ts) y los festeja en
+// la pantalla de la dueña del pedido. Los productos que se embalan (o que van en el camión) son los del pedido, uno por
+// subcategoría con su iconito (iconosProducto.ts): si lleva botellas y mochilas, se embalan una botella y una mochila.
+export interface FestejoPedido {
+  id: number; name: string; etapa: 'listo' | 'entregado'; at: string; monto: number | null; moneda: string | null;
+  articulos: Array<{ nombre: string; cantidad: number | null }>; hizo: Array<{ nombre: string; user_id: number | null }>;
+}
+let revisarDesdeAfuera: (() => void) | null = null;
+type Grupo = { sub: Subcategoria; cantidad: number };
+const MAX_EN_CAJA = 6;
+// El iconito va más grande en la caja y en el camión (ahí se luce el dibujo) y chiquito en las fichas de la lista.
+const TAM_ICONO: Record<string, number> = { 'emb-item': 56, 'cam-item': 22 };
+const fichaProducto = (g: Grupo, clase: string) => {
+  const i = document.createElement('i');
+  i.className = clase;
+  i.title = g.sub.tipo;
+  i.innerHTML = svgIcono(g.sub.svg, TAM_ICONO[clase] ?? 17);
+  return i;
+};
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// El moño de Formas (el isotipo, CINTA) como SVG suelto, para el sticker de la caja y el costado del camión.
+const monio = (color: string, ancho: number) =>
+  `<svg viewBox="78 221 544 258" width="${ancho}" height="${Math.round(ancho * 258 / 544 * 10) / 10}" aria-hidden="true"><path d="${CINTA}" fill="${color}"/></svg>`;
+
+// El diseño de la caja real de Formas (foto de Rodrigo, 19/11/2026): cartón kraft, una de las orejas del moño en verde,
+// enorme, que se sale por el borde izquierdo; «formas» en azul con el moño verde sobre la «a» y «Your brand loved» abajo a
+// la derecha (el logo original, el mismo del login); en las solapas, íconos de productos de línea dentro de círculos verdes, y cinta de embalar transparente.
+const VERDE_CAJA = '#7ab547';
+const ICONOS_TAPA = [
+  'M10 2.5h4V5l1.5 2v13a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 8.5 20V7L10 5zM8.5 11h7',
+  'M3.5 15.5a8.5 8.5 0 0 1 17 0zM20.5 15.5c1.5 0 2.5.5 2.5 1.2S21 18 19 18H5M12 7V6',
+  'M8 3.5 3 6.5l2 4 2.5-1v11h9v-11l2.5 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 5 8 3.5z',
+  'M9 5V4a3 3 0 0 1 6 0v1M6 9a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v11.5H6zM9 13.5h6v4H9z',
+  'M5 7.5h11V17a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3zM16 10h1.5a2.5 2.5 0 0 1 0 5H16M8.5 3.5c0 1 1 1 1 2M12 3.5c0 1 1 1 1 2',
+  'M18.5 3.5a2.1 2.1 0 0 1 3 3L9 19l-5 1.5L5.5 15.5zM16 6l3 3',
+  'M4 15v-3a8 8 0 0 1 16 0v3M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z',
+  'M2.5 12a9.5 9.5 0 0 1 19 0zM12 2.5V2M12 12v6.5a2 2 0 0 1-4 0',
+];
+// Una fila de íconos en círculos (la tapa estampada), empezando por el ícono `desde`.
+const estampadoTapa = (desde: number, n: number) => `<span class="emb-tapa-iconos">${Array.from({ length: n }, (_, k) =>
+  `<svg viewBox="-4 -4 32 32" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="14.5"/><path d="${ICONOS_TAPA[(desde + k) % ICONOS_TAPA.length]}"/></svg>`).join('')}</span>`;
+// La oreja del moño como en la caja: el moño del logo (CINTA) en grande, cortado un poco antes de la mitad (desde x 320 de
+// 78–622): queda la oreja derecha con un pedacito del nudo, y el corte va pegado al borde izquierdo de la caja.
+const frenteCaja = () => `<span class="emb-frente"><svg class="emb-oreja" viewBox="320 221 302 258" aria-hidden="true"><path d="${CINTA}" fill="${VERDE_CAJA}"/></svg>`
+  + '<img class="emb-logo" src="/login/formas-logo.png" alt="" draggable="false"></span>';   // el logo original, sin cambios
+
+// La caja: aparece abierta, caen los productos uno por uno, se cierran las solapas, la cinta, el sello «LISTO ✓» y vuela a Chispín.
+// Con más onda («ponele un poco más de onda al camioncito, cajita e iconitos», Rodrigo, 19/11/2026): cartón kraft con el sticker
+// del moño y las flechitas de «este lado arriba», los productos rebotan al caer (y la caja acusa el golpe), pega un saltito
+// de contenta cuando la sellan, le saltan brillitos y se va volando en curva. Los tiempos son los de siempre: lo que cambia
+// es el dibujo (styles.css, .emb-*); si se toca una duración allá, acá van los mismos milisegundos.
+async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
+  if (reducido()) return;
+  const capa = document.createElement('div');
+  capa.className = 'chispin-embalar';
+  capa.innerHTML = '<span class="emb-halo"></span><div class="emb-escena"><span class="emb-sombra"></span><div class="emb-caja">'
+    + `<span class="emb-solapa atras">${estampadoTapa(0, 5)}</span><span class="emb-fondo"></span>${frenteCaja()}`
+    + `<span class="emb-solapa izq">${estampadoTapa(2, 3)}<em>Your brand <strong>loved</strong></em></span><span class="emb-solapa der">${estampadoTapa(5, 3)}<em>Your brand <strong>loved</strong></em></span>`
+    + '<span class="emb-cinta"></span><span class="emb-sello">LISTO ✓</span>'
+    + '<span class="emb-brillos"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="emb-lista"></div>';
+  const caja = capa.querySelector('.emb-caja') as HTMLElement;
+  const lista = capa.querySelector('.emb-lista') as HTMLElement;
+  const enCaja = grupos.slice(0, MAX_EN_CAJA);
+  enCaja.forEach((g, k) => {
+    const it = fichaProducto(g, 'emb-item');
+    // Repartidos a lo ancho de la caja, un poco desordenados.
+    // Grandes, como stickers amontonados: se pisan un poco entre ellos.
+    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 28 : enCaja.length === 4 ? 40 : 46) + (Math.random() * 8 - 4)}px`);
+    it.style.setProperty('--r', `${Math.random() * 40 - 20}deg`);
+    it.style.setProperty('--y', `${-4 - (k % 2) * 10}px`);
+    caja.insertBefore(it, caja.querySelector('.emb-frente'));
+    const chip = document.createElement('span');
+    chip.className = 'emb-chip';
+    chip.style.setProperty('--d', `${500 + k * 90}ms`);
+    chip.appendChild(fichaProducto(g, 'emb-chip-ic'));
+    chip.appendChild(document.createTextNode(`${g.cantidad ? `${g.cantidad} ` : ''}${(g.cantidad === 1 ? g.sub.tipo.split(' / ')[0] : g.sub.plural).toLowerCase()}`));
+    lista.appendChild(chip);
+  });
+  document.body.appendChild(capa);
+  await esperar(350);
+  const items = [...caja.querySelectorAll<HTMLElement>('.emb-item')];
+  for (const it of items) {
+    it.classList.add('cae');
+    // Cuando toca fondo (a los ~430 ms de los 620 de la caída) la caja acusa el golpe: se reinicia la animación en cada producto.
+    setTimeout(() => { caja.classList.remove('pum'); void caja.offsetWidth; caja.classList.add('pum'); }, 430);
+    await esperar(420);
+  }
+  await esperar(450);
+  caja.classList.add('cerrada');
+  await esperar(450);
+  caja.classList.add('cinta');
+  await esperar(380);
+  caja.classList.add('sellada');
+  capa.classList.add('golpe');
+  await esperar(1500);
+  // Vuela a Chispín (o a la esquina).
+  const r = hacia?.getBoundingClientRect(), c = caja.getBoundingClientRect();
+  const dx = (r ? r.left + r.width / 2 : innerWidth - 50) - (c.left + c.width / 2), dy = (r ? r.top + r.height / 2 : innerHeight - 50) - (c.top + c.height / 2);
+  caja.style.setProperty('--vx', `${dx}px`); caja.style.setProperty('--vy', `${dy}px`);
+  capa.classList.add('vuela');
+  await esperar(900);
+  capa.remove();
+}
+
+// El camión: cruza la pantalla de izquierda a derecha con los productos en la caja de carga, frena en el medio a tocar bocina
+// y sigue. El camioncito con más onda (Rodrigo, 19/11/2026): redondeado, con el moño y «formas» en el costado, la vidriera de
+// la carga donde saltan los productos, el chofer, el farol que hace guiños al tocar bocina, la suspensión que cabecea al
+// frenar y al arrancar, humito, polvo y rayitas de viento. Va en dos SVG: la carrocería (que se hamaca) y las ruedas (que no).
+// Todo el dibujo es nuestro y fijo: lo único que viene de afuera son los productos, y entran por fichaProducto (title).
+const RUEDA = (cx: number) => `<g class="cam-rueda"><circle cx="${cx}" cy="97" r="15.5" fill="#12143a"/><circle cx="${cx}" cy="97" r="11.6" fill="none" stroke="#2c2f5c" stroke-width="1.6"/>`
+  + `<circle cx="${cx}" cy="97" r="8" fill="#e4e7f5"/><path d="M${cx} 90.2v13.6M${cx - 6.8} 97h13.6M${cx - 4.8} 92.2l9.6 9.6M${cx + 4.8} 92.2l-9.6 9.6" stroke="#a9adcd" stroke-width="1.7" stroke-linecap="round"/>`
+  + `<circle cx="${cx}" cy="97" r="3" fill="#8ee021" stroke="#12143a" stroke-width="1.2"/></g>`;
+function camion(grupos: Grupo[]) {
+  if (reducido()) return;
+  const capa = document.createElement('div');
+  capa.className = 'chispin-camion';
+  capa.innerHTML = `<div class="cam-auto"><span class="cam-viento"><i></i><i></i><i></i></span><span class="cam-sombra"></span>
+    <span class="cam-humo"><i></i><i></i><i></i></span><span class="cam-polvo"><i></i><i></i><i></i><i></i></span>
+    <div class="cam-inercia"><div class="cam-cuerpo"><svg viewBox="0 0 250 120" width="250" height="120" aria-hidden="true">
+      <defs><linearGradient id="cam-luz-g" x1="0" x2="1"><stop offset="0" stop-color="#ffe88a" stop-opacity=".95"/><stop offset="1" stop-color="#ffe88a" stop-opacity="0"/></linearGradient>
+        <clipPath id="cam-vidrio-c"><path d="M161 41h27.5a7 7 0 0 1 5.4 2.6L207.5 60H161z"/></clipPath><clipPath id="cam-caja-c"><rect x="6" y="9" width="146" height="77" rx="12"/></clipPath></defs>
+      <path class="cam-luz" d="M229 66 250 56v26l-21-7z" fill="url(#cam-luz-g)"/>
+      <rect x="0" y="86" width="12" height="5" rx="2.5" fill="#6d7096"/>
+      <rect x="6" y="9" width="146" height="77" rx="12" fill="#000085"/>
+      <g clip-path="url(#cam-caja-c)"><rect x="6" y="9" width="146" height="6" fill="#8ee021"/><rect x="6" y="64" width="146" height="3" fill="#8ee021"/><path d="M6 15h146v3H6z" fill="#fff" opacity=".12"/></g>
+      <rect x="14" y="20" width="130" height="40" rx="8" fill="#12143a"/><rect x="15.5" y="21.5" width="127" height="37" rx="6.5" fill="#dcecff"/>
+      <path d="M15.5 30v-2a6.5 6.5 0 0 1 6.5-6.5h114a6.5 6.5 0 0 1 6.5 6.5v2z" fill="#fff" opacity=".55"/>
+      <g transform="translate(72 69.6) scale(.044) translate(-78 -221)"><path d="${CINTA}" fill="#8ee021"/></g>
+      <text x="100" y="80.5" fill="#fff" font-family="Poppins, system-ui, sans-serif" font-weight="800" font-size="12.5" letter-spacing=".3">formas</text>
+      <path d="M154 86V42a9 9 0 0 1 9-9h26.5a12 12 0 0 1 9.3 4.4L218 60.5l9.5 3.8a7 7 0 0 1 4.5 6.5V86z" fill="#8ee021"/>
+      <path d="M154 70h78v16h-78z" fill="#7bcb14"/><path d="M154 68.5h77.4" stroke="#fff" stroke-width="2" opacity=".5"/>
+      <path d="M161 41h27.5a7 7 0 0 1 5.4 2.6L207.5 60H161z" fill="#d9eeff" stroke="#12143a" stroke-width="2.2" stroke-linejoin="round"/>
+      <g clip-path="url(#cam-vidrio-c)"><rect x="170" y="56" width="20" height="8" rx="4" fill="#000085"/><circle cx="180" cy="51" r="6.8" fill="#ffd9b8"/>
+        <path d="M172.8 50a7.2 7.2 0 0 1 14.4 0z" fill="#000085"/><path d="M186 50h5.5" stroke="#000085" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="182.6" cy="52.3" r=".9" fill="#12143a"/><path d="M181 55.2c1.2.9 2.6.8 3.6-.2" stroke="#12143a" stroke-width="1" fill="none" stroke-linecap="round"/>
+        <path d="M164 58 174 42M168.5 58l6-9.5" stroke="#fff" stroke-width="2" opacity=".8" stroke-linecap="round"/></g>
+      <path d="M165 66.5h7" stroke="#12143a" stroke-width="2.2" stroke-linecap="round"/><rect x="207" y="52" width="5" height="8" rx="2" fill="#12143a"/>
+      <rect x="222" y="65" width="8.5" height="10" rx="3.5" fill="#ffd76a" stroke="#12143a" stroke-width="1.6"/>
+      <rect x="2" y="83" width="234" height="8.5" rx="4" fill="#12143a"/><rect x="226" y="80" width="12" height="9" rx="4" fill="#c9cbe0" stroke="#12143a" stroke-width="1.6"/>
+      <path d="M28 91a20 20 0 0 1 40 0zM170 91a20 20 0 0 1 40 0z" fill="#12143a"/>
+      <g class="cam-ondas" fill="none" stroke="#000085" stroke-width="2.4" stroke-linecap="round"><path d="M236 40c2.5 2 2.5 6 0 8"/><path d="M241 36c4.5 4 4.5 12 0 16"/></g>
+    </svg><div class="cam-carga"></div><span class="cam-bocina">¡Bip, bip!</span></div></div>
+    <svg class="cam-ruedas" viewBox="0 0 250 120" width="250" height="120" aria-hidden="true">${RUEDA(48)}${RUEDA(190)}</svg></div>`;
+  const carga = capa.querySelector('.cam-carga') as HTMLElement;
+  const enCarga = grupos.length ? grupos.slice(0, MAX_EN_CAJA) : agruparProductos([{ nombre: '', cantidad: null }]);
+  // Con más de cuatro no entran en una fila de la vidriera: van más chicos, en dos.
+  if (enCarga.length > 4) carga.classList.add('muchos');
+  for (const g of enCarga) carga.appendChild(fichaProducto(g, 'cam-item'));
+  document.body.appendChild(capa);
+  setTimeout(() => capa.remove(), 5200);
+}
+
+const resumenProductos = (grupos: Grupo[]) => {
+  const partes = grupos.slice(0, 4).map((g) => `${g.cantidad ? `${g.cantidad} ` : ''}${(g.cantidad === 1 ? g.sub.tipo.split(' / ')[0] : g.sub.plural).toLowerCase()}`);
+  return partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}${grupos.length > 4 ? ' (y más)' : ''}` : partes[0] ?? '';
+};
+
 const ANTICIPOS: Array<(n: string, pedido: string) => string> = [
   (n, x) => `😎💸 ¡Entró el anticipo, ${n}! ${x}. ¡A producir!`,
   (n, x) => `😎💸 Llueve plata, ${n}: se cobró el anticipo de ${x}.`,
@@ -297,6 +458,60 @@ export default function Chispin() {
     return () => { ganadoDesdeAfuera = null; };
   }, [meta, yo, ponerAnteojos]);
   useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
+
+  // ---------- Los pedidos de ella listos para entregar o entregados: se buscan cada tanto y se festejan de a uno ----------
+  const cola = useRef<FestejoPedido[]>([]);
+  const abiertoRef = useRef(false);
+  abiertoRef.current = abierto;
+  const festejarPedido = useCallback((p: FestejoPedido) => {
+    festejoT.current.forEach(clearTimeout);
+    const grupos = agruparProductos(p.articulos);
+    const pedido = `«${p.name.length > 60 ? `${p.name.slice(0, 58)}…` : p.name}»`;
+    const productos = resumenProductos(grupos);
+    const quien = primerNombre(meta.me.name);
+    const hizo = [...new Set(p.hizo.filter((h) => h.user_id !== yo).map((h) => primerNombre(h.nombre)).filter(Boolean))];
+    const texto = p.etapa === 'listo'
+      ? `📦 ${quien ? `${quien}, ¡` : '¡'}está listo ${pedido}!${productos ? ` Ya están embalados: ${productos}.` : ''}${hizo.length ? ` Lo terminó ${hizo.join(' y ')} 💪` : ''} A coordinar la entrega.`
+      : `🚚 ¡Entregado! ${pedido} ya llegó al cliente${quien ? `, ${quien}` : ''}.${productos ? ` Iban ${productos}.` : ''} ¡Otro más! 🙌`;
+    setAbierto(false); setFestejando(true); setAnimo(p.etapa === 'listo' ? '' : 'mira');
+    setGlobo({ tipo: 'festejo', texto });
+    if (p.etapa === 'listo') {
+      embalar(grupos, botonRef.current);
+      festejoT.current = [setTimeout(() => { setAnimo('feliz'); festejar(botonRef.current); }, 900 + Math.min(grupos.length, MAX_EN_CAJA) * 420 + 2800)];
+    } else {
+      camion(grupos);
+      festejoT.current = [setTimeout(() => setAnimo('feliz'), 2400)];
+    }
+    festejoT.current.push(
+      setTimeout(() => setAnimo(''), 9000),
+      setTimeout(() => { setFestejando(false); setGlobo((g) => (g?.texto === texto ? null : g)); }, 12_000),
+    );
+  }, [meta, yo]);
+  const siguiente = useRef<() => void>(() => {});
+  siguiente.current = () => {
+    if (!cola.current.length) return;
+    if (festejandoRef.current || abiertoRef.current || document.visibilityState !== 'visible') { setTimeout(() => siguiente.current(), 5000); return; }
+    festejarPedido(cola.current.shift()!);
+    setTimeout(() => siguiente.current(), 13_000);
+  };
+  const revisarPedidos = useCallback(async () => {
+    let r: { pedidos: FestejoPedido[] };
+    try { r = await http<{ pedidos: FestejoPedido[] }>('GET', '/pedidos/festejos'); } catch { return; }
+    const hechos = new Set((leer('pedidos_festejados') ?? '').split(',').filter(Boolean));
+    const nuevos = r.pedidos.filter((p) => !hechos.has(`${p.id}:${p.etapa}`) && !cola.current.some((x) => x.id === p.id && x.etapa === p.etapa))
+      .sort((a, b) => a.at.localeCompare(b.at));
+    if (!nuevos.length) return;
+    for (const p of nuevos) hechos.add(`${p.id}:${p.etapa}`);
+    guardar('pedidos_festejados', [...hechos].slice(-120).join(','));
+    cola.current.push(...nuevos.slice(-3));   // si se juntaron muchos (días sin entrar), los últimos
+    siguiente.current();
+  }, []);
+  useEffect(() => {
+    revisarDesdeAfuera = revisarPedidos;
+    const t0 = setTimeout(revisarPedidos, 6000);
+    const t = setInterval(() => { if (document.visibilityState === 'visible') revisarPedidos(); }, 90_000);
+    return () => { revisarDesdeAfuera = null; clearTimeout(t0); clearInterval(t); };
+  }, [revisarPedidos]);
   // El link de una idea (…?idea=12, el que da Claude): abre el buzón en esa idea y se saca de la dirección.
   useEffect(() => {
     const sp = new URLSearchParams(loc.search);

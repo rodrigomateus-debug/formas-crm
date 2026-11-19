@@ -40,6 +40,7 @@ import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { resumenDireccion } from './direccion';
 import { inicioProduccion } from './inicioprod';
+import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
@@ -883,6 +884,14 @@ api.get('/dashboard', async (c) => {
       .bind(...todayBounds(), ownerId ?? ctx.user.id),
   ]);
   return c.json({ month: m, open: open.results, won: won.results, created: created.results, lost: lost.results, tasks: tasks.results[0] });
+});
+
+// Inicio de Ventas (forecast.ts): estimación de la semana y del mes, negocios y pedidos abiertos y producciones en curso. Como
+// /dashboard: el perfil Ventas, siempre lo suyo.
+api.get('/dashboard/vendedora', async (c) => {
+  const ctx = c.get('ctx');
+  const owner = restringido(ctx.user) ? 'me' : c.req.query('owner') ?? 'me';
+  return c.json(await inicioVendedora(c.env.DB, owner === 'all' ? null : Number(owner === 'me' ? ctx.user.id : owner)));
 });
 
 // Inicio de Dirección (direccion.ts): solo para los usuarios con la marca «Dirección».

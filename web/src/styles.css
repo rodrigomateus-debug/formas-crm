@@ -2926,7 +2926,8 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
    Con más onda (pedido de Rodrigo del 19/11/2026): cartón kraft con canaleta y sombra, el sticker del moño, los productos
    rebotan al caer, la caja pega un saltito cuando la sellan y le saltan brillitos. Solo se animan transform y opacity. */
 .chispin-embalar { position: fixed; left: 50%; top: 50%; z-index: 305; width: min(92vw, 440px); display: flex; flex-direction: column; align-items: center; gap: 18px; transform: translate(-50%, -50%); pointer-events: none; }
-.emb-escena { position: relative; width: 224px; height: 142px; }
+.emb-escena { position: relative; width: 224px; height: 142px; scale: 1.35; margin: 25px 39px; }   /* la caja, más grande (y los productos, el triple) */
+@media (max-width: 640px) { .emb-escena { scale: 1.1; margin: 7px 11px; } }   /* en el celular, que la pila entre en la pantalla */
 /* Un resplandor del color del fondo detrás de la caja, para que se lea arriba de cualquier pantalla (tablas, tableros…). */
 .emb-halo { position: absolute; inset: -70px -40px -46px; border-radius: 50%; background: radial-gradient(closest-side, var(--ui-surface, #fff) 58%, transparent); z-index: -1; opacity: 0; animation: emb-halo .4s ease forwards; }
 .emb-sombra { position: absolute; left: 8px; right: 8px; bottom: -9px; height: 18px; border-radius: 50%; background: radial-gradient(closest-side, rgba(18, 20, 58, .38), transparent); animation: emb-halo .4s ease both; }
@@ -2959,7 +2960,7 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 .emb-caja.cerrada .emb-fondo { opacity: 0; transition: opacity .15s .15s; }
 /* La animación de la caída deja fijos el transform y la opacidad: se hunden con translate (que va aparte) y se esconden con visibility. */
 .emb-caja.cerrada .emb-item { translate: 0 30px; visibility: hidden; transition: translate .2s ease-in, visibility 0s .2s; }
-.emb-item { position: absolute; left: 50%; top: -14px; width: 64px; height: 64px; margin-left: -32px; z-index: 2; display: grid; place-items: center; font-style: normal; opacity: 0; }
+.emb-item { position: absolute; left: 50%; top: -64px; width: 132px; height: 132px; margin-left: -66px; z-index: 2; display: grid; place-items: center; font-style: normal; opacity: 0; }
 /* Cada producto, troquelado como un sticker (pedido de Rodrigo del 19/11/2026): sin recuadro, con un borde blanco que sigue la
    forma del dibujo (sombras sin desenfoque apiladas, una por lado) y una sombrita abajo para que se despegue de la caja. */
 .emb-item svg { overflow: visible; filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff) drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)

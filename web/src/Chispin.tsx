@@ -166,7 +166,8 @@ let revisarDesdeAfuera: (() => void) | null = null;
 type Grupo = { sub: Subcategoria; cantidad: number };
 const MAX_EN_CAJA = 6;
 // El iconito va más grande en la caja y en el camión (ahí se luce el dibujo) y chiquito en las fichas de la lista.
-const TAM_ICONO: Record<string, number> = { 'emb-item': 56, 'cam-item': 22 };
+// Los de la caja, bien grandes (pedido de Rodrigo del 19/11/2026: «el triple»): 124 px por la escala de la caja (×1,35) ≈ 167 px.
+const TAM_ICONO: Record<string, number> = { 'emb-item': 124, 'cam-item': 22 };
 const fichaProducto = (g: Grupo, clase: string) => {
   const i = document.createElement('i');
   i.className = clase;
@@ -222,7 +223,7 @@ async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
     const it = fichaProducto(g, 'emb-item');
     // Repartidos a lo ancho de la caja, un poco desordenados.
     // Grandes, como stickers amontonados: se pisan un poco entre ellos.
-    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 28 : enCaja.length === 4 ? 40 : 46) + (Math.random() * 8 - 4)}px`);
+    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 46 : enCaja.length === 4 ? 66 : 84) + (Math.random() * 8 - 4)}px`);
     it.style.setProperty('--r', `${Math.random() * 40 - 20}deg`);
     it.style.setProperty('--y', `${-4 - (k % 2) * 10}px`);
     caja.insertBefore(it, caja.querySelector('.emb-frente'));

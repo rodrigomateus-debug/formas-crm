@@ -860,10 +860,13 @@ export async function htmlRemito(db: D1Database, d: DatosRemito) {
   @page { size: A4; margin: 12mm; }
   * { box-sizing: border-box; }
   body { margin: 0; background: #eef0f6; color: #11143a; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  .barra { max-width: 186mm; margin: 16px auto 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .barra { max-width: 210mm; margin: 16px auto 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .barra button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 0; background: #000085; color: #fff; cursor: pointer; }
   .barra span { color: #4a4e6e; }
-  .hoja { max-width: 186mm; min-height: 273mm; margin: 16px auto; background: #fff; padding: 12mm; display: flex; flex-direction: column; gap: 6mm; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* En pantalla, la hoja A4 entera (210 × 297 mm) con sus márgenes de 12 mm, igual que sale impresa. */
+  .hoja { width: 210mm; max-width: 100%; min-height: 297mm; margin: 16px auto; background: #fff; padding: 12mm; display: flex; flex-direction: column; gap: 6mm; box-shadow: 0 1px 6px rgba(17, 20, 58, .15); }
+  tr { break-inside: avoid; }
   header { display: grid; grid-template-columns: 1fr auto 1fr; gap: 6mm; align-items: start; border-bottom: 2.5px solid #000085; padding-bottom: 4mm; }
   .marca { display: flex; flex-direction: column; gap: 2mm; } .marca img { width: 40mm; }
   .empresa { display: flex; flex-direction: column; font-size: 10.5px; color: #3b3f63; } .empresa b { font-size: 12.5px; color: #11143a; }
@@ -878,7 +881,7 @@ export async function htmlRemito(db: D1Database, d: DatosRemito) {
   footer { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10mm; padding-top: 14mm; }
   footer div { border-top: 1px solid #11143a; padding-top: 1.5mm; font-size: 11px; } footer span { color: #6b6f8e; }
   .recibi { margin-top: auto; font-weight: 700; font-size: 12px; }
-  @media print { body { background: #fff; } .barra { display: none; } .hoja { margin: 0; max-width: none; min-height: 271mm; padding: 0; } }
+  @media print { body { background: #fff; } .barra { display: none; } .hoja { margin: 0; width: auto; max-width: none; min-height: 271mm; padding: 0; box-shadow: none; } }
 </style></head><body>
 <div class="barra"><button type="button" onclick="window.print()">Imprimir</button><span>${esc(d.numero ? 'Una hoja A4 por remito. Imprimilo dos veces: una copia queda en el destino y la firmada vuelve a Formas.' : 'Todavía sin número: se numera al imprimirlo desde el Hub.')}</span></div>
 <main class="hoja">
@@ -923,7 +926,8 @@ export async function remitoEgreso(env: Env, ctx: Ctx, b: { fecha?: unknown; cla
   const db = env.DB;
   const egresos = (await movimientos(db, b.fecha, b.fecha)).movs.filter((m) => m.tipo === 'egreso' && claveParada(m) === clave);
   if (!egresos.length) throw new HttpError(404, 'Ese día no hay egresos para ese impresor.');
-  const items: ItemEnc[] = egresos.map((m) => ({ cant: m.cantidad, que: m.articulo || 'Artículo', pdv: m.npdv }));
+  // Con lo que realmente se manda, si se anotó una demasía (cronograma_enviados).
+  const items: ItemEnc[] = egresos.map((m) => ({ cant: m.enviado?.cantidad ?? m.cantidad, que: m.articulo || 'Artículo', pdv: m.npdv }));
   const destino = egresos[0].lugar ?? 'Impresor';
   // La dirección: la de la ficha del impresor o, si no tiene, la de la libreta si hay un lugar que se llama igual.
   const emp = egresos[0].company_id ? await db.prepare("SELECT json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city FROM records WHERE id = ?")

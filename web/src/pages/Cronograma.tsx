@@ -16,6 +16,8 @@ import { EditarDireccion, lindaDireccion } from './DireccionParada';
 // la barra de semanas para ir a cualquier semana, pasada o futura, y ver cuánto queda pendiente. «Ruta del día» arma el
 // recorrido en el mapa (CronogramaRuta.tsx). Ver docs/CRONOGRAMA.md.
 
+import { LineaNota, NotasLogistica, type NotaLogistica } from '../NotasLogistica';
+import type { ModoHora } from '../ruta';
 const CronogramaRuta = lazy(() => import('./CronogramaRuta'));
 
 export type Tipo = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'retiro_impresor' | 'ingreso_impresor';
@@ -31,6 +33,8 @@ export interface Mov {
   hora?: string | null;       // la hora fijada a mano en su parada, en la ruta del día («A las 12:00»)
   parada?: string;            // la clave de su parada en la ruta del día
   colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»
+  notas?: NotaLogistica[];    // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar
+  enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó (demasía)
 }
 export interface Nota { id: number; fecha: string; texto: string; hecho: number }
 export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -86,7 +90,8 @@ export function lindo(s: string | null | undefined): string {
     return m.replace(/(^|[(/\-.'"«])([a-záéíóúñ])/g, (_, a: string, b: string) => a + b.toUpperCase());
   }).join(' ');
 }
-export const cantidad = (m: { cantidad: number | null; articulo: string }) => [m.cantidad != null ? num.format(m.cantidad) : '', m.articulo].filter(Boolean).join(' ');
+// Con la cantidad que realmente va, si se anotó una demasía.
+export const cantidad = (m: { cantidad: number | null; articulo: string; enviado?: { cantidad: number } | null }) => { const c = m.enviado?.cantidad ?? m.cantidad; return [c != null ? num.format(c) : '', m.articulo].filter(Boolean).join(' '); };
 
 // Una tarjeta: los artículos de un PDV que tienen el mismo movimiento, el mismo día, en el mismo lugar.
 // `parada`: va en la ruta del día (no es un ingreso ni lo retira el cliente), así que se le elige el chofer.
@@ -135,6 +140,9 @@ export default function CronogramaPage() {
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo abierto
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
   const [colgando, setColgando] = useState<{ ids: string[]; tipo: Tipo; pdv: string } | null>(null);   // lo que se soltó en «Colgados»: falta el motivo
+  const [anotando, setAnotando] = useState<Tarjeta | null>(null);   // las anotaciones de logística de una tarjeta
+  const [horaDe, setHoraDe] = useState<Tarjeta | null>(null);      // fijar la hora (o el rango) de la parada de una tarjeta
+  const [enviando, setEnviando] = useState<Mov | null>(null);      // la cantidad que realmente se mandó o llegó
   const arrastre = useRef<{ ids: string[]; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
   const pedido = useRef(0);
   // Las direcciones de las paradas de la semana: llegan después de la semana (no la demoran) y, mientras el servidor
@@ -327,6 +335,8 @@ export default function CronogramaPage() {
                                 dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
                                 onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
                                 onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
+                                onAnotar={t.record_id ? () => setAnotando(t) : undefined} onHora={t.parada && t.movs[0]?.parada && !t.hecho ? () => setHoraDe(t) : undefined}
+                                onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined}
                                 onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
                                 onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                             </div>
@@ -377,6 +387,13 @@ export default function CronogramaPage() {
             </div>
           )}
           {colgando && <ModalColgar a={colgando} onCerrar={() => setColgando(null)} onColgar={(m) => colgar(colgando, m)} />}
+          {anotando && anotando.record_id && (
+            <Modal title={`Anotaciones de logística · ${anotando.titulo} (${anotando.pdv})`} onClose={() => setAnotando(null)}>
+              <NotasLogistica recordId={anotando.record_id} tipo={anotando.tipo} destino={anotando.tipo === 'entrega' ? null : { company_id: anotando.movs[0]?.company_id, nombre: anotando.movs[0]?.lugar }} onCambio={cargar} />
+            </Modal>
+          )}
+          {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
+          {enviando && <ModalEnviado m={enviando} onCerrar={() => setEnviando(null)} onListo={() => { setEnviando(null); void cargar(); }} />}
           {v && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && (!unidad || s.unidad === unidad))} puede={puede}
             onArrastrar={(a) => { arrastre.current = a; if (!a) setSobre(null); }} onMover={(ids, f, pdv) => mover(ids, 'entrega', f, pdv)} onAbrir={setPreview} />}
         </>
@@ -495,12 +512,17 @@ const ROL: Record<Tipo, { nombre: string; icono: string }> = {
 };
 const TOPE = 3;
 
-function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar }: {
+function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar, onAnotar, onHora, onEnviado }: {
   t: Tarjeta; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
   onColgar?: () => void;   // dejarlo en «Colgados» (lo mismo que arrastrarlo ahí; para el celular)
+  onAnotar?: () => void;   // las anotaciones de logística de esta tarjeta
+  onHora?: () => void;     // fijar la hora o el rango horario de su parada
+  onEnviado?: (m: Mov) => void;   // anotar la cantidad que realmente se mandó o llegó (no en las entregas)
 }) {
+  // Las anotaciones de logística de sus movimientos, sin repetir (las de siempre son las mismas en todos).
+  const notas = [...new Map(t.movs.flatMap((m) => m.notas ?? []).map((n) => [n.id, n])).values()];
   // En «Colgados»: por qué quedó, qué día era y quién lo dejó.
   const colgado = t.movs.find((m) => m.colgado)?.colgado ?? null;
   const motivos = [...new Set(t.movs.map((m) => m.colgado?.motivo).filter((x): x is string => !!x))];
@@ -543,10 +565,22 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
       {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
       {prods.length > 0 && (
         <div className="cr-t-prods">
-          {ver.map((m) => <div key={m.id} className={m.hecho && !t.hecho ? 'ok' : ''}><b className="num">{m.cantidad != null ? num.format(m.cantidad) : ''}</b><span>{m.articulo}</span></div>)}
+          {ver.map((m) => {
+            // Con demasía: lo que realmente va («510», y al lado cuánto de más o de menos respecto del pedido).
+            const dif = m.enviado && m.cantidad != null ? m.enviado.cantidad - m.cantidad : 0;
+            const cant = <>{m.enviado ? num.format(m.enviado.cantidad) : m.cantidad != null ? num.format(m.cantidad) : ''}</>;
+            return (
+              <div key={m.id} className={m.hecho && !t.hecho ? 'ok' : ''}>
+                {puede && onEnviado ? <button type="button" className="cr-t-cant num" title={m.enviado ? `Se ${t.tipo === 'egreso' ? 'mandan' : 'reciben'} ${num.format(m.enviado.cantidad)} (el pedido es de ${m.cantidad != null ? num.format(m.cantidad) : '—'})${m.enviado.motivo ? `: ${m.enviado.motivo}` : ''}${m.enviado.por ? ` · ${m.enviado.por.split(' ')[0]}` : ''}. Clic para cambiarlo.` : 'Anotar la cantidad que realmente va (demasía)'}
+                  onClick={() => onEnviado(m)}>{cant}</button> : <b className="num">{cant}</b>}
+                <span>{m.articulo}{m.enviado && dif !== 0 && <em className="cr-t-demasia">{dif > 0 ? `+${num.format(dif)} de más` : `${num.format(dif)}`}</em>}</span>
+              </div>
+            );
+          })}
           {prods.length > TOPE && <button type="button" className="cr-t-mas" aria-expanded={todo} onClick={() => setTodo(!todo)}>{todo ? 'Ver menos' : `+ ${prods.length - TOPE} producto${prods.length - TOPE === 1 ? '' : 's'} más`}</button>}
         </div>
       )}
+      {notas.length > 0 && <div className="cr-t-notas">{notas.map((n) => <LineaNota key={n.id} n={n} />)}</div>}
       {!t.hecho && t.avisos.length > 0 && (
         <div className="cr-t-tags">
           {t.avisos.map((a) => <span key={a} className="cr-tag riesgo"><Icon name="alert" size={11} />{a}</span>)}
@@ -565,6 +599,8 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
           {/* Un egreso: el remito de traslado de lo que se le lleva al impresor ese día (todos sus PDV), para imprimir. */}
           {t.tipo === 'egreso' && t.movs[0]?.parada && <button type="button" className="cr-mini" aria-label="Remito de traslado" title="Imprimir el remito de traslado (todo lo que va a este impresor ese día)"
             onClick={() => abrirRemitoEgreso(t.fecha, t.movs[0].parada!, toast)}><Icon name="printer" size={13} /></button>}
+          {onAnotar && <button type="button" className="cr-mini" aria-label="Anotaciones de logística" title="Anotaciones de logística: para esta vez o para siempre" onClick={onAnotar}><Icon name="note" size={13} /></button>}
+          {onHora && <button type="button" className="cr-mini" aria-label="Horario" title={t.movs[0]?.hora ? `${t.movs[0].hora}: cambiar el horario` : 'Fijar la hora o el rango horario'} onClick={onHora}><Icon name="timer" size={13} /></button>}
           {onColgar && <button type="button" className="cr-mini" aria-label="Dejar en Colgados" title="No se pudo hacer: dejarlo en Colgados" onClick={onColgar}><Icon name="alert" size={13} /></button>}
           <SelectorFecha valor={t.fecha} onElegir={(f) => f && onMover(f)} label={colgado ? 'Pasar a un día' : 'Pasar a otro día'} className="cr-mini" title={colgado ? 'Pasar a un día' : 'Pasar a otro día'}><Icon name="calendar" size={13} /></SelectorFecha>
           <button type="button" className={`cr-check${t.hecho ? ' on' : ''}`} aria-pressed={t.hecho} aria-label={t.hecho ? 'Volver a pendiente' : 'Marcar como hecho'} title={t.hecho ? 'Volver a pendiente' : 'Marcar como hecho'} onClick={onMarcar}><Icon name="check" size={12} /></button>
@@ -572,6 +608,78 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
       )}
       {!puede && t.hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
+  );
+}
+
+// La hora de la parada de una tarjeta, desde la semana (pedido de Producción del 19/11/2026): una hora o un rango, para
+// que Logística organice el recorrido. Es la misma hora fijada de la Ruta del día: el recorrido se ordena para cumplirla.
+const MODOS_HORA: Array<[ModoHora, string]> = [['entre', 'Entre'], ['a_las', 'A las'], ['antes', 'Antes de las'], ['desde', 'Desde las']];
+export function CamposHora({ modo, hora, hasta, onModo, onHora, onHasta }: { modo: ModoHora; hora: string; hasta: string; onModo: (m: ModoHora) => void; onHora: (h: string) => void; onHasta: (h: string) => void }) {
+  return (
+    <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }} role="group" aria-label="Horario">
+      {MODOS_HORA.map(([k, t]) => <button key={k} type="button" className={`chip${modo === k ? ' on' : ''}`} aria-pressed={modo === k} onClick={() => onModo(k)}>{t}</button>)}
+      <input type="time" className="input sm" style={{ width: 'auto' }} value={hora} onChange={(e) => onHora(e.target.value)} aria-label={modo === 'entre' ? 'Desde' : 'Hora'} required />
+      {modo === 'entre' && <><span className="small muted">y las</span><input type="time" className="input sm" style={{ width: 'auto' }} value={hasta} onChange={(e) => onHasta(e.target.value)} aria-label="Hasta" required /></>}
+    </div>
+  );
+}
+export const ayudaHora = (modo: ModoHora) => (modo === 'entre' ? 'Tiene que llegar dentro de ese rango.' : modo === 'a_las' ? 'Llega entre 15 minutos antes y 15 después.' : modo === 'antes' ? 'Tiene que llegar antes de esa hora.' : 'No antes de esa hora.');
+function ModalHora({ t, onCerrar, onListo }: { t: Tarjeta; onCerrar: () => void; onListo: () => void }) {
+  const toast = useToast();
+  const [modo, setModo] = useState<ModoHora>('entre');
+  const [hora, setHora] = useState('10:00');
+  const [hasta, setHasta] = useState('13:00');
+  const [ocupado, setOcupado] = useState(false);
+  const actual = t.movs[0]?.hora ?? null;
+  const ok = !!hora && (modo !== 'entre' || (!!hasta && hasta > hora));
+  const guardar = async (m: ModoHora | null) => {
+    setOcupado(true);
+    try {
+      await http('PUT', '/cronograma/hora', { fecha: t.fecha, clave: t.movs[0].parada, modo: m, hora, hasta });
+      toast(m ? `${t.titulo}: horario guardado. El recorrido del ${diaCorto(t.fecha)} se ordena para cumplirlo.` : `${t.titulo}: sin horario fijado.`);
+      onListo();
+    } catch (e) { toast((e as Error).message, true); setOcupado(false); }
+  };
+  return (
+    <Modal title={`Horario · ${t.titulo} (${t.pdv})`} onClose={onCerrar}
+      footer={<><button type="button" className="btn" onClick={onCerrar}>Cancelar</button>{actual && <button type="button" className="btn" disabled={ocupado} onClick={() => guardar(null)}>Sacar el horario</button>}
+        <button type="button" className="btn primary" disabled={ocupado || !ok} onClick={() => guardar(modo)}>Guardar</button></>}>
+      {actual && <p className="small" style={{ marginTop: 0 }}>Hoy tiene: <b>{actual}</b></p>}
+      <CamposHora modo={modo} hora={hora} hasta={hasta} onModo={setModo} onHora={setHora} onHasta={setHasta} />
+      <p className="small muted">{ayudaHora(modo)} Vale para toda la parada de ese día (en un proveedor o impresor, todos sus retiros y egresos). El recorrido se ordena solo para cumplirlo y el chofer lo ve en su app.</p>
+      {modo === 'entre' && !!hora && !!hasta && hasta <= hora && <p className="small danger-text">La segunda hora tiene que ser más tarde.</p>}
+    </Modal>
+  );
+}
+
+// La cantidad que realmente se manda (o llega) de un producto, cuando no es la del pedido: la demasía. Queda anotada en
+// la tarjeta y en el remito de traslado; la cantidad del PDV no cambia.
+function ModalEnviado({ m, onCerrar, onListo }: { m: Mov; onCerrar: () => void; onListo: () => void }) {
+  const toast = useToast();
+  const [cantidad, setCantidad] = useState(String(m.enviado?.cantidad ?? m.cantidad ?? ''));
+  const [motivo, setMotivo] = useState(m.enviado?.motivo ?? '');
+  const [ocupado, setOcupado] = useState(false);
+  const n = Number(cantidad), dif = m.cantidad != null && cantidad !== '' && Number.isFinite(n) ? n - m.cantidad : 0;
+  const verbo = m.tipo === 'egreso' ? 'se manda' : m.tipo === 'ingreso' ? 'llega' : 'se retira';
+  const guardar = async (valor: string) => {
+    setOcupado(true);
+    try {
+      await http('POST', '/cronograma/enviado', { id: m.task_id, tipo: m.tipo, cantidad: valor === '' ? null : Number(valor), motivo });
+      toast(valor === '' || Number(valor) === m.cantidad ? 'Quedó con la cantidad del pedido.' : `Anotado: ${verbo}n ${num.format(Number(valor))}${dif > 0 ? ` (${num.format(dif)} de más)` : ''}.`);
+      onListo();
+    } catch (e) { toast((e as Error).message, true); setOcupado(false); }
+  };
+  return (
+    <Modal title={`Cantidad que ${verbo} · ${m.articulo || 'Artículo'}`} onClose={onCerrar}
+      footer={<><button type="button" className="btn" onClick={onCerrar}>Cancelar</button>{m.enviado && <button type="button" className="btn" disabled={ocupado} onClick={() => guardar('')}>Volver a la del pedido</button>}
+        <button type="button" className="btn primary" disabled={ocupado || cantidad === '' || !Number.isFinite(n) || n < 0} onClick={() => guardar(cantidad)}>Guardar</button></>}>
+      <p className="small muted" style={{ marginTop: 0 }}>PDV {m.npdv ?? '—'} · el pedido es de <b>{m.cantidad != null ? num.format(m.cantidad) : '—'}</b>. Si van unos de más (por si alguno sale fallado, para pruebas), anotá cuántos van en total. La cantidad del PDV no cambia{m.tipo === 'egreso' ? '; el remito de traslado sale con esta cantidad' : ''}.</p>
+      <label className="small">Cantidad que {verbo}
+        <input className="input" type="number" min={0} step="1" autoFocus value={cantidad} onChange={(e) => setCantidad(e.target.value)} /></label>
+      {dif !== 0 && <p className="small" style={{ margin: '6px 0' }}><b>{dif > 0 ? `${num.format(dif)} de más` : `${num.format(-dif)} de menos`}</b> respecto del pedido.</p>}
+      <label className="small">Por qué (opcional)
+        <input className="input" maxLength={200} placeholder="Demasía por fallados, para pruebas…" value={motivo} onChange={(e) => setMotivo(e.target.value)} /></label>
+    </Modal>
   );
 }
 
@@ -616,6 +724,8 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDi
         </div>
       )}
       {!lineas.length && e.notas && <div className="cr-t-item">{e.notas}</div>}
+      {/* Las anotaciones de logística de siempre de ese destino. */}
+      {!!e.anotaciones?.length && <div className="cr-t-notas">{e.anotaciones.map((n) => <LineaNota key={n.id} n={n} />)}</div>}
       {(e.urgente || e.estado === 'no_se_pudo' || e.horario || e.hora) && (
         <div className="cr-t-tags">
           {e.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{e.hora}</span>}

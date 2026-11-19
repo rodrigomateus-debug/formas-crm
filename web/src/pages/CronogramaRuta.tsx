@@ -6,7 +6,8 @@ import { QuienPidio, alEsc, useEsc } from '../components';
 import { Select, useFloating } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
-import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
+import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
+import { LineaNota } from '../NotasLogistica';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
 
@@ -24,7 +25,7 @@ export interface Parada {
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
   detalle?: string | null; observaciones?: string | null;   // piso, depto, puerta, unidad y observaciones de entrega
   // La hora fijada a mano (pedido de Rodrigo del 16/11/2026): `horario` ya es esa ventana y el orden más corto la cumple.
-  pactada?: { modo: ModoHora; min: number; texto: string } | null; estricto?: boolean;
+  pactada?: { modo: ModoHora; min: number; hasta?: number | null; texto: string } | null; estricto?: boolean;
   fotos?: number;   // las fotos del remito que mandó el chofer de esta parada (obligatoria en todas)
   remito?: number | null;   // el número del remito de traslado del egreso, si ya se imprimió
   espera_hasta?: number | null;   // con una hora fijada «a las», hasta cuándo se espera (ruta.ts)
@@ -203,11 +204,11 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   // de salida que se eligió).
   // Fijar (o sacar) la hora de una parada: lo que estaba sin guardar se guarda primero, y el recorrido vuelve del servidor
   // ya ordenado solo para cumplir esa hora y las demás.
-  async function fijarHora(p: Parada, modo: ModoHora | null, hora: string) {
+  async function fijarHora(p: Parada, modo: ModoHora | null, hora: string, hasta: string) {
     try {
       const pend = porGuardar.current;
       if (sucio.current && pend) { sucio.current = false; porGuardar.current = null; await http('PUT', '/cronograma/ruta', pend); }
-      await http('PUT', '/cronograma/hora', { fecha, clave: p.clave, modo, hora });
+      await http('PUT', '/cronograma/hora', { fecha, clave: p.clave, modo, hora, hasta });
       toast(modo ? `${lindo(p.nombre)}: ${modo === 'antes' ? 'antes de las' : modo === 'desde' ? 'desde las' : 'a las'} ${hora}. El recorrido se ordenó para cumplirla.` : `${lindo(p.nombre)}: sin hora fijada.`);
     } catch (e) { toast((e as Error).message, true); return; }
     // Vuelve del servidor ya ordenado; mientras tanto queda a la vista lo que había (sin vaciar la pantalla ni el mapa).
@@ -446,6 +447,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                     <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ? lindaDireccion(p.direccion) : 'Sin dirección cargada'}{p.detalle ? ` · ${p.detalle}` : ''}
                       {p.direccion && p.origen && ORIGEN_DUDOSO[p.origen] && <span className="cr-origen"> · {ORIGEN_DUDOSO[p.origen]}</span>}</div>
                     {p.observaciones && <div className="cr-p-sub cr-p-obs" title="Observaciones de entrega">{p.observaciones}</div>}
+                    {/* Las anotaciones de logística de lo que se hace en la parada, con quién las escribió. */}
+                    {[...new Map([...p.movimientos.flatMap((m) => m.notas ?? []), ...(p.encargos ?? []).flatMap((e) => e.anotaciones ?? [])].map((n) => [n.id, n])).values()].map((n) => <LineaNota key={n.id} n={n} />)}
                   </div>
                   <div className={`cr-eta${s.tarde ? ' tarde' : ''}`} role="group" aria-label={etaTexto} title={s.incierta ? 'Aproximada: antes hay una dirección sin ubicar, así que no cuenta ese viaje' : undefined}>
                     <b className="num" aria-hidden="true">{s.tramo.sinUbicar ? '—' : `${s.incierta ? '≈' : ''}${hhmm(atiende)}`}</b>
@@ -521,7 +524,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                   )}
                   {expresando === p.clave && <PorExpreso p={p} expresos={datos.expresos ?? []} onListo={() => { setExpresando(null); void cargar(); onCambio(); }} />}
                   {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
-                  {fijando === p.clave && <FijarHora p={p} llega={s.tramo.sinUbicar ? null : s.llega} aMano={!!act.r.a_mano} onGuardar={(modo, hora) => fijarHora(p, modo, hora)} onCancelar={() => setFijando(null)} />}
+                  {fijando === p.clave && <FijarHora p={p} llega={s.tramo.sinUbicar ? null : s.llega} aMano={!!act.r.a_mano} onGuardar={(modo, hora, hasta) => fijarHora(p, modo, hora, hasta)} onCancelar={() => setFijando(null)} />}
                 </li>
               </Fragment>
             );
@@ -668,26 +671,23 @@ function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id:
 }
 
 // Fijar la hora de una parada: «a las 12:00» (llega entre 15 minutos antes y 15 después), «antes de las…» o «desde las…».
-function FijarHora({ p, llega, aMano, onGuardar, onCancelar }: { p: Parada; llega: number | null; aMano: boolean; onGuardar: (modo: ModoHora | null, hora: string) => Promise<void>; onCancelar: () => void }) {
+function FijarHora({ p, llega, aMano, onGuardar, onCancelar }: { p: Parada; llega: number | null; aMano: boolean; onGuardar: (modo: ModoHora | null, hora: string, hasta: string) => Promise<void>; onCancelar: () => void }) {
   const dos = (x: number) => { const m = Math.round(x); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
   const [modo, setModo] = useState<ModoHora>(p.pactada?.modo ?? 'a_las');
   const [hora, setHora] = useState(p.pactada ? dos(p.pactada.min) : llega != null ? dos(Math.round(llega / 15) * 15) : '12:00');
+  const [hasta, setHasta] = useState(p.pactada?.hasta != null ? dos(p.pactada.hasta) : '13:00');
   const [ocupado, setOcupado] = useState(false);
-  const guardar = async (m: ModoHora | null) => { setOcupado(true); await onGuardar(m, hora); setOcupado(false); };
+  const ok = !!hora && (modo !== 'entre' || (!!hasta && hasta > hora));
+  const guardar = async (m: ModoHora | null) => { setOcupado(true); await onGuardar(m, hora, hasta); setOcupado(false); };
   return (
-    <form className="cr-editar cr-fijar" onKeyDown={alEsc(onCancelar)} onSubmit={(e) => { e.preventDefault(); if (hora) void guardar(modo); }}>
-      <div className="row" role="group" aria-label="Cómo">
-        {([['a_las', 'A las'], ['antes', 'Antes de las'], ['desde', 'Desde las']] as const).map(([k, t]) => (
-          <button key={k} type="button" className={`chip${modo === k ? ' on' : ''}`} aria-pressed={modo === k} onClick={() => setModo(k)}>{t}</button>
-        ))}
-        <input type="time" className="input sm" value={hora} onChange={(e) => setHora(e.target.value)} aria-label="Hora" required />
-      </div>
-      <span className="muted small">{modo === 'a_las' ? 'Llega entre 15 minutos antes y 15 después.' : modo === 'antes' ? 'Tiene que llegar antes de esa hora.' : 'No antes de esa hora.'} El recorrido se ordena solo para cumplirla, junto con las demás horas fijadas.</span>
+    <form className="cr-editar cr-fijar" onKeyDown={alEsc(onCancelar)} onSubmit={(e) => { e.preventDefault(); if (ok) void guardar(modo); }}>
+      <CamposHora modo={modo} hora={hora} hasta={hasta} onModo={setModo} onHora={setHora} onHasta={setHasta} />
+      <span className="muted small">{ayudaHora(modo)} El recorrido se ordena solo para cumplirla, junto con las demás horas fijadas.</span>
       {aMano && <span className="cr-ojo small"><Icon name="alert" size={12} />Este recorrido está ordenado a mano: al guardar se vuelve a ordenar solo y se pierde ese orden.</span>}
       <div className="acciones">
         <button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button>
         {p.pactada && <button type="button" className="btn sm ghost" disabled={ocupado} onClick={() => guardar(null)}>Sacar la hora</button>}
-        <button type="submit" className="btn sm primary" disabled={ocupado || !hora}>Fijar la hora</button>
+        <button type="submit" className="btn sm primary" disabled={ocupado || !ok}>Fijar la hora</button>
       </div>
     </form>
   );

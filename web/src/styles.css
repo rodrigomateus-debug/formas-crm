@@ -1575,6 +1575,26 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-colgados .cr-dia-sub { color: var(--ui-warning-ink); line-height: 1.35; }
 .cr-colgados.sobre { border-style: solid; }
 .cr-colgados-vacio { padding: 14px 12px; color: var(--ui-warning-ink); line-height: 1.45; }
+/* Anotaciones de logística (NotasLogistica.tsx): en la tarjeta, la parada y el pedido. Las de siempre, en azul; las de esta vez, en ámbar. */
+.lg-notas { display: flex; flex-direction: column; gap: 6px; }
+.lg-nota { padding: 5px 8px; border-left: 3px solid var(--ui-warning); background: var(--ui-warning-soft); border-radius: 0 6px 6px 0; min-width: 0; }
+.lg-nota.siempre { border-left-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 9%, var(--ui-surface)); }
+.lg-nota p { margin: 0 0 2px; font-size: 12.5px; line-height: 1.35; color: var(--ui-ink); white-space: pre-line; overflow-wrap: anywhere; }
+.lg-nota-pie { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 10.5px; color: var(--ui-ink-2); }
+.lg-nota-tag { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 9.5px; color: var(--ui-warning-ink); }
+.lg-nota.siempre .lg-nota-tag { color: var(--accent-ink); }
+.lg-nota-x { margin-left: auto; border: 0; background: none; padding: 2px; cursor: pointer; color: var(--ui-ink-2); border-radius: 4px; display: grid; place-items: center; }
+.lg-nota-x:hover { background: var(--ui-surface); color: var(--ui-ink); }
+.lg-form .chip { white-space: normal; text-align: left; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px; line-height: 1.25; }
+.lg-form { display: flex; flex-direction: column; gap: 6px; } .lg-form textarea { resize: vertical; }
+.lg-form-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.lg-horario { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ui-ink); } .lg-horario b { font-weight: 600; }
+.cr-t-notas { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.cr-p-quien .lg-nota { margin-top: 4px; }
+/* La cantidad de un producto en un ingreso, retiro o egreso: se toca para anotar la que realmente va (demasía). */
+.cr-t-cant { font: inherit; font-weight: 600; color: var(--ui-ink); text-align: right; border: 0; background: none; padding: 0 2px; margin: 0 -2px; border-radius: 4px; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.cr-t-cant:hover, .cr-t-cant:focus-visible { background: var(--ui-surface); }
+.cr-t-demasia { font-style: normal; font-weight: 600; margin-left: 6px; padding: 0 5px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 10.5px; white-space: nowrap; }
 .cr-t-motivo { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--ui-warning); background: var(--ui-warning-soft); color: var(--ui-warning-ink); border-radius: 0 6px 6px 0; }
 .cr-t-motivo p { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; } .cr-t-motivo span { opacity: .85; }
 .cr-dia-cab { padding: 12px 12px 10px; border-bottom: 1px solid var(--ui-line); display: flex; flex-direction: column; gap: 4px; }

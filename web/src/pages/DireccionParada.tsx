@@ -36,7 +36,6 @@ export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos
   const [horario, setHorario] = useState(p.horario_texto ?? '');
   // Lo que completa la dirección (piso, depto, puerta, unidad) y lo que tiene que saber el chofer al llegar.
   const [detalle, setDetalle] = useState(p.detalle ?? '');
-  const [observaciones, setObservaciones] = useState(p.observaciones ?? '');
   const [guardando, setGuardando] = useState(false);
   const esEntrega = pedidos.length > 0;
   // La libreta: al abrir, los lugares de ese cliente o proveedor; al escribir, lo que coincida.
@@ -50,7 +49,7 @@ export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setGuardando(true);
-    const dir = { direccion, detalle, observaciones, ...(placeId ? { place_id: placeId, sesion } : {}) };
+    const dir = { direccion, detalle, ...(placeId ? { place_id: placeId, sesion } : {}) };
     try {
       if (esEntrega) { for (const id of pedidos) await http('PUT', '/cronograma/direccion', { record_id: id, ...dir }); }
       if (p.company_id && (!esEntrega || horario !== (p.horario_texto ?? ''))) await http('PUT', '/cronograma/direccion', { company_id: p.company_id, ...(esEntrega ? {} : dir), horario });
@@ -79,8 +78,7 @@ export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos
         <label>Piso, depto, puerta o unidad<input className="input sm" value={detalle} onChange={(e) => setDetalle(e.target.value)} placeholder="Piso 4 B, nave 3, puerta 2…" maxLength={200} /></label>
         {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
       </div>
-      <label>Observaciones de entrega
-        <textarea className="input sm" rows={2} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} placeholder="Tocar timbre de recepción, entrar por el portón de atrás, preguntar por Ana…" maxLength={500} /></label>
+      <p className="muted small" style={{ margin: 0 }}>Lo que hay que saber al llegar (por dónde entrar, por quién preguntar) va en las <b>anotaciones de logística</b>: el ícono de la nota en la tarjeta.</p>
       <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando || !direccion.trim()}>Guardar</button></div>
     </form>
   );

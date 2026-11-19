@@ -125,8 +125,21 @@ Cuatro agentes (dos de Fable y dos de Opus) auditaron los perfiles y reprodujero
 - **Formulario público** (`/hooks/form/<nombre>`): el visitante carga solo datos de contacto (no el propietario, el tipo de
   relación ni el estado del lead) y la vuelta es solo a sitios de Formas o a los del formulario (README).
 
-Queda para después (no entró en esta tanda): que los tokens de Claude no sirvan en `/hooks`, sacar los tokens de las
-direcciones web, y que Ventas no edite ni borre notas ajenas.
+Segunda tanda:
+
+- **Cada token sirve solo en su entrada** (`SUPERFICIE` en `src/worker/auth.ts`): el de Claude (tipo «mcp», también el que
+  da «Conectar con Claude» a cualquiera) solo en `/mcp`; el de Darwin (que viaja en la dirección del webhook y es de un
+  administrador) solo en `/hooks/darwin`. Antes con el de Claude una vendedora usaba `/hooks/bundle` y se hacía visibles
+  clientes ajenos. El token en la dirección (`?token=`) se acepta solo en `/hooks`.
+- **Ventas cambia y borra solo sus notas, mails y tareas** (las que tiene asignadas, cargó o colabora; la gerenta, las de su
+  equipo), aunque vea las de otra en un registro que ve (`actividadSuyaVentas`).
+- **Filtros por datos de un asociado** («negocio.monto > X» en empresas): solo entre los asociados que ve quien busca.
+- **El administrador principal** (ADMIN_EMAIL) no se desactiva ni deja de ser administrador. Un cambio de usuario que
+  rebota no deja nada guardado a medias.
+- **CSV exportado** sin fórmulas (un texto que empieza con `=`, `+`, `-` o `@` va con apóstrofo).
+- **Cabeceras de seguridad** en la pantalla (`web/public/_headers`): `nosniff`, `X-Frame-Options`, `Referrer-Policy`.
+- **Choferes**: pasado el tope general de intentos con códigos errados, siguen pudiendo entrar las conexiones con menos de
+  3 errores (antes unos pocos probando al azar dejaban afuera a todos).
 
 ## Barra lateral y pantalla de inicio (pedido de Rodrigo del 16/11/2026)
 

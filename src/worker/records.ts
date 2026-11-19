@@ -720,7 +720,10 @@ async function filterSql(meta: Meta, ctx: Ctx, type: ObjectType, f: Filter, bind
     const inner: unknown[] = [];
     const cond = (await filterSql(meta, ctx, other, { ...f, prop: f.prop.slice(dot + 1) }, inner)).replace(/\br\./g, 'x.');
     binds.push(other, ...inner);
-    return `EXISTS (SELECT 1 FROM associations ax JOIN records x ON x.id = ax.to_id AND x.archived = 0 WHERE ax.from_id = r.id AND ax.to_type = ? AND ${cond})`;
+    // Solo entre los asociados que ve quien busca: si no, filtrar empresas por «negocio.monto > X» decía el monto, la etapa o
+    // el nombre de los negocios de otra vendedora (auditoría del 19/11/2026).
+    const visible = restringido(ctx.user) ? ` AND ${visibleSql('x', ctx.user)}` : '';
+    return `EXISTS (SELECT 1 FROM associations ax JOIN records x ON x.id = ax.to_id AND x.archived = 0 WHERE ax.from_id = r.id AND ax.to_type = ? AND ${cond}${visible})`;
   }
   const { expr, numeric } = await sqlFor(meta, type, f.prop);
   const val = (v: unknown) => {

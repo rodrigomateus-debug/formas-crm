@@ -408,8 +408,9 @@ async function chofer(env: Env, req: Request) {
 }
 // Entrar con el código (pedido de Rodrigo del 13/11/2026): el chofer escribe una vez los 8 números que le pasó Logística
 // y la app se queda con su link, como si lo hubiera abierto. Para que nadie pruebe códigos al azar: hasta 10 intentos
-// errados por conexión cada 15 minutos y 300 en total por hora; pasado eso, hay que esperar.
-const MAX_INTENTOS_IP = 10, MAX_INTENTOS = 300;
+// errados por conexión cada 15 minutos y 300 en total por hora. Pasado el total, siguen pudiendo probar las conexiones con
+// menos de 3 errores: si no, unos pocos probando al azar dejaban afuera a todos los choferes (auditoría del 19/11/2026).
+const MAX_INTENTOS_IP = 10, MAX_INTENTOS = 300, MAX_INTENTOS_IP_CON_TOPE = 3;
 hooks.post('/chofer/api/entrar', async (c) => {
   const db = c.env.DB;
   const ip = c.req.header('cf-connecting-ip') ?? 'sin-ip';
@@ -417,7 +418,7 @@ hooks.post('/chofer/api/entrar', async (c) => {
   await db.prepare('DELETE FROM chofer_intentos WHERE at < ?').bind(ahora - 3600_000).run();
   const n = await db.prepare('SELECT COALESCE(SUM(ip = ? AND at > ?), 0) AS ip, COUNT(*) AS total FROM chofer_intentos').bind(ip, ahora - 900_000)
     .first<{ ip: number; total: number }>();
-  if ((n?.ip ?? 0) >= MAX_INTENTOS_IP || (n?.total ?? 0) >= MAX_INTENTOS) throw new HttpError(429, 'Probaste muchas veces con un código que no es. Esperá unos minutos y volvé a probar, o pedile tu código a Logística.');
+  if ((n?.ip ?? 0) >= MAX_INTENTOS_IP || ((n?.total ?? 0) >= MAX_INTENTOS && (n?.ip ?? 0) >= MAX_INTENTOS_IP_CON_TOPE)) throw new HttpError(429, 'Probaste muchas veces con un código que no es. Esperá unos minutos y volvé a probar, o pedile tu código a Logística.');
   const { codigo } = await c.req.json<{ codigo?: unknown }>().catch(() => ({ codigo: '' }));
   const limpio = String(codigo ?? '').replace(/\D/g, '');
   const t = limpio.length === 8 ? await db.prepare("SELECT name, chofer_token FROM api_tokens WHERE codigo = ? AND source = 'chofer' AND revoked = 0 AND chofer_token IS NOT NULL")

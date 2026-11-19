@@ -133,13 +133,29 @@ export async function userByEmail(env: Env, email: string): Promise<User> {
 
 // Los links de los choferes (tokens tipo «chofer») solo sirven para la app de remitos (/hooks/chofer/api): si uno se
 // filtra, no abre el resto del CRM.
+// Cada token sirve solo en su entrada (auditoría del 19/11/2026): el de Claude (tipo «mcp», también el que da «Conectar con
+// Claude» a cualquier usuario) solo en /mcp, y el de Darwin (que viaja en la dirección del webhook) solo en /hooks/darwin.
+// Antes cualquiera abría todo /api y /hooks como su usuario: con /hooks/bundle una vendedora completaba contactos ajenos y
+// pasaba a verlos. El token en la dirección (?token=) se acepta solo en /hooks (webhooks que no mandan cabeceras): en el
+// resto queda en los registros de Cloudflare.
+const SUPERFICIE: Record<string, { prefijo: string; nombre: string }> = {
+  mcp: { prefijo: '/mcp', nombre: 'Claude (MCP)' },
+  darwin: { prefijo: '/hooks/darwin', nombre: 'Darwin' },
+};
 export async function authenticate(env: Env, req: Request, pathToken?: string, opts: { chofer?: boolean } = {}): Promise<Ctx> {
   const auth = req.headers.get('authorization');
-  const bearer = pathToken ?? (auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null) ?? new URL(req.url).searchParams.get('token');
+  const url = new URL(req.url);
+  const enDireccion = url.searchParams.get('token');
+  if (!pathToken && !auth?.startsWith('Bearer ') && enDireccion && !url.pathname.startsWith('/hooks/')) {
+    throw new HttpError(401, 'El token va en la cabecera Authorization: Bearer fcrm_…, no en la dirección.');
+  }
+  const bearer = pathToken ?? (auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null) ?? enDireccion;
   if (bearer) {
     const t = await userFromToken(env, bearer);
     if (!t) throw new HttpError(401, 'Token inválido o revocado.');
     if ((t.source === 'chofer') !== !!opts.chofer) throw new HttpError(t.source === 'chofer' ? 403 : 401, t.source === 'chofer' ? 'El link del chofer solo sirve para mandar remitos.' : 'Este token no es de un chofer.');
+    const sup = SUPERFICIE[t.source];
+    if (sup && !url.pathname.startsWith(sup.prefijo)) throw new HttpError(403, `Este token es de ${sup.nombre}: no sirve en ${url.pathname.split('/').slice(0, 3).join('/')}.`);
     return { user: t.user, source: t.source, sourceDetail: t.name, tokenId: t.tokenId };
   }
   if (opts.chofer) throw new HttpError(401, 'Falta el link del chofer.');

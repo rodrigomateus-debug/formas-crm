@@ -1,0 +1,13 @@
+# Cabeceras de los archivos que sirve Cloudflare directamente (la pantalla del Hub y sus assets). Las respuestas del Worker
+# (/api, /hooks, /mcp…) llevan las suyas.
+# Auditoría del 19/11/2026: la aplicación no tenía cabeceras de seguridad, y los assets (con hash en el nombre) se volvían a
+# pedir en cada apertura.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: same-origin
+
+# Llevan un hash en el nombre: si cambian, cambia el nombre. El navegador los guarda un año sin volver a preguntar.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

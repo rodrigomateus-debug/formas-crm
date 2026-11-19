@@ -181,3 +181,66 @@ test('el formulario público carga solo datos de contacto y vuelve solo a sitios
   assert.equal((await form({ email: mail, redirect: 'http://formas.ar/gracias' })).status, 200, 'sin https, no');
   sql(`DELETE FROM settings WHERE key = 'form:${slug}'`);
 });
+
+// Segunda tanda (misma auditoría): tokens, actividades ajenas, filtros, administrador principal, CSV.
+test('cada token sirve solo en su entrada, y no en la dirección', async () => {
+  const mcpA = (await call('POST', '/api/tokens', { name: `Claude tanda2 ${RUN}`, source: 'mcp', user_id: ids.A })).data.token;
+  const bearer = (t) => ({ authorization: `Bearer ${t}` });
+  assert.equal((await call('GET', '/api/me', undefined, bearer(mcpA))).status, 403, 'el de Claude no abre /api');
+  const bundle = await call('POST', '/hooks/bundle', { contact: { email: `colado-${RUN}@example.com` } }, bearer(mcpA));
+  assert.equal(bundle.status, 403, `ni /hooks/bundle (${JSON.stringify(bundle.data)})`);
+  const init = await fetch(`${CRM}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', ...bearer(mcpA) },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) });
+  assert.equal(init.status, 200, 'en /mcp sí');
+  const darwin = (await call('POST', '/api/tokens', { name: `Darwin tanda2 ${RUN}`, source: 'darwin' })).data.token;
+  assert.equal((await call('GET', '/api/users', undefined, bearer(darwin))).status, 403, 'el de Darwin (de un administrador) no abre /api');
+  assert.equal((await call('GET', `/crm/v3/objects/companies?limit=1`, undefined, bearer(darwin))).status, 403, 'ni la API compatible');
+  const api = (await call('POST', '/api/tokens', { name: `API tanda2 ${RUN}`, source: 'api' })).data.token;
+  assert.equal((await call('GET', '/api/me', undefined, bearer(api))).status, 200, 'uno de tipo API, en /api sí');
+  assert.equal((await call('GET', `/api/me?token=${api}`)).status, 401, 'pero en la dirección, no');
+});
+
+test('Ventas no cambia ni borra notas ajenas de un registro que ve', async () => {
+  const empB = await crear('company', { name: `Notas de B ${RUN}`, owner_id: ids.B });
+  await crear('deal', { dealname: `Negocio notas A ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', owner_id: ids.A }, undefined, [empB.id]);
+  const notaB = (await call('POST', '/api/activities', { type: 'note', body: `Nota privada de B ${RUN}`, links: [empB.id] }, como(B))).data;
+  assert.ok(notaB?.id, JSON.stringify(notaB));
+  const editar = await call('PATCH', `/api/activities/${notaB.id}`, { body: 'PISADO' }, como(A));
+  assert.equal(editar.status, 403, `no la edita (${JSON.stringify(editar.data)})`);
+  assert.match(editar.data.error, /Aud B/);
+  assert.equal((await call('DELETE', `/api/activities/${notaB.id}`, undefined, como(A))).status, 403, 'ni la borra');
+  assert.equal((await call('DELETE', `/api/activities/${notaB.id}/links/${empB.id}`, undefined, como(A))).status, 403, 'ni la saca del registro');
+  const notaA = (await call('POST', '/api/activities', { type: 'note', body: `Nota de A ${RUN}`, links: [empB.id] }, como(A))).data;
+  assert.equal((await call('PATCH', `/api/activities/${notaA.id}`, { body: 'Corregida' }, como(A))).status, 200, 'la suya sí');
+});
+
+test('los filtros por datos de un asociado no dicen nada de lo que no se ve', async () => {
+  const emp = await crear('company', { name: `Oráculo ${RUN}`, owner_id: ids.B });
+  await crear('deal', { dealname: `Chico de A ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 10, owner_id: ids.A }, undefined, [emp.id]);
+  await crear('deal', { dealname: `Grande de B ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 7777777, owner_id: ids.B }, undefined, [emp.id]);
+  const buscar = async (value, email) => (await call('POST', '/api/records/company/search', { q: `Oráculo ${RUN}`, filters: [{ prop: 'deal.amount', op: 'gt', value }] }, email ? como(email) : {})).data;
+  assert.equal((await buscar(5000000, A)).total, 0, 'el monto del negocio de B no aparece');
+  assert.equal((await buscar(5, A)).total, 1, 'el suyo sí filtra');
+  assert.equal((await buscar(5000000)).total, 1, 'el administrador ve todo');
+});
+
+test('otro administrador no deja afuera al administrador principal', async () => {
+  const yo = (await call('GET', '/api/me')).data;
+  const otro = (await call('POST', '/api/users', { email: `aud-admin2-${RUN}@example.com`, name: `Aud Admin2 ${RUN}`, profile: 'admin', role: 'admin' })).data;
+  const como2 = como(`aud-admin2-${RUN}@example.com`);
+  const baja = await call('PATCH', `/api/users/${yo.id}`, { active: false }, como2);
+  assert.equal(baja.status, 400, JSON.stringify(baja.data));
+  assert.equal((await call('PATCH', `/api/users/${yo.id}`, { role: 'member' }, como2)).status, 400);
+  assert.equal((await call('GET', '/api/me')).data.role, 'admin', 'sigue administrador y activo');
+  // Lo que rebota no deja nada guardado a medias.
+  const mal = await call('PATCH', `/api/users/${otro.id}`, { direccion: true, profile: 'no-existe' });
+  assert.equal(mal.status, 400);
+  assert.ok(!(await call('GET', '/api/users')).data.find((u) => u.id === otro.id).direccion, 'Dirección no quedó guardada');
+});
+
+test('el CSV exportado no lleva fórmulas', async () => {
+  await crear('company', { name: `=HYPERLINK("https://evil.example","Clic") ${RUN}` });
+  const csv = await (await fetch(`${CRM}/api/export/company?q=${encodeURIComponent(RUN)}&columns=name`)).text();
+  assert.ok(csv.includes(`'=HYPERLINK`), csv.slice(0, 300));
+  assert.ok(!/(^|,)"?=HYPERLINK/m.test(csv), 'ninguna celda empieza con =');
+});

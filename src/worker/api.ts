@@ -612,10 +612,26 @@ api.get('/activities/:id', async (c) => {
   return c.json(await getActivity(c.env.DB, Number(c.req.param('id'))));
 });
 
+// Perfil Ventas: ver una nota, un mail o una tarea porque está en un registro que ve no la habilita a cambiarla ni a borrarla.
+// La cambia quien la tiene asignada o la cargó (o una colaboradora de la tarea, o la gerenta de su equipo); lo que no tiene
+// ni responsable ni autor (lo que entra solo), también. Como soloLoSuyoVentas para los registros (auditoría del 19/11/2026).
+async function actividadSuyaVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
+  const user = c.get('ctx').user;
+  if (!esVentas(user)) return;
+  const db = c.env.DB;
+  const a = await db.prepare('SELECT type, owner_id, created_by FROM activities WHERE id = ?').bind(id).first<{ type: string; owner_id: number | null; created_by: number | null }>();
+  if (!a || (a.owner_id == null && a.created_by == null) || a.owner_id === user.id || a.created_by === user.id) return;
+  if (a.owner_id != null && await esDeSuEquipo(db, user, a.owner_id)) return;
+  if (a.type === 'task' && await db.prepare('SELECT 1 FROM tarea_colaboradores WHERE activity_id = ? AND user_id = ?').bind(id, user.id).first()) return;
+  const de = (await db.prepare('SELECT name FROM users WHERE id = ?').bind(a.owner_id ?? a.created_by).first<{ name: string }>())?.name ?? 'otra persona';
+  throw new HttpError(403, `Es de ${de}: la puede cambiar ella o un administrador.`);
+}
+
 api.patch('/activities/:id', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   await assertActividadVisible(c.env.DB, ctx.user, Number(c.req.param('id')));
+  await actividadSuyaVentas(c, Number(c.req.param('id')));
   const input = await c.req.json<Partial<ActivityInput>>();
   await linksVisibles(c, input.links);
   return c.json(await updateActivity(c.env.DB, ctx, Number(c.req.param('id')), input));
@@ -625,12 +641,14 @@ api.delete('/activities/:id', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   await assertActividadVisible(c.env.DB, ctx.user, Number(c.req.param('id')));
+  await actividadSuyaVentas(c, Number(c.req.param('id')));
   return c.json(await updateActivity(c.env.DB, ctx, Number(c.req.param('id')), { archived: true }));
 });
 
 api.delete('/activities/:id/links/:record', async (c) => {
   canWrite(c.get('ctx'));
   await assertActividadVisible(c.env.DB, c.get('ctx').user, Number(c.req.param('id')));
+  await actividadSuyaVentas(c, Number(c.req.param('id')));
   await registroVisible(c, Number(c.req.param('record')));
   await unlinkActivity(c.env.DB, Number(c.req.param('id')), Number(c.req.param('record')));
   return c.json({ ok: true });
@@ -1044,7 +1062,10 @@ api.get('/export/:type', async (c) => {
     return v;
   };
   const esc = (v: unknown) => {
-    const s = v == null ? '' : String(v);
+    let s = v == null ? '' : String(v);
+    // Un texto que empieza con =, +, -, @ (o tabulación / retorno) Excel lo toma como fórmula: un nombre o una nota cargada
+    // por un formulario público podía ejecutarse al abrir el CSV. Se le antepone un apóstrofo (auditoría del 19/11/2026).
+    if (/^[=+\-@\t\r]/.test(s) && typeof v !== 'number' && !/^[-+]?\d[\d.,]*$/.test(s)) s = `'${s}`;
     return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [['ID', ...columns.map(label)].map(esc).join(',')];
@@ -1998,9 +2019,22 @@ api.patch('/users/:id', async (c) => {
   const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
+  // Primero todo lo que puede rebotar, después se guarda (antes el permiso de superadmin, Dirección y Gerencia quedaban
+  // guardados aunque el resto rebotara).
+  const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
+  // El administrador principal (ADMIN_EMAIL) no se desactiva ni deja de ser administrador: otro administrador podía
+  // dejarlo afuera del CRM (auditoría del 19/11/2026).
+  if (c.env.ADMIN_EMAIL && String(cur.email).toLowerCase() === c.env.ADMIN_EMAIL.toLowerCase() && (role !== 'admin' || b.active === false)) {
+    throw new HttpError(400, 'Es el administrador principal del CRM (ADMIN_EMAIL): sigue activo y administrador.');
+  }
+  if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
+    const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
+    if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
+  }
+  if (b.superadmin !== undefined && !esSuperadmin(c.env, c.get('ctx').user)) throw new HttpError(403, 'Solo un superadmin puede dar o sacar el permiso de superadmin.');
+  if (b.gerencia_team != null && !(await c.env.DB.prepare('SELECT 1 FROM teams WHERE id = ?').bind(Number(b.gerencia_team)).first())) throw new HttpError(400, 'No existe ese equipo.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
   if (b.superadmin !== undefined) {
-    if (!esSuperadmin(c.env, c.get('ctx').user)) throw new HttpError(403, 'Solo un superadmin puede dar o sacar el permiso de superadmin.');
     if (!b.superadmin && c.env.ADMIN_EMAIL && String(cur.email).toLowerCase() === c.env.ADMIN_EMAIL.toLowerCase()) {
       throw new HttpError(400, 'Es el administrador principal del CRM (ADMIN_EMAIL): es superadmin siempre.');
     }
@@ -2013,11 +2047,6 @@ api.patch('/users/:id', async (c) => {
     const t = b.gerencia_team == null ? null : Number(b.gerencia_team);
     if (t != null && !(await c.env.DB.prepare('SELECT 1 FROM teams WHERE id = ?').bind(t).first())) throw new HttpError(400, 'No existe ese equipo.');
     await c.env.DB.prepare('UPDATE users SET gerencia_team = ? WHERE id = ?').bind(t, cur.id).run();
-  }
-  const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
-  if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
-    const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
-    if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
   }
   // Pipelines que ve: la lista elegida (solo ids que existen) o null para volver a «según sus equipos».
   if (b.pipelines !== undefined) {

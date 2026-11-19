@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
-import { Avatar, EditarEnLinea, Modal, QuienPidio, alEsc } from '../components';
+import { Avatar, EditarEnLinea, Modal, QuienPidio, UserChip, alEsc } from '../components';
+import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -37,6 +38,7 @@ export interface Mov {
   dir?: number | null; sitio?: string | null; repartida?: boolean;
   notas?: NotaLogistica[];    // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó (demasía)
+  despacho?: DespachoMov;     // si está listo para salir, qué falta y a quién le toca (despacho.ts)
 }
 export interface Nota { id: number; fecha: string; texto: string; hecho: number }
 export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -141,7 +143,10 @@ export default function CronogramaPage() {
   const [buscar, setBuscar] = useState('');
   const [unidad, setUnidad] = useState('');
   const [pendientes, setPendientes] = useState(false);
+  const [toca, setToca] = useState<Rol | ''>('');   // «Le toca a»: solo las tarjetas de Producción, Ventas, el proveedor o Logística
   const [preview, setPreview] = useState<number | null>(null);
+  const [previewT, setPreviewT] = useState<Tarjeta | null>(null);   // la tarjeta desde la que se abrió (su despacho va arriba)
+  const abrirTarjeta = (t: Tarjeta) => { if (t.record_id) { setPreview(t.record_id); setPreviewT(t); } };
   const [nuevoPara, setNuevoPara] = useState<Tarjeta | Encargo | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo abierto
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
@@ -199,6 +204,17 @@ export default function CronogramaPage() {
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
   const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad)), [v, q, unidad]);
+  // Estados de despacho: la dirección de la parada de una tarjeta (llega aparte) y a quién le toca cada una.
+  const dirDe = (t: Tarjeta) => (t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined);
+  const pasaToca = (t: Tarjeta) => !toca || despachoTarjeta(t, dirDe(t))?.quien === toca;
+  const porRol = useMemo(() => {
+    const n: Partial<Record<Rol, number>> = {};
+    for (const t of [...tarjetas(movs), ...tarjetas(colg).map((x) => ({ ...x, parada: false }))]) {
+      const r = despachoTarjeta(t, t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined)?.quien;
+      if (r) n[r] = (n[r] ?? 0) + 1;
+    }
+    return n;
+  }, [movs, colg, dirs]);
 
   async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string, dirs?: Array<number | null>) {
     // Es este movimiento: el del artículo o, en un pedido que va a varios lugares, la entrega de ese lugar.
@@ -309,6 +325,11 @@ export default function CronogramaPage() {
               </div>
             )}
             <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)} />Solo lo pendiente</label>
+            <div className="row cr-toca" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Le toca a">
+              <span className="small muted">Le toca a</span>
+              {(Object.keys(NOMBRE_ROL) as Rol[]).map((r) => <button key={r} type="button" className={`chip${toca === r ? ' on' : ''}`} aria-pressed={toca === r} onClick={() => setToca(toca === r ? '' : r)}
+                title={`Solo lo que le toca a ${NOMBRE_ROL[r]}`}>{NOMBRE_ROL[r]} <span className="num">{porRol[r] ?? 0}</span></button>)}
+            </div>
             <span className="grow" />
             <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}<span className="cr-k-X" title="Lo que alguien pidió en Recorridos"><i />Encargos</span></div>
           </div>
@@ -331,18 +352,19 @@ export default function CronogramaPage() {
                           <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{cuantos ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${cuantos}` : `${cuantos} hechos`) : 'Sin movimientos'}</span>
                           {(delDia.some((m) => !llega(m.tipo)) || encDia.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
                         </div>
+                        <MezclaDia estados={tarjetas(delDia).map((t) => (t.hecho ? 'hecho' : despachoTarjeta(t, dirDe(t))?.estado ?? 'listo'))} />
                         <Feriado dia={d} nombre={v.feriados[d]} puede={puede} onCambio={cargar} />
                       </header>
                       <div className="cr-carriles">
                         {CARRILES.map((c) => {
-                          const ts = tarjetas(delDia.filter((m) => c.tipos.includes(m.tipo)));
+                          const ts = tarjetas(delDia.filter((m) => c.tipos.includes(m.tipo))).filter(pasaToca);
                           if (!ts.length) return null;
                           return (
                             <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
                               <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
                               {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []} onChofer={(c) => asignar(t, c)}
                                 dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
-                                onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
+                                onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined} feriados={v.feriados}
                                 onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
                                 onAnotar={t.record_id ? () => setAnotando(t) : undefined} onHora={t.parada && t.movs[0]?.parada && !t.hecho ? () => setHoraDe(t) : undefined}
                                 onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined}
@@ -377,13 +399,13 @@ export default function CronogramaPage() {
                   </header>
                   <div className="cr-carriles">
                     {CARRILES.map((c) => {
-                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false }));
+                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false })).filter(pasaToca);
                       if (!ts.length) return null;
                       return (
                         <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
                           <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
                           {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy="" puede={puede} choferes={[]} expresos={[]} onChofer={() => undefined} buscando={false} onDir={() => undefined}
-                            onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
+                            onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined}
                             onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
                             onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: COLGADOS, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                         </div>
@@ -426,7 +448,8 @@ export default function CronogramaPage() {
         </Modal>
       )}
       {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); }} />}
-      {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
+      {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => { setPreview(null); setPreviewT(null); }} onChange={cargar}
+        arriba={previewT && previewT.record_id === preview ? <PanelDespacho t={previewT} dir={dirDe(previewT)} hoy={v?.hoy ?? hoyIso()} feriados={v?.feriados} /> : undefined} />}
       {nuevoPara && (
         <Modal title="Agregar chofer o expreso" onClose={() => setNuevoPara(null)}>
           <NuevoTransportista onCancelar={() => setNuevoPara(null)} onListo={(nombre) => { const t = nuevoPara; setNuevoPara(null); if ('movs' in t) void asignar(t, nombre); else void choferEnc(t, nombre); }} />
@@ -526,8 +549,8 @@ const ROL: Record<Tipo, { nombre: string; icono: string }> = {
 };
 const TOPE = 3;
 
-function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar, onAnotar, onHora, onEnviado }: {
-  t: Tarjeta; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
+function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar, onAnotar, onHora, onEnviado }: {
+  t: Tarjeta; hoy: string; feriados?: Record<string, string>; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
   onColgar?: () => void;   // dejarlo en «Colgados» (lo mismo que arrastrarlo ahí; para el celular)
@@ -547,8 +570,24 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
   const prods = t.movs.filter((m) => m.articulo);
   const ver = todo ? prods : prods.slice(0, TOPE);
   const marca = t.tipo === 'entrega' ? null : marcaProveedor(t.crudo);
+  const desp = t.hecho ? null : despachoTarjeta(t, dir);
+  const reloj = desp && hoy ? riesgo(desp, t.fecha, hoy, feriados) : null;
+  // Lo hecho ocupa una línea (la semana llena se sigue leyendo); se abre para ver la tarjeta entera.
+  const [abierta, setAbierta] = useState(false);
+  if (t.hecho && !abierta) return (
+    <article className={`cr-tarjeta hecho compacta${onAbrir ? ' abre' : ''}`} draggable={puede}
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.key); } catch { /* no hace falta */ } onArrastrar(true); }}
+      onDragEnd={() => onArrastrar(false)}
+      onClick={(e) => { if (onAbrir && !(e.target as HTMLElement).closest('button, a')) onAbrir(); }}>
+      {puede ? <button type="button" className="cr-check on" aria-pressed="true" aria-label="Volver a pendiente" title="Volver a pendiente" onClick={onMarcar}><Icon name="check" size={12} /></button>
+        : <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
+      <span className="cr-compacta-tit" title={t.titulo}>{t.titulo}</span>
+      <span className="cr-compacta-pdv num">{t.pdv.replace('PDV ', '')}</span>
+      <button type="button" className="cr-mini" aria-label="Ver la tarjeta entera" title="Ver la tarjeta entera" onClick={() => setAbierta(true)}><Icon name="down" size={13} /></button>
+    </article>
+  );
   return (
-    <article className={`cr-tarjeta${t.hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}${onAbrir ? ' abre' : ''}`} draggable={puede}
+    <article className={`cr-tarjeta${t.hecho ? ' hecho' : ''}${atrasado ? ' atrasado' : ''}${onAbrir ? ' abre' : ''}${desp ? ` cr-d cr-d-${desp.estado}` : ''}`} draggable={puede}
       onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', t.key); } catch { /* no hace falta */ } onArrastrar(true); e.currentTarget.classList.add('arrastrando'); }}
       onDragEnd={(e) => { e.currentTarget.classList.remove('arrastrando'); onArrastrar(false); }}
       onClick={(e) => { if (onAbrir && !(e.target as HTMLElement).closest('button, a, .popover, .select-pop, [role="dialog"]')) onAbrir(); }}>
@@ -570,6 +609,7 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
         {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
+      {desp && <FilaDespacho d={desp} tipo={t.tipo} reloj={reloj} />}
       {colgado && (
         <div className="cr-t-motivo">
           {motivos.map((m) => <p key={m}>{m}</p>)}
@@ -622,6 +662,77 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
       )}
       {!puede && t.hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
+  );
+}
+
+// El estado de despacho de una tarjeta: el estado, a quién le toca y los puntitos del checklist con lo que falta.
+const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8' };
+const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente' } as const;
+function Quien({ d }: { d: DespachoTarjeta }) {
+  if (!d.quien) return null;
+  return d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>;
+}
+const RelojTag = ({ r }: { r: Riesgo }) => <span className={`cr-desp-reloj ${r.nivel}`}><Icon name="timer" size={11} />{r.texto}</span>;
+function FilaDespacho({ d, tipo, reloj }: { d: DespachoTarjeta; tipo: Tipo; reloj?: Riesgo | null }) {
+  const falta = faltaTexto(d);
+  return (
+    <div className="cr-t-desp">
+      <div className="cr-t-desp-l1">
+        <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={11} />{nombreEstado(d.estado, tipo)}</span>
+        {d.quien && <span className="cr-desp-quien" title="A quién le toca el próximo paso"><Quien d={d} /></span>}
+      </div>
+      {reloj && <RelojTag r={reloj} />}
+      {d.checks.length > 0 && (
+        <div className="cr-t-desp-l2">
+          <span className="cr-puntos" role="list" aria-label="Checklist de salida">
+            {d.checks.map((c) => <i key={c.k} role="listitem" className={`cr-punto ${c.v}`} title={`${c.nombre}: ${V_TXT[c.v]}${c.t ? ` · ${c.t}` : ''}`} aria-label={`${c.nombre}: ${V_TXT[c.v]}`}>
+              <svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </i>)}
+          </span>
+          {falta && <small title={d.checks.filter((c) => c.t && c.v !== 'ok').map((c) => `${c.nombre}: ${c.t}`).join(' · ') || undefined}>{falta}</small>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// El despacho en la vista previa del pedido (arriba de todo): el estado, a quién le toca, si llega y el checklist entero.
+const V_LARGO = { ok: 'Sí', no: 'No', medio: 'En parte', pend: 'Pendiente' } as const;
+function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada; hoy: string; feriados?: Record<string, string> }) {
+  const d = despachoTarjeta(t, dir);
+  if (!d) return null;
+  const r = riesgo(d, t.fecha, hoy, feriados);
+  const colgado = t.movs.find((m) => m.colgado)?.colgado ?? null;
+  return (
+    <section className="panel cr-pv-desp" aria-label="Despacho">
+      <div className="panel-head"><h3>Despacho</h3><span className="small muted">{carrilDe(t.tipo).uno}{t.tipo === 'entrega' ? '' : ` · ${t.titulo}`} · {diaLargo(t.fecha)}</span></div>
+      <div className="cr-pv-desp-body">
+        <div className="row wrap" style={{ gap: 8 }}>
+          <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={12} />{nombreEstado(d.estado, t.tipo)}</span>
+          {r && <RelojTag r={r} />}
+        </div>
+        {d.quien && <div className="small row" style={{ gap: 6 }}><span className="muted">Le toca a</span><Quien d={d} /></div>}
+        {colgado && <div className="cr-t-motivo"><p>{colgado.motivo}</p><span className="small">Colgado · era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por}` : ''}</span></div>}
+        {d.checks.length > 0 && (
+          <ul className="cr-pv-checks">
+            {d.checks.map((c) => <li key={c.k}><i className={`cr-punto ${c.v}`} aria-hidden="true"><svg viewBox="0 0 16 16" width="9" height="9"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></i>
+              <span><b>{c.nombre}</b> <span className="muted">{c.t ?? V_LARGO[c.v]}</span></span></li>)}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// La barrita de cada día: cuánto hay de cada estado, de un vistazo.
+const ORDEN_MEZCLA: EstadoDespacho[] = ['hecho', 'remitido', 'listo', 'prog', 'cola', 'nollego', 'info', 'nopago'];
+function MezclaDia({ estados }: { estados: EstadoDespacho[] }) {
+  if (!estados.length) return null;
+  const n = (e: EstadoDespacho) => estados.filter((x) => x === e).length;
+  return (
+    <div className="cr-dia-mezcla" role="img" aria-label={ORDEN_MEZCLA.filter((e) => n(e)).map((e) => `${n(e)} ${nombreEstado(e, 'entrega').toLowerCase()}`).join(', ')}>
+      {ORDEN_MEZCLA.filter((e) => n(e)).map((e) => <i key={e} className={`cr-d-${e}`} style={{ flex: n(e) }} title={`${n(e)} · ${nombreEstado(e, 'entrega')}`} />)}
+    </div>
   );
 }
 

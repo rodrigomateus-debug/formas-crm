@@ -1541,6 +1541,59 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-k-R { --k: var(--k-r); --kb: var(--k-r-bg); } .cr-k-G { --k: var(--k-g); --kb: var(--k-g-bg); }
 .cr-k-N { --k: var(--text-3); --kb: var(--ui-surface-sunken); }
 .cr-k-X { --k: var(--k-x); --kb: var(--k-x-bg); }
+/* Estados de despacho (despacho.ts): los siete de Logística, en tonos bien separados y siempre con ícono y palabra. «No pagó»
+   lleva el amarillo flúor de la planilla en la barrita del día; el texto, un tono legible. El color va en la etiqueta del
+   estado, no en el borde de la tarjeta. */
+:root {
+  --d-hecho: #2b7a39; --d-hecho-bg: #e3f3e6; --d-remitido: #c2570c; --d-remitido-bg: #fdeadb; --d-cola: #6d3fd1; --d-cola-bg: #efe8fd;
+  --d-listo: #1d5fd1; --d-listo-bg: #e2ecfd; --d-info: #c42b2b; --d-info-bg: #fbe3e3; --d-nopago: #6b5d00; --d-nopago-bg: #f6ee8a; --d-nopago-flu: #e6dc00;
+  --d-nollego: #5f6577; --d-nollego-bg: #e9ebf0; --d-prog: #8a8fa8; --d-prog-bg: #eef0f5;
+}
+[data-theme="dark"] {
+  --d-hecho: #7fd88d; --d-hecho-bg: #14301b; --d-remitido: #ffa766; --d-remitido-bg: #3a2210; --d-cola: #b9a0ff; --d-cola-bg: #261b47;
+  --d-listo: #8fb6ff; --d-listo-bg: #13254a; --d-info: #ff8a84; --d-info-bg: #3d1716; --d-nopago: #f2e64a; --d-nopago-bg: #33300a;
+  --d-nollego: #b4b9cc; --d-nollego-bg: #262a3f; --d-prog: #8a8fb5; --d-prog-bg: #1c1f3a;
+}
+[data-theme="contrast"] {
+  --d-hecho: #1f5c2a; --d-remitido: #8f3c00; --d-cola: #4b23a8; --d-listo: #123f99; --d-info: #8f1a1a; --d-nopago: #4a4000; --d-nollego: #3d4252; --d-prog: #555a70;
+}
+.cr-d-hecho { --d: var(--d-hecho); --db: var(--d-hecho-bg); } .cr-d-remitido { --d: var(--d-remitido); --db: var(--d-remitido-bg); }
+.cr-d-cola { --d: var(--d-cola); --db: var(--d-cola-bg); } .cr-d-listo { --d: var(--d-listo); --db: var(--d-listo-bg); }
+.cr-d-info { --d: var(--d-info); --db: var(--d-info-bg); } .cr-d-nopago { --d: var(--d-nopago); --db: var(--d-nopago-bg); }
+.cr-d-nollego { --d: var(--d-nollego); --db: var(--d-nollego-bg); } .cr-d-prog { --d: var(--d-prog); --db: var(--d-prog-bg); }
+.cr-t-desp { display: flex; flex-direction: column; gap: 4px; margin: 5px 0 3px; min-width: 0; }
+.cr-t-desp-l1 { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-width: 0; }
+.cr-desp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; line-height: 1.5; padding: 0 7px 0 5px; border-radius: var(--r-pill); color: var(--d); background: var(--db); max-width: 100%; }
+.cr-desp-quien { font-size: 11.5px; color: var(--ui-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-desp-quien .user-inline { font-size: 11.5px; }
+.cr-t-desp-l2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cr-t-desp-l2 small { font-size: 11px; color: var(--ui-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-puntos { display: inline-flex; gap: 3px; flex: none; }
+.cr-punto { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; background: var(--ui-surface); color: var(--text-3); }
+.cr-punto.ok { background: var(--d-hecho-bg); color: var(--d-hecho); } .cr-punto.no { background: var(--d-info-bg); color: var(--d-info); }
+.cr-punto.medio { background: var(--d-cola-bg); color: var(--d-cola); }
+.cr-toca .chip .num { color: var(--text-3); font-weight: 500; } .cr-toca .chip.on .num { color: inherit; }
+/* Si llega a tiempo: solo cuando hay riesgo. */
+.cr-desp-reloj { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--ui-warning-ink); }
+.cr-desp-reloj.atrasado { color: var(--d-info); }
+/* Lo hecho, en una línea. */
+.cr-tarjeta.compacta { display: flex; align-items: center; gap: 6px; padding: 4px 6px; opacity: .7; }
+.cr-tarjeta.compacta .cr-check { position: static; flex: none; }
+.cr-compacta-tit { flex: 1; min-width: 0; font-size: 12px; color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-compacta-pdv { font-size: 11px; color: var(--text-3); flex: none; }
+.cr-tarjeta.compacta .cr-mini { opacity: 1; flex: none; }
+/* La barrita del día. */
+.cr-dia-mezcla { display: flex; gap: 1px; height: 6px; border-radius: var(--r-pill); overflow: hidden; background: var(--ui-surface-sunken); margin-top: 2px; }
+.cr-dia-mezcla i { display: block; background: var(--d); min-width: 4px; }
+.cr-dia-mezcla .cr-d-nopago { background: var(--d-nopago-flu); }
+/* El despacho en la vista previa del pedido. */
+.cr-pv-desp .panel-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.cr-pv-desp .panel-head .small { margin-left: auto; }
+.cr-pv-desp-body { padding: 12px 20px 14px; display: flex; flex-direction: column; gap: 10px; }
+.cr-pv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.cr-pv-checks li { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cr-pv-checks .cr-punto { margin-top: 2px; background: var(--ui-surface-sunken); }
+.cr-pv-checks .cr-punto.ok { background: var(--d-hecho-bg); } .cr-pv-checks .cr-punto.no { background: var(--d-info-bg); } .cr-pv-checks .cr-punto.medio { background: var(--d-cola-bg); }
 .cr-page .page-head { margin-bottom: 12px; }
 .cr-leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ui-ink-2); }
 .cr-leyenda i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--k); margin-right: 6px; }

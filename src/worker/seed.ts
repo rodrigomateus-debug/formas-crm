@@ -299,6 +299,8 @@ export const PROPERTIES: Record<string, PropDef[]> = {
     ['entregado_el', 'Entregado el', 'date', 'Pedido', [], RO],
     ['fecha_pedido', 'Fecha del pedido', 'date', 'Pedido', [], { ...RO, description: 'La fecha del pedido de venta en Finnegans (scripts/pedidos-totales.mjs).' }],
     ['factura_numero', 'Factura', 'string', 'Pedido', [], RO],
+    ['remito_finnegans', 'Remito en Finnegans', 'string', 'Pedido', [], RO],
+    ['remito_finnegans_fecha', 'Fecha del remito', 'date', 'Pedido', [], RO],
     ['hs_billing_address_firstname', 'Nombre (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_lastname', 'Apellido (facturación)', 'string', 'Facturación', [], CORE],
     ['hs_billing_address_email', 'Email (facturación)', 'email', 'Facturación', [], CORE],

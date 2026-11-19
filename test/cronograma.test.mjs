@@ -44,6 +44,8 @@ const ARTS = {
     { nombre: `Gorra ${RUN}`, cantidad: 20, status: 'en el impresor', proveedor: OP_PROV[0].id, impresor: OP_IMP[0].id, ingresoProv: '2026-10-05', retiroImp: HOY, entrega: '2027-03-01' },
     // El impresor trae la bolsa al depósito (INGRESO (IMPRESOR)): no hay que ir a buscarla.
     { nombre: `Bolsa ${RUN}`, cantidad: 30, status: 'en el impresor', impresor: OP_IMP[0].id, egresoImp: '2026-10-07', ingresoImp: '2026-11-25', entrega: '2027-03-02' },
+    // Lista para entregar el 24/11: el remito en Finnegans la pasa a «Remitido» (estados de despacho).
+    { nombre: `Caja ${RUN}`, cantidad: 40, status: 'listo para entergar', proveedor: OP_PROV[0].id, entrega: '2026-11-24' },
   ],
   [`cv${RUN}`]: [{ nombre: `Lapicera ${RUN}`, cantidad: 10, status: 'entregados', entrega: '2026-10-20' }],
 };
@@ -79,6 +81,8 @@ const COLOR = { 'ingreso de pedido': 'var(--cu-status-red)', pdv: '#a18072', 'en
 // La entrega pactada que dice Finnegans para el pedido (la prueba del final la cambia).
 let pactadaFinnegans = null;
 let consultasClaude = 0, consultasGeo = 0;
+// El remito del pedido en Finnegans (estados de despacho): la prueba lo «hace» a mitad de camino.
+let remitoHecho = false, consultasRemito = 0;
 
 let server;
 before(async () => {
@@ -140,6 +144,13 @@ before(async () => {
       }
       if (p === '/clickup/list/901326159292') return send({ statuses: ESTADOS.map((status) => ({ status, color: COLOR[status] ?? '#1090e0', type: status === 'entregados' ? 'closed' : 'custom' })) });
       if (p === '/clickup/list/901326159292/task') return send({ tasks: PDVS().flatMap((t) => [t, ...t.subtasks]), last_page: true });
+      if (p === '/fin/reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals') {
+        const ie = url.searchParams.get('PARAMWEBREPORT_IdentificacionExternaOrigen') ?? '';
+        if (!ie.includes(String(Number(PDV)).padStart(8, '0'))) return send([]);
+        consultasRemito++;
+        return send(remitoHecho ? [{ TIPODOCUMENTO: 'REMVTA', CATEGORIATIPODOCUMENTO: -9, DESTINONOMBRE: `FPREMVTA - 000${PDV}`, DESTINOIDENTIFICACIONEXTERNA: `REM-${PDV}`,
+          DESTINOFECHA: '2026-11-19T00:00:00', DESTINOTRANSACCIONID: 1, DESTINOIMPORTETOTAL: 0, OBTUVOCAE: 'NO' }] : []);
+      }
       if (p === '/fin/oauth/token') { res.setHeader('content-type', 'application/json'); return res.end('"token-de-prueba"'); }
       if (p.startsWith('/fin/pedidoVenta/')) return send({ Cliente: `C-${RUN}`, Items: [], ...(pactadaFinnegans && !p.includes(PDV_V) ? { FechaEntrega: pactadaFinnegans } : {}), DireccionEntrega: p.includes(PDV_V) ? `Nicaragua ${PDV_V}, Sarandí` : `Av. Libertador ${PDV} Piso 4, Vicente López` });
       if (p.startsWith('/fin/cliente/')) return send({ RazonSocial: CLIENTE });
@@ -185,6 +196,54 @@ test('cronograma: los movimientos salen de las fechas de ClickUp, con sus avisos
   assert.ok(v.dias['2026-10-20'].total >= 1);
   const viejo = (await api('GET', '/cronograma?desde=2026-10-19&hasta=2026-10-25')).data.movimientos.find((m) => m.npdv === PDV_V);
   assert.equal(viejo.hecho, true, 'un artículo entregado es una entrega hecha');
+});
+
+test('cronograma: estados de despacho, con lo que falta y a quién le toca', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  let v = await semana();
+  // El termo se entrega el 18/11, pero el ingreso de ZECAT del 16/11 no se marcó y el artículo sigue «pedido al proveedor».
+  const ent = mov(v, 'entrega', 'Termo').despacho;
+  assert.equal(ent.estado, 'nollego');
+  assert.equal(ent.quien, 'proveedor');
+  assert.match(ent.lugar, /ZECAT/);
+  assert.deepEqual(ent.checks.map((c) => `${c.k}:${c.v}`), ['prod:no', 'dep:no', 'pago:ok', 'remito:pend']);
+  assert.equal(mov(v, 'ingreso', 'Termo').despacho.estado, 'nollego', 'el ingreso del 16/11 no llegó');
+  assert.equal(mov(v, 'egreso', 'Termo').despacho.estado, 'nollego', 'sin la mercadería no se puede llevar al impresor');
+  // La mochila: el retiro del 17/11 no se hizo.
+  assert.equal(mov(v, 'entrega', 'Mochila').despacho.estado, 'nollego');
+  // Lo que el impresor trae después: programado.
+  assert.equal((await api('GET', '/cronograma?desde=2026-11-24&hasta=2026-11-27')).data.movimientos.find((m) => m.npdv === PDV && m.articulo.startsWith('Bolsa') && m.tipo === 'ingreso_impresor').despacho.estado, 'prog');
+
+  // La caja está lista para el 24/11: «Listo para despachar», le toca a Logística.
+  const otra = async () => (await api('GET', '/cronograma?desde=2026-11-24&hasta=2026-11-27')).data;
+  let caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.deepEqual([caja.estado, caja.quien], ['listo', 'logistica']);
+  // Con saldo en Finnegans (lo que falta facturar cuenta): «No pagó», le toca a Ventas.
+  const tok = (await api('POST', '/tokens', { name: `Despacho ${RUN}`, source: 'api' })).data.token;
+  const saldo = (n) => fetch(`${BASE}/hooks/pedidos/saldos`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+    body: JSON.stringify({ filas: [], porFacturar: { [`PEDVTASTP - ${PDV}`]: n } }) });
+  assert.equal((await saldo(1500)).status, 200);
+  caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.deepEqual([caja.estado, caja.quien], ['nopago', 'ventas']);
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /Saldo de \$ 1\.500 en Finnegans/);
+  await saldo(0);
+
+  // El remito: Finnegans no lo tiene todavía; cuando aparece, «Remitido».
+  const sync = () => api('POST', '/integrations/finnegans/sync', { barrido: false });
+  let r = await sync();
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(consultasRemito >= 1, 'se le preguntó a Finnegans por el remito del pedido listo');
+  assert.equal(mov(await otra(), 'entrega', 'Caja').despacho.estado, 'listo');
+  // Se hace el remito («Sincronizar» vuelve a preguntar sin esperar las 2 horas de la tarea automática).
+  remitoHecho = true;
+  for (let i = 0; i < 4 && mov(await otra(), 'entrega', 'Caja').despacho.estado !== 'remitido'; i++) await sync();
+  caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.equal(caja.estado, 'remitido');
+  assert.equal(caja.checks.find((c) => c.k === 'remito').v, 'ok');
+  const pedido = (await api('GET', `/records/order/${mov(await otra(), 'entrega', 'Caja').record_id}`)).data.record.props;
+  assert.equal(pedido.remito_finnegans, `FPREMVTA - 000${PDV}`);
+  assert.equal(pedido.remito_finnegans_fecha, '2026-11-19');
 });
 
 test('cronograma: mover a otro día escribe la fecha en ClickUp, también en Corporate', async (t) => {

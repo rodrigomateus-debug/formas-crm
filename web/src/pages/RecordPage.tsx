@@ -1233,18 +1233,19 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
 
 // Vista previa en un panel lateral, como al hacer clic en una tarjeta del tablero de HubSpot: lo principal del
 // registro, las acciones rápidas, «Acerca de» editable, con quién está asociado y la última actividad.
-export function RecordPreview({ type, id, compose, onClose, onChange }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void }) {
+// `arriba`: lo que la pantalla que abre la vista previa quiere mostrar primero (el cronograma: el despacho de la tarjeta).
+export function RecordPreview({ type, id, compose, onClose, onChange, arriba }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; arriba?: ReactNode }) {
   // Desde la vista previa se puede abrir la de un asociado (contacto, empresa…) y volver, como en HubSpot.
   const [stack, setStack] = useState<Array<{ type: ObjectType; id: number }>>([]);
   const cur = stack[stack.length - 1] ?? { type, id };
   return (
-    <PreviewBody key={`${cur.type}-${cur.id}`} type={cur.type} id={cur.id} compose={stack.length ? undefined : compose} onClose={onClose} onChange={onChange}
+    <PreviewBody key={`${cur.type}-${cur.id}`} type={cur.type} id={cur.id} compose={stack.length ? undefined : compose} onClose={onClose} onChange={onChange} arriba={stack.length ? undefined : arriba}
       onBack={stack.length ? () => setStack((s) => s.slice(0, -1)) : undefined} onPeek={(t, i) => setStack((s) => [...s, { type: t, id: i }])} />
   );
 }
 
-function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, onPeek }: {
-  type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; onBack?: () => void; onPeek: (t: ObjectType, id: number) => void;
+function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, onPeek, arriba }: {
+  type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; onBack?: () => void; onPeek: (t: ObjectType, id: number) => void; arriba?: ReactNode;
 }) {
   const { meta } = useMeta();
   const navigate = useNavigate();
@@ -1348,6 +1349,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
             {type === 'deal' && <div className="row wrap" style={{ marginTop: 8 }}><ChatDarwin url={record.props.link_a_darwin} /><WhatsAppDelNegocio record={record} associations={associations} /></div>}
           </div>
         </div>
+        {arriba}
         <div className="rec-actions">
           {(['note', 'email', 'call', 'task', 'meeting', 'whatsapp'] as const).map((t) => (
             <button key={t} className="act-btn" onClick={() => setCompose(t)}><span className="ic"><Icon name={t} /></span>{ACTIVITY_LABEL[t]}</button>

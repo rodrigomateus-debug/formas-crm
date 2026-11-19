@@ -118,6 +118,59 @@ export async function finnegansRemitos(env: Env, token: string, pedido: string, 
   });
 }
 
+// Estados de despacho (cronograma.ts): «Remitido» es que el remito ya está en Finnegans. Hay dos caminos: el remito sale
+// del pedido (lo habitual en Corporate: pedido → remito → factura) o de la factura (lo habitual en Formas Shop: pedido →
+// factura → remito). Se pregunta solo por los pedidos con algún producto listo y entrega entre hace 15 días y dentro de 7,
+// que todavía no tienen remito, cada pedido como mucho una vez cada 2 horas y hasta `max` por corrida: una consulta por
+// pedido y, si no aparece, una por cada factura (como mucho dos).
+const REVISAR_CADA = 2 * 3600_000;
+// `forzar` (el botón «Sincronizar» de Configuración): sin esperar las 2 horas.
+export async function revisarRemitos(env: Env, opts: { budget?: Budget; max?: number; forzar?: boolean } = {}) {
+  const db = env.DB;
+  const b = opts.budget ?? Budget.of(env);
+  const hoy = new Date(Date.now() - 3 * 3600_000);
+  const dia = (n: number) => new Date(hoy.getTime() + n * 86_400_000).toISOString().slice(0, 10);
+  const { results } = await db.prepare(`SELECT r.id, json_extract(r.props, '$.pedido_finnegans') AS pedido FROM records r
+    WHERE r.object_type = 'order' AND r.archived = 0 AND json_extract(r.props, '$.pedido_finnegans') LIKE '%PEDVTA%'
+      AND COALESCE(json_extract(r.props, '$.remito_finnegans'), '') = ''
+      AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?1, ?2)
+      AND EXISTS (SELECT 1 FROM produccion a WHERE a.record_id = r.id AND a.estado IN ('listo para entergar', 'listo para entregar', 'parcial entregado'))
+      AND EXISTS (SELECT 1 FROM produccion a WHERE a.record_id = r.id AND a.entrega_real BETWEEN ?3 AND ?4)
+      AND (?7 = 1 OR NOT EXISTS (SELECT 1 FROM finnegans_remitos_revision v WHERE v.record_id = r.id AND v.at > ?5))
+    ORDER BY (SELECT MIN(a.entrega_real) FROM produccion a WHERE a.record_id = r.id AND a.entrega_real >= ?3) LIMIT ?6`)
+    .bind(ENTREGADO, ANULADO, dia(-15), dia(7), new Date(Date.now() - REVISAR_CADA).toISOString(), opts.max ?? 15, opts.forzar ? 1 : 0).all<{ id: number; pedido: string }>();
+  const out = { revisados: 0, remitidos: 0, error: null as string | null };
+  if (!results.length) return out;
+  try {
+    const token = await finnegansToken(env, b);
+    if (!token) return { ...out, error: 'Faltan FINNEGANS_CLIENT_ID y FINNEGANS_CLIENT_SECRET.' };
+    const sys = await db.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<User>();
+    const ctx: Ctx = { user: sys!, source: 'finnegans', sourceDetail: 'Remitos' };
+    const remitosDe = async (ie: string) => ((await fin<Destino[]>(env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: ie }, b)) ?? [])
+      .filter((r) => /REM/i.test(r.TIPODOCUMENTO ?? ''));
+    for (const r of results) {
+      if (b.left() < 4) break;
+      const destinos = (await fin<Destino[]>(env, token, 'reports/ApiGetDocumentosDestinoByIdentificacionExternaDeals', { PARAMWEBREPORT_IdentificacionExternaOrigen: pedidoIds(r.pedido)[0] }, b)) ?? [];
+      let rem = destinos.find((d) => /REM/i.test(d.TIPODOCUMENTO ?? ''));
+      // Formas Shop: el remito sale de la factura.
+      if (!rem) {
+        const facturas = destinos.filter((d) => d.CATEGORIATIPODOCUMENTO === -8 && !/^(NC|ND)/.test(d.TIPODOCUMENTO)).slice(0, 2);
+        for (const f of facturas) { rem = (await remitosDe(f.DESTINOIDENTIFICACIONEXTERNA))[0]; if (rem) break; }
+      }
+      if (rem) {
+        await updateRecord(db, ctx, 'order', r.id, { remito_finnegans: rem.DESTINONOMBRE || rem.DESTINOIDENTIFICACIONEXTERNA, remito_finnegans_fecha: String(rem.DESTINOFECHA ?? '').slice(0, 10) || null },
+          { system: true, strict: false });
+        out.remitidos++;
+      }
+      await db.prepare('INSERT OR REPLACE INTO finnegans_remitos_revision (record_id, at) VALUES (?, ?)').bind(r.id, new Date().toISOString()).run();
+      out.revisados++;
+    }
+  } catch (e) {
+    if (!(e instanceof OutOfBudget)) out.error = (e as Error).message;
+  }
+  return out;
+}
+
 export interface FinnegansState { cursor?: number; at?: string; revisados?: number; facturas?: number; error?: string | null }
 
 export async function finnegansState(db: D1Database): Promise<FinnegansState> {

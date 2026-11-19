@@ -5,6 +5,7 @@ import {
   type Activity, type CrmRecord, type ObjectType, type Property,
 } from '../lib';
 import { Avatar, PropertyInput } from '../components';
+import { siEntroAnticipo } from '../Chispin';
 import type { DestinoOpcion } from '../pages/Recorridos';
 import { Hoja, TareaRapida } from './Movil';
 import { AltaNegocio } from './VentasMovil';
@@ -396,7 +397,10 @@ export function EditarDato({ tipo, record, prop, obligatorio, onClose, onListo }
   async function guardar() {
     if ((requerido && vacio) || ocupado) return;
     setOcupado(true);
-    try { await http('PATCH', `/records/${tipo}/${record.id}`, { props: { [prop.name]: vacio ? null : valor } }); toast('Guardado'); onListo(); onClose(); }
+    try {
+      await http('PATCH', `/records/${tipo}/${record.id}`, { props: { [prop.name]: vacio ? null : valor } }); toast('Guardado'); onListo(); onClose();
+      siEntroAnticipo(tipo, prop.name, record.props[prop.name], vacio ? null : valor, record);
+    }
     catch (e) { toast((e as Error).message, true); setOcupado(false); }
   }
   return (

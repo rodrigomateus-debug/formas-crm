@@ -24,10 +24,10 @@ async function api(method, path, body) {
 
 const F = {
   entrega: '10e3d8d0-bbd5-47af-946b-504ef9804428', ingresoProv: '98df51eb-1142-4ff5-b80c-9fd239ea3aac', retiroProv: '7fd568b7-9cfd-45fc-9f05-22864a0b9e9a',
-  egresoImp: 'c278fabb-b558-4a28-a6f6-f6b26a8e29eb', retiroImp: '3146d848-4952-4ac8-aac4-971e1361609b', proveedor: 'fd7010e7-cece-4d06-850a-ce5e948c1f83',
+  egresoImp: 'c278fabb-b558-4a28-a6f6-f6b26a8e29eb', retiroImp: '3146d848-4952-4ac8-aac4-971e1361609b', ingresoImp: '3806fa77-1c1c-46d3-b631-0168b139de9d', proveedor: 'fd7010e7-cece-4d06-850a-ce5e948c1f83',
   impresor: '555918b9-e727-4f89-aa67-b97a94dd6136', cantidad: 'eb9f3a13-3f31-4a2f-b924-3cfaec8d376f', unidad: '8dcf7531-1dad-45f5-aff3-bb9e45895c98',
 };
-const CAMPO = { [F.entrega]: 'entrega', [F.ingresoProv]: 'ingresoProv', [F.retiroProv]: 'retiroProv', [F.egresoImp]: 'egresoImp', [F.retiroImp]: 'retiroImp' };
+const CAMPO = { [F.entrega]: 'entrega', [F.ingresoProv]: 'ingresoProv', [F.retiroProv]: 'retiroProv', [F.egresoImp]: 'egresoImp', [F.retiroImp]: 'retiroImp', [F.ingresoImp]: 'ingresoImp' };
 const OP_PROV = [{ id: `prov-zecat-${RUN}`, name: `ZECAT ${RUN}`, orderindex: 0 }];
 const OP_IMP = [{ id: `imp-imprefas-${RUN}`, name: `IMPREFAS ${RUN}`, orderindex: 0 }];
 const OP_UNIDAD = [{ id: 'u-shop', name: 'FORMAS SHOP', orderindex: 0 }, { id: 'u-corp', name: 'CORPORATE', orderindex: 1 }];
@@ -42,6 +42,8 @@ const ARTS = {
     { nombre: `Mochila ${RUN}`, cantidad: 50, status: 'pedido al proveedor', proveedor: OP_PROV[0].id, retiroProv: '2026-11-17', entrega: null },
     // Para la app del chofer: un retiro de hoy, ya «en el impresor» (marcar su ingreso viejo no lo tiene que volver atrás).
     { nombre: `Gorra ${RUN}`, cantidad: 20, status: 'en el impresor', proveedor: OP_PROV[0].id, impresor: OP_IMP[0].id, ingresoProv: '2026-10-05', retiroImp: HOY, entrega: '2027-03-01' },
+    // El impresor trae la bolsa al depósito (INGRESO (IMPRESOR)): no hay que ir a buscarla.
+    { nombre: `Bolsa ${RUN}`, cantidad: 30, status: 'en el impresor', impresor: OP_IMP[0].id, egresoImp: '2026-10-07', ingresoImp: '2026-11-25', entrega: '2027-03-02' },
   ],
   [`cv${RUN}`]: [{ nombre: `Lapicera ${RUN}`, cantidad: 10, status: 'entregados', entrega: '2026-10-20' }],
 };
@@ -56,7 +58,7 @@ function articulo(pdvId, i, a) {
     custom_fields: [dd(F.unidad, 'UNIDAD DE NEGOCIO', 'u-corp', OP_UNIDAD), { id: F.cantidad, name: 'CANTIDAD ', type: 'number', value: String(a.cantidad) },
       dd(F.proveedor, 'PROVEEDOR', a.proveedor ?? null, OP_PROV), dd(F.impresor, 'IMPRESOR', a.impresor ?? null, OP_IMP),
       fecha(F.entrega, 'ENTREGAS (FECHA REAL)', f('entrega')), fecha(F.ingresoProv, 'INGRESO (PROVEEDOR)', f('ingresoProv')), fecha(F.retiroProv, 'RETIROS (PROVEEDOR)', f('retiroProv')),
-      fecha(F.egresoImp, 'EGRESO (IMPRESOR)', f('egresoImp')), fecha(F.retiroImp, 'RETIRO (IMPRESOR)', f('retiroImp'))],
+      fecha(F.egresoImp, 'EGRESO (IMPRESOR)', f('egresoImp')), fecha(F.retiroImp, 'RETIRO (IMPRESOR)', f('retiroImp')), fecha(F.ingresoImp, 'INGRESO (IMPRESOR)', f('ingresoImp'))],
   };
 }
 function pdvTask(id, npdv, entrega) {
@@ -153,7 +155,7 @@ after(() => server?.close());
 const sync = () => api('POST', '/integrations/clickup/sync', { full: true });
 const semana = async () => (await api('GET', '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20')).data;
 const mov = (v, tipo, articulo) => v.movimientos.find((m) => m.tipo === tipo && m.articulo.startsWith(articulo) && m.npdv === PDV);
-const T = `cr${RUN}-a0`, M = `cr${RUN}-a1`;
+const T = `cr${RUN}-a0`, M = `cr${RUN}-a1`, B = `cr${RUN}-a3`;
 
 test('cronograma: los movimientos salen de las fechas de ClickUp, con sus avisos', async (t) => {
   asUser = null;
@@ -162,7 +164,7 @@ test('cronograma: los movimientos salen de las fechas de ClickUp, con sus avisos
   await sync(); await sync();
   const v = await semana();
   assert.equal(v.puede_editar, true);
-  const propios = v.movimientos.filter((m) => m.npdv === PDV && !m.articulo.startsWith('Gorra'));
+  const propios = v.movimientos.filter((m) => m.npdv === PDV && !m.articulo.startsWith('Gorra') && !m.articulo.startsWith('Bolsa'));
   assert.deepEqual(propios.map((m) => `${m.fecha} ${m.tipo}`).sort(), [
     '2026-11-16 ingreso', '2026-11-17 egreso', '2026-11-17 retiro_proveedor', '2026-11-18 entrega', '2026-11-18 retiro_impresor', '2026-11-19 entrega']);
   const ing = mov(v, 'ingreso', 'Termo');
@@ -248,6 +250,49 @@ test('cronograma: marcar hecho cambia el estado en ClickUp y se puede deshacer',
   v = await semana();
   assert.ok(['ingreso', 'egreso', 'retiro_impresor', 'entrega'].every((tipo) => mov(v, tipo, 'Termo').hecho));
   assert.equal(mov(v, 'entrega', 'Termo').estado, 'entregados');
+});
+
+test('cronograma: el ingreso del impresor (lo trae él al depósito)', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  // Fuera de la semana de las otras pruebas, para no cambiarles las cuentas.
+  const otra = async () => (await api('GET', '/cronograma?desde=2026-11-24&hasta=2026-11-27')).data;
+  let v = await otra();
+  const ing = mov(v, 'ingreso_impresor', 'Bolsa');
+  assert.ok(ing, 'sale de INGRESO (IMPRESOR)');
+  assert.equal(ing.fecha, '2026-11-25');
+  assert.match(ing.lugar, /IMPREFAS/, 'el lugar es el impresor');
+  assert.ok(ing.company_id);
+  assert.equal(ing.parada, undefined, 'llega solo: no es parada de ningún recorrido');
+  assert.deepEqual(ing.avisos, []);
+  // En la ruta del día va con lo que llega al depósito, no como parada.
+  const r = (await api('GET', '/cronograma/ruta?fecha=2026-11-25')).data;
+  assert.ok(r.llegan.some((m) => m.tipo === 'ingreso_impresor' && m.task_id === B));
+  assert.ok(!r.paradas.some((p) => p.movimientos.some((m) => m.task_id === B)));
+  // Se mueve como las otras fechas: se escribe en INGRESO (IMPRESOR) de ClickUp.
+  escrito.length = 0;
+  let x = await api('POST', '/cronograma/mover', { ids: [B], tipo: 'ingreso_impresor', fecha: '2026-11-26' });
+  assert.equal(x.status, 200, JSON.stringify(x.data));
+  assert.deepEqual(escrito.map((e) => [e.task, e.path.split('/field/')[1]]), [[B, F.ingresoImp]]);
+  v = await otra();
+  assert.equal(mov(v, 'ingreso_impresor', 'Bolsa').fecha, '2026-11-26');
+  // Marcarlo hecho la pasa a «en revision», como el retiro del impresor.
+  escrito.length = 0;
+  x = await api('POST', '/cronograma/hecho', { ids: [B], tipo: 'ingreso_impresor', hecho: true });
+  assert.equal(x.status, 200, JSON.stringify(x.data));
+  assert.deepEqual([x.data.cambiados, x.data.estado], [1, 'en revision']);
+  assert.equal(mov(await otra(), 'ingreso_impresor', 'Bolsa').hecho, true);
+  x = await api('POST', '/cronograma/hecho', { ids: [B], tipo: 'ingreso_impresor', hecho: false });
+  assert.equal(x.data.cambiados, 1);
+  // Con retiro e ingreso del impresor a la vez, avisa: es uno o el otro.
+  await api('POST', '/cronograma/mover', { ids: [B], tipo: 'retiro_impresor', fecha: '2026-11-24' });
+  v = await otra();
+  assert.deepEqual(mov(v, 'ingreso_impresor', 'Bolsa').avisos, ['Tiene ingreso y retiro del impresor: es uno o el otro']);
+  assert.deepEqual(mov(v, 'retiro_impresor', 'Bolsa').avisos, ['Tiene ingreso y retiro del impresor: es uno o el otro']);
+  await api('POST', '/cronograma/mover', { ids: [B], tipo: 'retiro_impresor', fecha: '' });
+  // También se ve y se edita en Producción.
+  const art = (await api('GET', '/produccion?unidades=CORPORATE&cerrados=1')).data.pdvs.find((p) => p.npdv === PDV).articulos.find((a) => a.task_id === B);
+  assert.equal(art.ingreso_impresor, '2026-11-26');
 });
 
 test('cronograma: notas del día y feriados', async () => {
@@ -745,4 +790,76 @@ test('cronograma: lo que no se pudo hacer queda en Colgados con el motivo y avis
   v = (await api('GET', rango)).data;
   assert.ok(v.movimientos.some((x) => x.id === m.id), 'volvió a su día');
   assert.ok(!v.colgados.some((x) => x.id === m.id), 'y ya no está en Colgados');
+});
+
+// Pedidos de Producción (Rodrigo, 19/11/2026): el horario como rango desde la tarjeta, las anotaciones de logística con
+// quién las escribió (para esta vez o para siempre) y la cantidad que realmente se manda (demasía).
+test('cronograma: rango horario, anotaciones de logística con autor y cantidad enviada', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const rango = '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20';
+  const semana = async () => (await api('GET', rango)).data;
+  let v = await semana();
+  const ent = v.movimientos.find((x) => x.npdv === PDV && x.tipo === 'entrega' && x.record_id && x.parada);
+  const otro = v.movimientos.find((x) => x.npdv === PDV && x.tipo !== 'entrega' && x.company_id && x.cantidad);
+  assert.ok(ent && otro, 'hay una entrega y un movimiento con proveedor o impresor');
+
+  // 1. El horario: un rango, que se ve en la tarjeta.
+  const hora = (b) => api('PUT', '/cronograma/hora', { fecha: ent.fecha, clave: ent.parada, ...b });
+  assert.equal((await hora({ modo: 'entre', hora: '13:00', hasta: '10:00' })).status, 400, 'la segunda hora tiene que ser más tarde');
+  assert.equal((await hora({ modo: 'entre', hora: '10:00', hasta: '13:00' })).status, 200);
+  assert.equal((await semana()).movimientos.find((x) => x.id === ent.id).hora, 'Entre las 10:00 y las 13:00');
+  assert.equal((await hora({ modo: null })).status, 200);
+
+  // 2. Anotaciones. La vendedora, desde su pedido: solo de la entrega, y queda con su nombre.
+  const vende = (await api('POST', '/users', { email: `nota.${RUN}@formas.ar`, name: `Nota ${RUN}`, role: 'member' })).data;
+  assert.equal((await api('PATCH', `/records/order/${ent.record_id}`, { props: { owner_id: vende.id } })).status, 200);
+  asUser = `nota.${RUN}@formas.ar`;
+  const n1 = await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'puntual', texto: 'Preguntar por Marta en recepción' });
+  assert.equal(n1.status, 201, JSON.stringify(n1.data));
+  assert.equal(n1.data.por, `Nota ${RUN}`);
+  assert.equal((await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'puntual', texto: ' ' })).status, 400);
+  asUser = null;
+  // Producción, en la tarjeta de un proveedor o impresor: para siempre en ese lugar.
+  const n2 = await api('POST', '/logistica/notas', { record_id: otro.record_id, tipo: otro.tipo, alcance: 'siempre', destino: { company_id: otro.company_id, nombre: otro.lugar }, texto: 'Reciben solo por el portón lateral' });
+  assert.equal(n2.status, 201, JSON.stringify(n2.data));
+  v = await semana();
+  const notasDe = (id) => (v.movimientos.find((x) => x.id === id)?.notas ?? []).map((n) => [n.alcance, n.texto, n.por]);
+  assert.deepEqual(notasDe(ent.id), [['puntual', 'Preguntar por Marta en recepción', `Nota ${RUN}`]]);
+  assert.ok(notasDe(otro.id).some((n) => n[0] === 'siempre' && n[1] === 'Reciben solo por el portón lateral'), 'la de siempre, en la tarjeta de ese lugar');
+  // La de siempre aparece en todo lo de esa empresa; la puntual, solo en la entrega de ese pedido.
+  const delLugar = v.movimientos.filter((x) => x.tipo !== 'entrega' && x.company_id === otro.company_id);
+  assert.ok(delLugar.every((x) => (x.notas ?? []).some((n) => n.id === n2.data.id)));
+  assert.ok(!v.movimientos.some((x) => x.id !== ent.id && x.tipo !== 'entrega' && (x.notas ?? []).some((n) => n.id === n1.data.id)));
+  // La vendedora también puede dejarla para todas las entregas a ese cliente: queda en el destino (la empresa del pedido o,
+  // si no la tiene, el cliente del PDV) y aparece en sus entregas.
+  asUser = `nota.${RUN}@formas.ar`;
+  const n3 = await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'siempre', texto: 'Entregar siempre por la cochera' });
+  assert.equal(n3.status, 201, JSON.stringify(n3.data));
+  assert.ok(n3.data.destino, 'con el nombre del destino');
+  asUser = null;
+  const conSiempre = (await semana()).movimientos.filter((x) => x.tipo === 'entrega' && x.cliente === ent.cliente);
+  assert.ok(conSiempre.length && conSiempre.every((x) => (x.notas ?? []).some((n) => n.id === n3.data.id)), 'en todas las entregas a ese cliente');
+  assert.equal((await api('DELETE', `/logistica/notas/${n3.data.id}`)).status, 200);
+  // El horario fijado se ve en la ficha del pedido.
+  await hora({ modo: 'entre', hora: '10:00', hasta: '13:00' });
+  assert.ok(Array.isArray((await api('GET', `/logistica/notas?record_id=${ent.record_id}`)).data.horarios));
+  await hora({ modo: null });
+  // En la ficha del pedido se leen; la vendedora borra la suya, no la de Producción.
+  asUser = `nota.${RUN}@formas.ar`;
+  assert.deepEqual((await api('GET', `/logistica/notas?record_id=${ent.record_id}`)).data.notas.filter((n) => n.alcance === 'puntual').map((n) => n.texto), ['Preguntar por Marta en recepción']);
+  assert.equal((await api('DELETE', `/logistica/notas/${n2.data.id}`)).status, 403);
+  assert.equal((await api('DELETE', `/logistica/notas/${n1.data.id}`)).status, 200);
+  asUser = null;
+  assert.equal((await api('DELETE', `/logistica/notas/${n2.data.id}`)).status, 200);
+
+  // 3. La demasía: lo que realmente va, sin tocar la cantidad del PDV. No en las entregas.
+  assert.equal((await api('POST', '/cronograma/enviado', { id: ent.task_id, tipo: 'entrega', cantidad: 5 })).status, 400);
+  const env = await api('POST', '/cronograma/enviado', { id: otro.task_id, tipo: otro.tipo, cantidad: otro.cantidad + 10, motivo: 'Por si sale alguno fallado' });
+  assert.equal(env.status, 200, JSON.stringify(env.data));
+  const con = (await semana()).movimientos.find((x) => x.id === otro.id);
+  assert.deepEqual([con.cantidad, con.enviado.cantidad, con.enviado.motivo], [otro.cantidad, otro.cantidad + 10, 'Por si sale alguno fallado']);
+  // La misma cantidad del pedido lo saca.
+  assert.equal((await api('POST', '/cronograma/enviado', { id: otro.task_id, tipo: otro.tipo, cantidad: otro.cantidad })).data.enviado, null);
+  assert.ok(!(await semana()).movimientos.find((x) => x.id === otro.id).enviado);
 });

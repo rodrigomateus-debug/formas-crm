@@ -416,12 +416,13 @@ function PantallaParada({ p, n, total, llega, sinUbicar, tarde, hecha, conFoto, 
           })}
         </section>
 
-        {(contacto || p.observaciones || p.lugar?.observaciones || encs.some((e) => e.contacto)) && (
+        {(contacto || p.observaciones || p.lugar?.observaciones || p.notas?.length || encs.some((e) => e.contacto)) && (
           <section className="parada-seccion">
             <h3>En el lugar</h3>
             {contacto && <p>Preguntá por <b>{contacto}</b></p>}
             {encs.filter((e) => e.contacto).map((e) => <p key={`c${e.id}`}>Preguntá por <b>{e.contacto}</b></p>)}
             {p.observaciones && <p className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{p.observaciones}</span></p>}
+            {(p.notas ?? []).map((n, i) => <p key={`n${i}`} className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{n.texto}{n.por ? <small> · {n.por.split(' ')[0]}</small> : null}</span></p>)}
             {p.lugar?.observaciones && p.lugar.observaciones !== p.observaciones && <p className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{p.lugar.observaciones}</span></p>}
             {telefonos.length > 0 && <div className="parada-llamar">{telefonos.map((t) => <a key={t} className="boton chico" href={`tel:${t}`}>Llamar {t}</a>)}</div>}
           </section>

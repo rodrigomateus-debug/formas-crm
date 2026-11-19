@@ -14,6 +14,7 @@ import { ConsultasCard } from './Consultas';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { TareaPanel } from '../TareaPanel';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
+import { siGano } from '../Chispin';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
@@ -383,7 +384,10 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
   const go = async (stage: Stage, extra: Record<string, unknown> = {}) => {
     const missing = missingFor(stage, { ...record.props, ...extra }, extra);
     if (missing.length) { setAsk({ stage, missing }); return; }
-    try { await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stage.id, ...extra } }); toast('Etapa actualizada'); onChange(); }
+    try {
+      await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stage.id, ...extra } }); toast('Etapa actualizada'); onChange();
+      siGano(cur, stage, { nombre: record.name, monto: record.props.amount, moneda: record.props.deal_currency_code, duenio: record.props.owner_id });
+    }
     catch (e) {
       const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       if (m?.length) setAsk({ stage, missing: m }); else toast((e as Error).message, true);
@@ -982,7 +986,7 @@ interface FileRow { id: number; kind: string; name: string; source: string; crea
 // Compras de la empresa en Finnegans (las calcula el CRM cada noche): estado, última compra, cuánto compra y cuánto debe.
 // Proveedor o impresor (produccion.ts): lo que tiene ahora en producción, con las fechas de ingreso y retiro.
 interface ArticuloProveedor { task_id: string; nombre: string; estado: string; cantidad: number | null; npdv: string | null; cliente: string | null; record_id: number | null;
-  rol: 'proveedor' | 'impresor'; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null }
+  rol: 'proveedor' | 'impresor'; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null }
 function ProduccionProveedorCard({ companyId }: { companyId: number }) {
   const res = useAsync(() => http<{ articulos: ArticuloProveedor[] }>('GET', `/records/company/${companyId}/produccion`), [companyId]);
   const arts = res.data?.articulos ?? [];
@@ -993,7 +997,7 @@ function ProduccionProveedorCard({ companyId }: { companyId: number }) {
       <div className="panel-head"><h3>En producción <span className="muted small">({arts.length})</span></h3><Link className="btn sm ghost" to="/produccion">Ver producción</Link></div>
       {arts.slice(0, 12).map((a) => {
         const fechas = (a.rol === 'impresor'
-          ? [f(a.egreso_impresor) && `fue ${f(a.egreso_impresor)}`, f(a.retiro_impresor) && `retiro ${f(a.retiro_impresor)}`]
+          ? [f(a.egreso_impresor) && `fue ${f(a.egreso_impresor)}`, f(a.retiro_impresor) && `retiro ${f(a.retiro_impresor)}`, f(a.ingreso_impresor) && `lo trae ${f(a.ingreso_impresor)}`]
           : [f(a.ingreso_proveedor) && `ingreso ${f(a.ingreso_proveedor)}`, f(a.retiro_proveedor) && `retiro ${f(a.retiro_proveedor)}`]).filter(Boolean);
         return (
           <div key={a.task_id} className="assoc-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>
@@ -1278,6 +1282,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
       await http('PATCH', `/records/deal/${id}`, { props: { dealstage: stageId, ...extra } });
       toast(`Pasó a ${st.label}`);
       changed();
+      siGano(stageOf(meta, record.props.dealstage)?.stage, st, { nombre: record.name, monto: record.props.amount, moneda: record.props.deal_currency_code, duenio: record.props.owner_id });
     } catch (e) {
       const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       if (m?.length) setAsk({ stage: st, missing: m }); else toast((e as Error).message, true);

@@ -1575,6 +1575,26 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-colgados .cr-dia-sub { color: var(--ui-warning-ink); line-height: 1.35; }
 .cr-colgados.sobre { border-style: solid; }
 .cr-colgados-vacio { padding: 14px 12px; color: var(--ui-warning-ink); line-height: 1.45; }
+/* Anotaciones de logística (NotasLogistica.tsx): en la tarjeta, la parada y el pedido. Las de siempre, en azul; las de esta vez, en ámbar. */
+.lg-notas { display: flex; flex-direction: column; gap: 6px; }
+.lg-nota { padding: 5px 8px; border-left: 3px solid var(--ui-warning); background: var(--ui-warning-soft); border-radius: 0 6px 6px 0; min-width: 0; }
+.lg-nota.siempre { border-left-color: var(--accent-ink); background: color-mix(in srgb, var(--accent-ink) 9%, var(--ui-surface)); }
+.lg-nota p { margin: 0 0 2px; font-size: 12.5px; line-height: 1.35; color: var(--ui-ink); white-space: pre-line; overflow-wrap: anywhere; }
+.lg-nota-pie { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 10.5px; color: var(--ui-ink-2); }
+.lg-nota-tag { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 9.5px; color: var(--ui-warning-ink); }
+.lg-nota.siempre .lg-nota-tag { color: var(--accent-ink); }
+.lg-nota-x { margin-left: auto; border: 0; background: none; padding: 2px; cursor: pointer; color: var(--ui-ink-2); border-radius: 4px; display: grid; place-items: center; }
+.lg-nota-x:hover { background: var(--ui-surface); color: var(--ui-ink); }
+.lg-form .chip { white-space: normal; text-align: left; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px; line-height: 1.25; }
+.lg-form { display: flex; flex-direction: column; gap: 6px; } .lg-form textarea { resize: vertical; }
+.lg-form-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.lg-horario { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ui-ink); } .lg-horario b { font-weight: 600; }
+.cr-t-notas { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.cr-p-quien .lg-nota { margin-top: 4px; }
+/* La cantidad de un producto en un ingreso, retiro o egreso: se toca para anotar la que realmente va (demasía). */
+.cr-t-cant { font: inherit; font-weight: 600; color: var(--ui-ink); text-align: right; border: 0; background: none; padding: 0 2px; margin: 0 -2px; border-radius: 4px; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.cr-t-cant:hover, .cr-t-cant:focus-visible { background: var(--ui-surface); }
+.cr-t-demasia { font-style: normal; font-weight: 600; margin-left: 6px; padding: 0 5px; border-radius: var(--r-pill); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 10.5px; white-space: nowrap; }
 .cr-t-motivo { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--ui-warning); background: var(--ui-warning-soft); color: var(--ui-warning-ink); border-radius: 0 6px 6px 0; }
 .cr-t-motivo p { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; } .cr-t-motivo span { opacity: .85; }
 .cr-dia-cab { padding: 12px 12px 10px; border-bottom: 1px solid var(--ui-line); display: flex; flex-direction: column; gap: 4px; }
@@ -2588,6 +2608,27 @@ body.movil .chispin-zona .chispin-lugar { transform: scale(.8); transform-origin
 .chispin-mano.izq { left: 0; } .chispin-mano.der { right: 0; transform-origin: 0 100%; }
 .chispin-zzz { position: absolute; right: -4px; top: 2px; font-size: 11px; font-weight: 700; color: var(--ui-ink-3); opacity: 0; transition: opacity var(--dur-slow); pointer-events: none; }
 .chispin-zzz i { position: absolute; font-style: normal; opacity: 0; }
+/* Los anteojos de sol: el moño del logo dado vuelta (el puente arriba), con vidrios oscuros, un reflejo y un destello que pasa
+   cada tanto. Guardados arriba de la cabeza (invisibles); bajan con un rebote y la mano derecha sube a acomodarlos («acomoda»).
+   Puestos, sonríe de costado. */
+.chispin-anteojos { position: absolute; left: 50%; top: 9px; width: 48px; height: 23px; margin-left: -24px; overflow: visible; pointer-events: none;
+  filter: drop-shadow(0 1.5px 0 rgba(0, 0, 0, .35)); opacity: 0; transform: translateY(-30px) rotate(-14deg) scale(.85, -.85);
+  transition: transform 480ms cubic-bezier(.3, 1.45, .5, 1), opacity 200ms ease; }
+.chispin-bicho.anteojos .chispin-anteojos { opacity: 1; transform: scaleY(-1); }
+.chispin-bicho.anteojos:not(.feliz):not(.traga) .chispin-cuerpo { transform: rotate(-6deg); transition: transform 400ms cubic-bezier(.3, 1.45, .5, 1); }
+.chispin-cuerpo { transition: transform 300ms ease; }
+.chispin-marco { fill: var(--chispin-lampara); }
+.chispin-reflejo { fill: none; stroke: rgba(255, 255, 255, .55); stroke-width: 16; stroke-linecap: round; }
+.chispin-destello { fill: none; stroke: rgba(255, 255, 255, .9); stroke-width: 26; stroke-linecap: round; transform: translateX(-160px); }
+.chispin-bicho.anteojos .chispin-destello { animation: chispin-destello 4.5s ease-in-out .5s infinite; }
+.chispin-bicho.anteojos .chispin-ojo { width: 9px; height: 9px; margin-top: 3px; }
+.chispin-bicho.anteojos .chispin-pupila { left: 2.25px; top: 2.25px; width: 4.5px; height: 4.5px; }
+.chispin-bicho.anteojos .chispin-ojos { gap: 18px; }
+.chispin-bicho.anteojos:not(.feliz):not(.mira):not(.traga) .chispin-boca { width: 9px; height: 5px; transform: translateX(-30%) rotate(-12deg); border-radius: 0 0 10px 4px; }
+@keyframes chispin-destello { 0%, 62% { transform: translateX(-160px); } 85%, 100% { transform: translateX(560px); } }
+/* La mano que los acomoda, más clara para que se vea sobre el cuerpo. */
+.chispin-bicho.acomoda .chispin-mano.der { animation: none; z-index: 1; background: var(--chispin-brillo); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .35);
+  transform: translate(-3px, -19px) rotate(-25deg); }
 /* Al pasar el mouse: abre la boca («o») y saluda. */
 .chispin-bicho.mira .chispin-boca { width: 8px; height: 8px; border: 2px solid var(--chispin-tinta); border-radius: 50%; }
 .chispin-bicho.mira .chispin-mano.der { animation: chispin-saluda .7s ease-in-out 2; }
@@ -2641,6 +2682,11 @@ body.movil .chispin-zona .chispin-lugar { transform: scale(.8); transform-origin
 body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 176px)); }
 .chispin-panel.cargando { padding: 28px; align-items: center; }
 .chispin-cab { display: flex; align-items: flex-start; gap: 10px; padding: 14px 10px 12px 16px; background: linear-gradient(130deg, var(--chispin-cuerpo), var(--chispin-brillo)); color: #fff; }
+.chispin-cab-bicho { display: none; }
+@media (max-width: 640px) {
+  .chispin-cab-bicho { display: block; position: relative; flex: none; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, .9); overflow: hidden; }
+  .chispin-cab-bicho .chispin-bicho { inset: auto; left: 4px; top: 3px; width: 64px; height: 72px; transform: scale(.56); transform-origin: 0 0; animation: none; }
+}
 .chispin-cab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .chispin-cab-txt b { font-size: 15px; }
 .chispin-cab-txt span { font-size: 12px; color: rgba(255, 255, 255, .78); line-height: 1.4; }
@@ -2752,8 +2798,18 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 @keyframes chispin-subir { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes chispin-idea-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes chispin-resalta { 0%, 40% { box-shadow: 0 0 0 3px var(--formas-lime); border-color: var(--formas-green); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Negocio ganado (festejarGanado en Chispin.tsx): lluvia de papelitos por toda la pantalla y Chispín sale aunque esté escondido. */
+.chispin-lluvia { position: fixed; inset: 0; z-index: 300; overflow: hidden; pointer-events: none; }
+.chispin-lluvia i { position: absolute; top: -16px; width: 8px; height: 13px; border-radius: 2px; opacity: 0; animation: chispin-cae var(--t) cubic-bezier(.3, .1, .6, 1) var(--d) forwards; }
+.chispin-lluvia i[data-c="0"] { background: #000085; } .chispin-lluvia i[data-c="1"] { background: #8ee021; } .chispin-lluvia i[data-c="2"] { background: #65a7dd; }
+.chispin-lluvia i[data-c="3"] { background: #f0b45a; } .chispin-lluvia i[data-c="4"] { background: #ff7d74; border-radius: 50%; width: 9px; height: 9px; }
+.chispin-zona.festejando .chispin-globo { max-width: 300px; font-size: 14px; font-weight: 600; }
+.chispin-zona.festejando .chispin-lampara { background: var(--chispin-lampara); box-shadow: 0 0 0 4px rgba(142, 224, 33, .3), 0 0 22px 8px rgba(142, 224, 33, .7); }
+@keyframes chispin-cae { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), 105vh) rotate(var(--r)); } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {
+  .chispin-anteojos, .chispin-mano { transition: none !important; }
+  .chispin-destello { animation: none !important; }
   .chispin::before, .chispin-bicho, .chispin-cuerpo, .chispin-ojo, .chispin-antena, .chispin-lampara, .chispin-zzz i, .chispin-n, .chispin-globo, .chispin-panel, .chispin-idea, .chispin-mano { animation: none !important; }
 }
 

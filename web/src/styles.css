@@ -2866,11 +2866,11 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 .emb-caja.cerrada .emb-fondo { opacity: 0; transition: opacity .15s .15s; }
 /* La animación de la caída deja fijos el transform y la opacidad: se hunden con translate (que va aparte) y se esconden con visibility. */
 .emb-caja.cerrada .emb-item { translate: 0 30px; visibility: hidden; transition: translate .2s ease-in, visibility 0s .2s; }
-.emb-item { position: absolute; left: 50%; top: 4px; width: 50px; height: 50px; margin-left: -25px; z-index: 2; display: grid; place-items: center; font-style: normal; opacity: 0; }
+.emb-item { position: absolute; left: 50%; top: -14px; width: 64px; height: 64px; margin-left: -32px; z-index: 2; display: grid; place-items: center; font-style: normal; opacity: 0; }
 /* Cada producto, troquelado como un sticker (pedido de Rodrigo del 19/11/2026): sin recuadro, con un borde blanco que sigue la
    forma del dibujo (sombras sin desenfoque apiladas, una por lado) y una sombrita abajo para que se despegue de la caja. */
-.emb-item svg { overflow: visible; filter: drop-shadow(1.6px 0 0 #fff) drop-shadow(-1.6px 0 0 #fff) drop-shadow(0 1.6px 0 #fff) drop-shadow(0 -1.6px 0 #fff)
-  drop-shadow(1.1px 1.1px 0 #fff) drop-shadow(-1.1px -1.1px 0 #fff) drop-shadow(0 4px 5px rgba(18, 20, 58, .3)); }
+.emb-item svg { overflow: visible; filter: drop-shadow(2px 0 0 #fff) drop-shadow(-2px 0 0 #fff) drop-shadow(0 2px 0 #fff) drop-shadow(0 -2px 0 #fff)
+  drop-shadow(1.4px 1.4px 0 #fff) drop-shadow(-1.4px -1.4px 0 #fff) drop-shadow(0 4px 5px rgba(18, 20, 58, .3)); }
 .emb-item.cae { animation: emb-cae .62s forwards; }
 /* La cinta: baja por el frente y cruza la tapa; las rayitas más claras le dan el brillo del plástico. */
 .emb-cinta { position: absolute; left: 50%; top: 26px; width: 28px; height: 54px; margin-left: -14px; z-index: 5; border-radius: 0 0 2px 2px; transform-origin: 50% 0; transform: scaleY(0); transition: transform .32s ease-out;

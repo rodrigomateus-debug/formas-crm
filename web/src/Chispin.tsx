@@ -166,7 +166,7 @@ let revisarDesdeAfuera: (() => void) | null = null;
 type Grupo = { sub: Subcategoria; cantidad: number };
 const MAX_EN_CAJA = 6;
 // El iconito va más grande en la caja y en el camión (ahí se luce el dibujo) y chiquito en las fichas de la lista.
-const TAM_ICONO: Record<string, number> = { 'emb-item': 30, 'cam-item': 22 };
+const TAM_ICONO: Record<string, number> = { 'emb-item': 40, 'cam-item': 22 };
 const fichaProducto = (g: Grupo, clase: string) => {
   const i = document.createElement('i');
   i.className = clase;

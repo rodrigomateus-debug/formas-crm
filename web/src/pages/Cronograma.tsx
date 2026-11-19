@@ -141,6 +141,7 @@ export default function CronogramaPage() {
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
   const [colgando, setColgando] = useState<{ ids: string[]; tipo: Tipo; pdv: string } | null>(null);   // lo que se soltó en «Colgados»: falta el motivo
   const [anotando, setAnotando] = useState<Tarjeta | null>(null);   // las anotaciones de logística de una tarjeta
+  const [anotandoEnc, setAnotandoEnc] = useState<Encargo | null>(null);   // las de siempre del destino de un encargo
   const [horaDe, setHoraDe] = useState<Tarjeta | null>(null);      // fijar la hora (o el rango) de la parada de una tarjeta
   const [enviando, setEnviando] = useState<Mov | null>(null);      // la cantidad que realmente se mandó o llegó
   const arrastre = useRef<{ ids: string[]; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
@@ -347,7 +348,7 @@ export default function CronogramaPage() {
                             <h3>Encargos <span className="num">{encDia.length}</span></h3>
                             {encDia.map((e) => <TarjetaEncargo key={e.id} e={e} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []}
                               dir={e.parada ? dirs[`${e.fecha}|${e.parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
-                              onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })}
+                              onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })} onAnotar={() => setAnotandoEnc(e)}
                               onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
                               onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />)}
                           </div>
@@ -390,6 +391,11 @@ export default function CronogramaPage() {
           {anotando && anotando.record_id && (
             <Modal title={`Anotaciones de logística · ${anotando.titulo} (${anotando.pdv})`} onClose={() => setAnotando(null)}>
               <NotasLogistica recordId={anotando.record_id} tipo={anotando.tipo} destino={anotando.tipo === 'entrega' ? null : { company_id: anotando.movs[0]?.company_id, nombre: anotando.movs[0]?.lugar }} onCambio={cargar} />
+            </Modal>
+          )}
+          {anotandoEnc && (
+            <Modal title={`Anotaciones de logística · ${lindo(anotandoEnc.destino)}`} onClose={() => setAnotandoEnc(null)}>
+              <NotasLogistica recordId={null} destino={{ company_id: anotandoEnc.company_id, lugar_id: anotandoEnc.lugar_id, nombre: anotandoEnc.destino }} onCambio={cargar} />
             </Modal>
           )}
           {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
@@ -702,10 +708,11 @@ function ModalColgar({ a, onCerrar, onColgar }: { a: { ids: string[]; tipo: Tipo
 
 // Un encargo (Recorridos): a dónde, quién lo pidió y qué se deja o se retira. Se arrastra a otro día, se le elige el
 // chofer y se marca hecho como las demás tarjetas; un clic lo abre.
-function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar }: {
+function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar, onAnotar }: {
   e: Encargo; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onAbrir: () => void; onChofer: (c: string) => void; onMover: (f: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onArrastrar: (on: boolean) => void;
+  onAnotar?: () => void;   // las anotaciones de logística de siempre de ese destino
 }) {
   const hecho = e.estado === 'hecho', atrasado = !hecho && e.fecha < hoy;
   const lineas = [...e.llevar.map((i) => ['Deja', i] as const), ...e.retirar.map((i) => ['Retira', i] as const)];
@@ -743,6 +750,7 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDi
       ) : e.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{e.chofer}</div>}
       {puede && (
         <div className="cr-t-acc">
+          {onAnotar && <button type="button" className="cr-mini" aria-label="Anotaciones de logística del destino" title="Anotaciones de logística: lo que hay que saber cada vez que se va a este lugar" onClick={onAnotar}><Icon name="note" size={13} /></button>}
           <SelectorFecha valor={e.fecha} onElegir={(f) => f && onMover(f)} label="Pasar a otro día" className="cr-mini" title="Pasar a otro día"><Icon name="calendar" size={13} /></SelectorFecha>
           <button type="button" className={`cr-check${hecho ? ' on' : ''}`} aria-pressed={hecho} aria-label={hecho ? 'Volver a pendiente' : 'Marcar como hecho'} title={hecho ? 'Volver a pendiente' : 'Marcar como hecho'} onClick={onMarcar}><Icon name="check" size={12} /></button>
         </div>

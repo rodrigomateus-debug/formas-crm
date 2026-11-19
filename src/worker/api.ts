@@ -19,7 +19,7 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
 import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
-import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDePedido, type Destino as DestinoNota } from './logistica';
+import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDeDestino, notasDePedido, type Destino as DestinoNota } from './logistica';
 import { textoPactada, type ModoHora } from '../../web/src/ruta';
 import { asignarChofer, colgarMovimiento, guardarEnviado, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
@@ -1650,10 +1650,14 @@ api.post('/cronograma/enviado', async (c) => c.json(await guardarEnviado(c.env, 
 // (la vendedora, desde su ficha) o quien edita el cronograma.
 api.get('/logistica/notas', async (c) => {
   const recordId = Number(c.req.query('record_id'));
-  if (!recordId) throw new HttpError(400, 'Falta el pedido.');
+  const destino = { company_id: Number(c.req.query('company_id')) || null, lugar_id: Number(c.req.query('lugar_id')) || null, nombre: c.req.query('nombre') ?? null };
+  // Sin pedido: las de siempre de un destino (la tarjeta de un encargo de Recorridos). Solo quien edita el cronograma.
+  if (!recordId) {
+    if (!puedeEditarCronograma(c.get('ctx').user)) throw new HttpError(403, 'Las anotaciones de un destino las ven Logística y Producción.');
+    return c.json({ ...(await notasDeDestino(c.env.DB, destino)), horarios: [], edita: true });
+  }
   if (!puedeEditarCronograma(c.get('ctx').user)) await registroVisible(c, recordId);
   const tipo = String(c.req.query('tipo') ?? 'entrega');
-  const destino = { company_id: Number(c.req.query('company_id')) || null, nombre: c.req.query('nombre') ?? null };
   // En la ficha del pedido, también el horario fijado para su entrega en el cronograma.
   const horarios = tipo === 'entrega' ? (await horariosDePedido(c.env.DB, recordId)).map((h) => ({ fecha: h.fecha, texto: textoPactada({ modo: h.modo as ModoHora, min: h.minutos, hasta: h.hasta }) })) : [];
   return c.json({ ...(await notasDePedido(c.env.DB, recordId, tipo, destino)), horarios, edita: puedeEditarCronograma(c.get('ctx').user) });

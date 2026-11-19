@@ -75,6 +75,12 @@ export async function notasDePedido(db: D1Database, recordId: number, tipo = 'en
   return { notas, destino: d.nombre || d.company_id || d.lugar_id ? { nombre: d.nombre ?? null } : null };
 }
 
+// Las de siempre de un destino, sin pedido: para la tarjeta de un encargo de Recorridos.
+export async function notasDeDestino(db: D1Database, d: Destino) {
+  const [notas] = await notasPara(db, [{ destino: d }]);
+  return { notas, destino: d.nombre || d.company_id || d.lugar_id ? { nombre: d.nombre ?? null } : null };
+}
+
 export async function crearNota(db: D1Database, ctx: Ctx, b: { record_id?: unknown; tipo?: unknown; alcance?: unknown; texto?: unknown; destino?: Destino | null }) {
   if (ctx.user.role === 'viewer') throw new HttpError(403, 'Tu usuario es de solo lectura.');
   const texto = String(b.texto ?? '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);

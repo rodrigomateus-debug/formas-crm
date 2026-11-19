@@ -105,6 +105,9 @@ parada del mismo lugar en la ruta del día.
   la ficha del pedido. Las escriben Logística y Producción desde la tarjeta y **la vendedora desde su pedido** (ficha o
   vista previa, panel Entrega → «Anotaciones de logística»: Ventas no ve el cronograma), que elige si es solo para esta
   entrega o para todas las entregas a ese cliente. Ahí también ve **el horario fijado** para su entrega en el cronograma.
+  **Desde la tarjeta de un encargo** de Recorridos también se anota (el ícono de la nota): ahí no hay pedido, así que es
+  siempre del destino (lo de esa vez va en las notas del encargo); es la forma de dejar algo para un lugar al que solo se
+  va por encargos.
   La borra quien la escribió, Logística, Producción o un administrador. **Reemplazan las observaciones de entrega** de la
   dirección del pedido y de la ficha de la empresa: las que ya estaban cargadas pasaron a ser anotaciones (migración
   `0097`; las del pedido, de esa entrega; las de una empresa, de siempre) y el campo ya no está en «Corregir dirección»,

@@ -863,3 +863,33 @@ test('cronograma: rango horario, anotaciones de logística con autor y cantidad 
   assert.equal((await api('POST', '/cronograma/enviado', { id: otro.task_id, tipo: otro.tipo, cantidad: otro.cantidad })).data.enviado, null);
   assert.ok(!(await semana()).movimientos.find((x) => x.id === otro.id).enviado);
 });
+
+// Desde la tarjeta de un encargo de Recorridos se anota lo de siempre de ese destino (sin pedido): aparece en los
+// encargos a ese lugar, aunque el nombre esté escrito distinto.
+test('cronograma: desde un encargo se anota lo de siempre de su destino', async () => {
+  asUser = null;
+  const hoy = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+  const lugar = `Estudio Contable ${RUN}`;
+  const enc = await api('POST', '/recorridos/encargos', { fecha: hoy, destino: { nombre: lugar, direccion: `Av. Santa Fe ${Math.floor(Math.random() * 3000) + 100}, CABA` }, llevar: [{ cant: 1, que: 'Carpeta' }] });
+  assert.equal(enc.status, 200, JSON.stringify(enc.data));
+  assert.equal((await api('POST', '/logistica/notas', { alcance: 'puntual', texto: 'Sin pedido no hay «solo esta vez»' })).status, 400);
+  const n = await api('POST', '/logistica/notas', { alcance: 'siempre', destino: { lugar_id: enc.data.lugar_id, company_id: enc.data.company_id, nombre: enc.data.destino }, texto: 'Dejar en mesa de entradas, 2° piso' });
+  assert.equal(n.status, 201, JSON.stringify(n.data));
+  assert.equal(n.data.destino, lugar);
+  // Se lee por el destino, también con el nombre en mayúsculas y con «S.A.».
+  const q = (nombre) => api('GET', `/logistica/notas?nombre=${encodeURIComponent(nombre)}`);
+  assert.deepEqual((await q(`${lugar.toUpperCase()} S.A.`)).data.notas.map((x) => x.texto), ['Dejar en mesa de entradas, 2° piso']);
+  assert.deepEqual((await q('Otro lugar cualquiera')).data.notas, []);
+  // Y la trae el encargo en la semana.
+  const lunes = (() => { const d = new Date(`${hoy}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
+  const dom = new Date(Date.parse(`${lunes}T12:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+  const e = (await api('GET', `/cronograma?desde=${lunes}&hasta=${dom}`)).data.encargos.find((x) => x.id === enc.data.id);
+  assert.deepEqual((e.anotaciones ?? []).map((x) => x.texto), ['Dejar en mesa de entradas, 2° piso']);
+  // Quien no edita el cronograma no ve las de un destino suelto.
+  await api('POST', '/users', { email: `enc.${RUN}@formas.ar`, name: `Enc ${RUN}`, role: 'member' });
+  asUser = `enc.${RUN}@formas.ar`;
+  assert.equal((await q(lugar)).status, 403);
+  asUser = null;
+  assert.equal((await api('DELETE', `/logistica/notas/${n.data.id}`)).status, 200);
+  await api('PATCH', `/recorridos/encargos/${enc.data.id}`, { estado: 'cancelado' });
+});

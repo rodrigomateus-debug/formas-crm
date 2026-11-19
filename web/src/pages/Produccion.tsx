@@ -5,7 +5,7 @@ import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '..
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug, OcLinks, type OcRef } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
-import { cumple, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol } from './ProduccionFiltros';
+import { cumple, cumpleCreado, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol, type Rango } from './ProduccionFiltros';
 import { NombreProveedor } from '../proveedores';
 import { RecordPreview } from './RecordPage';
 import { BotonVacias, useColapso } from './Board';
@@ -38,6 +38,7 @@ interface Pdv extends Articulo {
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: Articulo[];
   ocs?: OcRef[];   // todas las órdenes de compra del pedido
+  creado: string | null;   // fecha de creación del PDV: la del pedido de venta en Finnegans o el alta en ClickUp (produccion.ts)
 }
 interface CostoLogo { logo: number; setup: number; cantidad: number | null; fuente: 'costos' | 'pedido' }
 interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null; produccion?: number }
@@ -58,9 +59,23 @@ const CERRADOS = ['entregados', 'anulado'];
 // cliente, si se ven los entregados y lista o tablero.
 // También los filtros por columna (ProduccionFiltros.tsx: estado, cantidad, fechas, proveedor, impresor).
 interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?: string; cliente?: string; cerrados: boolean; modo: 'lista' | 'tablero'; columnas?: FiltrosCol;
-  vacias?: boolean }   // tablero: colapsar las columnas vacías (Board.tsx, useColapso)
+  vacias?: boolean;   // tablero: colapsar las columnas vacías (Board.tsx, useColapso)
+  orden?: Orden }     // cómo se ordenan los PDV (si no está, los más nuevos primero)
 const normCols = (f?: FiltrosCol) => JSON.stringify(Object.entries(limpiar(f ?? {})).map(([k, x]) => [k, Array.isArray(x) ? [...x].sort() : x]));
-const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista', normCols(c.columnas), !!c.vacias]);
+const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista', normCols(c.columnas), !!c.vacias, c.orden ?? ORDEN_BASE]);
+
+// Cómo se ordenan los PDV (pedido de Rodrigo del 19/11/2026): por defecto, por fecha de creación, los más nuevos primero
+// (los que no tienen fecha, al final). Un clic en el encabezado «Creado» lo da vuelta; en «Real», por fecha de entrega
+// (como era antes: la real o, si no tiene, la pactada).
+type Orden = 'creado_desc' | 'creado_asc' | 'entrega';
+const ORDEN_BASE: Orden = 'creado_desc';
+const porNumero = (a: Pdv, b: Pdv) => Number(a.npdv ?? 0) - Number(b.npdv ?? 0);
+const entregaDe = (p: Pdv) => p.entrega_real ?? p.entrega_prometida?.slice(0, 10) ?? '9999';
+const ORDENES: Record<Orden, (a: Pdv, b: Pdv) => number> = {
+  creado_desc: (a, b) => (b.creado ?? '').localeCompare(a.creado ?? '') || porNumero(b, a),
+  creado_asc: (a, b) => (a.creado ?? '9999').localeCompare(b.creado ?? '9999') || porNumero(a, b),
+  entrega: (a, b) => entregaDe(a).localeCompare(entregaDe(b)) || porNumero(a, b),
+};
 
 // Quién vende el PDV (pedido de Rodrigo del 12/11/2026, con su foto y como filtro): el propietario del pedido en el CRM
 // y, si el PDV no tiene pedido, el VENDEDOR de ClickUp.
@@ -89,7 +104,8 @@ function Vendedor({ p }: { p: ConVendedor }) {
 
 // Preferencias de cada uno en este navegador (lista o tablero, colapsado). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
-function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean; vacias?: boolean } {
+// `creado`: si se ve la columna de la fecha de creación (por defecto, sí).
+function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean; vacias?: boolean; creado?: boolean } {
   try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; }
 }
 function guardarPref(p: object) { try { localStorage.setItem(PREF, JSON.stringify({ ...leerPref(), ...p })); } catch { /* sin almacenamiento */ } }
@@ -126,6 +142,10 @@ export default function ProduccionPage() {
   const [vendedor, setVendedor] = useState('');
   const [cliente, setCliente] = useState('');
   const [columnas, setColumnas] = useState<FiltrosCol>({});
+  const [orden, setOrden] = useState<Orden>(ORDEN_BASE);
+  // La columna «Creado» de la lista: se saca o se agrega desde «Columnas» (queda en este navegador).
+  const [colCreado, setColCreado] = useState(pref.creado !== false);
+  const cambiarColCreado = (x: boolean) => { setColCreado(x); guardarPref({ creado: x }); };
   const [cerrados, setCerrados] = useState(false);
   // Solo los PDV con la entrega real (la del PDV o la de algún artículo abierto) después de la pactada.
   const [pasadas, setPasadas] = useState(false);
@@ -196,6 +216,8 @@ export default function ProduccionPage() {
     const cache = new Map<string, number>();
     const cuenta = (col: ColFiltro, valor: string) => {
       const k = `${col}:${valor}`;
+      // La fecha de creación es del PDV: cuenta PDV.
+      if (col === 'creado' && !cache.has(k)) cache.set(k, (v?.pdvs ?? []).filter((p) => cumpleCreado(p.creado, { creado: valor as Rango })).length);
       if (!cache.has(k)) cache.set(k, arts.filter((a) => cumple(a, { [col]: ['estado', 'proveedor', 'impresor'].includes(col) ? [valor] : valor } as FiltrosCol, { mismaEmpresa })).length);
       return cache.get(k)!;
     };
@@ -207,10 +229,13 @@ export default function ProduccionPage() {
   const filtrados = useMemo(() => {
     if (!v) return [];
     const t = q.trim().toLowerCase();
-    // Con filtros por columna, de cada PDV quedan solo los productos que cumplen (y el PDV, si le queda alguno).
-    const porColumna = hayFiltros(columnas);
-    const pdvs = porColumna ? v.pdvs.map((p) => ({ ...p, articulos: p.articulos.filter((a) => cumple(a, columnas, ctxFiltros)) })).filter((p) => p.articulos.length) : v.pdvs;
+    // Con filtros por columna, de cada PDV quedan solo los productos que cumplen (y el PDV, si le queda alguno). La fecha
+    // de creación filtra el PDV entero.
+    const { creado: _creado, ...deProductos } = columnas;
+    const porColumna = hayFiltros(deProductos);
+    const pdvs = porColumna ? v.pdvs.map((p) => ({ ...p, articulos: p.articulos.filter((a) => cumple(a, deProductos, ctxFiltros)) })).filter((p) => p.articulos.length) : v.pdvs;
     return pdvs.filter((p) => {
+      if (!cumpleCreado(p.creado, columnas)) return false;
       if (persona === 'nadie' && p.asignados_todos.length) return false;
       // «Míos»: lo que tengo asignado en producción o los pedidos que son míos (para quien vende).
       if (persona === 'yo' && !((yo && p.asignados_todos.includes(yo.clickup_id)) || p.owner_id === meta.me.id)) return false;
@@ -220,8 +245,8 @@ export default function ProduccionPage() {
       if (pasadas) { const pac = p.entrega_prometida?.slice(0, 10); if (!pasada(pac, p.entrega_real) && !p.articulos.some((a) => !CERRADOS.includes(a.estado) && pasada(pac, a.entrega_real))) return false; }
       if (!t) return true;
       return [p.npdv, p.cliente, p.vendedor, p.pedido, ...p.articulos.map((a) => a.nombre)].some((x) => String(x ?? '').toLowerCase().includes(t));
-    });
-  }, [v, q, persona, vendedor, cliente, pasadas, columnas, ctxFiltros, yo?.clickup_id, meta]);
+    }).sort(ORDENES[orden]);
+  }, [v, q, persona, vendedor, cliente, pasadas, columnas, ctxFiltros, yo?.clickup_id, meta, orden]);
   // Las opciones de vendedor y cliente: las que hay en los PDV que se ven (con las unidades y «entregados» elegidos).
   const vendedores = useMemo(() => {
     const m = new Map<string, { clave: string; nombre: string; p: Pdv }>();
@@ -244,11 +269,11 @@ export default function ProduccionPage() {
     setActiva(k);
     setParams((p) => { if (k === pestanas[0]) p.delete('v'); else p.set('v', k); return p; }, { replace: true });
     const vista = vistaDe(k);
-    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setVendedor(''); setCliente(''); setColumnas({}); setCerrados(false); setBuscar(''); }
+    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setVendedor(''); setCliente(''); setColumnas({}); setCerrados(false); setBuscar(''); setOrden(ORDEN_BASE); }
     else if (vista) {
       const c = vista.config;
       setUnidades(c.unidades?.length ? c.unidades : base); setPersona(c.persona ?? ''); setVendedor(c.vendedor ?? ''); setCliente(c.cliente ?? '');
-      setCerrados(!!c.cerrados); setBuscar(c.q ?? ''); setColumnas(c.columnas ?? {});
+      setCerrados(!!c.cerrados); setBuscar(c.q ?? ''); setColumnas(c.columnas ?? {}); setOrden(c.orden ?? ORDEN_BASE);
       if (c.modo) setModo(c.modo);
       setVacias(!!c.vacias);
     }
@@ -263,7 +288,7 @@ export default function ProduccionPage() {
     if (!esFija(activa)) { if (vistaDe(activa)) elegir(activa); else elegir(pestanas[0]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vistas.data]);
-  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}), ...(vacias ? { vacias: true } : {}) };
+  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}), ...(vacias ? { vacias: true } : {}), ...(orden !== ORDEN_BASE ? { orden } : {}) };
   const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista', vacias: false })
     !== normConfig({ q: '', unidades: base, persona: activa === 'mine' ? 'yo' : '', cerrados: false, modo: 'lista' });
   const articulos = filtrados.reduce((n, p) => n + p.articulos.length, 0);
@@ -282,7 +307,7 @@ export default function ProduccionPage() {
       </div>
       <PestanasVistas tipo="produccion" vistas={vistas.data} pestanas={pestanas} guardarOrden={guardarOrden} activa={activa} onElegir={elegir}
         recargar={vistas.reload} actual={actual} igual={(a, b) => normConfig(a) === normConfig({ ...b, unidades: b.unidades?.length ? b.unidades : base ?? [] })}
-        filtrosCambiados={filtrosCambiados} total={v ? `${filtrados.length} PDV · ${articulos} artículos` : undefined} onActualizar={cargar} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, los filtros por columna, si se ven los entregados y si se ve en lista o tablero." />
+        filtrosCambiados={filtrosCambiados} total={v ? `${filtrados.length} PDV · ${articulos} artículos` : undefined} onActualizar={cargar} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, los filtros por columna, el orden, si se ven los entregados y si se ve en lista o tablero." />
       {/* La barra de filtros, igual en todos los módulos: buscar, filtros, «Filtros» y, a la derecha, lo que es de la vista. */}
       <div className="toolbar">
         <div className="search"><Icon name="search" />
@@ -324,6 +349,7 @@ export default function ProduccionPage() {
         {v && <FiltrosActivos f={columnas} onChange={setColumnas} ctx={ctxFiltros} />}
         <div className="bar-end">
           {modo === 'tablero' && <BotonVacias value={vacias} onChange={cambiarVacias} />}
+          {modo === 'lista' && <ElegirColumnas creado={colCreado} onCreado={cambiarColCreado} />}
           {modo === 'lista' && (
             <button type="button" className="btn ghost" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
               title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
@@ -341,7 +367,7 @@ export default function ProduccionPage() {
         <div className="empty plain">{v.pdvs.length ? 'Ningún PDV con esos filtros.' : 'No hay PDV en producción para estas unidades. Si recién se instaló, la primera lectura de ClickUp tarda unas corridas (cada 10 minutos).'}</div>
       )}
       {v && filtrados.length > 0 && (modo === 'lista'
-        ? <Lista pdvs={filtrados} v={v} editar={editar} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
+        ? <Lista pdvs={filtrados} v={v} editar={editar} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} orden={orden} onOrden={setOrden} colCreado={colCreado} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
             onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onTodos={(abrir) => cambiarColapsado(!abrir)} />
         : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} vacias={vacias} />)}
@@ -398,6 +424,29 @@ function ConfigUnidades({ config, onGuardado }: { config: { unidades: string[] }
             </label>
           ))}
           <div className="small muted" style={{ padding: '6px 10px 4px' }}>Las otras se ven, pero se editan en ClickUp.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Las columnas opcionales de la lista: por ahora, la fecha de creación del PDV.
+function ElegirColumnas({ creado, onCreado }: { creado: boolean; onCreado: (x: boolean) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button type="button" className="btn ghost" onClick={() => setOpen(!open)} aria-expanded={open} title="Agregar o sacar columnas de la lista"><Icon name="table" size={15} />Columnas</button>
+      {open && (
+        <div className="popover" style={{ right: 0, top: 36, minWidth: 220 }}>
+          <div className="grp">Columnas</div>
+          <label className="opt small"><input type="checkbox" checked={creado} onChange={(e) => onCreado(e.target.checked)} />Fecha de creación del PDV</label>
         </div>
       )}
     </div>
@@ -563,15 +612,17 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
 // La flecha de abrir y cerrar, como en ClickUp: para abajo si está abierto, para la derecha si está cerrado.
 export const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
 
-function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filtros }: {
-  filtros: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: CtxFiltros };
+function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filtros, orden, onOrden, colCreado }: {
+  filtros: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: CtxFiltros }; orden: Orden; onOrden: (o: Orden) => void; colCreado: boolean;
   pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void; onAbrir: (p: Pdv) => void; sel: number | null;
 }) {
   const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
   const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
   const todosAbiertos = pdvs.every((p) => abierto(p.task_id));
   // El embudo de cada columna (ProduccionFiltros.tsx).
-  const fil = (c: ColFiltro) => <FiltroEncabezado col={c} f={filtros.f} onChange={filtros.onChange} ctx={filtros.ctx} />;
+  // En un encabezado que ordena, el clic en el embudo (y en su ventana, que sube por React) no cambia el orden.
+  const fil = (c: ColFiltro) => <span onClick={(e) => e.stopPropagation()}><FiltroEncabezado col={c} f={filtros.f} onChange={filtros.onChange} ctx={filtros.ctx} /></span>;
+  const flecha = (on: boolean, asc: boolean) => on && <span className="sort-ind">{asc ? '▲' : '▼'}</span>;
   return (
     <div className="table-wrap prod-wrap">
       <table className="grid prod-grid">
@@ -581,11 +632,15 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
               <button type="button" className="btn ghost xs" onClick={() => onTodos(!todosAbiertos)} aria-label={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'} title={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'}>
                 <Flecha abierto={todosAbiertos} /></button>
               PDV / artículo</th>
-            <th className="nosort"><span className="th-f">Estado{fil('estado')}</span></th>
+            {colCreado && <th className="prod-creado-th" onClick={() => onOrden(orden === 'creado_desc' ? 'creado_asc' : 'creado_desc')}
+              aria-sort={orden === 'creado_desc' ? 'descending' : orden === 'creado_asc' ? 'ascending' : 'none'}
+              title="Fecha de creación del PDV: la del pedido de venta en Finnegans (o el alta en ClickUp, si todavía no la tiene). Clic para ordenar.">
+              <span className="th-f">Creado{flecha(orden !== 'entrega', orden === 'creado_asc')}{fil('creado')}</span></th>}            <th className="nosort"><span className="th-f">Estado{fil('estado')}</span></th>
             <th className="nosort">Asignado</th>
             <th className="nosort numcol"><span className="th-f">Cantidad{fil('cantidad')}</span></th>
             <th className="nosort" title="La fecha de entrega que puso el comercial en el pedido de Finnegans">Pactada</th>
-            <th className="nosort" title="La fecha de producción: ENTREGAS (FECHA REAL) en ClickUp"><span className="th-f">Real{fil('entrega_real')}</span></th>
+            <th onClick={() => onOrden('entrega')} aria-sort={orden === 'entrega' ? 'ascending' : 'none'} title="La fecha de producción: ENTREGAS (FECHA REAL) en ClickUp. Clic para ordenar por fecha de entrega.">
+              <span className="th-f">Real{flecha(orden === 'entrega', true)}{fil('entrega_real')}</span></th>
             <th className="nosort" title="La orden de compra al proveedor en Finnegans (clic para abrirla)">OC</th>
             <th className="nosort"><span className="th-f">Proveedor{fil('proveedor')}</span></th>
             <th className="nosort"><span className="th-f">Impresor{fil('impresor')}</span></th>
@@ -597,16 +652,16 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
           </tr>
         </thead>
         <tbody>
-          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
+          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} colCreado={colCreado} />)}
         </tbody>
       </table>
     </div>
   );
 }
 
-const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps, onAbrir, elegido }: {
+const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps, onAbrir, elegido, colCreado }: {
   p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: boolean; onToggle: (id: string) => void; provs: ReactNode; imps: ReactNode;
-  onAbrir: (p: Pdv) => void; elegido: boolean;
+  onAbrir: (p: Pdv) => void; elegido: boolean; colCreado: boolean;
 }) {
   const clic = p.record_id ? (e: React.MouseEvent) => { if (!clicAdentro(e)) onAbrir(p); } : undefined;
   const cls = `${p.record_id ? ' abre' : ''}${elegido ? ' sel' : ''}`;
@@ -638,6 +693,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
             </div>
           </div>
         </td>
+        {colCreado && <td className="prod-creado">{p.creado ? dia(p.creado) : <span className="muted">—</span>}</td>}
         <td>
           <div className="row" style={{ gap: 6 }}>
             {etapa ? <EtapaPedido value={p.etapa} label={etapa} /> : <span className="muted small">Sin arrancar</span>}
@@ -660,16 +716,16 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         <td>{p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir PDV ${p.npdv} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
       </tr>
       {abierto && p.articulos.map((a) => (
-        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} />
+        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} colCreado={colCreado} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={14} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={colCreado ? 15 : 14} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
 
-function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
+function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, colCreado }: {
   a: Articulo; p: Pdv; v: Vista; ed: boolean; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; provs: ReactNode; imps: ReactNode; listo: boolean;
-  clic?: (e: React.MouseEvent) => void; cls: string;
+  clic?: (e: React.MouseEvent) => void; cls: string; colCreado: boolean;
 }) {
   const set = (c: Campo) => (x: unknown) => editar(p, a.task_id, c, x);
   const artListo = ['listo para entergar', 'entregados'].includes(a.estado);
@@ -679,6 +735,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
       <td className="prod-nombre"><div className="prod-art-t"><FotoProducto url={a.foto} nombre={a.nombre} />
         {/* El nombre con todo el ancho y, abajo, los avisos (logo, costo del logo, notas): antes iban al lado y lo tapaban. */}
         <div className="prod-art-txt"><span className="ellipsis" title={a.nombre}>{a.nombre}</span><ChipsArticulo a={a} p={p} v={v} /></div></div></td>
+      {colCreado && <td />}
       <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
       <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>
       <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
@@ -830,7 +887,7 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
         </div>
         <div className="prod-cliente ellipsis" title={p.cliente ?? undefined}>{p.cliente ?? 'Sin cliente'}</div>
         <div className="small muted ellipsis">
-          <Vendedor p={p} />{p.entrega_prometida && `${p.owner_id || p.vendedor ? ' · ' : ''}Pactada ${dia(p.entrega_prometida.slice(0, 10))}`}
+          <Vendedor p={p} />{[p.creado && `Creado ${dia(p.creado)}`, p.entrega_prometida && `Pactada ${dia(p.entrega_prometida.slice(0, 10))}`].filter(Boolean).map((x, i) => `${i > 0 || p.owner_id || p.vendedor ? ' · ' : ''}${x}`).join('')}
         </div>
         <div className="row" style={{ gap: 8, justifyContent: 'space-between', minWidth: 0 }}>
           {/* En la tarjeta, todos los que tienen algo del PDV; elegir reasigna el PDV y sus artículos abiertos. */}

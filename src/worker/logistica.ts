@@ -12,7 +12,7 @@ import { companyKey } from './clickup';
 // Se ven en la tarjeta del cronograma, en la parada de la Ruta del día, en la app del chofer y en el pedido.
 // Reemplazan las observaciones de entrega de la dirección y de la ficha de la empresa (migración 0097).
 
-export const TIPOS_NOTA = ['entrega', 'ingreso', 'retiro_proveedor', 'egreso', 'retiro_impresor'] as const;
+export const TIPOS_NOTA = ['entrega', 'ingreso', 'retiro_proveedor', 'egreso', 'retiro_impresor', 'ingreso_impresor'] as const;
 export interface NotaLogistica { id: number; alcance: 'puntual' | 'siempre'; texto: string; por: string | null; user_id: number | null; at: string; destino?: string | null }
 // A dónde se va: lo que se sepa de la empresa, el lugar de la libreta y el nombre.
 export interface Destino { company_id?: number | null; lugar_id?: number | null; nombre?: string | null }

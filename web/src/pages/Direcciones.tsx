@@ -10,7 +10,8 @@ import { Modal, alEsc } from '../components';
 // Formas (Depósito Gral. Roca u Oficina Matienzo). Es una dirección más: también sirve repartido (parte retira, parte se envía).
 
 interface Direccion { id: number; direccion: string; detalle: string | null; place_id: string | null; validada: boolean; precisa: boolean; maps: string; localidad: string | null;
-  retira: string | null; retira_nombre: string | null }
+  retira: string | null; retira_nombre: string | null;
+  nombre: string | null; observaciones: string | null; obs_por: string | null }   // cómo se llama el lugar y su anotación, con quién la escribió
 interface Producto { clave: string; nombre: string; codigo: string | null; total: number | null; asignado: number; quedan: number | null }
 interface Base { id: string; nombre: string; direccion: string }
 interface Datos { direcciones: Direccion[]; cantidades: Array<{ direccion_id: number; clave: string; cantidad: number }>; productos: Producto[]; varias: boolean;
@@ -58,6 +59,8 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
           <div className="aviso warn small">Este pedido todavía no tiene dirección de entrega.</div>
           {puede && <div className="row wrap" style={{ gap: 6 }}>
             <button className="btn sm primary" disabled={guardando} onClick={() => setEditar({ varias: false })}><Icon name="pin" size={14} />Cargar dirección</button>
+            <button className="btn sm" disabled={guardando} onClick={() => setEditar({ varias: true })} title="El pedido se reparte entre varios lugares: cuánto va a cada uno y qué hay que saber de cada uno">
+              <Icon name="route" size={14} />Varias direcciones</button>
             {d.bases.length > 0 && (
               <button className="btn sm" disabled={guardando} aria-expanded={elegirRetira} onClick={() => setElegirRetira((x) => !x)}
                 title="El cliente lo retira en una de las direcciones de Formas: no va en el recorrido del chofer">
@@ -83,9 +86,12 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
           <Icon name={x.retira ? 'company' : 'pin'} size={16} />
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="direccion-texto">{dirs.length > 1 && <span className="muted">{i + 1}. </span>}
+              {dirs.length > 1 && x.nombre && <b>{x.nombre} · </b>}
               {x.retira ? (soloRetira ? x.retira_nombre : <>Retira en Formas: {x.retira_nombre}</>) : x.direccion}</div>
             {x.retira && <div className="small muted">{x.direccion}</div>}
             {x.detalle && <div className="small muted">{x.detalle}</div>}
+            {dirs.length > 1 && x.observaciones && <div className="lg-nota" style={{ marginTop: 4 }}><p>{x.observaciones}</p>
+              <span className="lg-nota-pie"><span className="lg-nota-tag">Solo este lugar</span>{x.obs_por ? x.obs_por.split(' ')[0] : ''}</span></div>}
             <div className="row wrap small" style={{ gap: 6, marginTop: 2 }}>
               {x.retira ? <span className="tag info" title="No va en el recorrido del chofer: el cliente lo retira en esta dirección de Formas.">Lo retira el cliente</span> : <Validacion d={x} />}
               {(x.validada || x.retira) && <a href={x.maps} target="_blank" rel="noreferrer">Ver en el mapa</a>}
@@ -101,7 +107,8 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
       {puede && dirs.length > 0 && (
         <div className="row wrap" style={{ gap: 6 }}>
           <button className="btn sm" onClick={() => setEditar({ varias: d.varias })}>{d.varias ? 'Cambiar direcciones y reparto' : soloRetira ? 'Cambiar' : 'Cambiar dirección'}</button>
-          {!d.varias && <button className="btn sm ghost" onClick={() => setEditar({ varias: true })}>Entregar en varias direcciones</button>}
+          {!d.varias && <button className="btn sm" onClick={() => setEditar({ varias: true })} title="El pedido se reparte entre varios lugares: cuánto va a cada uno y qué hay que saber de cada uno">
+            <Icon name="route" size={14} />Entregar en varias direcciones</button>}
         </div>
       )}
       {editar && <EditorDirecciones orderId={orderId} datos={d} varias={editar.varias} onClose={() => setEditar(null)} onSaved={() => { setEditar(null); res.reload(); onChange?.(); }} />}
@@ -112,7 +119,7 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
 // ---------- Editor ----------
 
 // `retira`: el id de la dirección de Formas donde lo retira el cliente (entonces no hay dirección que buscar).
-interface Fila { key: string; id?: number; texto: string; place_id: string | null; detalle: string; validada: boolean; retira: string | null }
+interface Fila { key: string; id?: number; texto: string; place_id: string | null; detalle: string; validada: boolean; retira: string | null; nombre: string; obs: string }
 export const nuevaSesion = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 let n = 0;
 const k = () => `f${++n}`;
@@ -121,9 +128,9 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
   const toast = useToast();
   const sesion = useRef(nuevaSesion()).current;
   const [filas, setFilas] = useState<Fila[]>(() => {
-    const f: Fila[] = datos.direcciones.map((d) => ({ key: k(), id: d.id, texto: d.retira ? '' : d.direccion, place_id: d.place_id, detalle: d.detalle ?? '', validada: d.validada, retira: d.retira }));
-    if (!f.length) f.push({ key: k(), texto: '', place_id: null, detalle: '', validada: false, retira: null });
-    if (variasIn && f.length < 2) f.push({ key: k(), texto: '', place_id: null, detalle: '', validada: false, retira: null });
+    const f: Fila[] = datos.direcciones.map((d) => ({ key: k(), id: d.id, texto: d.retira ? '' : d.direccion, place_id: d.place_id, detalle: d.detalle ?? '', validada: d.validada, retira: d.retira, nombre: d.nombre ?? '', obs: d.observaciones ?? '' }));
+    if (!f.length) f.push({ key: k(), texto: '', place_id: null, detalle: '', validada: false, retira: null, nombre: '', obs: '' });
+    if (variasIn && f.length < 2) f.push({ key: k(), texto: '', place_id: null, detalle: '', validada: false, retira: null, nombre: '', obs: '' });
     return f;
   });
   const baseDe = (id: string | null) => datos.bases.find((b) => b.id === id);
@@ -145,7 +152,7 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
   const vacias = filas.some((f) => !f.retira && f.texto.trim().length < 5);
   const setFila = (key: string, cambio: Partial<Fila>) => setFilas((fs) => fs.map((f) => (f.key === key ? { ...f, ...cambio } : f)));
   const quitar = (key: string) => { setFilas((fs) => fs.filter((f) => f.key !== key)); setQ((c) => { const x = { ...c }; delete x[key]; return x; }); };
-  const agregar = () => setFilas((fs) => [...fs, { key: k(), texto: '', place_id: null, detalle: '', validada: false, retira: null }]);
+  const agregar = () => setFilas((fs) => [...fs, { key: k(), texto: '', place_id: null, detalle: '', validada: false, retira: null, nombre: '', obs: '' }]);
   // Lo que falta repartir de cada producto, a esta dirección.
   const restoA = (key: string) => setQ((c) => {
     const x = { ...c, [key]: { ...(c[key] ?? {}) } };
@@ -157,7 +164,9 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
     try {
       await http('PUT', `/records/order/${orderId}/direcciones`, {
         sesion,
-        direcciones: filas.map((f) => (f.retira ? { id: f.id, retira: f.retira, detalle: f.detalle } : { id: f.id, place_id: f.place_id, direccion: f.texto, detalle: f.detalle })),
+        // El nombre del lugar y su anotación van solo con varias direcciones (con una sola, la anotación es la del pedido).
+        direcciones: filas.map((f) => ({ ...(f.retira ? { id: f.id, retira: f.retira, detalle: f.detalle } : { id: f.id, place_id: f.place_id, direccion: f.texto, detalle: f.detalle }),
+          ...(varias ? { nombre: f.nombre, observaciones: f.obs } : {}) })),
         cantidades: varias ? filas.flatMap((f, i) => Object.entries(q[f.key] ?? {}).filter(([, v]) => num(v) > 0).map(([clave, v]) => ({ direccion: i, clave, cantidad: num(v) }))) : [],
       });
       toast(varias ? 'Direcciones y reparto guardados' : 'Dirección de entrega guardada');
@@ -179,6 +188,8 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
             <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
               {varias && <span className="direccion-num">{i + 1}</span>}
               <div className="grow stack" style={{ gap: 6 }}>
+                {varias && <input className="input sm direccion-nombre" placeholder="Nombre del lugar: Central, Sucursal Santa Fe, Depósito de stock…" value={f.nombre} maxLength={80}
+                  onChange={(e) => setFila(f.key, { nombre: e.target.value })} aria-label={`Nombre del lugar ${i + 1}`} />}
                 {datos.bases.length > 0 && (
                   <div className="seg" role="group" aria-label={varias ? `Cómo se entrega lo de la dirección ${i + 1}` : 'Cómo se entrega'} style={{ alignSelf: 'flex-start' }}>
                     <button type="button" className={f.retira ? '' : 'on'} aria-pressed={!f.retira} onClick={() => setFila(f.key, { retira: null })}><Icon name="truck" size={13} />Envío</button>
@@ -201,12 +212,14 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
                       onElegir={(s) => setFila(f.key, { texto: s.texto, place_id: s.place_id, validada: true })} />}
                 <input className="input sm" placeholder={f.retira ? 'Detalle (opcional): quién retira, día y horario…' : 'Detalle (opcional): piso, depto, horario, quién recibe…'}
                   value={f.detalle} maxLength={300} onChange={(e) => setFila(f.key, { detalle: e.target.value })} aria-label={`Detalle de la dirección ${i + 1}`} />
+                {varias && <textarea className="input sm" rows={2} placeholder="Anotación para este lugar (solo acá): por dónde entrar, por quién preguntar…" value={f.obs} maxLength={500}
+                  onChange={(e) => setFila(f.key, { obs: e.target.value })} aria-label={`Anotación del lugar ${i + 1}`} />}
               </div>
               {varias && <button className="btn ghost icon sm" title="Quitar esta dirección" aria-label={`Quitar la dirección ${i + 1}`} onClick={() => quitar(f.key)}><Icon name="trash" size={14} /></button>}
             </div>
           </div>
         ))}
-        <div><button className="btn sm ghost" onClick={agregar}><Icon name="plus" size={14} />{varias ? 'Agregar otra dirección' : 'Entregar en varias direcciones'}</button></div>
+        <div><button className="btn sm" onClick={agregar}><Icon name="plus" size={14} />{varias ? 'Agregar otra dirección' : 'Entregar en varias direcciones'}</button></div>
       </div>
 
       {varias && (

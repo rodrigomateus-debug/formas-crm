@@ -11,6 +11,7 @@ import type { DestinoOpcion } from '../pages/Recorridos';
 import { Hoja, TareaRapida } from './Movil';
 import { Actividad, CampoMovil, Datos, EditarDato, ElegirEmpresa, Registrar, TarjetaCliente } from './ClientesMovil';
 import { Fallo, useCarga, useCerrarConAtras, usePuedeEscribir } from './base';
+import { siGano } from '../Chispin';
 
 // Ventas en el celular (versión celular, fase 3): Negocios | Pedidos. Los negocios se ven por etapa, se crean con lo
 // mínimo y se pasan de etapa (pidiendo lo que la etapa exige, como en el escritorio). Los pedidos no se crean desde acá:
@@ -233,7 +234,10 @@ function CambiarEtapa({ deal, pipe, onClose, onListo }: { deal: CrmRecord; pipe:
     const perdida = !!stage.is_closed && !stage.is_won;
     if (missing.length || (perdida && detalle && !('closed_lost_reason' in extra) && !pide)) { setPide({ stage, missing }); return; }
     setOcupado(true);
-    try { await http('PATCH', `/records/deal/${deal.id}`, { props: { dealstage: stage.id, ...extra } }); toast(`Pasó a «${stage.label}»`); onListo(); onClose(); }
+    try {
+      await http('PATCH', `/records/deal/${deal.id}`, { props: { dealstage: stage.id, ...extra } }); toast(`Pasó a «${stage.label}»`); onListo(); onClose();
+      siGano(stageOf(meta, deal.props.dealstage)?.stage, stage, { nombre: deal.name, monto: deal.props.amount, moneda: deal.props.deal_currency_code, duenio: deal.props.owner_id });
+    }
     catch (e) {
       const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       // Si el servidor pide algo que la pantalla no sabe mostrar, se dice (antes la hoja quedaba vacía, en un bucle).

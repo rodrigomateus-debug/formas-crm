@@ -175,19 +175,19 @@ export async function movimientos(db: D1Database, desde: string, hasta: string) 
 async function ponerExtras(db: D1Database, movs: Movimiento[]) {
   if (!movs.length) return;
   const deEntregas = await empresaDePedidos(db, [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))]);
-  const empresa = (m: Movimiento) => (m.tipo === 'entrega' ? deEntregas.get(m.record_id ?? -1)?.id ?? null : m.company_id);
-  const [{ puntuales, siempre }, env] = await Promise.all([
-    notasPara(db, movs.map((m) => ({ record_id: m.record_id, tipo: m.tipo, empresa: empresa(m) }))),
+  // A dónde va cada uno: en las entregas, la empresa del pedido y el cliente del PDV; en lo demás, el proveedor o el impresor.
+  const destino = (m: Movimiento) => (m.tipo === 'entrega' ? { company_id: deEntregas.get(m.record_id ?? -1)?.id ?? null, nombre: m.cliente } : { company_id: m.company_id, nombre: m.lugar });
+  const [notas, env] = await Promise.all([
+    notasPara(db, movs.map((m) => ({ record_id: m.record_id, tipo: m.tipo, destino: destino(m) }))),
     db.prepare(`SELECT e.task_id, e.tipo, e.cantidad, e.motivo, u.name AS por FROM cronograma_enviados e LEFT JOIN users u ON u.id = e.user_id`)
       .all<{ task_id: string; tipo: string; cantidad: number; motivo: string | null; por: string | null }>(),
   ]);
   const enviados = new Map(env.results.map((e) => [`${e.task_id}:${e.tipo}`, e]));
-  for (const m of movs) {
-    const ns = [...(siempre.get(empresa(m) ?? -1) ?? []), ...(puntuales.get(`${m.record_id}|${m.tipo}`) ?? [])];
-    if (ns.length) m.notas = ns;
+  movs.forEach((m, i) => {
+    if (notas[i].length) m.notas = notas[i];
     const e = enviados.get(m.id);
     if (e) m.enviado = { cantidad: e.cantidad, motivo: e.motivo, por: e.por };
-  }
+  });
 }
 
 // La cantidad que realmente se mandó (o llegó) en un egreso, un ingreso o un retiro (pedido de Producción del 19/11/2026):
@@ -1204,7 +1204,7 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
           // Las anotaciones de logística de lo que se hace en la parada (logistica.ts), sin repetir, y la cantidad que
           // realmente va si se anotó una demasía.
-          notas: [...new Map(p.movimientos.flatMap((m) => m.notas ?? []).map((n) => [n.id, { texto: n.texto, por: n.por, siempre: n.alcance === 'siempre' }])).values()],
+          notas: [...new Map([...p.movimientos.flatMap((m) => m.notas ?? []), ...p.encargos.flatMap((e) => e.anotaciones ?? [])].map((n) => [n.id, { texto: n.texto, por: n.por, siempre: n.alcance === 'siempre' }])).values()],
           movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.enviado?.cantidad ?? m.cantidad, hecho: m.hecho })),
           encargos: p.encargos.map((e) => ({ id: e.id, llevar: e.llevar, retirar: e.retirar, desde: nombreBase(e.desde, r.bases), hacia: nombreBase(e.hacia, r.bases),
             horario: e.horario, contacto: e.contacto, notas: e.notas, urgente: e.urgente, quien: e.quien, quien_foto: e.quien_foto ?? null, estado: e.estado })),
@@ -1298,6 +1298,7 @@ export interface EncargoDia {
   chofer?: string | null;   // en la semana: el chofer del recorrido en el que cae su parada
   parada?: string;          // en la semana: la parada en la que cae
   hora?: string | null;     // en la semana: la hora fijada a mano en esa parada
+  anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (logistica.ts)
 }
 export interface EncargoFila {
   id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; quien_foto?: string | null; destino: string; direccion: string | null; lugar_id: number | null;
@@ -1316,7 +1317,11 @@ export const aEncargo = (r: EncargoFila): EncargoDia => ({
 export async function encargosEntre(db: D1Database, desde: string, hasta: string) {
   // El historial que se trajo de la planilla vieja (origen «planilla») no va: lo de esos días ya está en ClickUp.
   const { results } = await db.prepare(`${SELECT_ENC} WHERE e.fecha BETWEEN ? AND ? AND e.estado <> 'cancelado' AND e.origen = 'hub' ORDER BY e.id`).bind(desde, hasta).all<EncargoFila>();
-  return results.map(aEncargo);
+  const encs = results.map(aEncargo);
+  // Las anotaciones de logística de siempre del lugar al que va cada encargo (por su empresa, su lugar de la libreta o su nombre).
+  const notas = await notasPara(db, encs.map((e) => ({ destino: { company_id: e.company_id, lugar_id: e.lugar_id, nombre: e.destino } })));
+  encs.forEach((e, i) => { if (notas[i].length) e.anotaciones = notas[i]; });
+  return encs;
 }
 export async function lugaresPorId(db: D1Database, ids: Array<number | null>) {
   const l = [...new Set(ids.filter((x): x is number => !!x))];

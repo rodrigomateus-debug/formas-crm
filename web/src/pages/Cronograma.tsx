@@ -387,7 +387,7 @@ export default function CronogramaPage() {
           {colgando && <ModalColgar a={colgando} onCerrar={() => setColgando(null)} onColgar={(m) => colgar(colgando, m)} />}
           {anotando && anotando.record_id && (
             <Modal title={`Anotaciones de logística · ${anotando.titulo} (${anotando.pdv})`} onClose={() => setAnotando(null)}>
-              <NotasLogistica recordId={anotando.record_id} tipo={anotando.tipo} companyId={anotando.tipo === 'entrega' ? null : anotando.movs[0]?.company_id} onCambio={cargar} />
+              <NotasLogistica recordId={anotando.record_id} tipo={anotando.tipo} destino={anotando.tipo === 'entrega' ? null : { company_id: anotando.movs[0]?.company_id, nombre: anotando.movs[0]?.lugar }} onCambio={cargar} />
             </Modal>
           )}
           {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
@@ -722,6 +722,8 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDi
         </div>
       )}
       {!lineas.length && e.notas && <div className="cr-t-item">{e.notas}</div>}
+      {/* Las anotaciones de logística de siempre de ese destino. */}
+      {!!e.anotaciones?.length && <div className="cr-t-notas">{e.anotaciones.map((n) => <LineaNota key={n.id} n={n} />)}</div>}
       {(e.urgente || e.estado === 'no_se_pudo' || e.horario || e.hora) && (
         <div className="cr-t-tags">
           {e.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{e.hora}</span>}

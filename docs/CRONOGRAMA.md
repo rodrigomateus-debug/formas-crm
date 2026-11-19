@@ -97,13 +97,18 @@ parada del mismo lugar en la ruta del día.
   el recorrido se ordena solo para cumplirla y el chofer la ve en su app.
 - **Anotaciones de logística, con quién las escribió** (`logistica.ts`, `web/src/NotasLogistica.tsx`, tabla
   `logistica_notas`): el ícono de la nota en la tarjeta. Dos alcances: **Solo esta vez** (de este pedido y este movimiento:
-  esta entrega, este retiro, este egreso) y **Siempre** (queda en la empresa: el cliente en las entregas, el proveedor o el
-  impresor en lo demás, y aparece en todo lo que se le entregue o se le retire de acá en más). Se ven en la tarjeta (en
-  ámbar las de esta vez, en azul las de siempre, con el nombre y el día), en la parada de la Ruta del día, en la app del
-  chofer y en la ficha del pedido. Las escriben Logística y Producción desde la tarjeta y **la vendedora desde su pedido**
-  (panel Entrega → «Anotaciones de logística»), que elige si es solo para esta entrega o para todas las entregas a ese
-  cliente (hace falta que el pedido tenga su empresa). La borra quien la escribió, Logística, Producción o un
-  administrador. No reemplazan las observaciones de la dirección («tocar timbre»), que son de esa dirección.
+  esta entrega, este retiro, este egreso) y **Siempre**, que queda en **el destino** y aparece cada vez que se va a ese
+  lugar, sea por una entrega, un retiro, un egreso o un encargo de Recorridos. El destino se reconoce por la empresa del
+  Hub, por el lugar de la libreta de Recorridos o por el nombre (en las entregas, el cliente del PDV, que está aunque el
+  pedido no tenga la empresa asociada; se compara sin mayúsculas, acentos ni «S.A.»). Se ven en la tarjeta (en ámbar las
+  de esta vez, en azul las de siempre, con el nombre y el día), en la parada de la Ruta del día, en la app del chofer y en
+  la ficha del pedido. Las escriben Logística y Producción desde la tarjeta y **la vendedora desde su pedido** (ficha o
+  vista previa, panel Entrega → «Anotaciones de logística»: Ventas no ve el cronograma), que elige si es solo para esta
+  entrega o para todas las entregas a ese cliente. Ahí también ve **el horario fijado** para su entrega en el cronograma.
+  La borra quien la escribió, Logística, Producción o un administrador. **Reemplazan las observaciones de entrega** de la
+  dirección del pedido y de la ficha de la empresa: las que ya estaban cargadas pasaron a ser anotaciones (migración
+  `0097`; las del pedido, de esa entrega; las de una empresa, de siempre) y el campo ya no está en «Corregir dirección»,
+  donde queda el piso, depto, puerta o unidad.
 - **Cantidad enviada (demasía)**: en ingresos, retiros y egresos (no en las entregas al cliente), la cantidad de cada
   producto se toca para anotar la que realmente va o llega («110», con «+10 de más» al lado) y por qué. La cantidad del PDV
   no cambia. El remito de traslado del egreso y la app del chofer salen con esa cantidad. Tabla `cronograma_enviados`,

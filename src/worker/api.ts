@@ -19,7 +19,8 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
 import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
-import { borrarNota as borrarNotaLogistica, crearNota, notasDePedido } from './logistica';
+import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDePedido, type Destino as DestinoNota } from './logistica';
+import { textoPactada, type ModoHora } from '../../web/src/ruta';
 import { asignarChofer, colgarMovimiento, guardarEnviado, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
@@ -1651,13 +1652,17 @@ api.get('/logistica/notas', async (c) => {
   const recordId = Number(c.req.query('record_id'));
   if (!recordId) throw new HttpError(400, 'Falta el pedido.');
   if (!puedeEditarCronograma(c.get('ctx').user)) await registroVisible(c, recordId);
-  return c.json({ ...(await notasDePedido(c.env.DB, recordId, String(c.req.query('tipo') ?? 'entrega'), Number(c.req.query('company_id')) || null)), edita: puedeEditarCronograma(c.get('ctx').user) });
+  const tipo = String(c.req.query('tipo') ?? 'entrega');
+  const destino = { company_id: Number(c.req.query('company_id')) || null, nombre: c.req.query('nombre') ?? null };
+  // En la ficha del pedido, también el horario fijado para su entrega en el cronograma.
+  const horarios = tipo === 'entrega' ? (await horariosDePedido(c.env.DB, recordId)).map((h) => ({ fecha: h.fecha, texto: textoPactada({ modo: h.modo as ModoHora, min: h.minutos, hasta: h.hasta }) })) : [];
+  return c.json({ ...(await notasDePedido(c.env.DB, recordId, tipo, destino)), horarios, edita: puedeEditarCronograma(c.get('ctx').user) });
 });
 api.post('/logistica/notas', async (c) => {
-  const b = await c.req.json<{ record_id?: unknown; tipo?: unknown; alcance?: unknown; texto?: unknown; company_id?: unknown }>();
+  const b = await c.req.json<{ record_id?: unknown; tipo?: unknown; alcance?: unknown; texto?: unknown; destino?: DestinoNota | null }>();
   const edita = puedeEditarCronograma(c.get('ctx').user);
   // Quien no edita el cronograma (la vendedora) anota sobre la entrega de un pedido que ve.
-  if (!edita) { if (!Number(b.record_id)) throw new HttpError(400, 'Falta el pedido.'); await registroVisible(c, Number(b.record_id)); b.tipo = 'entrega'; b.company_id = null; }
+  if (!edita) { if (!Number(b.record_id)) throw new HttpError(400, 'Falta el pedido.'); await registroVisible(c, Number(b.record_id)); b.tipo = 'entrega'; b.destino = null; }
   return c.json(await crearNota(c.env.DB, c.get('ctx'), b), 201);
 });
 api.delete('/logistica/notas/:id', async (c) => c.json(await borrarNotaLogistica(c.env.DB, c.get('ctx'), Number(c.req.param('id')), puedeEditarCronograma(c.get('ctx').user))));

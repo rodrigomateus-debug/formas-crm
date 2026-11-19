@@ -448,7 +448,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                       {p.direccion && p.origen && ORIGEN_DUDOSO[p.origen] && <span className="cr-origen"> · {ORIGEN_DUDOSO[p.origen]}</span>}</div>
                     {p.observaciones && <div className="cr-p-sub cr-p-obs" title="Observaciones de entrega">{p.observaciones}</div>}
                     {/* Las anotaciones de logística de lo que se hace en la parada, con quién las escribió. */}
-                    {[...new Map(p.movimientos.flatMap((m) => m.notas ?? []).map((n) => [n.id, n])).values()].map((n) => <LineaNota key={n.id} n={n} />)}
+                    {[...new Map([...p.movimientos.flatMap((m) => m.notas ?? []), ...(p.encargos ?? []).flatMap((e) => e.anotaciones ?? [])].map((n) => [n.id, n])).values()].map((n) => <LineaNota key={n.id} n={n} />)}
                   </div>
                   <div className={`cr-eta${s.tarde ? ' tarde' : ''}`} role="group" aria-label={etaTexto} title={s.incierta ? 'Aproximada: antes hay una dirección sin ubicar, así que no cuenta ese viaje' : undefined}>
                     <b className="num" aria-hidden="true">{s.tramo.sinUbicar ? '—' : `${s.incierta ? '≈' : ''}${hhmm(atiende)}`}</b>

@@ -776,7 +776,7 @@ test('cronograma: rango horario, anotaciones de logística con autor y cantidad 
   assert.equal((await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'puntual', texto: ' ' })).status, 400);
   asUser = null;
   // Producción, en la tarjeta de un proveedor o impresor: para siempre en ese lugar.
-  const n2 = await api('POST', '/logistica/notas', { record_id: otro.record_id, tipo: otro.tipo, alcance: 'siempre', company_id: otro.company_id, texto: 'Reciben solo por el portón lateral' });
+  const n2 = await api('POST', '/logistica/notas', { record_id: otro.record_id, tipo: otro.tipo, alcance: 'siempre', destino: { company_id: otro.company_id, nombre: otro.lugar }, texto: 'Reciben solo por el portón lateral' });
   assert.equal(n2.status, 201, JSON.stringify(n2.data));
   v = await semana();
   const notasDe = (id) => (v.movimientos.find((x) => x.id === id)?.notas ?? []).map((n) => [n.alcance, n.texto, n.por]);
@@ -786,6 +786,20 @@ test('cronograma: rango horario, anotaciones de logística con autor y cantidad 
   const delLugar = v.movimientos.filter((x) => x.tipo !== 'entrega' && x.company_id === otro.company_id);
   assert.ok(delLugar.every((x) => (x.notas ?? []).some((n) => n.id === n2.data.id)));
   assert.ok(!v.movimientos.some((x) => x.id !== ent.id && x.tipo !== 'entrega' && (x.notas ?? []).some((n) => n.id === n1.data.id)));
+  // La vendedora también puede dejarla para todas las entregas a ese cliente: queda en el destino (la empresa del pedido o,
+  // si no la tiene, el cliente del PDV) y aparece en sus entregas.
+  asUser = `nota.${RUN}@formas.ar`;
+  const n3 = await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'siempre', texto: 'Entregar siempre por la cochera' });
+  assert.equal(n3.status, 201, JSON.stringify(n3.data));
+  assert.ok(n3.data.destino, 'con el nombre del destino');
+  asUser = null;
+  const conSiempre = (await semana()).movimientos.filter((x) => x.tipo === 'entrega' && x.cliente === ent.cliente);
+  assert.ok(conSiempre.length && conSiempre.every((x) => (x.notas ?? []).some((n) => n.id === n3.data.id)), 'en todas las entregas a ese cliente');
+  assert.equal((await api('DELETE', `/logistica/notas/${n3.data.id}`)).status, 200);
+  // El horario fijado se ve en la ficha del pedido.
+  await hora({ modo: 'entre', hora: '10:00', hasta: '13:00' });
+  assert.ok(Array.isArray((await api('GET', `/logistica/notas?record_id=${ent.record_id}`)).data.horarios));
+  await hora({ modo: null });
   // En la ficha del pedido se leen; la vendedora borra la suya, no la de Producción.
   asUser = `nota.${RUN}@formas.ar`;
   assert.deepEqual((await api('GET', `/logistica/notas?record_id=${ent.record_id}`)).data.notas.filter((n) => n.alcance === 'puntual').map((n) => n.texto), ['Preguntar por Marta en recepción']);

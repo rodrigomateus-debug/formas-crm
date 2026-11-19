@@ -17,11 +17,13 @@ import { DestinosTab } from './RecorridosDestinos';
 
 export interface ItemEnc { cant: number | null; que: string; pdv: string | null }
 export type EstadoEnc = 'pendiente' | 'hecho' | 'no_se_pudo' | 'cancelado';
+import type { NotaLogistica } from '../NotasLogistica';
 export interface Encargo {
   id: number; fecha: string; user_id: number | null; quien: string | null; destino: string; direccion: string | null; lugar_id: number | null; company_id: number | null;
   record_id: number | null; llevar: ItemEnc[]; retirar: ItemEnc[]; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
   notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
   origen: string; created_at: string; chofer?: string | null; parada?: string; hora?: string | null;
+  anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (NotasLogistica.tsx)
 }
 interface Habitual { texto: string; dias: number[]; por_semana: number }
 export interface DestinoOpcion {

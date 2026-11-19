@@ -1585,8 +1585,10 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .lg-nota.siempre .lg-nota-tag { color: var(--accent-ink); }
 .lg-nota-x { margin-left: auto; border: 0; background: none; padding: 2px; cursor: pointer; color: var(--ui-ink-2); border-radius: 4px; display: grid; place-items: center; }
 .lg-nota-x:hover { background: var(--ui-surface); color: var(--ui-ink); }
+.lg-form .chip { white-space: normal; text-align: left; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px; line-height: 1.25; }
 .lg-form { display: flex; flex-direction: column; gap: 6px; } .lg-form textarea { resize: vertical; }
 .lg-form-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.lg-horario { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ui-ink); } .lg-horario b { font-weight: 600; }
 .cr-t-notas { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .cr-p-quien .lg-nota { margin-top: 4px; }
 /* La cantidad de un producto en un ingreso, retiro o egreso: se toca para anotar la que realmente va (demasía). */

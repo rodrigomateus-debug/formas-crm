@@ -226,8 +226,17 @@ test('cronograma: estados de despacho, con lo que falta y a quién le toca', asy
   assert.equal((await saldo(1500)).status, 200);
   caja = mov(await otra(), 'entrega', 'Caja').despacho;
   assert.deepEqual([caja.estado, caja.quien], ['nopago', 'ventas']);
-  assert.match(caja.checks.find((c) => c.k === 'pago').t, /Saldo de \$ 1\.500 en Finnegans/);
+  assert.equal(caja.checks.find((c) => c.k === 'pago').v, 'no');
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /No pagó nada: falta \$ 1\.500 en Finnegans/);
+  // Con el total del pedido en $ 3.000, ya pagó la mitad: «pagó una parte» (naranja), sigue trabando.
+  const totales = await fetch(`${BASE}/hooks/pedidos/totales`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+    body: JSON.stringify({ totales: { [`PEDVTASTP - ${PDV}`]: 3000 } }) });
+  assert.equal(totales.status, 200);
+  caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.deepEqual([caja.estado, caja.checks.find((c) => c.k === 'pago').v], ['nopago', 'parcial']);
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /Pagó una parte: falta \$ 1\.500 de \$ 3\.000/);
   await saldo(0);
+  assert.equal(mov(await otra(), 'entrega', 'Caja').despacho.checks.find((c) => c.k === 'pago').v, 'ok');
 
   // El remito: Finnegans no lo tiene todavía; cuando aparece, «Remitido».
   const sync = () => api('POST', '/integrations/finnegans/sync', { barrido: false });

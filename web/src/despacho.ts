@@ -5,11 +5,11 @@
 
 export type EstadoDespacho = 'hecho' | 'nopago' | 'info' | 'nollego' | 'cola' | 'remitido' | 'listo' | 'prog';
 export type Rol = 'produccion' | 'ventas' | 'proveedor' | 'logistica';
-export interface ControlMov { k: 'prod' | 'dep' | 'pago' | 'remito'; v: 'ok' | 'no' | 'pend'; t?: string }
+export interface ControlMov { k: 'prod' | 'dep' | 'pago' | 'remito'; v: 'ok' | 'no' | 'pend' | 'parcial'; t?: string }
 export interface DespachoMov {
   estado: Exclude<EstadoDespacho, 'info'>; checks: ControlMov[]; quien: Rol | null; owner_id: number | null; lugar: string | null;
 }
-export interface Control { k: ControlMov['k'] | 'dir' | 'nota'; nombre: string; v: 'ok' | 'no' | 'medio' | 'pend'; t?: string }
+export interface Control { k: ControlMov['k'] | 'dir' | 'nota'; nombre: string; v: 'ok' | 'no' | 'medio' | 'pend' | 'parcial'; t?: string }
 export interface DespachoTarjeta { estado: EstadoDespacho; checks: Control[]; quien: Rol | null; owner_id: number | null; lugar: string | null }
 
 type TipoMov = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'retiro_impresor' | 'ingreso_impresor';
@@ -53,7 +53,7 @@ export function despachoTarjeta(t: { tipo: TipoMov; hecho: boolean; parada: bool
   const checks: Control[] = orden.map((k) => {
     const cs = ds.flatMap((d) => d.checks.filter((c) => c.k === k));
     const ok = cs.filter((c) => c.v === 'ok').length, no = cs.filter((c) => c.v === 'no').length;
-    const v: Control['v'] = ok === cs.length ? 'ok' : no === cs.length ? 'no' : k === 'prod' && ok ? 'medio' : no ? 'no' : 'pend';
+    const v: Control['v'] = cs.every((c) => c.v === cs[0].v) ? cs[0].v : k === 'prod' && ok ? 'medio' : no ? 'no' : 'pend';
     const t = k === 'prod' && v !== 'ok' ? `${ok} de ${cs.length} listos`
       : [...new Set(cs.filter((c) => c.v !== 'ok' && c.t).map((c) => c.t!))].join(' · ') || cs.find((c) => c.t)?.t;
     return { k, nombre: NOMBRE_CONTROL[k], v, t };
@@ -81,7 +81,7 @@ export function despachoTarjeta(t: { tipo: TipoMov; hecho: boolean; parada: bool
 
 // Lo que falta, en pocas palabras, para la tarjeta.
 export function faltaTexto(d: DespachoTarjeta): string {
-  const no = d.checks.filter((c) => c.v === 'no' || c.v === 'medio');
+  const no = d.checks.filter((c) => c.v === 'no' || c.v === 'medio' || c.v === 'parcial');
   if (no.length) return `Falta: ${no.map((c) => c.nombre.toLowerCase()).join(', ')}`;
   if (!d.checks.length) return '';
   return d.checks.every((c) => c.v === 'ok') ? 'Todo listo' : `Falta: ${d.checks.filter((c) => c.v === 'pend').map((c) => c.nombre.toLowerCase()).join(', ')}`;
@@ -109,4 +109,10 @@ export function riesgo(d: DespachoTarjeta, dia: string, hoy: string, feriados?: 
   if (n === 1) return { nivel: 'atrasado', texto: 'Atrasado · es mañana' };
   if (n === 2) return { nivel: 'justo', texto: 'Justo · en 2 días hábiles' };
   return null;
+}
+
+// La etiqueta del estado de una tarjeta: el pago dice si no pagó nada o pagó una parte (como en Pedidos).
+export function etiquetaEstado(d: DespachoTarjeta, tipo: TipoMov): string {
+  if (d.estado === 'nopago') return d.checks.find((c) => c.k === 'pago')?.v === 'parcial' ? 'Pagó una parte' : 'No pagó nada';
+  return nombreEstado(d.estado, tipo);
 }

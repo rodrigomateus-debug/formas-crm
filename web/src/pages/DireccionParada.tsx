@@ -25,7 +25,9 @@ export function lindaDireccion(d: string) {
 }
 
 // Corregir la dirección de la parada: la de entrega de sus pedidos, o la de la empresa (con su horario de recepción).
-export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos: number[]; onListo: () => void }) {
+// `onListo` recibe lo guardado (para que la pantalla lo muestre enseguida, sin esperar a recargar); sin nada, se canceló.
+export interface DireccionGuardada { direccion: string; detalle: string; horario: string; validada: boolean }
+export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos: number[]; onListo: (g?: DireccionGuardada) => void }) {
   const toast = useToast();
   const [direccion, setDireccion] = useState(p.direccion ?? '');
   // La que se eligió de las sugerencias de Google Maps (como en Uber): queda validada, con el punto exacto en el mapa.
@@ -54,11 +56,11 @@ export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos
       if (esEntrega) { for (const id of pedidos) await http('PUT', '/cronograma/direccion', { record_id: id, ...dir }); }
       if (p.company_id && (!esEntrega || horario !== (p.horario_texto ?? ''))) await http('PUT', '/cronograma/direccion', { company_id: p.company_id, ...(esEntrega ? {} : dir), horario });
       toast(`${esEntrega ? 'Dirección de entrega guardada en el pedido' : 'Dirección guardada en la ficha de la empresa'}${placeId ? ', validada con Google Maps' : ''}.`);
-      onListo();
+      onListo({ direccion, detalle, horario, validada: !!placeId });
     } catch (err) { toast((err as Error).message, true); setGuardando(false); }
   }
   return (
-    <form className="cr-editar" onKeyDown={alEsc(onListo)} onSubmit={guardar}>
+    <form className="cr-editar" onKeyDown={alEsc(() => onListo())} onSubmit={guardar}>
       <BuscarDireccion etiqueta={esEntrega ? 'Dirección de entrega de este pedido' : 'Dirección de la empresa'} valor={direccion} validada={!!placeId} sesion={sesion} maps={maps} sugerida={null}
         onTexto={(t) => { setDireccion(t); setPlaceId(null); }} onElegir={(s) => { setDireccion(s.texto); setPlaceId(s.place_id); }} />
       <details className="cr-libreta">
@@ -79,7 +81,7 @@ export function EditarDireccion({ p, pedidos, onListo }: { p: ParadaDir; pedidos
         {p.company_id && <label>Horario de recepción<input className="input sm" value={horario} onChange={(e) => setHorario(e.target.value)} placeholder="9 a 13" /></label>}
       </div>
       <p className="muted small" style={{ margin: 0 }}>Lo que hay que saber al llegar (por dónde entrar, por quién preguntar) va en las <b>anotaciones de logística</b>: el ícono de la nota en la tarjeta.</p>
-      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onListo}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando || !direccion.trim()}>Guardar</button></div>
+      <div className="acciones"><button type="button" className="btn sm ghost" onClick={() => onListo()}>Cancelar</button><button type="submit" className="btn sm primary" disabled={guardando || !direccion.trim()}>Guardar</button></div>
     </form>
   );
 }

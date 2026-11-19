@@ -4,7 +4,7 @@ import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, EditarEnLinea, Modal, QuienPidio, UserChip, alEsc } from '../components';
-import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
+import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -444,7 +444,12 @@ export default function CronogramaPage() {
         <Modal title={`Dirección de ${lindo(corrigiendo.d.nombre)}`} onClose={() => setCorrigiendo(null)}>
           <EditarDireccion p={{ nombre: corrigiendo.d.nombre, direccion: corrigiendo.d.direccion, horario_texto: corrigiendo.d.horario, company_id: corrigiendo.d.company_id,
             detalle: corrigiendo.d.detalle, observaciones: corrigiendo.d.observaciones }}
-            pedidos={corrigiendo.d.record_ids} onListo={() => { setCorrigiendo(null); void cargarDirs(); }} />
+            pedidos={corrigiendo.d.record_ids} onListo={(g) => {
+              // Lo guardado se ve enseguida en la tarjeta (y su despacho); la semana se vuelve a pedir de fondo.
+              if (g) { const k = corrigiendo.k; setDirs((ds) => (ds[k] ? { ...ds, [k]: { ...ds[k], direccion: g.direccion.trim() || null, detalle: g.detalle.trim() || null, horario: g.horario.trim() || ds[k].horario,
+                estado: !g.direccion.trim() ? 'sin_direccion' : g.validada ? 'ok' : 'buscando' } } : ds)); }
+              setCorrigiendo(null); void cargarDirs();
+            }} />
         </Modal>
       )}
       {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); }} />}
@@ -667,8 +672,8 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
 }
 
 // El estado de despacho de una tarjeta: el estado, a quién le toca y los puntitos del checklist con lo que falta.
-const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8' };
-const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente' } as const;
+const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend' | 'parcial', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8', parcial: 'M4 8h8' };
+const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente', parcial: 'una parte' } as const;
 function Quien({ d }: { d: DespachoTarjeta }) {
   if (!d.quien) return null;
   return d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>;
@@ -680,7 +685,7 @@ function FilaDespacho({ d, tipo, reloj, reprogramar }: { d: DespachoTarjeta; tip
   return (
     <div className="cr-t-desp">
       <div className="cr-t-desp-l1">
-        <span className={`cr-desp-chip cr-d-${reprogramar ? 'listo' : d.estado}`}><Icon name={reprogramar ? 'calendar' : ICONO_ESTADO[d.estado]} size={11} />{reprogramar ? 'Listo para reprogramar' : nombreEstado(d.estado, tipo)}</span>
+        <span className={`cr-desp-chip cr-d-${reprogramar ? 'listo' : d.estado}`}><Icon name={reprogramar ? 'calendar' : ICONO_ESTADO[d.estado]} size={11} />{reprogramar ? 'Listo para reprogramar' : etiquetaEstado(d, tipo)}</span>
         {d.quien && <span className="cr-desp-quien" title="A quién le toca el próximo paso"><Quien d={d} /></span>}
       </div>
       {reloj && <RelojTag r={reloj} />}
@@ -699,7 +704,7 @@ function FilaDespacho({ d, tipo, reloj, reprogramar }: { d: DespachoTarjeta; tip
 }
 
 // El despacho en la vista previa del pedido (arriba de todo): el estado, a quién le toca, si llega y el checklist entero.
-const V_LARGO = { ok: 'Sí', no: 'No', medio: 'En parte', pend: 'Pendiente' } as const;
+const V_LARGO = { ok: 'Sí', no: 'No', medio: 'En parte', pend: 'Pendiente', parcial: 'Una parte' } as const;
 function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada; hoy: string; feriados?: Record<string, string> }) {
   const d = despachoTarjeta(t, dir);
   if (!d) return null;
@@ -710,7 +715,7 @@ function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada;
       <div className="panel-head"><h3>Despacho</h3><span className="small muted">{carrilDe(t.tipo).uno}{t.tipo === 'entrega' ? '' : ` · ${t.titulo}`} · {diaLargo(t.fecha)}</span></div>
       <div className="cr-pv-desp-body">
         <div className="row wrap" style={{ gap: 8 }}>
-          <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={12} />{nombreEstado(d.estado, t.tipo)}</span>
+          <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={12} />{etiquetaEstado(d, t.tipo)}</span>
           {r && <RelojTag r={r} />}
         </div>
         {d.quien && <div className="small row" style={{ gap: 6 }}><span className="muted">Le toca a</span><Quien d={d} /></div>}

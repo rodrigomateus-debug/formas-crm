@@ -4,7 +4,7 @@ import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMon
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
 import { BotonVacias, SortPick, useColapso, type CardActions } from './Board';
 import { Select } from '../Select';
-import { siEntroAnticipo } from '../Chispin';
+import { siFestejaPedido } from '../Chispin';
 import { ChatChip } from './Conversacion';
 import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useEsperaCorta, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
 
@@ -252,7 +252,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
       await http('PATCH', `/records/${type}/${id}`, { props: { [prop]: value } });
       olvidarMemoria('/board-prop');
       toast(`«${rec.name}» pasó a ${to.label}`);
-      siEntroAnticipo(type, prop, from.value, value, rec);
+      siFestejaPedido(type, prop, from.value, value, rec);
     } catch (e) {
       toast((e as Error).message, true);
       board.reload();

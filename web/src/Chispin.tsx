@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, fmtMoney, userOf, CINTA, type Stage } from './lib';
 import { UserAvatar, etapaPedidoSlug } from './components';
+import { agruparProductos, svgIcono, type Subcategoria } from './iconosProducto';
 
 // Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
 // que junta las ideas para mejorarlo. Es una «forma» que cambia de forma (Formas), con una lamparita arriba que se prende
@@ -104,9 +105,11 @@ export function festejarGanado(n: NegocioGanado) {
 const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
 const DESPUES_DEL_ANTICIPO = new Set(['boceto-digital', 'listo-produccion', 'esperando', 'produccion', 'listo-entregar', 'parcial', 'entregado']);
 // Para llamar después de guardar una propiedad de un registro (tablero, ficha, vista previa, lista, celular).
-export function siEntroAnticipo(tipo: string, prop: string, antes: unknown, despues: unknown, rec: { name: string; props: Record<string, any> }) {
-  if (tipo !== 'order' || prop !== 'hs_pipeline_stage' || String(antes ?? '') !== ANTICIPO) return;
-  if (!DESPUES_DEL_ANTICIPO.has(etapaPedidoSlug(despues) ?? '')) return;
+export function siFestejaPedido(tipo: string, prop: string, antes: unknown, despues: unknown, rec: { name: string; props: Record<string, any> }) {
+  if (tipo !== 'order' || prop !== 'hs_pipeline_stage' || String(antes ?? '') === String(despues ?? '')) return;
+  // Listo para entregar o entregado: si es suyo, Chispín lo encuentra enseguida (y si es de otra, en la pantalla de ella).
+  if (['listo-entregar', 'entregado'].includes(etapaPedidoSlug(despues) ?? '')) { setTimeout(() => revisarDesdeAfuera?.(), 600); return; }
+  if (String(antes ?? '') !== ANTICIPO || !DESPUES_DEL_ANTICIPO.has(etapaPedidoSlug(despues) ?? '')) return;
   lluvia(true);
   ganadoDesdeAfuera?.({ nombre: rec.name, monto: rec.props.hs_total_price, moneda: rec.props.hs_currency_code, duenio: rec.props.owner_id }, 'anticipo');
 }
@@ -151,6 +154,94 @@ function tirarPlata(desde?: HTMLElement | null) {
   document.body.appendChild(capa);
   setTimeout(() => capa.remove(), 2600);
 }
+// ---------- Pedido listo para entregar: la caja / entregado: el camión (pedido de Rodrigo del 19/11/2026) ----------
+// Los mueve casi siempre ClickUp, así que Chispín los busca (GET /pedidos/festejos, src/worker/festejos.ts) y los festeja en
+// la pantalla de la dueña del pedido. Los productos que se embalan (o que van en el camión) son los del pedido, uno por
+// subcategoría con su iconito (iconosProducto.ts): si lleva botellas y mochilas, se embalan una botella y una mochila.
+export interface FestejoPedido {
+  id: number; name: string; etapa: 'listo' | 'entregado'; at: string; monto: number | null; moneda: string | null;
+  articulos: Array<{ nombre: string; cantidad: number | null }>; hizo: Array<{ nombre: string; user_id: number | null }>;
+}
+let revisarDesdeAfuera: (() => void) | null = null;
+type Grupo = { sub: Subcategoria; cantidad: number };
+const MAX_EN_CAJA = 6;
+const fichaProducto = (g: Grupo, clase: string) => {
+  const i = document.createElement('i');
+  i.className = clase;
+  i.title = g.sub.tipo;
+  i.innerHTML = svgIcono(g.sub.d, clase === 'emb-item' ? 26 : 17);
+  return i;
+};
+const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// La caja: aparece abierta, caen los productos uno por uno, se cierran las solapas, la cinta, el sello «LISTO ✓» y vuela a Chispín.
+async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
+  if (reducido()) return;
+  const capa = document.createElement('div');
+  capa.className = 'chispin-embalar';
+  capa.innerHTML = '<div class="emb-caja"><span class="emb-fondo"></span><span class="emb-solapa izq"></span><span class="emb-solapa der"></span>'
+    + '<span class="emb-frente"><span class="emb-marca">formas</span></span><span class="emb-cinta"></span><span class="emb-sello">LISTO ✓</span></div><div class="emb-lista"></div>';
+  const caja = capa.querySelector('.emb-caja') as HTMLElement;
+  const lista = capa.querySelector('.emb-lista') as HTMLElement;
+  const enCaja = grupos.slice(0, MAX_EN_CAJA);
+  enCaja.forEach((g, k) => {
+    const it = fichaProducto(g, 'emb-item');
+    // Repartidos a lo ancho de la caja, un poco desordenados.
+    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 22 : 30) + (Math.random() * 8 - 4)}px`);
+    it.style.setProperty('--r', `${Math.random() * 40 - 20}deg`);
+    it.style.setProperty('--y', `${-4 - (k % 2) * 10}px`);
+    caja.insertBefore(it, caja.querySelector('.emb-frente'));
+    const chip = document.createElement('span');
+    chip.className = 'emb-chip';
+    chip.appendChild(fichaProducto(g, 'emb-chip-ic'));
+    chip.appendChild(document.createTextNode(`${g.cantidad ? `${g.cantidad} ` : ''}${(g.cantidad === 1 ? g.sub.tipo.split(' / ')[0] : g.sub.plural).toLowerCase()}`));
+    lista.appendChild(chip);
+  });
+  document.body.appendChild(capa);
+  await esperar(350);
+  const items = [...caja.querySelectorAll<HTMLElement>('.emb-item')];
+  for (const it of items) { it.classList.add('cae'); await esperar(420); }
+  await esperar(450);
+  caja.classList.add('cerrada');
+  await esperar(450);
+  caja.classList.add('cinta');
+  await esperar(380);
+  caja.classList.add('sellada');
+  capa.classList.add('golpe');
+  await esperar(1500);
+  // Vuela a Chispín (o a la esquina).
+  const r = hacia?.getBoundingClientRect(), c = caja.getBoundingClientRect();
+  const dx = (r ? r.left + r.width / 2 : innerWidth - 50) - (c.left + c.width / 2), dy = (r ? r.top + r.height / 2 : innerHeight - 50) - (c.top + c.height / 2);
+  caja.style.setProperty('--vx', `${dx}px`); caja.style.setProperty('--vy', `${dy}px`);
+  capa.classList.add('vuela');
+  await esperar(900);
+  capa.remove();
+}
+
+// El camión: cruza la pantalla de izquierda a derecha con los productos en la caja de carga, tocando bocina.
+function camion(grupos: Grupo[]) {
+  if (reducido()) return;
+  const capa = document.createElement('div');
+  capa.className = 'chispin-camion';
+  capa.innerHTML = `<div class="cam-auto"><svg viewBox="0 0 220 112" width="220" height="112" aria-hidden="true">
+      <rect x="4" y="8" width="140" height="72" rx="7" fill="#000085"/><rect x="4" y="8" width="140" height="10" rx="5" fill="#8ee021"/>
+      <path d="M146 32h40l24 26v22h-64z" fill="#8ee021"/><path d="M153 39h30l17 18h-47z" fill="#d9eeff"/><rect x="203" y="63" width="6" height="7" rx="2" fill="#ffd76a"/>
+      <rect x="4" y="78" width="206" height="9" rx="3" fill="#12143a"/>
+      <g class="cam-rueda"><circle cx="42" cy="92" r="14" fill="#12143a"/><circle cx="42" cy="92" r="5.5" fill="#c9cbe0"/><path d="M42 80v24M30 92h24" stroke="#45476b" stroke-width="2.5"/></g>
+      <g class="cam-rueda"><circle cx="176" cy="92" r="14" fill="#12143a"/><circle cx="176" cy="92" r="5.5" fill="#c9cbe0"/><path d="M176 80v24M164 92h24" stroke="#45476b" stroke-width="2.5"/></g>
+    </svg><div class="cam-carga"></div><span class="cam-bocina">¡Bip bip! 📯</span><span class="cam-humo"><i></i><i></i><i></i></span></div>`;
+  const carga = capa.querySelector('.cam-carga') as HTMLElement;
+  for (const g of grupos.slice(0, MAX_EN_CAJA)) carga.appendChild(fichaProducto(g, 'cam-item'));
+  if (!grupos.length) for (const g of agruparProductos([{ nombre: '', cantidad: null }])) carga.appendChild(fichaProducto(g, 'cam-item'));
+  document.body.appendChild(capa);
+  setTimeout(() => capa.remove(), 5200);
+}
+
+const resumenProductos = (grupos: Grupo[]) => {
+  const partes = grupos.slice(0, 4).map((g) => `${g.cantidad ? `${g.cantidad} ` : ''}${(g.cantidad === 1 ? g.sub.tipo.split(' / ')[0] : g.sub.plural).toLowerCase()}`);
+  return partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}${grupos.length > 4 ? ' (y más)' : ''}` : partes[0] ?? '';
+};
+
 const ANTICIPOS: Array<(n: string, pedido: string) => string> = [
   (n, x) => `😎💸 ¡Entró el anticipo, ${n}! ${x}. ¡A producir!`,
   (n, x) => `😎💸 Llueve plata, ${n}: se cobró el anticipo de ${x}.`,
@@ -297,6 +388,60 @@ export default function Chispin() {
     return () => { ganadoDesdeAfuera = null; };
   }, [meta, yo, ponerAnteojos]);
   useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
+
+  // ---------- Los pedidos de ella listos para entregar o entregados: se buscan cada tanto y se festejan de a uno ----------
+  const cola = useRef<FestejoPedido[]>([]);
+  const abiertoRef = useRef(false);
+  abiertoRef.current = abierto;
+  const festejarPedido = useCallback((p: FestejoPedido) => {
+    festejoT.current.forEach(clearTimeout);
+    const grupos = agruparProductos(p.articulos);
+    const pedido = `«${p.name.length > 60 ? `${p.name.slice(0, 58)}…` : p.name}»`;
+    const productos = resumenProductos(grupos);
+    const quien = primerNombre(meta.me.name);
+    const hizo = [...new Set(p.hizo.filter((h) => h.user_id !== yo).map((h) => primerNombre(h.nombre)).filter(Boolean))];
+    const texto = p.etapa === 'listo'
+      ? `📦 ${quien ? `${quien}, ¡` : '¡'}está listo ${pedido}!${productos ? ` Ya están embalados: ${productos}.` : ''}${hizo.length ? ` Lo terminó ${hizo.join(' y ')} 💪` : ''} A coordinar la entrega.`
+      : `🚚 ¡Entregado! ${pedido} ya llegó al cliente${quien ? `, ${quien}` : ''}.${productos ? ` Iban ${productos}.` : ''} ¡Otro más! 🙌`;
+    setAbierto(false); setFestejando(true); setAnimo(p.etapa === 'listo' ? '' : 'mira');
+    setGlobo({ tipo: 'festejo', texto });
+    if (p.etapa === 'listo') {
+      embalar(grupos, botonRef.current);
+      festejoT.current = [setTimeout(() => { setAnimo('feliz'); festejar(botonRef.current); }, 900 + Math.min(grupos.length, MAX_EN_CAJA) * 420 + 2800)];
+    } else {
+      camion(grupos);
+      festejoT.current = [setTimeout(() => setAnimo('feliz'), 2400)];
+    }
+    festejoT.current.push(
+      setTimeout(() => setAnimo(''), 9000),
+      setTimeout(() => { setFestejando(false); setGlobo((g) => (g?.texto === texto ? null : g)); }, 12_000),
+    );
+  }, [meta, yo]);
+  const siguiente = useRef<() => void>(() => {});
+  siguiente.current = () => {
+    if (!cola.current.length) return;
+    if (festejandoRef.current || abiertoRef.current || document.visibilityState !== 'visible') { setTimeout(() => siguiente.current(), 5000); return; }
+    festejarPedido(cola.current.shift()!);
+    setTimeout(() => siguiente.current(), 13_000);
+  };
+  const revisarPedidos = useCallback(async () => {
+    let r: { pedidos: FestejoPedido[] };
+    try { r = await http<{ pedidos: FestejoPedido[] }>('GET', '/pedidos/festejos'); } catch { return; }
+    const hechos = new Set((leer('pedidos_festejados') ?? '').split(',').filter(Boolean));
+    const nuevos = r.pedidos.filter((p) => !hechos.has(`${p.id}:${p.etapa}`) && !cola.current.some((x) => x.id === p.id && x.etapa === p.etapa))
+      .sort((a, b) => a.at.localeCompare(b.at));
+    if (!nuevos.length) return;
+    for (const p of nuevos) hechos.add(`${p.id}:${p.etapa}`);
+    guardar('pedidos_festejados', [...hechos].slice(-120).join(','));
+    cola.current.push(...nuevos.slice(-3));   // si se juntaron muchos (días sin entrar), los últimos
+    siguiente.current();
+  }, []);
+  useEffect(() => {
+    revisarDesdeAfuera = revisarPedidos;
+    const t0 = setTimeout(revisarPedidos, 6000);
+    const t = setInterval(() => { if (document.visibilityState === 'visible') revisarPedidos(); }, 90_000);
+    return () => { revisarDesdeAfuera = null; clearTimeout(t0); clearInterval(t); };
+  }, [revisarPedidos]);
   // El link de una idea (…?idea=12, el que da Claude): abre el buzón en esa idea y se saca de la dirección.
   useEffect(() => {
     const sp = new URLSearchParams(loc.search);

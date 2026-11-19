@@ -2806,7 +2806,7 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 .chispin-zona.festejando { z-index: 310; }   /* el globo y Chispín, por encima de los papelitos y la plata */
 .chispin-zona.festejando .chispin-globo { max-width: 300px; font-size: 14px; font-weight: 600; }
 .chispin-zona.festejando .chispin-lampara { background: var(--chispin-lampara); box-shadow: 0 0 0 4px rgba(142, 224, 33, .3), 0 0 22px 8px rgba(142, 224, 33, .7); }
-/* Entró el anticipo (siEntroAnticipo en Chispin.tsx): con los anteojos puestos saca un fajo con la mano izquierda y con la
+/* Entró el anticipo (siFestejaPedido en Chispin.tsx): con los anteojos puestos saca un fajo con la mano izquierda y con la
    derecha tira billetes, como en el meme; mientras, llueve plata. */
 .chispin-fajo { position: absolute; left: -9px; top: -5px; width: 17px; height: 9px; border-radius: 2px; background: #6cc25a; border: 1px solid #2f7a2c;
   box-shadow: 0 -2px 0 -1px #4fa043, 0 -4px 0 -1px #8fd977; transform: rotate(-18deg) scale(0); transition: transform 250ms var(--ease-out); }
@@ -2834,6 +2834,68 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
   90% { opacity: 1; }
   100% { opacity: 0; transform: translate(calc(var(--x) * .3), 105vh) rotate(var(--r)) rotateX(540deg); }
 }
+/* Pedido listo para entregar (embalar en Chispin.tsx): la caja abierta en el medio de la pantalla, caen los productos del
+   pedido (un iconito por subcategoría, iconosProducto.ts), se cierran las solapas, la cinta verde, el sello y vuela a Chispín. */
+.chispin-embalar { position: fixed; left: 50%; top: 50%; z-index: 305; width: min(92vw, 440px); display: flex; flex-direction: column; align-items: center; gap: 16px; transform: translate(-50%, -50%); pointer-events: none; }
+.emb-caja { position: relative; width: 176px; height: 114px; animation: emb-aparece .45s cubic-bezier(.3, 1.5, .5, 1); }
+.emb-fondo { position: absolute; left: 5px; right: 5px; top: 12px; height: 22px; border-radius: 6px 6px 0 0; background: #8a5a26; z-index: 1; transition: opacity .2s; }
+.emb-frente { position: absolute; left: 0; right: 0; bottom: 0; height: 82px; z-index: 3; display: grid; place-items: center; border: 2px solid #9c6b2f; border-radius: 4px;
+  background: linear-gradient(#e6bd80, #cf9d5a); box-shadow: 0 10px 24px -8px rgba(18, 20, 58, .45); }
+.emb-marca { margin-top: 18px; font: 800 17px/1 Poppins, system-ui, sans-serif; letter-spacing: .5px; color: rgba(110, 66, 22, .5); }
+.emb-solapa { position: absolute; top: 2px; width: 50%; height: 30px; z-index: 4; background: #d9aa6a; border: 2px solid #9c6b2f; transition: transform .38s cubic-bezier(.3, 1.3, .5, 1); }
+.emb-solapa.izq { left: 0; transform-origin: 0 100%; transform: rotate(-125deg); }
+.emb-solapa.der { right: 0; transform-origin: 100% 100%; transform: rotate(125deg); }
+.emb-caja.cerrada .emb-solapa { transform: translateY(20px) scaleY(.3); }
+.emb-caja.cerrada .emb-fondo { opacity: 0; transition: opacity .15s .15s; }
+.emb-caja.cerrada .emb-item { visibility: hidden; transition: visibility 0s .2s; }   /* la animación deja la opacidad en 1: se esconden así */
+.emb-caja.sellada .emb-marca { opacity: 0; }
+.emb-item { position: absolute; left: 50%; top: 14px; width: 44px; height: 44px; margin-left: -22px; z-index: 2; display: grid; place-items: center; border-radius: 12px;
+  background: #fff; color: #000085; border: 2px solid #8ee021; box-shadow: 0 4px 10px rgba(18, 20, 58, .25); font-style: normal; opacity: 0; }
+.emb-item.cae { animation: emb-cae .62s cubic-bezier(.45, 0, .75, 1.25) forwards; }
+.emb-cinta { position: absolute; left: 50%; top: 24px; width: 26px; height: 0; margin-left: -13px; z-index: 5; background: #8ee021; opacity: .93; border-radius: 2px; transition: height .32s ease-out; }
+.emb-caja.cinta .emb-cinta { height: 50px; }
+.emb-sello { position: absolute; left: 50%; top: 64%; z-index: 6; padding: 5px 10px; border: 3px solid #2f8a1f; border-radius: 8px; background: rgba(255, 255, 255, .8); color: #2f8a1f;
+  font: 900 17px/1 Poppins, system-ui, sans-serif; letter-spacing: 1px; white-space: nowrap; opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(2.6); }
+.emb-caja.sellada .emb-sello { animation: emb-sello .3s cubic-bezier(.5, 0, .7, 1.4) forwards; }
+.chispin-embalar.golpe .emb-caja { animation: emb-golpe .32s ease .22s; }
+.chispin-embalar.vuela .emb-caja { transition: transform .85s cubic-bezier(.55, 0, .8, .2), opacity .85s ease-in; transform: translate(var(--vx), var(--vy)) scale(.12) rotate(30deg); opacity: .15; }
+.chispin-embalar.vuela .emb-lista { opacity: 0; transition: opacity .3s; }
+.emb-lista { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: min(92vw, 440px); }
+.emb-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px 4px 7px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface);
+  color: var(--ui-ink); box-shadow: var(--shadow-float); font-size: 12.5px; font-weight: 600; opacity: 0; animation: emb-chip .4s ease .5s forwards; }
+.emb-chip-ic { display: grid; font-style: normal; color: var(--formas-green, #5cb84e); }
+@keyframes emb-aparece { from { opacity: 0; transform: scale(.6) translateY(30px); } to { opacity: 1; transform: none; } }
+@keyframes emb-cae {
+  0% { opacity: 1; transform: translate(var(--x), -60vh) rotate(calc(var(--r) * -5)); }
+  82% { opacity: 1; transform: translate(var(--x), calc(var(--y) + 8px)) rotate(var(--r)); }
+  100% { opacity: 1; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
+}
+@keyframes emb-sello { to { opacity: 1; transform: translate(-50%, -50%) rotate(-10deg) scale(1); } }
+@keyframes emb-golpe { 0%, 100% { transform: none; } 25% { transform: translate(-3px, 2px) rotate(-1.5deg); } 50% { transform: translate(3px, -1px) rotate(1deg); } 75% { transform: translate(-2px, 1px); } }
+@keyframes emb-chip { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* Pedido entregado (camion en Chispin.tsx): el camión de Formas cruza la pantalla con los productos en la carga, frena en el
+   medio a tocar bocina y sigue. */
+.chispin-camion { position: fixed; left: 0; right: 0; bottom: 14vh; height: 150px; z-index: 305; overflow: hidden; pointer-events: none; }
+.cam-auto { position: absolute; left: 0; bottom: 0; width: 220px; height: 112px; animation: cam-cruza 4.8s forwards; }
+.cam-auto svg { display: block; animation: cam-bache .26s ease-in-out infinite alternate; filter: drop-shadow(0 8px 10px rgba(18, 20, 58, .3)); }
+.cam-rueda { transform-box: fill-box; transform-origin: center; animation: cam-rueda .4s linear infinite; }
+.cam-carga { position: absolute; left: 12px; top: 22px; width: 124px; height: 52px; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 4px; }
+.cam-item { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: #fff; color: #000085; font-style: normal; }
+.cam-bocina { position: absolute; left: 140px; top: -34px; padding: 3px 9px; border: 2px solid #12143a; border-radius: 10px; background: #fff; color: #12143a;
+  font: 800 13px/1.3 Poppins, system-ui, sans-serif; white-space: nowrap; opacity: 0; animation: cam-bip 4.8s ease forwards; }
+.cam-humo { position: absolute; left: -4px; bottom: 26px; }
+.cam-humo i { position: absolute; width: 13px; height: 13px; border-radius: 50%; background: rgba(140, 142, 165, .5); animation: cam-humo .9s ease-out infinite; }
+.cam-humo i:nth-child(2) { animation-delay: .3s; } .cam-humo i:nth-child(3) { animation-delay: .6s; }
+@keyframes cam-cruza {
+  0% { transform: translateX(-240px); animation-timing-function: cubic-bezier(.2, .6, .35, 1); }
+  42%, 60% { transform: translateX(calc(50vw - 110px)); animation-timing-function: cubic-bezier(.55, 0, .8, .4); }
+  100% { transform: translateX(calc(100vw + 30px)); }
+}
+@keyframes cam-bache { from { transform: translateY(0); } to { transform: translateY(-2px); } }
+@keyframes cam-rueda { to { transform: rotate(360deg); } }
+@keyframes cam-bip { 0%, 44% { opacity: 0; transform: scale(.5); } 49% { opacity: 1; transform: scale(1.12); } 54%, 60% { opacity: 1; transform: scale(1); } 66%, 100% { opacity: 0; transform: scale(.9); } }
+@keyframes cam-humo { from { opacity: .8; transform: translate(0, 0) scale(.4); } to { opacity: 0; transform: translate(-28px, -14px) scale(1.7); } }
 @keyframes chispin-cae { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), 105vh) rotate(var(--r)); } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {

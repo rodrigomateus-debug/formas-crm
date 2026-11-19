@@ -46,6 +46,7 @@ import { inicioProduccion } from './inicioprod';
 import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
+import { festejosDePedidos } from './festejos';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
@@ -1091,6 +1092,9 @@ api.get('/pedidos/articulos', async (c) => {
   const [pedidos, adjuntos] = await Promise.all([produccionDePedidos(c.env.DB, suyos), c.req.query('adjuntos') === '1' ? adjuntosDePedidos(c.env.DB, suyos) : {}]);
   return c.json({ pedidos, adjuntos });
 });
+
+// Los pedidos de la vendedora que pasaron a «Listo para entregar» o «Entregado» desde `desde` (festejos.ts): Chispín los festeja.
+api.get('/pedidos/festejos', async (c) => c.json({ pedidos: await festejosDePedidos(c.env.DB, c.get('ctx').user.id, c.req.query('desde')) }));
 
 // La razón social con que se factura un pedido (razones.ts): la del pedido o la del pedido de un negocio, y las de una empresa.
 api.get('/records/:type/:id/razon-social', async (c) => {

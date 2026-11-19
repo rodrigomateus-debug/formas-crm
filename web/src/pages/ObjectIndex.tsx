@@ -15,7 +15,7 @@ import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, U
 import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
-import { siEntroAnticipo } from '../Chispin';
+import { siFestejaPedido } from '../Chispin';
 import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
 import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useEsperaCorta, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
@@ -739,7 +739,7 @@ function EditCell({ type, record, col, onSaved, display, tip }: { type: ObjectTy
       onSaved(await http<CrmRecord>('PATCH', `/records/${type}/${record.id}`, { props: { [col]: v } }));
       setAt(null);
       toast(`${prop.label}: guardado`);
-      siEntroAnticipo(type, col, record.props[col], v, record);
+      siFestejaPedido(type, col, record.props[col], v, record);
     } catch (e) {
       const missing = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       toast(missing?.length ? `Para esa etapa falta: ${missing.map((m) => propOf(meta, type, m)?.label ?? m).join(', ')}. Completalo desde la ficha o el tablero.` : (e as Error).message, true);

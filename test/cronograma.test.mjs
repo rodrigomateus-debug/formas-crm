@@ -755,3 +755,39 @@ test('cronograma: un recorrido puede terminar en otro lugar que de donde sale, o
   rec = await app();
   assert.deepEqual([rec[0].fin?.nombre, rec[0].vuelve], ['Depósito Gral. Roca', true]);
 });
+
+// Colgados (pedido de Rodrigo del 19/11/2026): lo que no se pudo hacer sale de su día y queda en una columna que está en
+// todas las semanas, con el motivo; al responsable del pedido le llega el aviso. Pasarlo a un día lo devuelve.
+test('cronograma: lo que no se pudo hacer queda en Colgados con el motivo y avisa al responsable del pedido', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const rango = '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20';
+  const m = (await api('GET', rango)).data.movimientos.find((x) => x.npdv === PDV && !x.hecho && x.record_id);
+  assert.ok(m, 'hay un movimiento pendiente del PDV');
+  // La responsable del pedido: una vendedora.
+  const resp = (await api('POST', '/users', { email: `resp.${RUN}@formas.ar`, name: `Resp ${RUN}`, role: 'member' })).data;
+  assert.equal((await api('PATCH', `/records/order/${m.record_id}`, { props: { owner_id: resp.id } })).status, 200);
+  assert.equal((await api('POST', '/cronograma/colgar', { ids: [m.task_id], tipo: m.tipo, motivo: ' ' })).status, 400, 'sin motivo no');
+  const r = await api('POST', '/cronograma/colgar', { ids: [m.task_id], tipo: m.tipo, motivo: 'Fueron y nadie recibió' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data, { colgados: 1, avisados: [`Resp ${RUN}`] });
+  // Sale de su día (también visto desde otra semana) y está en Colgados, con el motivo y el día que tenía.
+  let v = (await api('GET', rango)).data;
+  assert.ok(!v.movimientos.some((x) => x.id === m.id), 'ya no está en su día');
+  const otraSemana = (await api('GET', '/cronograma?desde=2026-12-07&hasta=2026-12-13')).data;
+  const c = otraSemana.colgados.find((x) => x.id === m.id);
+  assert.ok(c, 'está en Colgados, en cualquier semana');
+  assert.deepEqual([c.colgado.motivo, c.colgado.fecha], ['Fueron y nadie recibió', m.fecha]);
+  // A la responsable le llega el aviso, con qué era y por qué.
+  asUser = `resp.${RUN}@formas.ar`;
+  const n = (await api('GET', '/notificaciones')).data.items.find((x) => x.kind === 'colgado' && x.record_id === m.record_id);
+  assert.ok(n, 'aviso en la campanita');
+  assert.match(n.texto, /Fueron y nadie recibió/);
+  assert.equal((await api('POST', '/cronograma/colgar', { ids: [m.task_id], tipo: m.tipo, motivo: 'otra cosa' })).status, 403, 'Ventas no edita el cronograma');
+  asUser = null;
+  // Pasarlo a un día (el mismo que tenía) lo devuelve al cronograma.
+  assert.equal((await api('POST', '/cronograma/mover', { ids: [m.task_id], tipo: m.tipo, fecha: m.fecha })).status, 200);
+  v = (await api('GET', rango)).data;
+  assert.ok(v.movimientos.some((x) => x.id === m.id), 'volvió a su día');
+  assert.ok(!v.colgados.some((x) => x.id === m.id), 'y ya no está en Colgados');
+});

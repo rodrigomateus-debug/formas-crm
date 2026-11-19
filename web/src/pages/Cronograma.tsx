@@ -30,6 +30,7 @@ export interface Mov {
   retira_en?: string | null;  // lo retira el cliente en Formas: no es parada de nadie
   hora?: string | null;       // la hora fijada a mano en su parada, en la ruta del día («A las 12:00»)
   parada?: string;            // la clave de su parada en la ruta del día
+  colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»
 }
 export interface Nota { id: number; fecha: string; texto: string; hecho: number }
 export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -38,7 +39,11 @@ export interface Vista {
   hoy: string; desde: string; hasta: string; movimientos: Mov[]; notas: Nota[]; feriados: Record<string, string>; dias: Record<string, DiaResumen>;
   sin_fecha: SinFecha[]; puede_editar: boolean; choferes?: string[]; expresos?: string[];
   encargos?: Encargo[];   // lo que pidió alguien al recorrido de cada día (Recorridos)
+  colgados?: Mov[];       // lo que no se pudo hacer y quedó pendiente, con su motivo: la misma columna en todas las semanas
 }
+// La columna de lo colgado, como destino del arrastre (no es un día).
+const COLGADOS = 'colgados';
+const MOTIVOS_COLGADO = ['El cliente todavía no abonó el total', 'Fueron y nadie recibió', 'Falta un documento para entregar', 'El cliente pidió reprogramar', 'No estaba listo'];
 
 // La dirección de cada parada de la semana (GET /cronograma/direcciones), por `fecha|clave de la parada`: la misma que usa
 // la Ruta del día y si está ubicada en el mapa (pedido de Rodrigo del 18/11/2026).
@@ -129,6 +134,7 @@ export default function CronogramaPage() {
   const [nuevoPara, setNuevoPara] = useState<Tarjeta | Encargo | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo abierto
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
+  const [colgando, setColgando] = useState<{ ids: string[]; tipo: Tipo; pdv: string } | null>(null);   // lo que se soltó en «Colgados»: falta el motivo
   const arrastre = useRef<{ ids: string[]; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
   const pedido = useRef(0);
   // Las direcciones de las paradas de la semana: llegan después de la semana (no la demoran) y, mientras el servidor
@@ -177,18 +183,40 @@ export default function CronogramaPage() {
   const finDeSemana = [5, 6].filter((i) => { const d = sumar(semana, i); return movs.some((m) => m.fecha === d) || encs.some((e) => e.fecha === d) || !!v?.notas.some((n) => n.fecha === d); });
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
+  const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad)), [v, q, unidad]);
 
   async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string) {
-    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === tipo ? { ...m, fecha } : m)), sin_fecha: d.sin_fecha.filter((s) => !ids.includes(s.task_id)) });
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === tipo ? { ...m, fecha } : m)), sin_fecha: d.sin_fecha.filter((s) => !ids.includes(s.task_id)),
+      colgados: (d.colgados ?? []).filter((m) => !(ids.includes(m.task_id) && m.tipo === tipo)) });
     try {
       for (let i = 0; i < ids.length; i += 25) await http('POST', '/cronograma/mover', { ids: ids.slice(i, i + 25), tipo, fecha });
       toast(`${pdv}: ${carrilDe(tipo).uno.toLowerCase()} pasó al ${diaCorto(fecha)}. Ya está en ClickUp.`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
   }
+  // Deja un movimiento en «Colgados», con el motivo: sale de su día y al responsable del pedido le llega el aviso.
+  async function colgar(a: { ids: string[]; tipo: Tipo; pdv: string }, motivo: string) {
+    setColgando(null);
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.filter((m) => !(a.ids.includes(m.task_id) && m.tipo === a.tipo)) });
+    try {
+      const avisados = new Set<string>();
+      for (let i = 0; i < a.ids.length; i += 25) (await http<{ avisados: string[] }>('POST', '/cronograma/colgar', { ids: a.ids.slice(i, i + 25), tipo: a.tipo, motivo })).avisados.forEach((x) => avisados.add(x));
+      toast(`${a.pdv}: ${carrilDe(a.tipo).uno.toLowerCase()} quedó en Colgados.${avisados.size ? ` Se le avisó a ${[...avisados].join(' y ')}.` : ''}`);
+    } catch (e) { toast((e as Error).message, true); }
+    void cargar();
+  }
+  const soltarEnColgados = () => {
+    const a = arrastre.current;
+    arrastre.current = null; setSobre(null);
+    if (!a || a.de === COLGADOS) return;
+    if (a.tipo === 'encargo') { toast('Los encargos no se cuelgan acá: se pasan a otro día o se cancelan desde el encargo.', true); return; }
+    if (!a.de) { toast('Eso todavía no tiene fecha: no hay qué dejar pendiente.', true); return; }
+    setColgando({ ids: a.ids, tipo: a.tipo, pdv: a.pdv });
+  };
   async function marcar(t: Tarjeta) {
     const hecho = !t.hecho, ids = t.movs.map((m) => m.task_id);
-    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === t.tipo ? { ...m, hecho } : m)) });
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === t.tipo ? { ...m, hecho } : m)),
+      colgados: (d.colgados ?? []).filter((m) => !(hecho && ids.includes(m.task_id) && m.tipo === t.tipo)) });
     try {
       const r = { cambiados: 0, estado: null as string | null };
       for (let i = 0; i < ids.length; i += 25) { const x = await http<{ cambiados: number; estado: string | null }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + 25), tipo: t.tipo, hecho }); r.cambiados += x.cambiados; r.estado = x.estado; }
@@ -271,7 +299,7 @@ export default function CronogramaPage() {
           {!v && !error && <div className="empty plain">Cargando la semana…</div>}
           {v && (
             <div className="cr-scroll">
-              <div className="cr-semana" style={{ gridTemplateColumns: `repeat(${dias.length}, minmax(214px, 1fr))` }}>
+              <div className="cr-semana" style={{ gridTemplateColumns: `repeat(${dias.length}, minmax(214px, 1fr)) minmax(226px, 1fr)` }}>
                 {dias.map((d) => {
                   const delDia = movs.filter((m) => m.fecha === d), notas = v.notas.filter((n) => n.fecha === d), encDia = encs.filter((e) => e.fecha === d);
                   const pend = delDia.filter((m) => !m.hecho).length + encDia.filter((e) => e.estado !== 'hecho').length, cuantos = delDia.length + encDia.length;
@@ -298,6 +326,7 @@ export default function CronogramaPage() {
                               {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []} onChofer={(c) => asignar(t, c)}
                                 dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
                                 onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
+                                onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
                                 onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
                                 onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                             </div>
@@ -318,9 +347,36 @@ export default function CronogramaPage() {
                     </section>
                   );
                 })}
+                {/* Colgados: lo que no se pudo hacer y quedó pendiente. La misma columna en todas las semanas. */}
+                <section className={`cr-dia cr-colgados${sobre === COLGADOS ? ' sobre' : ''}`} aria-label="Colgados"
+                  onDragOver={(e) => { if (arrastre.current && puede && arrastre.current.de !== COLGADOS) { e.preventDefault(); if (sobre !== COLGADOS) setSobre(COLGADOS); } }}
+                  onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setSobre((x) => (x === COLGADOS ? null : x)); }}
+                  onDrop={(e) => { e.preventDefault(); soltarEnColgados(); }}>
+                  <header className="cr-dia-cab">
+                    <div className="cr-dia-tit"><Icon name="alert" size={15} /><b>Colgados</b><span className="num">{colg.length ? tarjetas(colg).length : ''}</span></div>
+                    <div className="cr-dia-sub"><span>Lo que no se pudo hacer. No es de ninguna semana: queda acá hasta que se resuelve.</span></div>
+                  </header>
+                  <div className="cr-carriles">
+                    {CARRILES.map((c) => {
+                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false }));
+                      if (!ts.length) return null;
+                      return (
+                        <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
+                          <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
+                          {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy="" puede={puede} choferes={[]} expresos={[]} onChofer={() => undefined} buscando={false} onDir={() => undefined}
+                            onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
+                            onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
+                            onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: COLGADOS, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
+                        </div>
+                      );
+                    })}
+                    {!colg.length && <div className="cr-colgados-vacio small">{puede ? 'Arrastrá acá lo que no se pudo hacer (no pagó, nadie recibió, falta un documento…) y decí por qué. Al responsable del pedido le llega el aviso.' : 'Nada pendiente.'}</div>}
+                  </div>
+                </section>
               </div>
             </div>
           )}
+          {colgando && <ModalColgar a={colgando} onCerrar={() => setColgando(null)} onColgar={(m) => colgar(colgando, m)} />}
           {v && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && (!unidad || s.unidad === unidad))} puede={puede}
             onArrastrar={(a) => { arrastre.current = a; if (!a) setSobre(null); }} onMover={(ids, f, pdv) => mover(ids, 'entrega', f, pdv)} onAbrir={setPreview} />}
         </>
@@ -439,11 +495,15 @@ const ROL: Record<Tipo, { nombre: string; icono: string }> = {
 };
 const TOPE = 3;
 
-function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar }: {
+function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar }: {
   t: Tarjeta; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
+  onColgar?: () => void;   // dejarlo en «Colgados» (lo mismo que arrastrarlo ahí; para el celular)
 }) {
+  // En «Colgados»: por qué quedó, qué día era y quién lo dejó.
+  const colgado = t.movs.find((m) => m.colgado)?.colgado ?? null;
+  const motivos = [...new Set(t.movs.map((m) => m.colgado?.motivo).filter((x): x is string => !!x))];
   const toast = useToast();
   const atrasado = !t.hecho && t.fecha < hoy;
   // Hasta tres productos a la vista; el resto se abre con «+ N productos más», así un pedido largo no estira la columna.
@@ -474,6 +534,12 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
         {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
+      {colgado && (
+        <div className="cr-t-motivo">
+          {motivos.map((m) => <p key={m}>{m}</p>)}
+          <span className="small">Era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por.split(' ')[0]}` : ''}</span>
+        </div>
+      )}
       {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
       {prods.length > 0 && (
         <div className="cr-t-prods">
@@ -499,12 +565,30 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
           {/* Un egreso: el remito de traslado de lo que se le lleva al impresor ese día (todos sus PDV), para imprimir. */}
           {t.tipo === 'egreso' && t.movs[0]?.parada && <button type="button" className="cr-mini" aria-label="Remito de traslado" title="Imprimir el remito de traslado (todo lo que va a este impresor ese día)"
             onClick={() => abrirRemitoEgreso(t.fecha, t.movs[0].parada!, toast)}><Icon name="printer" size={13} /></button>}
-          <SelectorFecha valor={t.fecha} onElegir={(f) => f && onMover(f)} label="Pasar a otro día" className="cr-mini" title="Pasar a otro día"><Icon name="calendar" size={13} /></SelectorFecha>
+          {onColgar && <button type="button" className="cr-mini" aria-label="Dejar en Colgados" title="No se pudo hacer: dejarlo en Colgados" onClick={onColgar}><Icon name="alert" size={13} /></button>}
+          <SelectorFecha valor={t.fecha} onElegir={(f) => f && onMover(f)} label={colgado ? 'Pasar a un día' : 'Pasar a otro día'} className="cr-mini" title={colgado ? 'Pasar a un día' : 'Pasar a otro día'}><Icon name="calendar" size={13} /></SelectorFecha>
           <button type="button" className={`cr-check${t.hecho ? ' on' : ''}`} aria-pressed={t.hecho} aria-label={t.hecho ? 'Volver a pendiente' : 'Marcar como hecho'} title={t.hecho ? 'Volver a pendiente' : 'Marcar como hecho'} onClick={onMarcar}><Icon name="check" size={12} /></button>
         </div>
       )}
       {!puede && t.hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
+  );
+}
+
+// El motivo de lo que se deja en «Colgados»: los de siempre, a un clic, o el que se escriba.
+function ModalColgar({ a, onCerrar, onColgar }: { a: { ids: string[]; tipo: Tipo; pdv: string }; onCerrar: () => void; onColgar: (motivo: string) => void }) {
+  const [motivo, setMotivo] = useState('');
+  const ok = motivo.trim().length >= 3;
+  return (
+    <Modal title={`${a.pdv}: ¿por qué queda pendiente?`} onClose={onCerrar}
+      footer={<><button type="button" className="btn" onClick={onCerrar}>Cancelar</button><button type="button" className="btn primary" disabled={!ok} onClick={() => onColgar(motivo.trim())}>Dejar en Colgados</button></>}>
+      <p className="small muted" style={{ marginTop: 0 }}>{carrilDe(a.tipo).uno} sale de su día y queda en la columna Colgados hasta que se resuelva. Al responsable del pedido le llega el aviso (en el Hub y por mail) con el motivo.</p>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {MOTIVOS_COLGADO.map((m) => <button key={m} type="button" className={`chip${motivo === m ? ' on' : ''}`} aria-pressed={motivo === m} onClick={() => setMotivo(m)}>{m}</button>)}
+      </div>
+      <textarea className="input" rows={3} autoFocus placeholder="Qué pasó…" value={motivo} maxLength={300} onChange={(e) => setMotivo(e.target.value)} aria-label="Motivo"
+        onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && ok) onColgar(motivo.trim()); }} />
+    </Modal>
   );
 }
 

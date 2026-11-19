@@ -8,23 +8,26 @@ import { SelectorFecha, isoDia } from '../Fecha';
 // Filtros por columna de Producción (pedido de Rodrigo del 12/11/2026): cada columna de la lista tiene el suyo (el embudo
 // del encabezado) y también se agregan desde «+ Filtro» (sirve en el tablero). Filtran PRODUCTOS: se ven solo los que
 // cumplen, cada uno con su PDV; los PDV que se quedan sin productos no se ven. Se guardan en las vistas.
+// La fecha de creación (pedido de Rodrigo del 19/11/2026) es del PDV, no de sus productos: filtra PDV enteros
+// (cumpleCreado), con rangos hacia atrás (últimos 7 o 30 días, este mes).
 
-export type Rango = '' | 'vencidas' | 'hoy' | 'semana' | 'proximos' | 'con' | 'sin' | { desde?: string; hasta?: string };
+export type Rango = '' | 'vencidas' | 'hoy' | 'semana' | 'proximos' | 'ultimos7' | 'ultimos30' | 'mes' | 'con' | 'sin' | { desde?: string; hasta?: string };
 export interface FiltrosCol {
   estado?: string[];
   cantidad?: { min?: number | null; max?: number | null };
   proveedor?: string[];   // id de la opción de ClickUp; '' = sin proveedor
   impresor?: string[];
   entrega_real?: Rango; ingreso_proveedor?: Rango; retiro_proveedor?: Rango; egreso_impresor?: Rango; retiro_impresor?: Rango; ingreso_impresor?: Rango;
+  creado?: Rango;   // del PDV
 }
 export type ColFiltro = keyof FiltrosCol;
-type ColFecha = 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor';
-const FECHAS: ColFecha[] = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
+type ColFecha = 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor' | 'creado';
+const FECHAS: Array<Exclude<ColFecha, 'creado'>> = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
 export const NOMBRE_COL: Record<ColFiltro, string> = {
-  estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega real',
+  creado: 'Creado', estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega real',
   ingreso_proveedor: 'Ingreso prov.', retiro_proveedor: 'Retiro prov.', egreso_impresor: 'Egreso imp.', retiro_impresor: 'Retiro imp.', ingreso_impresor: 'Ingreso imp.',
 };
-const COLUMNAS: ColFiltro[] = ['estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
+const COLUMNAS: ColFiltro[] = ['creado', 'estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
 
 // Lo que necesita saber de un producto.
 export interface ArticuloFiltrable {
@@ -49,7 +52,7 @@ export const hayFiltros = (f: FiltrosCol) => COLUMNAS.some((c) => activo(f, c));
 // Para comparar vistas: sin lo vacío.
 export const limpiar = (f: FiltrosCol): FiltrosCol => Object.fromEntries(COLUMNAS.filter((c) => activo(f, c)).map((c) => [c, f[c]])) as FiltrosCol;
 
-function enRango(fecha: string | null, r: Rango, hoy: string) {
+export function enRango(fecha: string | null, r: Rango, hoy = isoDia(new Date())) {
   if (!r) return true;
   if (r === 'sin') return !fecha;
   if (r === 'con') return !!fecha;
@@ -58,6 +61,8 @@ function enRango(fecha: string | null, r: Rango, hoy: string) {
   if (r === 'hoy') return fecha === hoy;
   const d = new Date(`${hoy}T12:00:00`);
   if (r === 'proximos') { const h = new Date(d); h.setDate(h.getDate() + 7); return fecha >= hoy && fecha <= isoDia(h); }
+  if (r === 'ultimos7' || r === 'ultimos30') { const h = new Date(d); h.setDate(h.getDate() - (r === 'ultimos7' ? 6 : 29)); return fecha >= isoDia(h) && fecha <= hoy; }
+  if (r === 'mes') return fecha.slice(0, 7) === hoy.slice(0, 7);
   if (r === 'semana') {
     const lunes = new Date(d); lunes.setDate(d.getDate() - ((d.getDay() + 6) % 7));
     const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
@@ -80,16 +85,21 @@ export function cumple(a: ArticuloFiltrable, f: FiltrosCol, ctx: Pick<Ctx, 'mism
   for (const k of FECHAS) if (f[k] && !enRango(a[k], f[k]!, hoy)) return false;
   return true;
 }
+// El filtro de la fecha de creación, sobre el PDV.
+export const cumpleCreado = (creado: string | null, f: FiltrosCol, hoy = isoDia(new Date())) => !f.creado || enRango(creado, f.creado, hoy);
 
 // Cómo se lee un filtro en su chip.
 const RANGOS: Array<[Exclude<Rango, object>, string]> = [['vencidas', 'Ya pasó'], ['hoy', 'Hoy'], ['semana', 'Esta semana'], ['proximos', 'Próximos 7 días'], ['con', 'Con fecha'], ['sin', 'Sin fecha']];
+// La creación ya pasó: rangos hacia atrás.
+const RANGOS_CREADO: Array<[Exclude<Rango, object>, string]> = [['hoy', 'Hoy'], ['semana', 'Esta semana'], ['ultimos7', 'Últimos 7 días'], ['ultimos30', 'Últimos 30 días'], ['mes', 'Este mes'], ['sin', 'Sin fecha']];
+const rangosDe = (c: ColFiltro) => (c === 'creado' ? RANGOS_CREADO : RANGOS);
 const ddmm = (s?: string) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}` : '');
 export function resumen(f: FiltrosCol, c: ColFiltro, ctx: Ctx) {
   const x = f[c];
   if (c === 'estado') return (x as string[]).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(', ');
   if (c === 'proveedor' || c === 'impresor') return (x as string[]).map((id) => (id === '' ? `Sin ${c}` : ctx.opciones[c].find((o) => o.value === id)?.label ?? id)).join(', ');
   if (c === 'cantidad') { const r = x as NonNullable<FiltrosCol['cantidad']>; return r.min != null && r.max != null ? `${r.min} a ${r.max}` : r.min != null ? `${r.min} o más` : `hasta ${r.max}`; }
-  if (typeof x === 'string') return RANGOS.find(([k]) => k === x)?.[1] ?? x;
+  if (typeof x === 'string') return rangosDe(c).find(([k]) => k === x)?.[1] ?? x;
   const r = x as { desde?: string; hasta?: string };
   return r.desde && r.hasta ? `${ddmm(r.desde)} al ${ddmm(r.hasta)}` : r.desde ? `desde ${ddmm(r.desde)}` : `hasta ${ddmm(r.hasta)}`;
 }
@@ -144,7 +154,7 @@ function Control({ col, f, set, ctx }: { col: ColFiltro; f: FiltrosCol; set: (x:
   const rango = typeof r === 'object' ? r : null;
   return (
     <div className="fcol-ops">
-      {RANGOS.map(([k, l]) => (
+      {rangosDe(col).map(([k, l]) => (
         <label key={k} className="opt small"><input type="radio" name={`r-${col}`} checked={r === k} onChange={() => set(k)} /><span className="grow">{l}</span>
           <span className="fcol-n">{ctx.cuenta(col, k)}</span></label>
       ))}
@@ -222,7 +232,7 @@ export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onC
   return (
     <>
       <button ref={(el) => { mas.current = el; anclas.current.set('+', el); }} type="button" className={`btn qf-btn${activos.length ? ' on' : ''}`} onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}
-        title="Filtrar los productos por estado, cantidad, fechas, proveedor o impresor">
+        title="Filtrar por fecha de creación del PDV o los productos por estado, cantidad, fechas, proveedor o impresor">
         <Icon name="filter" size={15} />Filtros{activos.length ? ` (${activos.length})` : ''}
       </button>
       {extra}
@@ -239,7 +249,7 @@ export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onC
       )}
       {menu && createPortal(
         <div ref={menuPop} className="popover" role="menu" style={{ ...style, minWidth: 200 }}>
-          <div className="grp">Filtrar productos por</div>
+          <div className="grp">Filtrar por</div>
           {COLUMNAS.map((c) => <div key={c} className="opt" role="menuitem" tabIndex={0} onClick={() => { setMenu(false); setAbierto(c); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { setMenu(false); setAbierto(c); } }}>{NOMBRE_COL[c]}{activo(f, c) && <span className="small muted" style={{ marginLeft: 'auto' }}>✓</span>}</div>)}
         </div>,

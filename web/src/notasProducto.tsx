@@ -14,7 +14,7 @@ export type Gravedad = 'info' | 'ojo' | 'no';
 export interface ResumenNotas { n: number; gravedad: Gravedad; tipos: string[]; ultima: string }
 export interface NotaProducto {
   id: number; sku: string; modelo: string | null; producto: string | null; tipo: string; gravedad: Gravedad; texto: string;
-  record_id: number | null; pedido: string | null; task_id: string | null; foto: boolean; user_id: number | null; autor: string | null;
+  record_id: number | null; pedido: string | null; task_id: string | null; fotos: number[]; user_id: number | null; autor: string | null;
   created_at: string; updated_at: string | null; archivada_at: string | null; archivada_por: number | null; puede_editar: boolean;
 }
 interface Venta { id: number; name: string; created_at: string; etapa: string | null; cantidad: number | null; empresa: string | null; notas: number }
@@ -49,6 +49,41 @@ export function useCambioNotas(f: () => void) {
 }
 
 const urlSku = (sku: string) => `/productos/sku/${encodeURIComponent(sku)}`;
+const urlFoto = (id: number) => `/api/productos/notas/fotos/${id}`;
+const MAX_FOTOS = 10;   // por nota (MAX_FOTOS en notasproducto.ts)
+const TIPOS_FOTO = 'image/jpeg,image/png,image/webp,image/gif';
+const esFoto = (f: File) => TIPOS_FOTO.split(',').includes(f.type);
+
+// Las fotos van en un formulario (`foto` repetido, una vez por foto); http() manda JSON.
+async function enviarFormulario<T>(url: string, fd: FormData): Promise<T> {
+  const res = await fetch(`/api${url}`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
+  const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
+  if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
+  return data as T;
+}
+// Las imágenes pegadas (Ctrl+V de una captura o de WhatsApp Web).
+const fotosPegadas = (e: React.ClipboardEvent) => Array.from(e.clipboardData.files).filter(esFoto);
+
+// Las fotos elegidas que todavía no se subieron: el nombre y una cruz para sacarla.
+function FotosElegidas({ fotos, onQuitar }: { fotos: File[]; onQuitar: (i: number) => void }) {
+  const [urls, setUrls] = useState<string[]>([]);
+  useEffect(() => {
+    const u = fotos.map((f) => URL.createObjectURL(f));
+    setUrls(u);
+    return () => u.forEach((x) => URL.revokeObjectURL(x));
+  }, [fotos]);
+  if (!fotos.length) return null;
+  return (
+    <div className="nota-fotos">
+      {fotos.map((f, i) => (
+        <span key={`${f.name}-${f.size}-${i}`} className="nota-foto" title={f.name}>
+          {urls[i] && <img src={urls[i]} alt={f.name} />}
+          <button type="button" className="nota-foto-x" onClick={() => onQuitar(i)} aria-label={`Sacar ${f.name}`}><Icon name="x" size={12} /></button>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 // El aviso al lado del producto: cuántas notas tiene y la más grave, con la última en el título. Sin notas, quien puede
 // escribir ve «+ Nota» (en Producción, solo al pasar el mouse por el artículo).
@@ -167,9 +202,15 @@ function NuevaNota({ ficha, nombre, recordId, taskId, autoFocus, onGuardada }: {
   const [tipo, setTipo] = useState('otro');
   const [gravedad, setGravedad] = useState<Gravedad>('ojo');
   const [todos, setTodos] = useState(false);
-  const [foto, setFoto] = useState<File | null>(null);
+  const [fotos, setFotos] = useState<File[]>([]);
   const [guardando, setGuardando] = useState(false);
   const archivo = useRef<HTMLInputElement>(null);
+  const sumarFotos = (nuevas: File[]) => {
+    if (!nuevas.length) return;
+    const todas = [...fotos, ...nuevas.filter(esFoto)];
+    if (todas.length > MAX_FOTOS) toast(`Una nota lleva hasta ${MAX_FOTOS} fotos: quedaron las primeras ${MAX_FOTOS}.`, true);
+    setFotos(todas.slice(0, MAX_FOTOS));
+  };
   const guardar = async () => {
     if (!texto.trim()) return;
     setGuardando(true);
@@ -179,11 +220,9 @@ function NuevaNota({ ficha, nombre, recordId, taskId, autoFocus, onGuardada }: {
       fd.append('producto', nombre);
       if (recordId) fd.append('record_id', String(recordId));
       if (taskId) fd.append('task_id', taskId);
-      if (foto) fd.append('foto', foto);
-      const res = await fetch(`/api${urlSku(ficha.sku)}/notas`, { method: 'POST', body: fd, credentials: 'same-origin', headers: cabecerasVerComo() });
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      if (!res.ok) throw new Error(data?.error ?? `Error ${res.status}`);
-      setTexto(''); setFoto(null); setTipo('otro'); setGravedad('ojo'); setTodos(false);
+      for (const f of fotos) fd.append('foto', f);
+      await enviarFormulario(`${urlSku(ficha.sku)}/notas`, fd);
+      setTexto(''); setFotos([]); setTipo('otro'); setGravedad('ojo'); setTodos(false);
       toast('Nota guardada: se va a ver cada vez que se venda este producto');
       onGuardada();
     } catch (e) { toast((e as Error).message, true); }
@@ -193,7 +232,9 @@ function NuevaNota({ ficha, nombre, recordId, taskId, autoFocus, onGuardada }: {
     <div className="nota-nueva">
       <textarea className="input" rows={3} autoFocus={autoFocus} placeholder="¿Qué pasó con este producto? Ej.: la serigrafía se sale en la tela, el bordado tapa el bolsillo…"
         value={texto} onChange={(e) => setTexto(e.target.value)} maxLength={2000}
+        onPaste={ficha.fotos ? (e) => { const p = fotosPegadas(e); if (p.length) { e.preventDefault(); sumarFotos(p); } } : undefined}
         onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) guardar(); }} />
+      {ficha.fotos && <FotosElegidas fotos={fotos} onQuitar={(i) => setFotos(fotos.filter((_, j) => j !== i))} />}
       <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <Select className="input sm" style={{ width: 210 }} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo de nota">
           {Object.entries(ficha.tipos).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -209,11 +250,13 @@ function NuevaNota({ ficha, nombre, recordId, taskId, autoFocus, onGuardada }: {
         )}
         {ficha.fotos && (
           <>
-            <input ref={archivo} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(e) => setFoto(e.target.files?.[0] ?? null)} />
-            {foto
-              ? <span className="small row" style={{ gap: 4 }}><Icon name="image" size={14} /><span className="ellipsis" style={{ maxWidth: 180 }}>{foto.name}</span>
-                  <button type="button" className="btn ghost xs icon" onClick={() => { setFoto(null); if (archivo.current) archivo.current.value = ''; }} aria-label="Quitar la foto"><Icon name="x" size={12} /></button></span>
-              : <button type="button" className="btn ghost sm" onClick={() => archivo.current?.click()}><Icon name="image" size={14} />Agregar foto</button>}
+            <input ref={archivo} type="file" accept={TIPOS_FOTO} multiple hidden
+              onChange={(e) => { sumarFotos(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+            {fotos.length < MAX_FOTOS && (
+              <button type="button" className="btn ghost sm" onClick={() => archivo.current?.click()} title="Se pueden elegir varias a la vez, o pegarlas en el texto (Ctrl+V)">
+                <Icon name="image" size={14} />{fotos.length ? 'Agregar más fotos' : 'Agregar fotos'}
+              </button>
+            )}
           </>
         )}
         <span className="grow" />
@@ -230,7 +273,30 @@ function Nota({ n, f, puede, onCambio }: { n: NotaProducto; f: Ficha; puede: boo
   const [tipo, setTipo] = useState(n.tipo);
   const [gravedad, setGravedad] = useState<Gravedad>(n.gravedad);
   const [todos, setTodos] = useState(!!n.modelo);
+  const [subiendo, setSubiendo] = useState(false);
+  const archivo = useRef<HTMLInputElement>(null);
   const g = GRAVEDAD[n.gravedad];
+  // Agregar o sacar fotos (quien la escribió o un administrador, mientras edita): se guarda en el momento.
+  const agregarFotos = async (nuevas: File[]) => {
+    const ok = nuevas.filter(esFoto);
+    if (!ok.length) return;
+    const lugar = MAX_FOTOS - n.fotos.length;
+    if (ok.length > lugar) toast(lugar > 0 ? `Una nota lleva hasta ${MAX_FOTOS} fotos: se suben las primeras ${lugar}.` : `Una nota lleva hasta ${MAX_FOTOS} fotos.`, true);
+    if (lugar <= 0) return;
+    setSubiendo(true);
+    try {
+      const fd = new FormData();
+      for (const f of ok.slice(0, lugar)) fd.append('foto', f);
+      await enviarFormulario(`/productos/notas/${n.id}/fotos`, fd);
+      toast(ok.length > 1 ? 'Fotos agregadas' : 'Foto agregada'); onCambio();
+    } catch (e) { toast((e as Error).message, true); }
+    setSubiendo(false);
+  };
+  const sacarFoto = async (fotoId: number) => {
+    if (!window.confirm('¿Sacar esta foto de la nota?')) return;
+    try { await http('DELETE', `/productos/notas/fotos/${fotoId}`); toast('Foto sacada'); onCambio(); }
+    catch (e) { toast((e as Error).message, true); }
+  };
   const cancelarEdicion = () => { setEditando(false); setTexto(n.texto); setTipo(n.tipo); setGravedad(n.gravedad); setTodos(!!n.modelo); };
   const cambiar = async (body: Record<string, unknown>, ok: string) => {
     try { await http('PATCH', `/productos/notas/${n.id}`, body); toast(ok); setEditando(false); onCambio(); }
@@ -258,23 +324,39 @@ function Nota({ n, f, puede, onCambio }: { n: NotaProducto; f: Ficha; puede: boo
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && texto.trim()) { e.preventDefault(); void cambiar({ texto, tipo, gravedad, ...(deOtroSku ? {} : { todos_colores: todos }) }, 'Nota actualizada'); return; }
           alEsc(cancelarEdicion)(e);
         }}>
-          <textarea className="input" rows={3} value={texto} onChange={(e) => setTexto(e.target.value)} maxLength={2000} autoFocus />
+          <textarea className="input" rows={3} value={texto} onChange={(e) => setTexto(e.target.value)} maxLength={2000} autoFocus
+            onPaste={f.fotos ? (e) => { const p = fotosPegadas(e); if (p.length) { e.preventDefault(); void agregarFotos(p); } } : undefined} />
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <Select className="input sm" style={{ width: 210 }} value={tipo} onChange={(e) => setTipo(e.target.value)} aria-label="Tipo de nota">
               {Object.entries(f.tipos).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </Select>
             <ElegirGravedad value={gravedad} onChange={setGravedad} />
             {(f.modelo || n.modelo) && !deOtroSku && <label className="row small" style={{ gap: 6 }}><input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />Todos los colores</label>}
+            {f.fotos && n.fotos.length < MAX_FOTOS && (
+              <>
+                <input ref={archivo} type="file" accept={TIPOS_FOTO} multiple hidden onChange={(e) => { void agregarFotos(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
+                <button type="button" className="btn ghost sm" disabled={subiendo} onClick={() => archivo.current?.click()} title="Se guardan en el momento; también se pueden pegar en el texto (Ctrl+V)">
+                  <Icon name="image" size={14} />{subiendo ? 'Subiendo…' : 'Agregar fotos'}
+                </button>
+              </>
+            )}
             <span className="grow" />
             <button type="button" className="btn ghost sm" onClick={cancelarEdicion}>Cancelar</button>
             <button type="button" className="btn primary sm" disabled={!texto.trim()} onClick={() => cambiar({ texto, tipo, gravedad, ...(deOtroSku ? {} : { todos_colores: todos }) }, 'Nota actualizada')}>Guardar</button>
           </div>
         </div>
       ) : <div className="nota-texto">{n.texto}</div>}
-      {n.foto && (
-        <a href={`/api/productos/notas/${n.id}/foto`} target="_blank" rel="noreferrer" className="nota-foto" title="Ver la foto">
-          <img src={`/api/productos/notas/${n.id}/foto`} alt={`Foto de la nota sobre ${n.sku}`} loading="lazy" />
-        </a>
+      {n.fotos.length > 0 && (
+        <div className="nota-fotos">
+          {n.fotos.map((id, i) => (
+            <span key={id} className="nota-foto">
+              <a href={urlFoto(id)} target="_blank" rel="noreferrer" title="Ver la foto">
+                <img src={urlFoto(id)} alt={`Foto ${i + 1} de ${n.fotos.length} de la nota sobre ${n.sku}`} loading="lazy" />
+              </a>
+              {editando && n.puede_editar && <button type="button" className="nota-foto-x" onClick={() => sacarFoto(id)} aria-label="Sacar la foto"><Icon name="x" size={12} /></button>}
+            </span>
+          ))}
+        </div>
       )}
       <div className="row small muted" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
         {n.user_id ? <UserAvatar id={n.user_id} size="xs" /> : null}

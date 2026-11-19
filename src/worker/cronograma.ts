@@ -87,6 +87,7 @@ export interface Movimiento {
   hora?: string | null;      // en la semana: la hora fijada a mano en su parada («A las 12:00»)
   parada?: string;           // en la semana: la clave de su parada en la ruta del día (para el remito de traslado de un egreso)
   retira_en?: string | null; // en la semana: lo retira el cliente en Formas (tarjeta «Entrega»), así que no es parada de nadie
+  colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»: por qué, desde cuándo y quién
 }
 // La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
 // esa empresa (tres retiros en el mismo impresor son una parada). No depende de la dirección. Un pedido que va a varias
@@ -166,7 +167,67 @@ export async function movimientos(db: D1Database, desde: string, hasta: string) 
     db.prepare('SELECT fecha, nombre FROM feriados WHERE fecha BETWEEN ? AND ?').bind(desde, hasta).all<{ fecha: string; nombre: string }>(),
   ]);
   const fer = new Map(feriados.results.map((x) => [x.fecha, x.nombre]));
-  return { movs: armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta), feriados: fer };
+  // Lo colgado no está en su día ni en la ruta: va en su columna (colgados).
+  const colg = new Set((await db.prepare('SELECT task_id, tipo FROM cronograma_colgados').all<{ task_id: string; tipo: string }>()).results.map((c) => `${c.task_id}:${c.tipo}`));
+  const movs = armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta);
+  return { movs: colg.size ? movs.filter((m) => !colg.has(m.id)) : movs, feriados: fer };
+}
+
+// ---------- Colgados (pedido de Rodrigo del 19/11/2026) ----------
+// Lo que no se pudo hacer y queda pendiente por algún motivo: una columna que está en todas las semanas. Un movimiento
+// colgado sale de su día (y de la ruta de ese día) hasta que se pasa a un día (moverMovimiento) o se marca hecho. La fecha
+// de ClickUp no se toca al colgarlo. Al responsable del pedido le llega el aviso (campanita y mail) con el motivo.
+export async function colgados(db: D1Database): Promise<Movimiento[]> {
+  const { results: filasC } = await db.prepare(`SELECT c.task_id, c.tipo, c.motivo, c.fecha, c.at, u.name AS por FROM cronograma_colgados c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.at`)
+    .all<{ task_id: string; tipo: string; motivo: string; fecha: string; at: string; por: string | null }>();
+  if (!filasC.length) return [];
+  const porId = new Map(filasC.map((c) => [`${c.task_id}:${c.tipo}`, c]));
+  const [filas, ops, hechos] = await Promise.all([
+    db.prepare(`${SELECT_MOV} AND a.task_id IN (SELECT task_id FROM cronograma_colgados)`).all<FilaMov>(),
+    opciones(db),
+    db.prepare('SELECT h.task_id, h.tipo, h.user_id FROM cronograma_hechos h WHERE h.task_id IN (SELECT task_id FROM cronograma_colgados)').all<{ task_id: string; tipo: string; user_id: number | null }>(),
+  ]);
+  const movs = armar(filas.results, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), new Map(), '0000-00-00', '9999-12-31')
+    .filter((m) => porId.has(m.id) && !m.hecho);
+  // Lo que ya se hizo, se anuló o se quedó sin fecha en ClickUp deja de estar colgado.
+  const vivos = new Set(movs.map((m) => m.id));
+  const viejos = filasC.filter((c) => !vivos.has(`${c.task_id}:${c.tipo}`));
+  if (viejos.length) await db.batch(viejos.slice(0, 50).map((c) => db.prepare('DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = ?').bind(c.task_id, c.tipo)));
+  for (const m of movs) { const c = porId.get(m.id)!; m.colgado = { motivo: c.motivo, at: c.at, por: c.por, fecha: c.fecha }; m.avisos = []; }
+  return movs;
+}
+
+const diaMes = (d: string) => `${Number(d.slice(8))}/${Number(d.slice(5, 7))}`;
+export async function colgarMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; motivo?: unknown }) {
+  exigir(ctx);
+  if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
+  const tipo = b.tipo;
+  const motivo = String(b.motivo ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (motivo.length < 3) throw new HttpError(400, 'Falta el motivo: por qué queda pendiente.');
+  const db = env.DB;
+  const filas = await filasDe(db, b.ids);
+  const pdvs = new Map((await db.prepare('SELECT task_id, npdv, record_id, entrega_real FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify([...new Set(filas.map((f) => f.pdv_task))])).all<{ task_id: string; npdv: string | null; record_id: number | null; entrega_real: string | null }>()).results.map((p) => [p.task_id, p]));
+  const col = TIPOS[tipo].col;
+  const conFecha = filas.map((f) => ({ f, fecha: ((f as unknown as Record<string, string | null>)[col] ?? (tipo === 'entrega' ? pdvs.get(f.pdv_task)?.entrega_real : null)) ?? null }))
+    .filter((x): x is { f: FilaDb; fecha: string } => !!x.fecha);
+  if (!conFecha.length) throw new HttpError(400, 'Eso no tiene fecha en el cronograma: no hay qué dejar pendiente.');
+  const ts = now();
+  await db.batch(conFecha.map(({ f, fecha }) => db.prepare('INSERT OR REPLACE INTO cronograma_colgados (task_id, tipo, motivo, fecha, user_id, at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(f.task_id, tipo, motivo, fecha, ctx.user.id, ts)));
+  // El aviso al responsable de cada pedido: en la campanita y por mail (avisos.ts), con el motivo.
+  const pedidos = [...new Set(conFecha.map(({ f }) => f.record_id ?? pdvs.get(f.pdv_task)?.record_id).filter((x): x is number => !!x))];
+  const avisados: string[] = [];
+  if (pedidos.length) {
+    const { results } = await db.prepare(`SELECT r.id, r.owner_id, u.name FROM records r JOIN users u ON u.id = r.owner_id AND u.active = 1 AND u.deleted_at IS NULL
+      WHERE r.archived = 0 AND r.id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(pedidos)).all<{ id: number; owner_id: number; name: string }>();
+    const fecha = conFecha[0].fecha;
+    const detalle = `${TIPOS[tipo].nombre} del ${diaMes(fecha)}: ${motivo}`.slice(0, 300);
+    const para = results.filter((r) => r.owner_id !== ctx.user.id);
+    if (para.length) await db.batch(para.map((r) => db.prepare("INSERT INTO avisos (user_id, kind, record_id, by_user, detalle) VALUES (?, 'colgado', ?, ?, ?)").bind(r.owner_id, r.id, ctx.user.id, detalle)));
+    avisados.push(...new Set(para.map((r) => r.name)));
+  }
+  return { colgados: conFecha.length, avisados };
 }
 
 // El dominio de la empresa de cada movimiento, para mostrar su logo: en las entregas, la empresa del pedido; en lo demás,
@@ -196,7 +257,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   const rd = esDia(q.rd) && q.rd < q.desde ? q.rd : q.desde;
   const rh = esDia(q.rh) && q.rh > q.hasta ? q.rh : q.hasta;
   if (Date.parse(rh) - Date.parse(rd) > 200 * 86_400_000) throw new HttpError(400, 'El rango es demasiado largo.');
-  const [{ movs, feriados }, encs] = await Promise.all([movimientos(db, rd, rh), encargosEntre(db, rd, rh)]);
+  const [{ movs, feriados }, encs, colg] = await Promise.all([movimientos(db, rd, rh), encargosEntre(db, rd, rh), colgados(db)]);
   const hoy = hoyBsAs();
   const dias: Record<string, { total: number; pendientes: number; atrasados: number }> = {};
   // Los encargos (Recorridos) cuentan igual que un movimiento; uno que no se pudo hacer sigue pendiente hasta que Logística
@@ -215,7 +276,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   const deLaSemana = movs.filter((m) => m.fecha >= q.desde && m.fecha <= q.hasta);
   const encargos = encs.filter((e) => e.fecha >= q.desde && e.fecha <= q.hasta);
   const [, , quienes, horas] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, encargos, q.desde, q.hasta), choferesYExpresos(db),
-    horasDelDia(db, q.desde, q.hasta)]);
+    horasDelDia(db, q.desde, q.hasta), ponerDominios(db, colg)]);
   for (const m of deLaSemana) if (!llega(m.tipo)) m.parada = claveParada(m);
   // La hora fijada en la ruta del día, en la tarjeta de su parada (un pedido que va a varias direcciones: la primera).
   if (horas.size) {
@@ -225,7 +286,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   }
   return {
     hoy, desde: q.desde, hasta: q.hasta,
-    movimientos: deLaSemana, encargos,
+    movimientos: deLaSemana, encargos, colgados: colg,
     notas: notas.results.filter((n) => n.fecha >= q.desde && n.fecha <= q.hasta),
     feriados: Object.fromEntries(feriados), dias,
     sin_fecha: sinFecha.results.map((f) => ({
@@ -357,6 +418,8 @@ export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; ti
   }
   // Lo que estaba marcado hecho deja de estarlo: cambió de día, hay que hacerlo de nuevo.
   await env.DB.prepare('DELETE FROM cronograma_hechos WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
+  // Y lo que estaba colgado vuelve al cronograma, en ese día (aunque sea el mismo que tenía).
+  await env.DB.prepare('DELETE FROM cronograma_colgados WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
   await refrescar(env, ctx, pdvsTocados);
   return { escritos };
 }
@@ -392,6 +455,8 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?:
       await db.prepare('INSERT OR IGNORE INTO cronograma_hechos (task_id, tipo, estado_antes, user_id, chofer, at) VALUES (?, ?, ?, ?, ?, ?)')
         .bind(f.task_id, tipo, cambia ? f.estado : null, opts.chofer ? null : ctx.user.id, opts.chofer ?? null, now()).run();
       marcados.push(f.task_id);
+      // Hecho: ya no está colgado.
+      await db.prepare('DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = ?').bind(f.task_id, tipo).run();
     } else {
       const m = marcas.get(f.task_id);
       if (m?.estado_antes && f.estado === destino) { await editarProduccion(env, c2, f.task_id, 'estado', m.estado_antes, { libre: true, sinRefrescar: true }); cambiados++; pdvs.push(f.pdv_task); }

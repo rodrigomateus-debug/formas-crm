@@ -88,7 +88,7 @@ fecha que tenía el PDV al crearse y el registro del Worker anota qué campos de
 - **Estados como pastilla suave**, del color de ClickUp con su ícono, del ancho del texto y con mayúscula solo al
   principio, igual que la etapa del PDV. Las erratas de los nombres de ClickUp se corrigen solo a la vista
   («listo para entergar» se ve «Listo para entregar»; `nombreEstado` en `components.tsx`).
-- **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de entrega. El tablero (pedido de
+- **Lista o tablero.** La lista agrupa por PDV, como ClickUp, ordenada por fecha de creación (ver «Fecha de creación»). El tablero (pedido de
   Rodrigo del 12/11/2026) tiene **una tarjeta por PDV**, en la columna de su etapa general (la misma de la lista y de
   Pedidos: Esperando boceto o confirmación, En producción, Listo para entregar…), con sus productos adentro como
   hijos: foto, nombre, cantidad, proveedor e impresor, y su estado y asignado, que se cambian ahí mismo. Muestra
@@ -280,8 +280,13 @@ cada vez que ese producto se vuelve a vender, aparece sola.
   Producción la marca **«Ya no aplica»**: deja de avisar y queda en el historial.
 - Código: `src/worker/notasproducto.ts`, `web/src/notasProducto.tsx`, `web/src/pages/NotasProductos.tsx`. API:
   `GET /api/productos/notas`, `GET /api/productos/sku/:sku`, `POST /api/productos/sku/:sku/notas` (JSON o formulario con
-  `foto`), `PATCH`/`DELETE /api/productos/notas/:id`, `GET /api/productos/notas/:id/foto`. Migración
-  `0067_notas_producto.sql`; prueba en `test/notas-producto.test.mjs`.
+  `foto` repetido, una vez por foto), `PATCH`/`DELETE /api/productos/notas/:id`, `POST /api/productos/notas/:id/fotos`,
+  `GET`/`DELETE /api/productos/notas/fotos/:fotoId` y `GET /api/productos/notas/:id/foto` (la primera). Migraciones
+  `0067_notas_producto.sql` y `0096_notas_producto_fotos.sql`; pruebas en `test/notas-producto.test.mjs` y
+  `test/notas-producto-fotos.test.mjs`.
+- **Fotos:** cada nota lleva hasta 10 (JPG, PNG, WEBP o GIF, hasta 15 MB cada una), en Drive (`Notas de productos/<SKU>`).
+  Se eligen varias a la vez o se pegan en el texto (Ctrl+V). Después, quien escribió la nota o un administrador agrega o
+  saca fotos desde «Editar» (se guarda en el momento; la sacada queda en Drive).
 
 ## Cómo está hecho
 
@@ -312,3 +317,21 @@ hay que actualizarlo ahí. Para leer, también se reconoce por el nombre.
   repetidas de ClickUp juntas) y cada fecha (ya pasó, hoy, esta semana, próximos 7 días, con o sin fecha, o entre dos
   fechas). Filtran **productos**: de cada PDV quedan los que cumplen y los PDV sin ninguno no se ven.
 - **Fechas**: el calendario del CRM (`web/src/Fecha.tsx`) en lugar del campo del navegador; elegir un día lo guarda.
+
+## Fecha de creación del PDV
+
+Pedido de Rodrigo del 19/11/2026: los PDV vienen ordenados por fecha de creación, con su columna y su filtro.
+
+- **Qué fecha es**: la del pedido de venta en Finnegans (`fecha_pedido`, la misma de Inicio de Producción). Si el pedido
+  todavía no la tiene (recién cargado, antes de la corrida de totales de la mañana), el alta de la tarea del PDV en
+  ClickUp (`date_created`, columna `produccion.creado`, migración `0095`, que llena la sincronización) y, si el pedido no
+  vino de ClickUp, su alta en el CRM (`SELECT_PDV` en `src/worker/produccion.ts`).
+- **Orden**: por defecto, los más nuevos primero (sin fecha, al final). Un clic en el encabezado **Creado** lo da vuelta;
+  en **Real**, por fecha de entrega (la real o, si no tiene, la pactada), como era antes. El orden se guarda en las vistas
+  y también ordena las tarjetas del tablero.
+- **Columna**: «Creado» en el renglón del PDV; se saca o se agrega desde **Columnas** (queda en ese navegador). En la
+  tarjeta del tablero se ve «Creado …» junto a la pactada.
+- **Filtro**: el embudo de «Creado» o «Filtros → Creado»: hoy, esta semana, últimos 7 días, últimos 30 días, este mes,
+  sin fecha o entre dos fechas. A diferencia de los otros filtros por columna, filtra **el PDV entero** (no sus
+  productos).
+

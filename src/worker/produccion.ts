@@ -92,6 +92,7 @@ interface Fila {
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
   egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null; vence: string | null; asignados: string; etiquetas: string;
   orden: number; url: string | null; actualizado: number; codigo: string | null;
+  creado: string | null;   // alta de la tarea en ClickUp (date_created), AAAA-MM-DD
 }
 
 // Una fecha de ClickUp (ms) → AAAA-MM-DD en Buenos Aires.
@@ -150,7 +151,7 @@ function filaDe(t: CuTask, pdvTask: string): Fila & { campos: boolean } {
     retiro_impresor: diaDe(campoDe(t, 'retiro_impresor')?.value), ingreso_impresor: diaDe(campoDe(t, 'ingreso_impresor')?.value), vence: diaDe(t.due_date),
     asignados: JSON.stringify((t.assignees ?? []).map((a) => a.id).filter((x) => x != null)),
     etiquetas: JSON.stringify((t.tags ?? []).map((x) => x.name).filter(Boolean)),
-    orden: Number(t.orderindex ?? 0) || 0, url: t.url ?? null, actualizado: Number(t.date_updated ?? 0) || 0,
+    orden: Number(t.orderindex ?? 0) || 0, url: t.url ?? null, actualizado: Number(t.date_updated ?? 0) || 0, creado: diaDe(t.date_created),
     // El SKU: la línea «Código:» de la descripción del artículo (si la tarea no trajo la descripción, queda el que estaba).
     codigo: es_pdv || !(t.text_content || t.description) ? null : leerArticulo(t).code?.trim() || null,
   };
@@ -158,9 +159,9 @@ function filaDe(t: CuTask, pdvTask: string): Fila & { campos: boolean } {
 
 const COLS = ['task_id', 'pdv_task', 'es_pdv', 'nombre', 'npdv', 'estado', 'unidad', 'cliente', 'vendedor', 'cantidad', 'cantidad_controlada', 'proveedor',
   'impresor', 'entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado',
-  'codigo'] as const;
+  'codigo', 'creado'] as const;
 // Sin los campos personalizados se actualiza solo lo que trae siempre la tarea (y el código, si vino la descripción).
-const SIEMPRE = ['nombre', 'estado', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado', 'codigo'];
+const SIEMPRE = ['nombre', 'estado', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado', 'codigo', 'creado'];
 
 // Guarda las tareas que trajo ClickUp: los PDV (tareas de la lista con «PDV» en el nombre) y sus artículos (subtareas).
 // Lo más viejo no pisa lo más nuevo. También guarda la gente asignada y las opciones de PROVEEDOR e IMPRESOR.
@@ -177,7 +178,7 @@ export async function guardarTareas(db: D1Database, tasks: CuTask[]) {
   const stmts: D1PreparedStatement[] = [];
   for (const f of filas) {
     const set = (f.campos ? COLS.filter((c) => c !== 'task_id' && c !== 'pdv_task' && c !== 'es_pdv') : SIEMPRE)
-      .map((c) => (c === 'codigo' ? 'codigo = COALESCE(excluded.codigo, produccion.codigo)' : `${c} = excluded.${c}`));
+      .map((c) => (c === 'codigo' || c === 'creado' ? `${c} = COALESCE(excluded.${c}, produccion.${c})` : `${c} = excluded.${c}`));
     stmts.push(db.prepare(`INSERT INTO produccion (${COLS.join(', ')}, record_id, leido_at) VALUES (${COLS.map(() => '?').join(', ')},
         (SELECT record_id FROM produccion WHERE task_id = ?), ?)
       ON CONFLICT(task_id) DO UPDATE SET ${set.join(', ')}, pdv_task = excluded.pdv_task, leido_at = excluded.leido_at
@@ -488,6 +489,7 @@ export interface PdvVista extends ArticuloVista {
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: ArticuloVista[];
   ocs?: OcRef[];   // todas las órdenes de compra del pedido (también las que no se pudieron atar a un producto)
+  creado: string | null;   // fecha de creación del PDV, AAAA-MM-DD (SELECT_PDV)
 }
 
 export const lista = (s: string | null | undefined) => { try { const v = JSON.parse(s ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -505,7 +507,8 @@ export function etapaPdv(pdvEstado: string, estados: string[], etapaPedido: stri
   return { etapa: auto ?? etapaPedido ?? null, auto: !!auto };
 }
 
-function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }, arts: FilaDb[], editables: string[], verCerrados: boolean,
+type FilaPdv = FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null; creado_pdv: string | null };
+function armarPdv(p: FilaPdv, arts: FilaDb[], editables: string[], verCerrados: boolean,
   fotos: Map<string, string>, logos: Map<string, string> = new Map(), servicios: Set<string> = new Set(), notas: NotasArt = { skus: new Map(), resumen: new Map() },
   costos: Map<string, CostoLogo> = new Map(), ocs: Awaited<ReturnType<typeof ocsDePedidos>> = new Map()): PdvVista {
   // Los artículos que son un servicio (envío, setup, un adicional: servicios.ts) no se producen: no se listan, no cuentan
@@ -521,7 +524,7 @@ function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; 
   for (const a of vivos) for (const x of lista(a.asignados)) todos.add(Number(x));
   return {
     ...articulo(p), estado: ver(p.estado), npdv: p.npdv, unidad: p.unidad, vendedor: p.vendedor, record_id: p.record_id, pedido: p.pedido, owner_id: p.owner_id,
-    entrega_prometida: p.entrega_prometida, etapa, etapa_auto: auto, editable: editables.includes(p.unidad ?? ''),
+    entrega_prometida: p.entrega_prometida, creado: p.creado_pdv, etapa, etapa_auto: auto, editable: editables.includes(p.unidad ?? ''),
     listos: vivos.filter((a) => LISTOS.includes(a.estado)).length, total: vivos.length, asignados_todos: [...todos],
     articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), estado: ver(a.estado), foto: fotos.get(a.task_id) ?? null,
       // El aviso del logo, solo mientras falta producirlo (ya listo, entregado o anulado no importa).
@@ -544,8 +547,12 @@ function notasDe(n: NotasArt, taskId: string) {
   return admiteNotas(sku) ? { sku, notas: n.resumen.get(sku!) ?? null } : { sku: null, notas: null };
 }
 
+// La fecha de creación del PDV: la del pedido de venta en Finnegans (fecha_pedido, la misma de Inicio de Producción); si
+// todavía no la tiene, el alta de la tarea en ClickUp y, si el pedido no vino de ClickUp (que se dieron de alta todos
+// juntos el 2/11/2026), su alta en el CRM.
 const SELECT_PDV = `SELECT p.*, r.name AS pedido, r.owner_id, json_extract(r.props, '$.hs_pipeline_stage') AS etapa_pedido,
-    json_extract(r.props, '$.fecha_de_entrega') AS entrega_prometida
+    json_extract(r.props, '$.fecha_de_entrega') AS entrega_prometida,
+    COALESCE(json_extract(r.props, '$.fecha_pedido'), p.creado, CASE WHEN r.source NOT LIKE 'clickup%' THEN substr(r.created_at, 1, 10) END) AS creado_pdv
   FROM produccion p LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0`;
 
 export async function vistaProduccion(db: D1Database, user: User, q: { unidades?: string[]; cerrados?: boolean }) {
@@ -559,7 +566,7 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
       AND (EXISTS (SELECT 1 FROM produccion a WHERE a.pdv_task = p.task_id AND a.es_pdv = 0 AND a.estado NOT IN ('entregados', 'anulado'))
         OR (NOT EXISTS (SELECT 1 FROM produccion a WHERE a.pdv_task = p.task_id AND a.es_pdv = 0) AND p.estado NOT IN ('entregados', 'anulado'))
         OR (?2 = 1 AND p.actualizado > ?3))`)
-    .bind(JSON.stringify(unidades), q.cerrados ? 1 : 0, desde).all<FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }>()).results;
+    .bind(JSON.stringify(unidades), q.cerrados ? 1 : 0, desde).all<FilaPdv>()).results;
   const arts = pdvs.length ? (await db.prepare('SELECT * FROM produccion WHERE es_pdv = 0 AND pdv_task IN (SELECT value FROM json_each(?))')
     .bind(JSON.stringify(pdvs.map((p) => p.task_id))).all<FilaDb>()).results : [];
   const dePdv = new Map<string, FilaDb[]>();
@@ -605,7 +612,7 @@ export async function referencias(db: D1Database) {
 async function pdvVista(db: D1Database, pdvTask: string) {
   const cfg = await produccionConfig(db);
   const p = await db.prepare(`${SELECT_PDV} WHERE p.task_id = ?`).bind(pdvTask)
-    .first<FilaDb & { pedido: string | null; owner_id: number | null; etapa_pedido: string | null; entrega_prometida: string | null }>();
+    .first<FilaPdv>();
   if (!p) return null;
   const arts = (await db.prepare('SELECT * FROM produccion WHERE es_pdv = 0 AND pdv_task = ?').bind(pdvTask).all<FilaDb>()).results;
   const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? p.record_id }));

@@ -1622,9 +1622,13 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-check.solo { position: absolute; top: 6px; right: 6px; cursor: default; }
 /* La dirección de la parada (pedido de Rodrigo del 18/11/2026): una línea, cortada con «…», con el tilde verde si está
    ubicada en el mapa y en naranja si falta o no se encontró. Si se puede corregir es un botón (abre «Corregir dirección»). */
-.cr-t-dir { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; margin-top: 4px; padding: 1px 4px 1px 2px; border: 1px solid transparent; border-radius: 5px;
+.cr-t-dir { display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: 100%; min-width: 0; margin-top: 4px; padding: 1px 4px 1px 2px; border: 1px solid transparent; border-radius: 5px;
   background: none; font: inherit; font-size: 11px; line-height: 1.4; color: var(--ui-ink-2); text-align: left; }
-.cr-t-dir > svg { flex: none; color: var(--ui-ink-3); }
+.cr-t-dir-fila { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.cr-t-dir-fila > svg { flex: none; color: var(--ui-ink-3); }
+/* Piso/depto (en negrita) y observaciones de entrega (en itálica): una línea, cortada; completas en el título. */
+.cr-t-dir-obs b { font-weight: 600; color: var(--ui-ink); }
+.cr-t-dir-obs { padding-left: 15px; font-weight: 400; color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-t-dir-txt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-t-dir-mas { flex: none; font-size: 10px; font-weight: 600; color: var(--ui-ink-3); }
 .cr-t-dir-ok { flex: none; width: 14px; height: 14px; border-radius: 50%; display: grid; place-items: center; background: var(--ok-fill); color: var(--on-ok-fill); }
@@ -1633,7 +1637,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-t-dir-busca { flex: none; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--ui-ink-3); border-top-color: transparent; animation: girar 0.9s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .cr-t-dir-busca { animation: none; } }
 .cr-t-dir.falta { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
-.cr-t-dir.falta > svg { color: var(--warn); }
+.cr-t-dir.falta .cr-t-dir-fila > svg { color: var(--warn); }
 button.cr-t-dir { cursor: pointer; }
 button.cr-t-dir:hover { border-color: var(--ui-line); background: var(--ui-surface); }
 button.cr-t-dir.falta:hover { border-color: var(--warn); background: var(--warn-soft); }
@@ -2518,3 +2522,11 @@ thead .ds-acciones { z-index: 2; }
 .cq-col-pista { flex: 1; width: 100%; max-width: 28px; display: flex; align-items: flex-end; }
 .cq-col-pista i { display: block; width: 100%; min-height: 2px; border-radius: 4px 4px 0 0; background: var(--viz-1); }
 .cq-col-et { font-size: 11px; color: var(--muted, inherit); white-space: nowrap; }
+/* «Corregir dirección»: primero el buscador de Google Maps; la libreta, plegada abajo. */
+.cr-libreta { display: flex; flex-direction: column; gap: 6px; }
+.cr-libreta > summary { cursor: pointer; color: var(--ui-ink-2); }
+.cr-libreta[open] > summary { margin-bottom: 6px; }
+.cr-editar .buscar-direccion { position: relative; }
+.cr-editar-fila { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.cr-editar textarea.input { resize: vertical; min-height: 52px; font: inherit; }
+.cr-p-obs { font-style: italic; }

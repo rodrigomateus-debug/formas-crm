@@ -314,9 +314,24 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   assert.equal((await api('GET', `/records/order/${pedido}`)).data.record.props.direccion_entrega, `Nicaragua ${PDV_V}, Sarandí, Avellaneda`);
   // En la tarjeta de la semana: la misma dirección, con el tilde de ubicada en el mapa, y se corrige en el pedido.
   let dirs = (await api('GET', '/cronograma/direcciones?desde=2026-11-16&hasta=2026-11-22')).data;
-  assert.deepEqual(dirs.direcciones[`2026-11-20|${nueva.clave}`] && { ...dirs.direcciones[`2026-11-20|${nueva.clave}`], nombre: undefined, horario: undefined, company_id: undefined },
-    { direccion: `Nicaragua ${PDV_V}, Sarandí, Avellaneda`, origen: 'pedido', estado: 'ok', record_ids: [pedido], expreso: false, otras: 0, nombre: undefined, horario: undefined, company_id: undefined });
+  assert.deepEqual(dirs.direcciones[`2026-11-20|${nueva.clave}`] && { ...dirs.direcciones[`2026-11-20|${nueva.clave}`], nombre: undefined, horario: undefined, company_id: undefined, detalle: undefined, observaciones: undefined },
+    { direccion: `Nicaragua ${PDV_V}, Sarandí, Avellaneda`, origen: 'pedido', estado: 'ok', record_ids: [pedido], expreso: false, otras: 0, nombre: undefined, horario: undefined, company_id: undefined, detalle: undefined, observaciones: undefined });
   assert.equal((await api('GET', '/cronograma/direcciones?desde=2026-11-16')).status, 400);
+  // Piso, depto, puerta o unidad y las observaciones de entrega: quedan en la dirección del pedido, sin cambiarla, y se ven
+  // en la tarjeta y en la parada.
+  assert.equal((await api('PUT', '/cronograma/direccion', { record_id: pedido, direccion: `Nicaragua ${PDV_V}, Sarandí, Avellaneda`, detalle: 'Piso 4 B', observaciones: 'Tocar timbre de recepción' })).status, 200);
+  dirs = (await api('GET', '/cronograma/direcciones?desde=2026-11-16&hasta=2026-11-22')).data;
+  const conExtra = dirs.direcciones[`2026-11-20|${nueva.clave}`];
+  assert.deepEqual([conExtra.direccion, conExtra.detalle, conExtra.observaciones, conExtra.estado], [`Nicaragua ${PDV_V}, Sarandí, Avellaneda`, 'Piso 4 B', 'Tocar timbre de recepción', 'ok']);
+  const parada = (await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data.paradas.find((p) => p.clave === nueva.clave);
+  assert.deepEqual([parada.detalle, parada.observaciones], ['Piso 4 B', 'Tocar timbre de recepción']);
+  // Cambiar solo la dirección no las borra.
+  assert.equal((await api('PUT', '/cronograma/direccion', { record_id: pedido, direccion: `Nicaragua ${PDV_V}, Sarandí, Avellaneda` })).status, 200);
+  assert.equal((await api('GET', '/cronograma/ruta?fecha=2026-11-20')).data.paradas.find((p) => p.clave === nueva.clave).observaciones, 'Tocar timbre de recepción');
+  // En un proveedor o impresor, en la ficha de la empresa.
+  assert.equal((await api('PUT', '/cronograma/direccion', { company_id: imprefas, detalle: 'Nave 3', observaciones: 'Entrar por el portón de atrás' })).status, 200);
+  const emp = (await api('GET', `/records/company/${imprefas}`)).data.record.props;
+  assert.deepEqual([emp.direccion_detalle, emp.observaciones_entrega, emp.address], ['Nave 3', 'Entrar por el portón de atrás', `Cnel. Sayos ${PDV}, Lanús`]);
 
   // Retira en Formas (tarjeta «Entrega»): no es una parada del chofer; va aparte, en «Retiran en Formas».
   const dirsUrl = `/records/order/${pedido}/direcciones`;

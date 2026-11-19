@@ -113,7 +113,7 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
 
 // `retira`: el id de la dirección de Formas donde lo retira el cliente (entonces no hay dirección que buscar).
 interface Fila { key: string; id?: number; texto: string; place_id: string | null; detalle: string; validada: boolean; retira: string | null }
-const nuevaSesion = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+export const nuevaSesion = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 let n = 0;
 const k = () => `f${++n}`;
 

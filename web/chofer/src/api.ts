@@ -236,6 +236,8 @@ export type ParadaChofer = {
   fotos?: number;
   /** La hora fijada por Logística («A las 12:00»): `horario` ya es esa ventana. */
   pactada?: string | null;
+  /** Piso, depto, puerta o unidad, y las observaciones de entrega que cargó Logística. */
+  detalle?: string | null; observaciones?: string | null;
   visita: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null } | null;
   /** La entrega no va directo: se deja en este expreso, para ese cliente. */
   expreso?: { guia: string | null; cliente: string } | null;

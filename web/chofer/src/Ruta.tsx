@@ -261,7 +261,7 @@ export function RutaHoy({ enLinea, alEntregar }: { enLinea: boolean; alEntregar:
                     <div className="ruta-fila">
                       <button type="button" className="ruta-parada" aria-haspopup="dialog" onClick={() => abrir(p.clave)}>
                         <span className="ruta-n">{hecha ? '✓' : estado === 'fallo' ? '!' : i + 1}</span>
-                        <span className="ruta-quien"><strong>{p.nombre}</strong>{p.expreso && <span>Expreso: dejar para {p.expreso.cliente}{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</span>}<span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span>
+                        <span className="ruta-quien"><strong>{p.nombre}</strong>{p.expreso && <span>Expreso: dejar para {p.expreso.cliente}{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</span>}<span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}{p.detalle ? ` · ${p.detalle}` : ''}</span>
                           {estado === 'fallo' && <em>{MOTIVOS.find((m) => m[0] === p.visita!.motivo)?.[1] ?? 'No se pudo'}{p.visita!.nota ? `: ${p.visita!.nota}` : ''}</em>}
                           {estado === 'salteada' && <em>La dejaste para después</em>}
                           {hecha && !conFoto(p) && <em>Falta la foto del remito</em>}</span>
@@ -383,7 +383,7 @@ function PantallaParada({ p, n, total, llega, sinUbicar, tarde, hecha, conFoto, 
           <h2 id="parada-titulo">{p.nombre}</h2>
           {tipos.length > 0 && <p className="parada-tipos">{tipos.map((t) => <span key={t}>{t}</span>)}</p>}
           {p.expreso && <p className="parada-expreso">Es un expreso: dejá la mercadería para <b>{p.expreso.cliente}</b>{p.expreso.guia ? ` · guía ${p.expreso.guia}` : ''}</p>}
-          <p className="parada-dir"><Icono nombre="lugar" tamano={22} /><span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}</span></p>
+          <p className="parada-dir"><Icono nombre="lugar" tamano={22} /><span>{p.direccion ?? 'Sin dirección: preguntale a Logística'}{p.detalle && <><br /><b>{p.detalle}</b></>}</span></p>
           <p className={`parada-llega${tarde ? ' tarde' : ''}`}><Icono nombre="reloj" tamano={20} />
             <span>{sinUbicar ? 'Sin hora estimada' : <>Llegás cerca de las <b>{hhmm(llega)}</b></>}
               {p.pactada ? <> · <b>{p.pactada}</b></> : p.horario ? ` · reciben de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : p.lugar?.horario ? ` · horario: ${p.lugar.horario}` : ''}
@@ -416,12 +416,13 @@ function PantallaParada({ p, n, total, llega, sinUbicar, tarde, hecha, conFoto, 
           })}
         </section>
 
-        {(contacto || p.lugar?.observaciones || encs.some((e) => e.contacto)) && (
+        {(contacto || p.observaciones || p.lugar?.observaciones || encs.some((e) => e.contacto)) && (
           <section className="parada-seccion">
             <h3>En el lugar</h3>
             {contacto && <p>Preguntá por <b>{contacto}</b></p>}
             {encs.filter((e) => e.contacto).map((e) => <p key={`c${e.id}`}>Preguntá por <b>{e.contacto}</b></p>)}
-            {p.lugar?.observaciones && <p className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{p.lugar.observaciones}</span></p>}
+            {p.observaciones && <p className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{p.observaciones}</span></p>}
+            {p.lugar?.observaciones && p.lugar.observaciones !== p.observaciones && <p className="parada-ojo"><Icono nombre="aviso" tamano={20} /><span>{p.lugar.observaciones}</span></p>}
             {telefonos.length > 0 && <div className="parada-llamar">{telefonos.map((t) => <a key={t} className="boton chico" href={`tel:${t}`}>Llamar {t}</a>)}</div>}
           </section>
         )}

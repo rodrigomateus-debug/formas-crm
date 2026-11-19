@@ -11,6 +11,7 @@ import { Modal, alEsc } from '../components';
 
 interface Direccion { id: number; direccion: string; detalle: string | null; place_id: string | null; validada: boolean; precisa: boolean; maps: string; localidad: string | null;
   retira: string | null; retira_nombre: string | null;
+  fecha: string | null; hecho_at: string | null;   // con varias direcciones: el día de este lugar en el cronograma y si ya se entregó acá
   nombre: string | null; observaciones: string | null; obs_por: string | null }   // cómo se llama el lugar y su anotación, con quién la escribió
 interface Producto { clave: string; nombre: string; codigo: string | null; total: number | null; asignado: number; quedan: number | null }
 interface Base { id: string; nombre: string; direccion: string }
@@ -19,6 +20,7 @@ interface Datos { direcciones: Direccion[]; cantidades: Array<{ direccion_id: nu
 export interface Sugerencia { place_id: string; texto: string; principal: string; secundario: string }
 
 const cant = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
+const diaLugar = (f: string) => { const d = new Date(`${f}T12:00:00`); return `${['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
 
 function Validacion({ d }: { d: Pick<Direccion, 'validada' | 'precisa'> }) {
   if (!d.validada) return <span className="tag warn" title="Cargada a mano: no se verificó con Google Maps. Elegila de las sugerencias de Google para validarla.">Sin validar</span>;
@@ -95,6 +97,8 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
             <div className="row wrap small" style={{ gap: 6, marginTop: 2 }}>
               {x.retira ? <span className="tag info" title="No va en el recorrido del chofer: el cliente lo retira en esta dirección de Formas.">Lo retira el cliente</span> : <Validacion d={x} />}
               {(x.validada || x.retira) && <a href={x.maps} target="_blank" rel="noreferrer">Ver en el mapa</a>}
+              {dirs.length > 1 && x.hecho_at && <span className="tag ok" title="Ya se entregó en este lugar">Entregado</span>}
+              {dirs.length > 1 && x.fecha && !x.hecho_at && <span className="tag info" title="El día de este lugar en el cronograma (lo mueve Logística)">Va el {diaLugar(x.fecha)}</span>}
               {dirs.length > 1 && <span className="muted">{items(x.id).length ? `${items(x.id).length} ${items(x.id).length === 1 ? 'producto' : 'productos'} · ${cant(unidades(x.id))} u.` : 'Sin productos asignados'}</span>}
             </div>
           </div>

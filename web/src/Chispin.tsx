@@ -165,8 +165,12 @@ export interface FestejoPedido {
 let revisarDesdeAfuera: (() => void) | null = null;
 type Grupo = { sub: Subcategoria; cantidad: number };
 const MAX_EN_CAJA = 6;
+const POR_TANDA = 3, EN_TANDA = 150, ENTRE_TANDAS = 470;
+// Cuánto tardan en caer n productos (de a tandas de 3), para que Chispín festeje cuando la caja ya está cerrada.
+const tiempoCaida = (n: number) => Array.from({ length: n }, (_, k) => ((k + 1) % POR_TANDA === 0 || k === n - 1 ? ENTRE_TANDAS : EN_TANDA)).reduce((a, b) => a + b, 0);
 // El iconito va más grande en la caja y en el camión (ahí se luce el dibujo) y chiquito en las fichas de la lista.
-const TAM_ICONO: Record<string, number> = { 'emb-item': 56, 'cam-item': 22 };
+// Los de la caja, bien grandes (pedido de Rodrigo del 19/11/2026: «el triple»): 124 px por la escala de la caja (×1,35) ≈ 167 px.
+const TAM_ICONO: Record<string, number> = { 'emb-item': 124, 'cam-item': 22 };
 const fichaProducto = (g: Grupo, clase: string) => {
   const i = document.createElement('i');
   i.className = clase;
@@ -220,11 +224,12 @@ async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
   const enCaja = grupos.slice(0, MAX_EN_CAJA);
   enCaja.forEach((g, k) => {
     const it = fichaProducto(g, 'emb-item');
-    // Repartidos a lo ancho de la caja, un poco desordenados.
-    // Grandes, como stickers amontonados: se pisan un poco entre ellos.
-    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 28 : enCaja.length === 4 ? 40 : 46) + (Math.random() * 8 - 4)}px`);
-    it.style.setProperty('--r', `${Math.random() * 40 - 20}deg`);
-    it.style.setProperty('--y', `${-4 - (k % 2) * 10}px`);
+    // De a 3 como mucho, lado a lado y siempre dentro del ancho de la caja (pedido de Rodrigo del 19/11/2026: que no se
+    // salgan); desde el cuarto, otra tanda que cae arriba de la anterior y se amontona.
+    const tanda = Math.floor(k / POR_TANDA), lugar = k % POR_TANDA, enTanda = Math.min(POR_TANDA, enCaja.length - tanda * POR_TANDA);
+    it.style.setProperty('--x', `${(lugar - (enTanda - 1) / 2) * 42 + (Math.random() * 6 - 3)}px`);
+    it.style.setProperty('--r', `${Math.random() * 24 - 12}deg`);
+    it.style.setProperty('--y', `${-4 - tanda * 30 - (lugar % 2) * 6}px`);
     caja.insertBefore(it, caja.querySelector('.emb-frente'));
     const chip = document.createElement('span');
     chip.className = 'emb-chip';
@@ -236,11 +241,12 @@ async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
   document.body.appendChild(capa);
   await esperar(350);
   const items = [...caja.querySelectorAll<HTMLElement>('.emb-item')];
-  for (const it of items) {
-    it.classList.add('cae');
+  for (let k = 0; k < items.length; k++) {
+    items[k].classList.add('cae');
     // Cuando toca fondo (a los ~430 ms de los 620 de la caída) la caja acusa el golpe: se reinicia la animación en cada producto.
     setTimeout(() => { caja.classList.remove('pum'); void caja.offsetWidth; caja.classList.add('pum'); }, 430);
-    await esperar(420);
+    // Los de una misma tanda caen casi juntos; entre tandas, la pausa de antes.
+    await esperar((k + 1) % POR_TANDA === 0 || k === items.length - 1 ? ENTRE_TANDAS : EN_TANDA);
   }
   await esperar(450);
   caja.classList.add('cerrada');
@@ -477,7 +483,7 @@ export default function Chispin() {
     setGlobo({ tipo: 'festejo', texto });
     if (p.etapa === 'listo') {
       embalar(grupos, botonRef.current);
-      festejoT.current = [setTimeout(() => { setAnimo('feliz'); festejar(botonRef.current); }, 900 + Math.min(grupos.length, MAX_EN_CAJA) * 420 + 2800)];
+      festejoT.current = [setTimeout(() => { setAnimo('feliz'); festejar(botonRef.current); }, 900 + tiempoCaida(Math.min(grupos.length, MAX_EN_CAJA)) + 2800)];
     } else {
       camion(grupos);
       festejoT.current = [setTimeout(() => setAnimo('feliz'), 2400)];

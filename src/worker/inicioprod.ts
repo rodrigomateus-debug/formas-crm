@@ -57,15 +57,16 @@ export async function inicioProduccion(db: D1Database, ctx: Ctx, q: Record<strin
     FROM records r
     WHERE r.object_type = 'order' AND r.archived = 0 AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') != ?
       ${unidades.length ? `AND UPPER(COALESCE(json_extract(r.props, '$.unidad_de_negocio'), '')) IN (${unidades.map(() => '?').join(', ')})` : ''}
-      AND (COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?)
+      AND (COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') != ?
         OR substr(json_extract(r.props, '$.entregado_el'), 1, 10) BETWEEN ? AND ?
         OR COALESCE(json_extract(r.props, '$.fecha_pedido'), CASE WHEN r.source NOT LIKE 'clickup%' THEN substr(r.created_at, 1, 10) END) BETWEEN ? AND ?)`)
-    .bind(...EN_PRODUCCION, ANULADO, ...unidades, ENTREGADO, PARCIAL, desde, hasta, desde, hasta).all<Fila>();
+    .bind(...EN_PRODUCCION, ANULADO, ...unidades, ENTREGADO, desde, hasta, desde, hasta).all<Fila>();
 
   const enPeriodo = (d: string | null) => !!d && d >= desde && d <= hasta;
   const ingresados = results.filter((r) => enPeriodo(r.fecha_pedido));
   const entregados = results.filter((r) => r.etapa === ENTREGADO && enPeriodo(r.entregado));
-  const abiertos = results.filter((r) => r.etapa !== ENTREGADO && r.etapa !== PARCIAL);
+  // En curso: todo lo que no está entregado del todo (los entregados en parte también: les falta entregar).
+  const abiertos = results.filter((r) => r.etapa !== ENTREGADO);
 
   // Cumplimiento de lo pactado, en los entregados del período que tienen fecha pactada.
   const conPactada = entregados.filter((r) => r.pactada && r.entregado);
@@ -90,8 +91,15 @@ export async function inicioProduccion(db: D1Database, ctx: Ctx, q: Record<strin
       atrasados: abiertos.filter((r) => de(r) && r.pactada && r.pactada < hoy).length, ...cumplimiento(ent), ...tiempos(ent) };
   }).filter((u) => u.ingresados || u.entregados || u.abiertos);
 
-  const etapas = new Map<string, { n: number; monto: number }>();
-  for (const r of abiertos) { const e = etapas.get(r.etapa ?? '') ?? { n: 0, monto: 0 }; e.n++; e.monto += Number(r.amount ?? 0); etapas.set(r.etapa ?? '', e); }
+  // En curso por etapa y por unidad de negocio (shop, corporate, noestres; «otra» si no tiene unidad).
+  const etapas = new Map<string, { n: number; monto: number; unidades: Record<string, { n: number; monto: number }> }>();
+  for (const r of abiertos) {
+    const e = etapas.get(r.etapa ?? '') ?? { n: 0, monto: 0, unidades: {} };
+    const k = UNIDAD_DE[r.unidad ?? ''] ?? 'otra';
+    const x = e.unidades[k] ?? { n: 0, monto: 0 };
+    e.n++; e.monto += Number(r.amount ?? 0); x.n++; x.monto += Number(r.amount ?? 0);
+    e.unidades[k] = x; etapas.set(r.etapa ?? '', e);
+  }
   const lista = (r: Fila) => ({ id: r.id, name: r.name, cliente: r.cliente, owner_id: r.owner_id, unidad: UNIDAD_DE[r.unidad ?? ''] ?? null, etapa: r.etapa,
     pactada: r.pactada, fecha_pedido: r.fecha_pedido, evento: r.tipo === 'EVENTO' });
   const atrasados = abiertos.filter((r) => r.pactada && r.pactada < hoy).map((r) => ({ ...lista(r), dias_tarde: dias(r.pactada!, hoy) }))

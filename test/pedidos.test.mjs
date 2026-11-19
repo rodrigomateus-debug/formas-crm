@@ -276,6 +276,28 @@ test('pedidos desde ClickUp: cada corrida respeta el tope de consultas y sigue e
   cu.bulk = 0;
 });
 
+// Repaso de lo que está en curso (clickup.ts, `abiertos`): un pedido que quedó con una etapa vieja (por ejemplo, al
+// combinarlo con el de HubSpot) y cuyo PDV no cambió en ClickUp no lo corrige la sincronización de siempre; el repaso sí.
+test('pedidos desde ClickUp: el repaso de abiertos corrige la etapa de un PDV que no cambió', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  cu.bulk = 3;
+  const pedido = async () => (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${BULK(0)}`)}`)).data.results[0];
+  const o = await pedido();
+  assert.equal((await api('PATCH', `/records/order/${o.id}`, { props: { hs_pipeline_stage: '1237498998' } })).status, 200);
+  const antes = (await api('POST', '/integrations/clickup/sync', {})).data;
+  assert.equal((await pedido()).props.hs_pipeline_stage, '1237498998', 'la sincronización de siempre no lo relee');
+  const tok = (await api('POST', '/tokens', { name: `Repaso ${RUN}`, source: 'api' })).data.token;
+  const revisar = async (modo) => (await api('POST', '/hooks/pedidos/revisar', { modo }, { authorization: `Bearer ${tok}` })).data;
+  let st = await revisar('abiertos');
+  for (let i = 0; i < 20 && (st.leyendo_lista || st.pendientes); i++) st = await revisar('seguir');
+  assert.ok(!st.error, st.error);
+  assert.equal(st.pendientes, 0);
+  assert.equal((await pedido()).props.hs_pipeline_stage, '1237498994', 'vuelve a En producción, como sus artículos');
+  assert.ok(st.last >= antes.last, 'no retrocede desde cuándo se piden los cambios');
+  cu.bulk = 0;
+});
+
 test('productos: el pedido de los PDV viejos y, si Finnegans no tiene renglones, los artículos de ClickUp', async () => {
   // PDV viejo: «Tipo de Documento: PEDVTAFP» + número del PDV (no la «Fecha pedido»).
   const c = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_C}`)}`)).data.results[0];

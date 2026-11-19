@@ -489,6 +489,11 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
   if (type === 'contact' && lp.email && pp.email && lp.email !== pp.email) {
     fill.hs_additional_emails = [pp.hs_additional_emails, lp.email].filter(Boolean).join(';');
   }
+  // Un pedido con PDV de ClickUp que se combina en uno que no lo tiene (el que vino de HubSpot): la etapa y el detalle de
+  // producción son los de ClickUp, no los que tenía el otro (quedaba, por ejemplo, «Entregado» con el artículo en el impresor).
+  if (type === 'order' && lp.url_clickup && !pp.url_clickup) {
+    for (const k of ['hs_pipeline_stage', 'detalle_produccion', 'entregado_el']) if (lp[k] != null && lp[k] !== '') fill[k] = lp[k];
+  }
   const ts = now();
   await db.batch([
     db.prepare(`INSERT OR IGNORE INTO associations (from_type, from_id, to_type, to_id, label, is_primary, created_at)
@@ -506,6 +511,11 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     db.prepare('UPDATE OR IGNORE conversacion_participantes SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
     db.prepare('DELETE FROM conversacion_participantes WHERE record_id = ?').bind(loserId),
     db.prepare('UPDATE avisos SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
+    // Lo de producción y entrega también: el PDV de ClickUp (si no, dejaba de verse en Producción, que no muestra los PDV
+    // de un pedido archivado), los cambios de estado de sus artículos, bocetos, remitos, logos y lo pendiente para ClickUp.
+    ...['produccion', 'produccion_cambios', 'bocetos', 'remitos', 'logos', 'clickup_salida', 'producto_notas']
+      .map((t) => db.prepare(`UPDATE ${t} SET record_id = ? WHERE record_id = ?`).bind(primaryId, loserId)),
+    ...['remito_pedidos', 'producto_logos'].map((t) => db.prepare(`UPDATE OR IGNORE ${t} SET record_id = ? WHERE record_id = ?`).bind(primaryId, loserId)),
     // Los productos (de Finnegans) se vuelven a leer en el registro que queda.
     db.prepare('DELETE FROM line_items WHERE record_id = ?').bind(loserId),
     db.prepare('DELETE FROM line_item_sync WHERE record_id IN (?, ?)').bind(loserId, primaryId),

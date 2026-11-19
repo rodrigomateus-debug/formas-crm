@@ -413,6 +413,8 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     result = 'creado';
   } else {
     id = existing.id;
+    // El PDV queda atado a este pedido (si estaba atado a otro que se combinó en este, vuelve a verse en Producción).
+    await enlazarPedido(db, t.id, id);
     const cur = JSON.parse(existing.props) as Record<string, unknown>;
     const change: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(synced)) if (v != null && String(v) !== String(cur[k] ?? '')) change[k] = v;
@@ -558,7 +560,7 @@ export async function remitosPendientes(env: Env, limit = 20) {
 
 export interface ClickupState {
   last?: number;                    // cuándo empezó la última lectura completa de la lista (la próxima pide lo cambiado desde ahí)
-  scan?: { full: boolean; step: number; page: number; since: number; started: number } | null;   // lectura en curso
+  scan?: { full: boolean; step: number; page: number; since: number; started: number; abiertos?: boolean } | null;   // lectura en curso
   queue?: Array<[string, number]>;  // PDV por revisar: [tarea, última modificación]
   at?: string; creados?: number; actualizados?: number; error?: string | null; pendientes?: number;
   produccion?: number;              // 1: ya se hizo la lectura completa que llena la vista de Producción (produccion.ts)
@@ -577,7 +579,11 @@ export async function clickupStatus(db: D1Database) {
 // Cada corrida: 1) sigue leyendo la lista (lo que cambió desde la última vez; en la carga completa, también los PDV
 // cerrados de los últimos 45 días y todos los abiertos) y anota los PDV por revisar; 2) revisa los PDV anotados, primero
 // los que cambiaron más recién. Si llega al tope de consultas, lo que falta queda anotado para la próxima.
-export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
+// `abiertos` (pedido de Rodrigo del 19/11/2026): repaso de lo que está en curso, sin releer la lista entera. Vuelve a leer
+// todos los PDV abiertos de ClickUp (los que falten en el CRM se crean), los pedidos del CRM con PDV que no están
+// entregados ni anulados (por si en ClickUp ya se cerraron) y los que se combinaron en el último mes (al combinar queda
+// la etapa del registro que se conserva, que puede ser vieja). No mueve desde cuándo se piden los cambios.
+export async function syncClickup(env: Env, opts: { full?: boolean; abiertos?: boolean } = {}) {
   if (!env.CLICKUP_TOKEN) return { skipped: 'Falta CLICKUP_TOKEN.' };
   const db = env.DB;
   const state = await clickupState(db);
@@ -589,7 +595,19 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
   const out: ClickupState = { ...state, at: new Date(started).toISOString(), creados: 0, actualizados: 0, error: null };
   // La vista de Producción necesita una lectura completa de la lista la primera vez (después, lo cambiado alcanza).
   const llenarProduccion = !state.produccion && !state.scan?.full;
-  if (opts.full || llenarProduccion || (!state.last && !state.scan)) out.scan = { full: true, step: 0, page: 0, since: started - 45 * 86_400_000, started };
+  if (opts.abiertos && !opts.full && !llenarProduccion && state.last) {
+    out.scan = { full: true, step: 1, page: 0, since: started, started, abiertos: true };
+    const { results } = await db.prepare(`SELECT json_extract(r.props, '$.url_clickup') AS url FROM records r WHERE r.object_type = 'order' AND r.archived = 0
+        AND json_extract(r.props, '$.url_clickup') IS NOT NULL
+        AND (COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?1, ?2)
+          OR EXISTS (SELECT 1 FROM changes c WHERE c.record_id = r.id AND c.prop = 'merged' AND c.changed_at > ?3))`)
+      .bind(STAGE.entregado, STAGE.anulado, new Date(started - 30 * 86_400_000).toISOString()).all<{ url: string }>();
+    for (const r of results) {
+      const pid = String(r.url).match(/\/t\/([\w-]+)/)?.[1];
+      if (pid) queue.set(pid, Math.max(queue.get(pid) ?? 0, started));
+    }
+  }
+  else if (opts.full || llenarProduccion || (!state.last && !state.scan)) out.scan = { full: true, step: 0, page: 0, since: started - 45 * 86_400_000, started };
   else if (!state.scan) out.scan = { full: false, step: 0, page: 0, since: state.last! - 5 * 60_000, started };
   try {
     const ctx = await systemCtx(env);
@@ -600,13 +618,15 @@ export async function syncClickup(env: Env, opts: { full?: boolean } = {}) {
       const d = await cu<{ tasks: CuTask[]; last_page?: boolean }>(env, `/list/${LIST}/task`, { ...params, subtasks: 'true', page: sc.page }, b);
       for (const t of d.tasks) {
         const pid = t.parent || t.id;
-        queue.set(pid, Math.max(queue.get(pid) ?? 0, Number(t.date_updated ?? 0)));
+        // En el repaso de abiertos se releen todos, no solo los que cambiaron.
+        queue.set(pid, Math.max(queue.get(pid) ?? 0, sc.abiertos ? sc.started : Number(t.date_updated ?? 0)));
       }
       out.actualizados! += await ownersFromList(db, ctx, d.tasks);
       // La lista ya trae cada artículo con sus campos y sus asignados: a la vista de Producción, sin consultas de más.
       await guardarTareas(db, d.tasks);
       if (d.last_page === false && d.tasks.length && sc.page < 200) sc.page++;
       else if (sc.full && sc.step === 0) { sc.step = 1; sc.page = 0; }
+      else if (sc.abiertos) out.scan = null;
       else { out.last = sc.started; if (sc.full) out.produccion = 1; out.scan = null; }
     }
     await leerEstados(env, b).catch((e) => { if (e instanceof OutOfBudget) throw e; console.error('estados', (e as Error).message); });

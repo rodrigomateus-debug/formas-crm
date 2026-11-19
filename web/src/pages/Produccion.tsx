@@ -10,6 +10,7 @@ import { NombreProveedor } from '../proveedores';
 import { RecordPreview } from './RecordPage';
 import { BotonVacias, useColapso } from './Board';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
+import { revisarFestejos } from '../Chispin';
 
 // Un clic en un renglón o una tarjeta abre la vista previa del pedido, salvo que sea en algo que se usa ahí mismo (un
 // desplegable, una fecha, un link, los asignados…).
@@ -190,6 +191,7 @@ export default function ProduccionPage() {
     setV((cur) => cur && { ...cur, pdvs: cur.pdvs.map((p) => (p.task_id !== pdv.task_id ? p : aplicar(p, taskId, campo, valor))) });
     try {
       const r = await http<{ pdv: Pdv | null }>('PATCH', `/produccion/${encodeURIComponent(taskId)}`, { campo, valor });
+      revisarFestejos();   // si el pedido pasó a listo para entregar o entregado, Chispín lo festeja (Chispin.tsx)
       if (r.pdv) setV((cur) => cur && { ...cur, pdvs: cur.pdvs.map((p) => (p.task_id === r.pdv!.task_id ? r.pdv! : p)) });
     } catch (e) {
       setV(antes);

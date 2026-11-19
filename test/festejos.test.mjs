@@ -1,5 +1,6 @@
 // Festejos de Chispín (festejos.ts): la vendedora ve sus pedidos que pasaron a «Listo para entregar» (la caja) o a
-// «Entregado» (el camión), con sus productos; los de otra vendedora, los que siguen en otra etapa o se anularon, no.
+// «Entregado» (el camión), con sus productos, y también quien los movió; los de otra vendedora que no movió, los que
+// siguen en otra etapa o se anularon, no.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -16,7 +17,7 @@ async function api(method, path, body) {
 const como = (u) => { asUser = u; };
 const EN_PRODUCCION = '1237498994', LISTO = '1237498996', ENTREGADO = '1237498998', ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
 
-test('festejos de pedidos: listo para entregar y entregado, solo los suyos', async () => {
+test('festejos de pedidos: listo para entregar y entregado, los suyos y los que movió', async () => {
   como(null);
   const vero = (await api('POST', '/users', { email: `vero.festejos.${RUN}@formas.ar`, name: `Vero ${RUN}`, profile: 'comercial', role: 'member' })).data;
   const otra = (await api('POST', '/users', { email: `otra.festejos.${RUN}@formas.ar`, name: `Otra ${RUN}`, profile: 'comercial', role: 'member' })).data;
@@ -49,4 +50,10 @@ test('festejos de pedidos: listo para entregar y entregado, solo los suyos', asy
   // La otra vendedora ve el suyo.
   como(otra.email);
   assert.ok((await api('GET', '/pedidos/festejos')).data.pedidos.some((p) => p.id === ajeno.id));
+
+  // Quien lo movió también lo ve, aunque no sea suyo (acá, el usuario de desarrollo que movió todos), con la dueña.
+  como(null);
+  const mio = (await api('GET', '/pedidos/festejos')).data.pedidos.find((p) => p.id === ajeno.id);
+  assert.ok(mio, 'quien lo movió lo ve');
+  assert.equal(mio.duenio_id, otra.id);
 });

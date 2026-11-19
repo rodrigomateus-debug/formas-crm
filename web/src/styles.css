@@ -2894,7 +2894,12 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 .chispin-lluvia i { position: absolute; top: -16px; width: 8px; height: 13px; border-radius: 2px; opacity: 0; animation: chispin-cae var(--t) cubic-bezier(.3, .1, .6, 1) var(--d) forwards; }
 .chispin-lluvia i[data-c="0"] { background: #000085; } .chispin-lluvia i[data-c="1"] { background: #8ee021; } .chispin-lluvia i[data-c="2"] { background: #65a7dd; }
 .chispin-lluvia i[data-c="3"] { background: #f0b45a; } .chispin-lluvia i[data-c="4"] { background: #ff7d74; border-radius: 50%; width: 9px; height: 9px; }
-.chispin-zona.festejando { z-index: 310; }   /* el globo y Chispín, por encima de los papelitos y la plata */
+.chispin-zona.festejando { z-index: 310; }
+/* «Saltear»: corta el festejo si estás apurado (también con Esc o tocando a Chispín). */
+.chispin-saltear { margin-right: 34px; padding: 5px 12px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface); color: var(--ui-ink);
+  box-shadow: var(--shadow-float); font: 600 12.5px/1.2 Poppins, system-ui, sans-serif; cursor: pointer; animation: chispin-globo-in .3s var(--ease-out); }
+.chispin-saltear:hover { background: var(--ui-surface-sunken); }
+.chispin-saltear:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }   /* el globo y Chispín, por encima de los papelitos y la plata */
 .chispin-zona.festejando .chispin-globo { max-width: 300px; font-size: 14px; font-weight: 600; }
 .chispin-zona.festejando .chispin-lampara { background: var(--chispin-lampara); box-shadow: 0 0 0 4px rgba(142, 224, 33, .3), 0 0 22px 8px rgba(142, 224, 33, .7); }
 /* Entró el anticipo (siFestejaPedido en Chispin.tsx): con los anteojos puestos saca un fajo con la mano izquierda y con la

@@ -161,8 +161,12 @@ function tirarPlata(desde?: HTMLElement | null) {
 export interface FestejoPedido {
   id: number; name: string; etapa: 'listo' | 'entregado'; at: string; monto: number | null; moneda: string | null;
   articulos: Array<{ nombre: string; cantidad: number | null }>; hizo: Array<{ nombre: string; user_id: number | null }>;
+  duenio_id: number | null;
 }
 let revisarDesdeAfuera: (() => void) | null = null;
+// Después de mover un pedido desde una pantalla que no pasa por siFestejaPedido (Producción): que Chispín se fije enseguida
+// (y otra vez al rato, por si ClickUp tarda en devolver la etapa).
+export function revisarFestejos() { setTimeout(() => revisarDesdeAfuera?.(), 1200); setTimeout(() => revisarDesdeAfuera?.(), 6000); }
 type Grupo = { sub: Subcategoria; cantidad: number };
 const MAX_EN_CAJA = 6;
 const POR_TANDA = 3, EN_TANDA = 150, ENTRE_TANDAS = 470;
@@ -465,6 +469,21 @@ export default function Chispin() {
   }, [meta, yo, ponerAnteojos]);
   useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
 
+  // Saltear el festejo si estás apurado (pedido de Rodrigo del 19/11/2026): el botón «Saltear», la tecla Esc, tocar a Chispín
+  // o la ✕ del globo cortan todo de una (papelitos, plata, la caja o el camión, los anteojos y el globo).
+  const saltear = useCallback(() => {
+    festejoT.current.forEach(clearTimeout);
+    festejoT.current = [];
+    document.querySelectorAll('.chispin-lluvia, .chispin-plata, .chispin-papelitos, .chispin-embalar, .chispin-camion').forEach((e) => e.remove());
+    setFestejando(false); setGlobo(null); setAnimo(''); ponerAnteojos(false);
+  }, [ponerAnteojos]);
+  useEffect(() => {
+    if (!festejando) return;
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') saltear(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [festejando, saltear]);
+
   // ---------- Los pedidos de ella listos para entregar o entregados: se buscan cada tanto y se festejan de a uno ----------
   const cola = useRef<FestejoPedido[]>([]);
   const abiertoRef = useRef(false);
@@ -476,7 +495,13 @@ export default function Chispin() {
     const productos = resumenProductos(grupos);
     const quien = primerNombre(meta.me.name);
     const hizo = [...new Set(p.hizo.filter((h) => h.user_id !== yo).map((h) => primerNombre(h.nombre)).filter(Boolean))];
-    const texto = p.etapa === 'listo'
+    // Si no es suyo (lo movió ella, pero es de otra vendedora), se nombra a la dueña.
+    const otra = p.duenio_id != null && p.duenio_id !== yo ? primerNombre(userOf(meta, p.duenio_id)?.name) : '';
+    const texto = otra
+      ? (p.etapa === 'listo'
+        ? `📦 ¡Está listo ${pedido}, de ${otra}!${productos ? ` Ya están embalados: ${productos}.` : ''}${hizo.length ? ` Lo terminó ${hizo.join(' y ')} 💪` : ''}`
+        : `🚚 ¡Entregado! ${pedido}, de ${otra}, ya llegó al cliente.${productos ? ` Iban ${productos}.` : ''} 🙌`)
+      : p.etapa === 'listo'
       ? `📦 ${quien ? `${quien}, ¡` : '¡'}está listo ${pedido}!${productos ? ` Ya están embalados: ${productos}.` : ''}${hizo.length ? ` Lo terminó ${hizo.join(' y ')} 💪` : ''} A coordinar la entrega.`
       : `🚚 ¡Entregado! ${pedido} ya llegó al cliente${quien ? `, ${quien}` : ''}.${productos ? ` Iban ${productos}.` : ''} ¡Otro más! 🙌`;
     setAbierto(false); setFestejando(true); setAnimo(p.etapa === 'listo' ? '' : 'mira');
@@ -624,14 +649,17 @@ export default function Chispin() {
           toast={toast} />
       )}
       {abierto && !ideas && <div className="chispin-panel cargando" role="dialog" aria-label="Buzón de ideas"><div className="muted small">Buscando las ideas…</div></div>}
+      {festejando && !abierto && (
+        <button type="button" className="chispin-saltear" onClick={saltear} title="Cortar el festejo (Esc)">Saltear ⏭</button>
+      )}
       {globo && !abierto && !estorba && (
         <div className={`chispin-globo ${globo.tipo}`} role="status">
-          <button type="button" className="chispin-globo-texto" onClick={() => (festejando ? setGlobo(null) : abrir())}>{globo.texto}</button>
-          <button type="button" className="chispin-globo-x" onClick={() => setGlobo(null)} aria-label="Cerrar"><Icon name="x" size={12} /></button>
+          <button type="button" className="chispin-globo-texto" onClick={() => (festejando ? saltear() : abrir())}>{globo.texto}</button>
+          <button type="button" className="chispin-globo-x" onClick={() => (festejando ? saltear() : setGlobo(null))} aria-label="Cerrar"><Icon name="x" size={12} /></button>
         </div>
       )}
       <div className="chispin-lugar">
-        <button ref={botonRef} type="button" className="chispin" onClick={() => (abierto ? setAbierto(false) : escondido && !estorba ? esconder(false) : abrir())}
+        <button ref={botonRef} type="button" className="chispin" onClick={() => (festejando ? saltear() : abierto ? setAbierto(false) : escondido && !estorba ? esconder(false) : abrir())}
           onPointerEnter={() => setAnimo((a) => (a === '' || a === 'duerme' ? 'mira' : a))} onPointerLeave={() => setAnimo((a) => (a === 'mira' ? '' : a))}
           aria-expanded={abierto} aria-label={escondido ? 'Mostrar a Chispín (buzón de ideas)' : nuevas ? `Buzón de ideas: ${nuevas} nuevas` : 'Buzón de ideas para mejorar el Hub'}
           title={escondido ? 'Volver a mostrar a Chispín' : 'Ideas para mejorar el Hub'}>

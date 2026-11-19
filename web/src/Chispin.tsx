@@ -465,6 +465,21 @@ export default function Chispin() {
   }, [meta, yo, ponerAnteojos]);
   useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
 
+  // Saltear el festejo si estás apurado (pedido de Rodrigo del 19/11/2026): el botón «Saltear», la tecla Esc, tocar a Chispín
+  // o la ✕ del globo cortan todo de una (papelitos, plata, la caja o el camión, los anteojos y el globo).
+  const saltear = useCallback(() => {
+    festejoT.current.forEach(clearTimeout);
+    festejoT.current = [];
+    document.querySelectorAll('.chispin-lluvia, .chispin-plata, .chispin-papelitos, .chispin-embalar, .chispin-camion').forEach((e) => e.remove());
+    setFestejando(false); setGlobo(null); setAnimo(''); ponerAnteojos(false);
+  }, [ponerAnteojos]);
+  useEffect(() => {
+    if (!festejando) return;
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') saltear(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [festejando, saltear]);
+
   // ---------- Los pedidos de ella listos para entregar o entregados: se buscan cada tanto y se festejan de a uno ----------
   const cola = useRef<FestejoPedido[]>([]);
   const abiertoRef = useRef(false);
@@ -624,14 +639,17 @@ export default function Chispin() {
           toast={toast} />
       )}
       {abierto && !ideas && <div className="chispin-panel cargando" role="dialog" aria-label="Buzón de ideas"><div className="muted small">Buscando las ideas…</div></div>}
+      {festejando && !abierto && (
+        <button type="button" className="chispin-saltear" onClick={saltear} title="Cortar el festejo (Esc)">Saltear ⏭</button>
+      )}
       {globo && !abierto && !estorba && (
         <div className={`chispin-globo ${globo.tipo}`} role="status">
-          <button type="button" className="chispin-globo-texto" onClick={() => (festejando ? setGlobo(null) : abrir())}>{globo.texto}</button>
-          <button type="button" className="chispin-globo-x" onClick={() => setGlobo(null)} aria-label="Cerrar"><Icon name="x" size={12} /></button>
+          <button type="button" className="chispin-globo-texto" onClick={() => (festejando ? saltear() : abrir())}>{globo.texto}</button>
+          <button type="button" className="chispin-globo-x" onClick={() => (festejando ? saltear() : setGlobo(null))} aria-label="Cerrar"><Icon name="x" size={12} /></button>
         </div>
       )}
       <div className="chispin-lugar">
-        <button ref={botonRef} type="button" className="chispin" onClick={() => (abierto ? setAbierto(false) : escondido && !estorba ? esconder(false) : abrir())}
+        <button ref={botonRef} type="button" className="chispin" onClick={() => (festejando ? saltear() : abierto ? setAbierto(false) : escondido && !estorba ? esconder(false) : abrir())}
           onPointerEnter={() => setAnimo((a) => (a === '' || a === 'duerme' ? 'mira' : a))} onPointerLeave={() => setAnimo((a) => (a === 'mira' ? '' : a))}
           aria-expanded={abierto} aria-label={escondido ? 'Mostrar a Chispín (buzón de ideas)' : nuevas ? `Buzón de ideas: ${nuevas} nuevas` : 'Buzón de ideas para mejorar el Hub'}
           title={escondido ? 'Volver a mostrar a Chispín' : 'Ideas para mejorar el Hub'}>

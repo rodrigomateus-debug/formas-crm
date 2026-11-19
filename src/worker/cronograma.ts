@@ -16,7 +16,8 @@ import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, t
 // fechas de cada artículo (tabla `produccion`, que llena la sincronización de ClickUp):
 //
 //   Entregas  ← ENTREGAS (FECHA REAL)          Retiros ← RETIROS (PROVEEDOR) y RETIRO (IMPRESOR)
-//   Ingresos  ← INGRESO (PROVEEDOR)            Egresos ← EGRESO (IMPRESOR)
+//   Ingresos  ← INGRESO (PROVEEDOR) e          Egresos ← EGRESO (IMPRESOR)
+//               INGRESO (IMPRESOR)
 //
 // Mover un movimiento a otro día escribe la fecha en ClickUp; marcarlo como hecho cambia el estado del artículo en
 // ClickUp. Vale para todas las unidades, aunque producción todavía trabaje Corporate en ClickUp. Lo único propio son las
@@ -28,16 +29,19 @@ export const TIPOS = {
   retiro_proveedor: { col: 'retiro_proveedor', rol: 'proveedor', nombre: 'Retiro' },
   egreso: { col: 'egreso_impresor', rol: 'impresor', nombre: 'Egreso' },
   retiro_impresor: { col: 'retiro_impresor', rol: 'impresor', nombre: 'Retiro' },
+  ingreso_impresor: { col: 'ingreso_impresor', rol: 'impresor', nombre: 'Ingreso' },
 } as const;
 export type Tipo = keyof typeof TIPOS;
 const esTipo = (t: unknown): t is Tipo => typeof t === 'string' && t in TIPOS;
+// Los que llegan solos al depósito (los trae el proveedor o el impresor): no son una parada de ningún recorrido.
+export const llega = (t: Tipo) => t === 'ingreso' || t === 'ingreso_impresor';
 export const esDia = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
 
 // A qué estado pasa el artículo en ClickUp cuando se marca hecho cada movimiento. Se puede cambiar en la configuración
 // del cronograma (settings `cronograma`).
 const ESTADO_AL_HACER: Record<Tipo, string> = {
   ingreso: 'en control de depósito', retiro_proveedor: 'en control de depósito', egreso: 'en el impresor',
-  retiro_impresor: 'en revision', entrega: 'entregados',
+  retiro_impresor: 'en revision', ingreso_impresor: 'en revision', entrega: 'entregados',
 };
 // Con el artículo en estos estados, lo anterior a la entrega ya pasó: no se lo vuelve atrás.
 const AVANZADOS = ['listo para entergar', 'listo para entregar', 'parcial entregado', 'entregados'];
@@ -116,9 +120,9 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
   for (const f of filas) {
     const fechas: Record<Tipo, string | null> = {
       entrega: f.entrega_real ?? f.pdv_entrega, ingreso: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
-      egreso: f.egreso_impresor, retiro_impresor: f.retiro_impresor,
+      egreso: f.egreso_impresor, retiro_impresor: f.retiro_impresor, ingreso_impresor: f.ingreso_impresor,
     };
-    const previos = [fechas.ingreso, fechas.retiro_proveedor, fechas.egreso, fechas.retiro_impresor].filter((x): x is string => !!x).sort();
+    const previos = [fechas.ingreso, fechas.retiro_proveedor, fechas.egreso, fechas.retiro_impresor, fechas.ingreso_impresor].filter((x): x is string => !!x).sort();
     for (const tipo of Object.keys(TIPOS) as Tipo[]) {
       const fecha = fechas[tipo];
       if (!fecha || fecha < desde || fecha > hasta) continue;
@@ -134,10 +138,13 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
       if (tipo === 'entrega' && esDia(pactada) && fecha > pactada) avisos.push(`Pactada para el ${Number(pactada.slice(8))}/${Number(pactada.slice(5, 7))}`);
       if (tipo === 'entrega' && previos.length) {
         const ultimo = previos[previos.length - 1];
-        if (ultimo > fecha) avisos.push('La entrega es anterior al último retiro');
+        if (ultimo > fecha) avisos.push('La entrega es anterior al último retiro o ingreso');
         else if (ultimo === fecha) avisos.push('Se retira y se entrega el mismo día');
       }
       if (tipo === 'retiro_impresor' && fechas.egreso && fechas.egreso > fecha) avisos.push('El retiro del impresor es anterior al egreso');
+      if (tipo === 'ingreso_impresor' && fechas.egreso && fechas.egreso > fecha) avisos.push('El ingreso del impresor es anterior al egreso');
+      // Lo trae el impresor o se lo va a buscar: es uno o el otro.
+      if ((tipo === 'ingreso_impresor' || tipo === 'retiro_impresor') && fechas.ingreso_impresor && fechas.retiro_impresor) avisos.push('Tiene ingreso y retiro del impresor: es uno o el otro');
       out.push({
         id: `${f.task_id}:${tipo}`, tipo, fecha, task_id: f.task_id, pdv_task: f.pdv_task, npdv: f.pdv_npdv ?? f.npdv, cliente: f.cliente ?? f.pdv_cliente,
         unidad: f.pdv_unidad ?? f.unidad, record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
@@ -151,7 +158,8 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
 
 export async function movimientos(db: D1Database, desde: string, hasta: string) {
   const filas = (await db.prepare(`${SELECT_MOV} AND (COALESCE(a.entrega_real, p.entrega_real) BETWEEN ?1 AND ?2 OR a.ingreso_proveedor BETWEEN ?1 AND ?2
-      OR a.retiro_proveedor BETWEEN ?1 AND ?2 OR a.egreso_impresor BETWEEN ?1 AND ?2 OR a.retiro_impresor BETWEEN ?1 AND ?2)`).bind(desde, hasta).all<FilaMov>()).results;
+      OR a.retiro_proveedor BETWEEN ?1 AND ?2 OR a.egreso_impresor BETWEEN ?1 AND ?2 OR a.retiro_impresor BETWEEN ?1 AND ?2
+      OR a.ingreso_impresor BETWEEN ?1 AND ?2)`).bind(desde, hasta).all<FilaMov>()).results;
   const [ops, hechos, feriados] = await Promise.all([
     opciones(db),
     db.prepare(`SELECT h.task_id, h.tipo, h.user_id FROM cronograma_hechos h JOIN produccion a ON a.task_id = h.task_id`).all<{ task_id: string; tipo: string; user_id: number | null }>(),
@@ -208,11 +216,11 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
   const encargos = encs.filter((e) => e.fecha >= q.desde && e.fecha <= q.hasta);
   const [, , quienes, horas] = await Promise.all([ponerDominios(db, deLaSemana), ponerChoferes(db, deLaSemana, encargos, q.desde, q.hasta), choferesYExpresos(db),
     horasDelDia(db, q.desde, q.hasta)]);
-  for (const m of deLaSemana) if (m.tipo !== 'ingreso') m.parada = claveParada(m);
+  for (const m of deLaSemana) if (!llega(m.tipo)) m.parada = claveParada(m);
   // La hora fijada en la ruta del día, en la tarjeta de su parada (un pedido que va a varias direcciones: la primera).
   if (horas.size) {
     const texto = (fecha: string, clave: string | undefined) => { const h = clave ? horas.get(`${fecha}|${clave}`) : null; return h ? textoPactada(h) : null; };
-    for (const m of deLaSemana) if (m.tipo !== 'ingreso') m.hora = texto(m.fecha, claveParada(m));
+    for (const m of deLaSemana) if (!llega(m.tipo)) m.hora = texto(m.fecha, claveParada(m));
     for (const e of encargos) e.hora = texto(e.fecha, e.parada);
   }
   return {
@@ -243,7 +251,7 @@ async function ponerChoferes(db: D1Database, movs: Movimiento[], encs: EncargoDi
   const porDia = new Map<string, Array<{ chofer: string | null; orden: string[] }>>();
   for (const r of guardadas.results) porDia.set(r.fecha, [...(porDia.get(r.fecha) ?? []), { chofer: r.chofer, orden: lista(r.orden).map(String) }]);
   for (const m of movs) {
-    if (m.tipo === 'ingreso') continue;
+    if (llega(m.tipo)) continue;
     const todas = m.tipo === 'entrega' && m.record_id ? dirs.get(m.record_id) ?? [] : [];
     if (todas.length && todas.every((d) => d.retira)) {
       m.retira_en = [...new Set(todas.map((d) => cfg.bases.find((x) => x.id === d.retira)?.nombre ?? d.direccion))].join(' y ');
@@ -256,7 +264,7 @@ async function ponerChoferes(db: D1Database, movs: Movimiento[], encs: EncargoDi
   // en la ruta del día: la entrega con la empresa del pedido y su dirección, el retiro o egreso con la dirección de la
   // empresa (sin lo que se busca afuera, Finnegans o el mapa).
   if (!encs.length) return;
-  const viajes = movs.filter((m) => m.tipo !== 'ingreso' && !m.retira_en);
+  const viajes = movs.filter((m) => !llega(m.tipo) && !m.retira_en);
   const { empresaDePedido, dirEmpresa } = await empresasDe(db, [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],
     [...new Set(viajes.map((m) => m.company_id).filter((x): x is number => !!x))]);
   const sitios = new Map<string, Sitio[]>();
@@ -750,8 +758,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   const b = Budget.of(env);
   const cfg = await cronogramaConfig(db);
   const { movs } = await movimientos(db, fecha, fecha);
-  const llegan = movs.filter((m) => m.tipo === 'ingreso');
-  const viajes = movs.filter((m) => m.tipo !== 'ingreso');
+  const llegan = movs.filter((m) => llega(m.tipo));
+  const viajes = movs.filter((m) => !llega(m.tipo));
 
   // Las empresas (proveedores, impresores y clientes de los pedidos) con su dirección y su horario.
   const pedidosIds = [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];

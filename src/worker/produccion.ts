@@ -31,6 +31,8 @@ export const CAMPOS = {
   retiro_proveedor: { id: '7fd568b7-9cfd-45fc-9f05-22864a0b9e9a', nombre: 'RETIROS (PROVEEDOR)', tipo: 'date' },
   egreso_impresor: { id: 'c278fabb-b558-4a28-a6f6-f6b26a8e29eb', nombre: 'EGRESO (IMPRESOR)', tipo: 'date' },
   retiro_impresor: { id: '3146d848-4952-4ac8-aac4-971e1361609b', nombre: 'RETIRO (IMPRESOR)', tipo: 'date' },
+  // El impresor trae lo que hizo al depósito, en vez de ir a retirarlo (pedido de Producción del 19/11/2026). Pasa poco.
+  ingreso_impresor: { id: '3806fa77-1c1c-46d3-b631-0168b139de9d', nombre: 'INGRESO (IMPRESOR)', tipo: 'date' },
   proveedor: { id: 'fd7010e7-cece-4d06-850a-ce5e948c1f83', nombre: 'PROVEEDOR', tipo: 'drop_down' },
   impresor: { id: '555918b9-e727-4f89-aa67-b97a94dd6136', nombre: 'IMPRESOR', tipo: 'drop_down' },
   cantidad: { id: 'eb9f3a13-3f31-4a2f-b924-3cfaec8d376f', nombre: 'CANTIDAD', tipo: 'number' },
@@ -41,7 +43,7 @@ export const CAMPOS = {
   npdv: { id: 'c0ead31a-5a3e-4a89-b666-f2d282a6f921', nombre: 'N° PDV', tipo: 'short_text' },
 } as const;
 type Campo = keyof typeof CAMPOS;
-const FECHAS = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor'] as const;
+const FECHAS = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'] as const;
 // Lo que se puede editar desde el CRM.
 export const EDITABLES = ['estado', 'asignados', ...FECHAS, 'proveedor', 'impresor', 'cantidad_controlada'] as const;
 type Editable = (typeof EDITABLES)[number];
@@ -88,7 +90,7 @@ interface Fila {
   task_id: string; pdv_task: string; es_pdv: number; nombre: string; npdv: string | null; estado: string;
   unidad: string | null; cliente: string | null; vendedor: string | null; cantidad: number | null; cantidad_controlada: number | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
-  egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: string; etiquetas: string;
+  egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null; vence: string | null; asignados: string; etiquetas: string;
   orden: number; url: string | null; actualizado: number; codigo: string | null;
 }
 
@@ -145,7 +147,7 @@ function filaDe(t: CuTask, pdvTask: string): Fila & { campos: boolean } {
     proveedor: opcionDe(campoDe(t, 'proveedor')), impresor: opcionDe(campoDe(t, 'impresor')),
     entrega_real: diaDe(campoDe(t, 'entrega_real')?.value), ingreso_proveedor: diaDe(campoDe(t, 'ingreso_proveedor')?.value),
     retiro_proveedor: diaDe(campoDe(t, 'retiro_proveedor')?.value), egreso_impresor: diaDe(campoDe(t, 'egreso_impresor')?.value),
-    retiro_impresor: diaDe(campoDe(t, 'retiro_impresor')?.value), vence: diaDe(t.due_date),
+    retiro_impresor: diaDe(campoDe(t, 'retiro_impresor')?.value), ingreso_impresor: diaDe(campoDe(t, 'ingreso_impresor')?.value), vence: diaDe(t.due_date),
     asignados: JSON.stringify((t.assignees ?? []).map((a) => a.id).filter((x) => x != null)),
     etiquetas: JSON.stringify((t.tags ?? []).map((x) => x.name).filter(Boolean)),
     orden: Number(t.orderindex ?? 0) || 0, url: t.url ?? null, actualizado: Number(t.date_updated ?? 0) || 0,
@@ -155,7 +157,7 @@ function filaDe(t: CuTask, pdvTask: string): Fila & { campos: boolean } {
 }
 
 const COLS = ['task_id', 'pdv_task', 'es_pdv', 'nombre', 'npdv', 'estado', 'unidad', 'cliente', 'vendedor', 'cantidad', 'cantidad_controlada', 'proveedor',
-  'impresor', 'entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado',
+  'impresor', 'entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado',
   'codigo'] as const;
 // Sin los campos personalizados se actualiza solo lo que trae siempre la tarea (y el código, si vino la descripción).
 const SIEMPRE = ['nombre', 'estado', 'vence', 'asignados', 'etiquetas', 'orden', 'url', 'actualizado', 'codigo'];
@@ -472,7 +474,7 @@ export type FilaDb = Fila & { record_id: number | null; proveedor_auto?: string 
 export interface ArticuloVista {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
-  egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
+  egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
   foto?: string | null;   // la foto del producto, la misma que en el pedido (fotosDeArticulos en productos.ts)
   logo?: string | null;   // cómo está el logo del producto: ok, textos, no_vectorial, sin_verificar o falta (logos.ts)
   proveedor_sku: string | null;   // el SKU, si el proveedor lo puso el CRM por el SKU y sigue ese (completarProveedores)
@@ -492,7 +494,7 @@ export const lista = (s: string | null | undefined) => { try { const v = JSON.pa
 const articulo = (f: FilaDb): ArticuloVista => ({
   task_id: f.task_id, nombre: f.nombre, estado: f.estado, cantidad: f.cantidad, cantidad_controlada: f.cantidad_controlada, cliente: f.cliente,
   proveedor: f.proveedor, impresor: f.impresor, entrega_real: f.entrega_real, ingreso_proveedor: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
-  egreso_impresor: f.egreso_impresor, retiro_impresor: f.retiro_impresor, vence: f.vence, asignados: lista(f.asignados).map(Number), etiquetas: lista(f.etiquetas).map(String),
+  egreso_impresor: f.egreso_impresor, retiro_impresor: f.retiro_impresor, ingreso_impresor: f.ingreso_impresor, vence: f.vence, asignados: lista(f.asignados).map(Number), etiquetas: lista(f.etiquetas).map(String),
   url: f.url, proveedor_sku: f.proveedor && f.proveedor === f.proveedor_auto ? f.codigo : null,
 });
 
@@ -743,7 +745,7 @@ export async function refrescarPdv(env: Env, ctx: Ctx, pdvTask: string) {
 // Lo que está en producción con un proveedor o impresor (la ficha de su empresa).
 export async function produccionDeEmpresa(db: D1Database, companyId: number) {
   const { results } = await db.prepare(`SELECT a.task_id, a.nombre, a.estado, a.cantidad, a.proveedor, a.impresor, a.ingreso_proveedor, a.retiro_proveedor,
-      a.egreso_impresor, a.retiro_impresor, a.url, p.npdv, COALESCE(a.cliente, p.cliente) AS cliente, p.record_id, p.entrega_real,
+      a.egreso_impresor, a.retiro_impresor, a.ingreso_impresor, a.url, p.npdv, COALESCE(a.cliente, p.cliente) AS cliente, p.record_id, p.entrega_real,
       CASE WHEN op.company_id = ?1 THEN 'proveedor' ELSE 'impresor' END AS rol
     FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task
       LEFT JOIN produccion_opciones op ON op.campo = 'proveedor' AND op.option_id = a.proveedor

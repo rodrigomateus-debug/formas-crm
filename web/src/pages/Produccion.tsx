@@ -24,7 +24,7 @@ const clicAdentro = (e: React.MouseEvent) =>
 interface Articulo {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
-  egreso_impresor: string | null; retiro_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
+  egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null; vence: string | null; asignados: number[]; etiquetas: string[]; url: string | null;
   foto?: string | null;
   logo?: string | null;   // ok, textos, no_vectorial, sin_verificar o falta (logos.ts)
   proveedor_sku?: string | null;   // el SKU, si el proveedor lo puso el CRM por el SKU (completarProveedores)
@@ -44,7 +44,7 @@ interface Persona { clickup_id: number; nombre: string; user_id: number | null; 
 interface Opcion { campo: 'proveedor' | 'impresor'; option_id: string; nombre: string; color: string | null; orden: number; company_id: number | null; empresa: string | null }
 interface Estado { status: string; color: string; type: string }
 interface Vista { pdvs: Pdv[]; personas: Persona[]; opciones: Opcion[]; estados: Estado[]; config: { unidades: string[] }; unidades: string[]; puede_editar: boolean }
-type Campo = 'estado' | 'asignados' | 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'proveedor' | 'impresor' | 'cantidad_controlada';
+type Campo = 'estado' | 'asignados' | 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor' | 'proveedor' | 'impresor' | 'cantidad_controlada';
 
 const UNIDADES = [
   { value: 'FORMAS SHOP', label: 'Formas Shop' }, { value: 'CORPORATE', label: 'Corporate' },
@@ -593,6 +593,7 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
             <th className="nosort" title="Se retira del proveedor"><span className="th-f">Retiro prov.{fil('retiro_proveedor')}</span></th>
             <th className="nosort" title="Va al impresor"><span className="th-f">Egreso imp.{fil('egreso_impresor')}</span></th>
             <th className="nosort" title="Se retira del impresor"><span className="th-f">Retiro imp.{fil('retiro_impresor')}</span></th>
+            <th className="nosort" title="Lo trae el impresor al depósito (en vez de ir a retirarlo)"><span className="th-f">Ingreso imp.{fil('ingreso_impresor')}</span></th>
             <th className="nosort" aria-label="ClickUp" />
           </tr>
         </thead>
@@ -654,7 +655,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         <td><span className="prod-real"><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega real del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /><Corrida pactada={pactada} real={p.entrega_real} /></span></td>
         {/* Las OC del pedido que no quedaron en ningún artículo (o todas, si el pedido no muestra artículos). */}
         <td><OcLinks ocs={ocsSueltas(p)} /></td>
-        <td colSpan={6} className="small muted">
+        <td colSpan={7} className="small muted">
           {!ed && !p.editable && <span>Se trabaja en ClickUp</span>}
         </td>
         <td>{p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir PDV ${p.npdv} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
@@ -662,7 +663,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
       {abierto && p.articulos.map((a) => (
         <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={14} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={15} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
@@ -691,6 +692,7 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls }: {
       <td><FechaCelda valor={a.retiro_proveedor} editable={ed} onChange={set('retiro_proveedor')} label={`Retiro del proveedor de ${a.nombre}`} /></td>
       <td><FechaCelda valor={a.egreso_impresor} editable={ed} onChange={set('egreso_impresor')} label={`Egreso al impresor de ${a.nombre}`} /></td>
       <td><FechaCelda valor={a.retiro_impresor} editable={ed} onChange={set('retiro_impresor')} label={`Retiro del impresor de ${a.nombre}`} /></td>
+      <td><FechaCelda valor={a.ingreso_impresor} editable={ed} onChange={set('ingreso_impresor')} label={`Ingreso del impresor de ${a.nombre}`} /></td>
       <td>{a.url && <a href={a.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir ${a.nombre} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
     </tr>
   );

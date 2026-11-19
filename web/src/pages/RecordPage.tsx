@@ -979,7 +979,7 @@ interface FileRow { id: number; kind: string; name: string; source: string; crea
 // Compras de la empresa en Finnegans (las calcula el CRM cada noche): estado, última compra, cuánto compra y cuánto debe.
 // Proveedor o impresor (produccion.ts): lo que tiene ahora en producción, con las fechas de ingreso y retiro.
 interface ArticuloProveedor { task_id: string; nombre: string; estado: string; cantidad: number | null; npdv: string | null; cliente: string | null; record_id: number | null;
-  rol: 'proveedor' | 'impresor'; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null }
+  rol: 'proveedor' | 'impresor'; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null }
 function ProduccionProveedorCard({ companyId }: { companyId: number }) {
   const res = useAsync(() => http<{ articulos: ArticuloProveedor[] }>('GET', `/records/company/${companyId}/produccion`), [companyId]);
   const arts = res.data?.articulos ?? [];
@@ -990,7 +990,7 @@ function ProduccionProveedorCard({ companyId }: { companyId: number }) {
       <div className="panel-head"><h3>En producción <span className="muted small">({arts.length})</span></h3><Link className="btn sm ghost" to="/produccion">Ver producción</Link></div>
       {arts.slice(0, 12).map((a) => {
         const fechas = (a.rol === 'impresor'
-          ? [f(a.egreso_impresor) && `fue ${f(a.egreso_impresor)}`, f(a.retiro_impresor) && `retiro ${f(a.retiro_impresor)}`]
+          ? [f(a.egreso_impresor) && `fue ${f(a.egreso_impresor)}`, f(a.retiro_impresor) && `retiro ${f(a.retiro_impresor)}`, f(a.ingreso_impresor) && `lo trae ${f(a.ingreso_impresor)}`]
           : [f(a.ingreso_proveedor) && `ingreso ${f(a.ingreso_proveedor)}`, f(a.retiro_proveedor) && `retiro ${f(a.retiro_proveedor)}`]).filter(Boolean);
         return (
           <div key={a.task_id} className="assoc-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 2 }}>

@@ -6,7 +6,7 @@ import { CERRADOS } from './produccion';
 import { serviceToken } from './google';
 import {
   SELECT_ENC, aEncargo, actualizarLugares, anfitrion, avisarEncargo, claveCalle, claveEncargo, claveParada, cronogramaConfig, diaSemana, direccionLugar, encargosEntre,
-  esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, ubicar, lugaresPara, lugaresPorId, mismoSitio, movimientos, puedeEditarCronograma, reindexarLugares, sumarDias, unicoLugar,
+  esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, llega, ubicar, lugaresPara, lugaresPorId, mismoSitio, movimientos, puedeEditarCronograma, reindexarLugares, sumarDias, unicoLugar,
   type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio,
 } from './cronograma';
 import { direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
@@ -407,7 +407,7 @@ async function viajesEntre(db: D1Database, user: User, desde: string, hasta: str
   ]);
   const ventas = esVentas(user);
   for (const m of movs) {
-    if (m.tipo === 'ingreso') continue;
+    if (llega(m.tipo)) continue;
     if (m.tipo === 'entrega') {
       const p = m.record_id ? pedidoInfo.get(m.record_id) : undefined;
       const ds = m.record_id ? dirs.get(m.record_id) ?? [] : [];

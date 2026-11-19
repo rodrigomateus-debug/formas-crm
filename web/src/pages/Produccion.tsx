@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf, userOf } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf, userOf, type Meta } from '../lib';
 import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '../vistas';
 import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug, OcLinks, type OcRef } from '../components';
 import { Select } from '../Select';
@@ -64,10 +64,24 @@ const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(
 
 // Quién vende el PDV (pedido de Rodrigo del 12/11/2026, con su foto y como filtro): el propietario del pedido en el CRM
 // y, si el PDV no tiene pedido, el VENDEDOR de ClickUp.
-const claveVendedor = (p: { owner_id: number | null; vendedor: string | null }) => (p.owner_id ? `u${p.owner_id}` : p.vendedor ? `n:${p.vendedor}` : '');
-function Vendedor({ p }: { p: { owner_id: number | null; vendedor: string | null } }) {
+// Un PDV sin propietario en el CRM trae al vendedor escrito en ClickUp: si ese nombre es el de un usuario, es esa misma
+// persona (si no, en el filtro salía dos veces: una con foto, por sus pedidos, y otra con iniciales, por el nombre).
+type ConVendedor = { owner_id: number | null; vendedor: string | null };
+const normNombre = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+function usuarioVendedor(meta: Meta, p: ConVendedor) {
+  if (p.owner_id) return userOf(meta, p.owner_id);
+  const n = normNombre(p.vendedor ?? '');
+  return n ? meta.users.find((u) => normNombre(u.name) === n) : undefined;
+}
+const claveVendedor = (meta: Meta, p: ConVendedor) => {
+  const u = usuarioVendedor(meta, p);
+  return u ? `u${u.id}` : p.owner_id ? `u${p.owner_id}` : p.vendedor ? `n:${p.vendedor}` : '';
+};
+// Lo elegido en una vista guardada antes («n:Sonia Andersen») sigue valiendo: se lleva a la misma clave.
+const claveElegida = (meta: Meta, clave: string) => (clave.startsWith('n:') ? claveVendedor(meta, { owner_id: null, vendedor: clave.slice(2) }) : clave);
+function Vendedor({ p }: { p: ConVendedor }) {
   const { meta } = useMeta();
-  const u = p.owner_id ? userOf(meta, p.owner_id) : null;
+  const u = usuarioVendedor(meta, p);
   const nombre = u?.name ?? p.vendedor;
   if (!nombre) return null;
   return <span className="prod-vende" title={`Vende ${nombre}`}>{u ? <UserAvatar id={u.id} size="xs" /> : <Avatar name={nombre} size="xs" />}{nombre}</span>;
@@ -201,19 +215,19 @@ export default function ProduccionPage() {
       // «Míos»: lo que tengo asignado en producción o los pedidos que son míos (para quien vende).
       if (persona === 'yo' && !((yo && p.asignados_todos.includes(yo.clickup_id)) || p.owner_id === meta.me.id)) return false;
       if (persona && persona !== 'nadie' && persona !== 'yo' && !p.asignados_todos.includes(Number(persona))) return false;
-      if (vendedor && claveVendedor(p) !== vendedor) return false;
+      if (vendedor && claveVendedor(meta, p) !== claveElegida(meta, vendedor)) return false;
       if (cliente && (p.cliente ?? '') !== cliente) return false;
       if (pasadas) { const pac = p.entrega_prometida?.slice(0, 10); if (!pasada(pac, p.entrega_real) && !p.articulos.some((a) => !CERRADOS.includes(a.estado) && pasada(pac, a.entrega_real))) return false; }
       if (!t) return true;
       return [p.npdv, p.cliente, p.vendedor, p.pedido, ...p.articulos.map((a) => a.nombre)].some((x) => String(x ?? '').toLowerCase().includes(t));
     });
-  }, [v, q, persona, vendedor, cliente, pasadas, columnas, ctxFiltros, yo?.clickup_id, meta.me.id]);
+  }, [v, q, persona, vendedor, cliente, pasadas, columnas, ctxFiltros, yo?.clickup_id, meta]);
   // Las opciones de vendedor y cliente: las que hay en los PDV que se ven (con las unidades y «entregados» elegidos).
   const vendedores = useMemo(() => {
     const m = new Map<string, { clave: string; nombre: string; p: Pdv }>();
     for (const p of v?.pdvs ?? []) {
-      const k = claveVendedor(p);
-      if (k && !m.has(k)) m.set(k, { clave: k, nombre: (p.owner_id ? userOf(meta, p.owner_id)?.name : null) ?? p.vendedor ?? '', p });
+      const k = claveVendedor(meta, p);
+      if (k && !m.has(k)) m.set(k, { clave: k, nombre: usuarioVendedor(meta, p)?.name ?? p.vendedor ?? '', p });
     }
     return [...m.values()].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   }, [v, meta]);
@@ -290,9 +304,9 @@ export default function ProduccionPage() {
           </Select>
         </div>
         <div className="bar-select">
-          <Select value={vendedor} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className={`input${vendedor ? ' on' : ''}`}>
+          <Select value={claveElegida(meta, vendedor)} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className={`input${vendedor ? ' on' : ''}`}>
             <option value="">Vendedor: todos</option>
-            {vendedor && !vendedores.some((x) => x.clave === vendedor) && <option value={vendedor}>{vendedor.replace(/^n:|^u/, '')}</option>}
+            {vendedor && !vendedores.some((x) => x.clave === claveElegida(meta, vendedor)) && <option value={claveElegida(meta, vendedor)}>{userOf(meta, claveElegida(meta, vendedor).replace(/^u/, ''))?.name ?? vendedor.replace(/^n:|^u/, '')}</option>}
             {vendedores.map((x) => <option key={x.clave} value={x.clave}><Vendedor p={x.p} /></option>)}
           </Select>
         </div>

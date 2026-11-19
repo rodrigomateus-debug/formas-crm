@@ -23,7 +23,9 @@ es lo que se prende en esa lamparita.
 - **Mías**: las que propuso cada uno. Mientras está pendiente se puede **corregir** o **borrar**.
 
 Chispín también tiene vida propia: sigue el mouse con los ojos, parpadea, saluda al pasar por encima, se duerme si nadie
-mueve el mouse un buen rato y salta con papelitos cuando se hace una idea tuya (o una que votaste). Una vez por día dice
+mueve el mouse un buen rato y salta con papelitos cuando se hace una idea tuya (o una que votaste). Cuando proponés una idea o votás una, se pone **anteojos de sol**
+con la forma del moño de Formas (dado vuelta, con vidrios oscuros y un reflejo que pasa): la mano sube, se los pone, se inclina
+sonriendo de costado y a los segundos se los saca. En el celular se ve en el encabezado del buzón. Una vez por día dice
 algo (la primera vez se presenta; después avisa si hay ideas nuevas o tira una frase). Con la ✕ que aparece al pasar
 por encima se **esconde** y queda espiando desde el borde; un clic lo vuelve a traer. En Conversaciones (y con la
 conversación abierta en una ficha) se corre solo al borde para no tapar el botón de mandar. Con «reducir movimiento» del

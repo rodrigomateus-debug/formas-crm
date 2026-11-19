@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, fmtMoney, userOf, type Stage } from './lib';
+import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, fmtMoney, userOf, CINTA, type Stage } from './lib';
 import { UserAvatar } from './components';
 
 // Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
@@ -25,6 +25,9 @@ const guardar = (k: string, v: string) => { try { localStorage.setItem(`chispin.
 // ---------- Abrir el buzón desde otro lado (la campanita) ----------
 let abrirDesdeAfuera: ((id?: number) => void) | null = null;
 export function abrirChispin(id?: number) { abrirDesdeAfuera?.(id); }
+// Los anteojos de sol (al proponer o votar): lo llaman el buzón y los botones de votar.
+let fachaDesdeAfuera: (() => void) | null = null;
+const conFacha = () => fachaDesdeAfuera?.();
 
 const FRASES = [
   '¿Algo del Hub te hace renegar? Contámelo y lo arreglamos.',
@@ -121,9 +124,19 @@ const FELICITACIONES: Array<(n: string, negocio: string) => string> = [
 ];
 
 // ---------- El personaje ----------
-function Personaje({ animo, lampara, ojosRef }: { animo: string; lampara: boolean; ojosRef: React.RefObject<HTMLSpanElement> }) {
+// Los anteojos de sol (pedido de Rodrigo del 19/11/2026): el moño del logo de Formas dado vuelta (el puente arriba, como unos
+// anteojos de verdad), con vidrios oscuros, un reflejo y un destello que pasa cada tanto. Se los pone con el buzón abierto y,
+// de vez en cuando, solo; la mano sube a acomodarlos al ponérselos y al sacárselos.
+// Los dos huecos del moño (los vidrios) son el segundo y el tercer tramo de la cinta del isotipo.
+const VIDRIOS = CINTA.split('Z').filter((t) => t.trim()).slice(1).map((t) => `${t}Z`).join('');
+// Los reflejos, en las coordenadas del isotipo (el moño se da vuelta entero, así que se dibujan «\» para que se vean «/»).
+const REFLEJO = 'M150 330 L230 410 M196 318 L262 384 M418 330 L498 410 M464 318 L530 384';
+function Personaje({ animo, lampara, ojosRef, anteojos = false, acomoda = false }: {
+  animo: string; lampara: boolean; ojosRef: React.RefObject<HTMLSpanElement>; anteojos?: boolean; acomoda?: boolean;
+}) {
+  const id = useId().replace(/:/g, '');
   return (
-    <span className={`chispin-bicho ${animo}`} aria-hidden="true">
+    <span className={`chispin-bicho ${animo}${anteojos ? ' anteojos' : ''}${acomoda ? ' acomoda' : ''}`} aria-hidden="true">
       <span className={`chispin-antena${lampara ? ' prendida' : ''}`}><span className="chispin-lampara" /></span>
       <span className="chispin-cuerpo">
         <span className="chispin-ojos" ref={ojosRef}>
@@ -132,6 +145,20 @@ function Personaje({ animo, lampara, ojosRef }: { animo: string; lampara: boolea
         </span>
         <span className="chispin-cachetes"><span /><span /></span>
         <span className="chispin-boca" />
+        <svg className="chispin-anteojos" viewBox="78 221 544 258">
+          <defs>
+            <linearGradient id={`${id}-sol`} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0" stopColor="#05051c" /><stop offset=".55" stopColor="#141466" /><stop offset="1" stopColor="#3d2a8f" />
+            </linearGradient>
+            <clipPath id={`${id}-vidrios`}><path d={VIDRIOS} /></clipPath>
+          </defs>
+          <path className="chispin-vidrio" d={VIDRIOS} fill={`url(#${id}-sol)`} />
+          <g clipPath={`url(#${id}-vidrios)`}>
+            <path className="chispin-reflejo" d={REFLEJO} />
+            <path className="chispin-destello" d="M100 300 L220 420" />
+          </g>
+          <path className="chispin-marco" d={CINTA} />
+        </svg>
       </span>
       <span className="chispin-mano izq" /><span className="chispin-mano der" />
       <span className="chispin-zzz"><i>z</i><i>z</i><i>z</i></span>
@@ -158,6 +185,18 @@ export default function Chispin() {
   festejandoRef.current = festejando;
   const botonRef = useRef<HTMLButtonElement>(null);
   const ojosRef = useRef<HTMLSpanElement>(null);
+
+  // ---------- Los anteojos: la mano sube, se los pone (o se los saca) y baja ----------
+  const [anteojos, setAnteojos] = useState(false);
+  const [acomoda, setAcomoda] = useState(false);
+  const anteojosRef = useRef(false);
+  const ponerAnteojos = useCallback((v: boolean) => {
+    if (anteojosRef.current === v) return;
+    anteojosRef.current = v;
+    setAcomoda(true);
+    setTimeout(() => setAnteojos(v), 200);
+    setTimeout(() => setAcomoda(false), 800);
+  }, []);
 
   const cargar = useCallback(() => http<{ ideas: Idea[]; admin: boolean }>('GET', '/ideas')
     .then((r) => { setIdeas(r.ideas); setAdmin(r.admin); return r.ideas; }, () => null), []);
@@ -247,6 +286,18 @@ export default function Chispin() {
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [ideas]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Se los pone «con facha» solo cuando alguien propone una idea o vota una (pedido de Rodrigo del 19/11/2026): unos segundos,
+  // inclinado y sonriendo de costado. Otro voto mientras los tiene puestos los deja un rato más. Dormido, sin anteojos.
+  const fachaHasta = useRef<ReturnType<typeof setTimeout>>();
+  const facha = useCallback(() => {
+    setAnimo((a) => (a === 'duerme' ? '' : a));
+    ponerAnteojos(true);
+    clearTimeout(fachaHasta.current);
+    fachaHasta.current = setTimeout(() => ponerAnteojos(false), 4200);
+  }, [ponerAnteojos]);
+  useEffect(() => { fachaDesdeAfuera = facha; return () => { fachaDesdeAfuera = null; clearTimeout(fachaHasta.current); }; }, [facha]);
+  useEffect(() => { if (animo === 'duerme') ponerAnteojos(false); }, [animo, ponerAnteojos]);
+
   // ---------- Los ojos siguen al mouse; sin moverse un buen rato, se duerme ----------
   useEffect(() => {
     if (reducido()) return;
@@ -285,7 +336,8 @@ export default function Chispin() {
       {abierto && ideas && (
         <Buzon ideas={ideas} admin={admin} yo={yo} resaltar={resaltar} onResaltado={() => setResaltar(null)} cerrar={() => setAbierto(false)}
           cambiar={(i) => setIdeas((l) => (l ?? []).map((x) => (x.id === i.id ? i : x)))}
-          agregar={(i) => { setIdeas((l) => [i, ...(l ?? [])]); setAnimo('traga'); setTimeout(() => setAnimo(''), 900); }}
+          agregar={(i) => { setIdeas((l) => [i, ...(l ?? [])]); setAnimo('traga'); setTimeout(() => { setAnimo(''); facha(); }, 700); }}
+          anteojos={anteojos} acomoda={acomoda}
           quitar={(id) => setIdeas((l) => (l ?? []).filter((x) => x.id !== id))}
           festejo={() => { setAnimo('feliz'); festejar(botonRef.current); setTimeout(() => setAnimo(''), 2000); }}
           toast={toast} />
@@ -302,7 +354,7 @@ export default function Chispin() {
           onPointerEnter={() => setAnimo((a) => (a === '' || a === 'duerme' ? 'mira' : a))} onPointerLeave={() => setAnimo((a) => (a === 'mira' ? '' : a))}
           aria-expanded={abierto} aria-label={escondido ? 'Mostrar a Chispín (buzón de ideas)' : nuevas ? `Buzón de ideas: ${nuevas} nuevas` : 'Buzón de ideas para mejorar el Hub'}
           title={escondido ? 'Volver a mostrar a Chispín' : 'Ideas para mejorar el Hub'}>
-          <Personaje animo={animo} lampara={lampara} ojosRef={ojosRef} />
+          <Personaje animo={animo} lampara={lampara} ojosRef={ojosRef} anteojos={anteojos} acomoda={acomoda} />
           {nuevas > 0 && !abierto && <span className="chispin-n">{nuevas > 9 ? '9+' : nuevas}</span>}
         </button>
         {!escondido && !estorba && !abierto && (
@@ -317,11 +369,12 @@ export default function Chispin() {
 }
 
 // ---------- El buzón ----------
-function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agregar, quitar, festejo, toast }: {
+function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agregar, quitar, festejo, toast, anteojos, acomoda }: {
   ideas: Idea[]; admin: boolean; yo: number; resaltar: number | null; onResaltado: () => void; cerrar: () => void;
   cambiar: (i: Idea) => void; agregar: (i: Idea) => void; quitar: (id: number) => void; festejo: () => void;
-  toast: (msg: string, err?: boolean) => void;
+  toast: (msg: string, err?: boolean) => void; anteojos: boolean; acomoda: boolean;
 }) {
+  const ojosCab = useRef<HTMLSpanElement>(null);
   const { meta } = useMeta();
   const [pestana, setPestana] = useState<Pestana>('ranking');
   const [texto, setTexto] = useState(() => leer('borrador') ?? '');
@@ -389,6 +442,8 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
   return (
     <div className="chispin-panel" role="dialog" aria-label="Buzón de ideas">
       <div className="chispin-cab">
+        {/* En pantallas angostas el buzón tapa la esquina: Chispín se asoma acá arriba (con sus anteojos al votar o proponer). */}
+        <span className="chispin-cab-bicho"><Personaje animo="" lampara anteojos={anteojos} acomoda={acomoda} ojosRef={ojosCab} /></span>
         <div className="chispin-cab-txt">
           <b>Buzón de ideas</b>
           <span>Proponé mejoras para el Hub y votá las de los demás: las más votadas se hacen primero.</span>
@@ -482,6 +537,7 @@ function BotonVoto({ idea, cambiar, toast, chico }: { idea: Idea; cambiar: (i: I
     const v = !idea.votada;
     // Al toque en pantalla; después lo confirma el servidor.
     cambiar({ ...idea, votada: v, votos: idea.votos + (v ? 1 : -1) });
+    if (v) conFacha();
     if (v && !reducido()) { setPop(true); setTimeout(() => setPop(false), 450); }
     try { cambiar(await http<Idea>(v ? 'PUT' : 'DELETE', `/ideas/${idea.id}/voto`)); }
     catch (e) { cambiar(idea); toast((e as Error).message, true); }

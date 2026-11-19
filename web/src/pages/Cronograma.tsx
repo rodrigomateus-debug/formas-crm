@@ -18,7 +18,9 @@ import { EditarDireccion, lindaDireccion } from './DireccionParada';
 
 const CronogramaRuta = lazy(() => import('./CronogramaRuta'));
 
-export type Tipo = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'retiro_impresor';
+export type Tipo = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'retiro_impresor' | 'ingreso_impresor';
+// Los que llegan solos al depósito (los trae el proveedor o el impresor): no son una parada de ningún recorrido.
+export const llega = (t: Tipo) => t === 'ingreso' || t === 'ingreso_impresor';
 export interface Mov {
   id: string; tipo: Tipo; fecha: string; task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null;
   record_id: number | null; articulo: string; cantidad: number | null; estado: string; lugar: string | null; company_id: number | null;
@@ -53,7 +55,7 @@ export interface DirParada {
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
   { k: 'E', nombre: 'Entregas', uno: 'Entrega', tipos: ['entrega'], ayuda: 'Al cliente' },
-  { k: 'I', nombre: 'Ingresos', uno: 'Ingreso', tipos: ['ingreso'], ayuda: 'Llega al depósito' },
+  { k: 'I', nombre: 'Ingresos', uno: 'Ingreso', tipos: ['ingreso', 'ingreso_impresor'], ayuda: 'Lo trae el proveedor o el impresor' },
   { k: 'R', nombre: 'Retiros', uno: 'Retiro', tipos: ['retiro_proveedor', 'retiro_impresor'], ayuda: 'Del proveedor o del impresor' },
   { k: 'G', nombre: 'Egresos', uno: 'Egreso', tipos: ['egreso'], ayuda: 'Va al impresor' },
 ];
@@ -101,8 +103,8 @@ export function tarjetas(movs: Mov[]): Tarjeta[] {
       const entrega = x.tipo === 'entrega';
       const crudo = (entrega ? x.cliente : x.lugar) ?? '';
       t = { key, tipo: x.tipo, fecha: x.fecha, pdv, para: entrega ? '' : lindo(x.cliente), movs: [], hecho: true, evento: false, avisos: [], record_id: x.record_id, dominio: x.dominio ?? null, crudo,
-        parada: x.tipo !== 'ingreso' && !x.retira_en, chofer: x.chofer ?? null, retira_en: x.retira_en ?? null,
-        titulo: lindo(crudo) || (entrega ? pdv : x.tipo === 'egreso' || x.tipo === 'retiro_impresor' ? 'Sin impresor' : 'Sin proveedor') };
+        parada: !llega(x.tipo) && !x.retira_en, chofer: x.chofer ?? null, retira_en: x.retira_en ?? null,
+        titulo: lindo(crudo) || (entrega ? pdv : x.tipo === 'egreso' || x.tipo === 'retiro_impresor' || x.tipo === 'ingreso_impresor' ? 'Sin impresor' : 'Sin proveedor') };
       m.set(key, t);
     }
     t.movs.push(x);
@@ -310,7 +312,7 @@ export default function CronogramaPage() {
                         <div className="cr-dia-tit"><b>{DIAS[D(d).getDay()]}</b><span className="num">{D(d).getDate()}/{D(d).getMonth() + 1}</span>{d === v.hoy && <span className="cr-hoy">Hoy</span>}</div>
                         <div className="cr-dia-sub">
                           <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{cuantos ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${cuantos}` : `${cuantos} hechos`) : 'Sin movimientos'}</span>
-                          {(delDia.some((m) => m.tipo !== 'ingreso') || encDia.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
+                          {(delDia.some((m) => !llega(m.tipo)) || encDia.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
                         </div>
                         <Feriado dia={d} nombre={v.feriados[d]} puede={puede} onCambio={cargar} />
                       </header>
@@ -489,7 +491,7 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
 // Con quién es cada movimiento: el cliente, un proveedor o un impresor.
 const ROL: Record<Tipo, { nombre: string; icono: string }> = {
   entrega: { nombre: 'Cliente', icono: 'company' }, ingreso: { nombre: 'Proveedor', icono: 'bag' }, retiro_proveedor: { nombre: 'Proveedor', icono: 'bag' },
-  egreso: { nombre: 'Impresor', icono: 'printer' }, retiro_impresor: { nombre: 'Impresor', icono: 'printer' },
+  egreso: { nombre: 'Impresor', icono: 'printer' }, retiro_impresor: { nombre: 'Impresor', icono: 'printer' }, ingreso_impresor: { nombre: 'Impresor', icono: 'printer' },
 };
 const TOPE = 3;
 

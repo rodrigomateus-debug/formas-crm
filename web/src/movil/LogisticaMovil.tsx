@@ -25,7 +25,7 @@ import { Fallo, useCarga, usePuedeEscribir } from './base';
 
 const TANDA = 25;   // el servidor acepta de a 25 artículos por vez
 const hhmm = (min: number) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
-const TIPO_CORTO: Record<Tipo, string> = { entrega: 'Entrega', ingreso: 'Ingreso', retiro_proveedor: 'Retiro', retiro_impresor: 'Retiro', egreso: 'Egreso' };
+const TIPO_CORTO: Record<Tipo, string> = { entrega: 'Entrega', ingreso: 'Ingreso', retiro_proveedor: 'Retiro', retiro_impresor: 'Retiro', egreso: 'Egreso', ingreso_impresor: 'Ingreso' };
 const mapa = (p: { lat: number | null; lng: number | null; direccion: string | null; nombre: string }) => (p.lat != null && p.lng != null
   ? `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`
   : p.direccion ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.direccion)}` : undefined);

@@ -13,7 +13,7 @@ Nada se carga: los movimientos salen de las fechas de cada artículo en ClickUp,
 | En el cronograma | Campo de ClickUp | Lugar |
 |---|---|---|
 | Entregas | ENTREGAS (FECHA REAL), del artículo o, si no tiene, la del PDV | El cliente |
-| Ingresos | INGRESO (PROVEEDOR) | Llega al depósito (no es un viaje) |
+| Ingresos | INGRESO (PROVEEDOR) e INGRESO (IMPRESOR) | Lo trae el proveedor o el impresor al depósito (no es un viaje). El del impresor pasa poco: es en vez de ir a retirarlo, y si un artículo tiene los dos, el cronograma avisa |
 | Retiros | RETIROS (PROVEEDOR) y RETIRO (IMPRESOR) | El proveedor o el impresor |
 | Egresos | EGRESO (IMPRESOR) | El impresor |
 | Listos para entregar, sin fecha | Estado «listo para entregar» sin fecha de entrega | — |

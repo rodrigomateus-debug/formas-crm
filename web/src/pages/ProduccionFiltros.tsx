@@ -17,22 +17,22 @@ export interface FiltrosCol {
   cantidad?: { min?: number | null; max?: number | null };
   proveedor?: string[];   // id de la opción de ClickUp; '' = sin proveedor
   impresor?: string[];
-  entrega_real?: Rango; ingreso_proveedor?: Rango; retiro_proveedor?: Rango; egreso_impresor?: Rango; retiro_impresor?: Rango;
+  entrega_real?: Rango; ingreso_proveedor?: Rango; retiro_proveedor?: Rango; egreso_impresor?: Rango; retiro_impresor?: Rango; ingreso_impresor?: Rango;
   creado?: Rango;   // del PDV
 }
 export type ColFiltro = keyof FiltrosCol;
-type ColFecha = 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'creado';
-const FECHAS: Array<Exclude<ColFecha, 'creado'>> = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor'];
+type ColFecha = 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor' | 'creado';
+const FECHAS: Array<Exclude<ColFecha, 'creado'>> = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
 export const NOMBRE_COL: Record<ColFiltro, string> = {
   creado: 'Creado', estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega real',
-  ingreso_proveedor: 'Ingreso prov.', retiro_proveedor: 'Retiro prov.', egreso_impresor: 'Egreso imp.', retiro_impresor: 'Retiro imp.',
+  ingreso_proveedor: 'Ingreso prov.', retiro_proveedor: 'Retiro prov.', egreso_impresor: 'Egreso imp.', retiro_impresor: 'Retiro imp.', ingreso_impresor: 'Ingreso imp.',
 };
-const COLUMNAS: ColFiltro[] = ['creado', 'estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor'];
+const COLUMNAS: ColFiltro[] = ['creado', 'estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
 
 // Lo que necesita saber de un producto.
 export interface ArticuloFiltrable {
   estado: string; cantidad: number | null; proveedor: string | null; impresor: string | null;
-  entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null;
+  entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null;
 }
 export interface Ctx {
   estados: Array<{ status: string; color: string }>;

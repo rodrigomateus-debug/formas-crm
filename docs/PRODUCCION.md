@@ -33,6 +33,7 @@ se edita desde ahí.
 | Retiro prov. | RETIROS (PROVEEDOR): se retira del proveedor | Sí |
 | Egreso imp. | EGRESO (IMPRESOR): va al impresor | Sí |
 | Retiro imp. | RETIRO (IMPRESOR): se retira del impresor | Sí |
+| Ingreso imp. | INGRESO (IMPRESOR): lo trae el impresor al depósito, en vez de ir a retirarlo (pedido de Producción del 19/11/2026) | Sí |
 
 **Reasignar** (pedido de Rodrigo del 17/11/2026). Cualquiera de Producción (o un administrador) reasigna cualquier PDV,
 también los de otra persona y los de las unidades que se siguen trabajando en ClickUp (el resto de los campos de esas

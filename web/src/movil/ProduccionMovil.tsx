@@ -18,7 +18,7 @@ import { Fallo, useCarga, usePuedeEscribir } from './base';
 
 interface Articulo {
   task_id: string; nombre: string; estado: string; cantidad: number | null; proveedor: string | null; impresor: string | null; entrega_real: string | null;
-  ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; asignados: number[];
+  ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null; asignados: number[];
   url: string | null; foto?: string | null; logo?: string | null;
 }
 interface Pdv extends Articulo {
@@ -29,7 +29,7 @@ interface Persona { clickup_id: number; nombre: string; user_id: number | null; 
 interface Opcion { campo: 'proveedor' | 'impresor'; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
 interface Estado { status: string; color: string; type: string }
 interface Vista { pdvs: Pdv[]; personas: Persona[]; opciones: Opcion[]; estados: Estado[]; puede_editar: boolean }
-type Campo = 'estado' | 'asignados' | 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'proveedor' | 'impresor';
+type Campo = 'estado' | 'asignados' | 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor' | 'proveedor' | 'impresor';
 
 const CERRADOS = ['entregados', 'anulado'];
 const LISTOS = ['listo para entergar', 'entregados'];
@@ -320,7 +320,7 @@ export function FichaPdv() {
         {[...abiertos, ...cerrados].map((a) => {
           const estado = v.estados.find((x) => x.status === a.estado);
           const atr = !!a.entrega_real && a.entrega_real.slice(0, 10) < hoy && !LISTOS.includes(a.estado) && !CERRADOS.includes(a.estado);
-          const fechas = ([['Ingreso', a.ingreso_proveedor], ['Retiro prov.', a.retiro_proveedor], ['Egreso imp.', a.egreso_impresor], ['Retiro imp.', a.retiro_impresor]] as Array<[string, string | null]>).filter(([, f]) => f);
+          const fechas = ([['Ingreso', a.ingreso_proveedor], ['Retiro prov.', a.retiro_proveedor], ['Egreso imp.', a.egreso_impresor], ['Retiro imp.', a.retiro_impresor], ['Ingreso imp.', a.ingreso_impresor]] as Array<[string, string | null]>).filter(([, f]) => f);
           return (
             <button key={a.task_id} type="button" className={`m-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}`} onClick={() => setHoja({ articulo: a.task_id })} aria-label={`${a.nombre}: ${nombreEstado(a.estado)}. Editar`}>
               {a.foto ? <img className="m-art-img" src={a.foto} alt="" loading="lazy" /> : <span className="m-art-img vacia"><Icon name="bag" size={18} /></span>}
@@ -390,7 +390,7 @@ function HojaAsignados({ v, ids, nota, onCambio, onClose }: { v: Vista; ids: num
 // Un artículo: el estado (con sus colores de ClickUp), las fechas, proveedor, impresor y quién lo tiene. Cada cambio se
 // guarda en el momento, como en la pantalla Producción.
 const FECHAS: Array<[Campo, string]> = [['entrega_real', 'Entrega real'], ['ingreso_proveedor', 'Ingreso del proveedor'], ['retiro_proveedor', 'Retiro del proveedor'],
-  ['egreso_impresor', 'Egreso al impresor'], ['retiro_impresor', 'Retiro del impresor']];
+  ['egreso_impresor', 'Egreso al impresor'], ['retiro_impresor', 'Retiro del impresor'], ['ingreso_impresor', 'Ingreso del impresor']];
 function HojaArticulo({ a, v, ed, puedeAsignar, editar, onClose }: { a: Articulo; v: Vista; ed: boolean; puedeAsignar: boolean; editar: (c: Campo, valor: unknown, aviso?: string) => void; onClose: () => void }) {
   const [sub, setSub] = useState<null | { fecha: Campo } | { opcion: 'proveedor' | 'impresor' } | 'asignados'>(null);
   if (sub && typeof sub === 'object' && 'fecha' in sub) {

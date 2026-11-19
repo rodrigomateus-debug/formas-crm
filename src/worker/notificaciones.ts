@@ -11,6 +11,7 @@ export interface Notificacion {
   id: number; kind: string; record_id: number | null; object_type: string | null; name: string | null; activity_id: number | null;
   subject: string | null; mensaje_id: number | null; texto: string | null; by_user: number | null; created_at: string; leido_at: string | null;
   encargo_id?: number | null; encargo_destino?: string | null; encargo_fecha?: string | null;   // un encargo de Recorridos (recorridos.ts)
+  idea_id?: number | null;   // una idea del buzón (ideas.ts)
 }
 
 // Lo que se puede mostrar: de registros que todavía existen y que la persona ve; las menciones y respuestas de mensajes
@@ -18,15 +19,17 @@ export interface Notificacion {
 const FILTRO = (user: Ctx['user']) => `v.user_id = ?1 AND (v.record_id IS NULL OR (r.id IS NOT NULL AND r.archived = 0 AND ${visibleSql('r', user)}))
   AND NOT (v.kind IN ('mencion', 'respuesta') AND (m.id IS NULL OR m.borrado_at IS NOT NULL))
   AND NOT (v.kind IN ('tarea', 'tarea_mencion', 'tarea_comentario') AND (a.id IS NULL OR a.archived = 1))
-  AND NOT (v.kind IN ('tarea_mencion', 'tarea_comentario') AND (tc.id IS NULL OR tc.borrado_at IS NOT NULL)) AND NOT (v.kind = 'encargo' AND e.id IS NULL)`;
+  AND NOT (v.kind IN ('tarea_mencion', 'tarea_comentario') AND (tc.id IS NULL OR tc.borrado_at IS NOT NULL)) AND NOT (v.kind = 'encargo' AND e.id IS NULL)
+  AND NOT (v.idea_id IS NOT NULL AND (i.id IS NULL OR i.borrada_at IS NOT NULL))`;
 const JOINS = `FROM avisos v LEFT JOIN records r ON r.id = v.record_id LEFT JOIN mensajes m ON m.id = v.mensaje_id LEFT JOIN activities a ON a.id = v.activity_id
-  LEFT JOIN encargos e ON e.id = v.encargo_id LEFT JOIN tarea_comentarios tc ON tc.id = v.comentario_id`;
+  LEFT JOIN encargos e ON e.id = v.encargo_id LEFT JOIN tarea_comentarios tc ON tc.id = v.comentario_id
+  LEFT JOIN ideas i ON i.id = v.idea_id`;
 
 export async function notificaciones(db: D1Database, ctx: Ctx, opts: { limite?: number; noLeidas?: boolean } = {}) {
   const lim = Math.min(Math.max(opts.limite ?? 30, 1), 100);
   const [lista, cuenta] = await db.batch([
     db.prepare(`SELECT v.id, v.kind, v.record_id, r.object_type, r.name, v.activity_id, a.subject, v.mensaje_id, COALESCE(m.body, tc.body, v.detalle) AS texto, v.by_user, v.created_at, v.leido_at,
-        v.encargo_id, e.destino AS encargo_destino, e.fecha AS encargo_fecha
+        v.encargo_id, e.destino AS encargo_destino, e.fecha AS encargo_fecha, v.idea_id
       ${JOINS} WHERE ${FILTRO(ctx.user)} ${opts.noLeidas ? 'AND v.leido_at IS NULL' : ''} ORDER BY v.id DESC LIMIT ?2`).bind(ctx.user.id, lim),
     db.prepare(`SELECT COUNT(*) AS n ${JOINS} WHERE ${FILTRO(ctx.user)} AND v.leido_at IS NULL`).bind(ctx.user.id),
   ]);

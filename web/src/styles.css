@@ -2835,67 +2835,164 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
   100% { opacity: 0; transform: translate(calc(var(--x) * .3), 105vh) rotate(var(--r)) rotateX(540deg); }
 }
 /* Pedido listo para entregar (embalar en Chispin.tsx): la caja abierta en el medio de la pantalla, caen los productos del
-   pedido (un iconito por subcategoría, iconosProducto.ts), se cierran las solapas, la cinta verde, el sello y vuela a Chispín. */
-.chispin-embalar { position: fixed; left: 50%; top: 50%; z-index: 305; width: min(92vw, 440px); display: flex; flex-direction: column; align-items: center; gap: 16px; transform: translate(-50%, -50%); pointer-events: none; }
-.emb-caja { position: relative; width: 176px; height: 114px; animation: emb-aparece .45s cubic-bezier(.3, 1.5, .5, 1); }
-.emb-fondo { position: absolute; left: 5px; right: 5px; top: 12px; height: 22px; border-radius: 6px 6px 0 0; background: #8a5a26; z-index: 1; transition: opacity .2s; }
-.emb-frente { position: absolute; left: 0; right: 0; bottom: 0; height: 82px; z-index: 3; display: grid; place-items: center; border: 2px solid #9c6b2f; border-radius: 4px;
-  background: linear-gradient(#e6bd80, #cf9d5a); box-shadow: 0 10px 24px -8px rgba(18, 20, 58, .45); }
-.emb-marca { margin-top: 18px; font: 800 17px/1 Poppins, system-ui, sans-serif; letter-spacing: .5px; color: rgba(110, 66, 22, .5); }
-.emb-solapa { position: absolute; top: 2px; width: 50%; height: 30px; z-index: 4; background: #d9aa6a; border: 2px solid #9c6b2f; transition: transform .38s cubic-bezier(.3, 1.3, .5, 1); }
-.emb-solapa.izq { left: 0; transform-origin: 0 100%; transform: rotate(-125deg); }
-.emb-solapa.der { right: 0; transform-origin: 100% 100%; transform: rotate(125deg); }
-.emb-caja.cerrada .emb-solapa { transform: translateY(20px) scaleY(.3); }
+   pedido (un iconito por subcategoría, iconosProducto.ts), se cierran las solapas, la cinta verde, el sello y vuela a Chispín.
+   Con más onda (pedido de Rodrigo del 19/11/2026): cartón kraft con canaleta y sombra, el sticker del moño, los productos
+   rebotan al caer, la caja pega un saltito cuando la sellan y le saltan brillitos. Solo se animan transform y opacity. */
+.chispin-embalar { position: fixed; left: 50%; top: 50%; z-index: 305; width: min(92vw, 440px); display: flex; flex-direction: column; align-items: center; gap: 18px; transform: translate(-50%, -50%); pointer-events: none; }
+.emb-escena { position: relative; width: 190px; height: 128px; }
+/* Un resplandor del color del fondo detrás de la caja, para que se lea arriba de cualquier pantalla (tablas, tableros…). */
+.emb-halo { position: absolute; inset: -70px -40px -46px; border-radius: 50%; background: radial-gradient(closest-side, var(--ui-surface, #fff) 58%, transparent); z-index: -1; opacity: 0; animation: emb-halo .4s ease forwards; }
+.emb-sombra { position: absolute; left: 8px; right: 8px; bottom: -9px; height: 18px; border-radius: 50%; background: radial-gradient(closest-side, rgba(18, 20, 58, .38), transparent); animation: emb-halo .4s ease both; }
+.emb-caja { position: absolute; inset: 0; transform-origin: 50% 100%; animation: emb-aparece .45s cubic-bezier(.3, 1.5, .5, 1); }
+.emb-fondo { position: absolute; left: 6px; right: 6px; top: 26px; height: 24px; border-radius: 5px 5px 0 0; background: linear-gradient(#6f4519, #8a5a26); z-index: 1; transition: opacity .2s; }
+.emb-frente { position: absolute; left: 0; right: 0; bottom: 0; height: 88px; z-index: 3; border: 2px solid #8f5f27; border-radius: 4px 4px 9px 9px; transform-origin: 50% 100%;
+  /* El cartón: la canaleta (rayitas finas), la luz de arriba a abajo y los costados un toque más oscuros. */
+  background: repeating-linear-gradient(90deg, rgba(120, 72, 22, .07) 0 2px, transparent 2px 6px), linear-gradient(90deg, rgba(110, 66, 22, .22), transparent 14%, transparent 86%, rgba(110, 66, 22, .22)), linear-gradient(#ecc588, #d3a05c);
+  box-shadow: inset 0 3px 0 rgba(255, 240, 210, .5), inset 0 -5px 0 rgba(110, 66, 22, .14), 0 12px 22px -10px rgba(18, 20, 58, .5); }
+.emb-caja.pum .emb-frente { animation: emb-pum .24s ease-out; }
+/* El sticker del moño (pegado medio torcido, con su borde blanco) y las flechitas de «este lado arriba / frágil» en tinta. */
+.emb-sticker { position: absolute; left: 14px; bottom: 13px; width: 40px; height: 40px; display: grid; place-items: center; border: 2.5px solid #fff; border-radius: 50%; background: #000085;
+  box-shadow: 0 2px 4px rgba(70, 40, 10, .35); transform: rotate(-9deg); }
+.emb-estampa { position: absolute; right: 13px; bottom: 12px; fill: none; stroke: rgba(110, 66, 22, .55); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.emb-solapa { position: absolute; top: 8px; width: 50%; height: 32px; z-index: 4; border: 2px solid #8f5f27; border-radius: 3px; transition: transform .38s cubic-bezier(.3, 1.3, .5, 1);
+  background: linear-gradient(#f0cc92, #dcab68); box-shadow: inset 0 2px 0 rgba(255, 240, 210, .55); }
+.emb-solapa.izq { left: 0; transform-origin: 0 100%; transform: rotate(-128deg); }
+.emb-solapa.der { right: 0; transform-origin: 100% 100%; transform: rotate(128deg); }
+/* La solapa de atrás: se ve por adentro (más clarita) mientras la caja está abierta. */
+.emb-solapa.atras { left: 9px; right: 9px; top: 2px; width: auto; height: 30px; z-index: 0; transform-origin: 50% 100%; background: linear-gradient(#e0b473, #c9975a); border-radius: 5px 5px 0 0;
+  clip-path: polygon(7% 0, 93% 0, 100% 100%, 0 100%); border: 0; box-shadow: none; }
+.emb-caja.cerrada .emb-solapa.izq, .emb-caja.cerrada .emb-solapa.der { transform: scaleY(.44); }
+.emb-caja.cerrada .emb-solapa.atras { transform: scaleY(0); transition: transform .2s ease-in; }
 .emb-caja.cerrada .emb-fondo { opacity: 0; transition: opacity .15s .15s; }
-.emb-caja.cerrada .emb-item { visibility: hidden; transition: visibility 0s .2s; }   /* la animación deja la opacidad en 1: se esconden así */
-.emb-caja.sellada .emb-marca { opacity: 0; }
-.emb-item { position: absolute; left: 50%; top: 14px; width: 44px; height: 44px; margin-left: -22px; z-index: 2; display: grid; place-items: center; border-radius: 12px;
-  background: #fff; color: #000085; border: 2px solid #8ee021; box-shadow: 0 4px 10px rgba(18, 20, 58, .25); font-style: normal; opacity: 0; }
-.emb-item.cae { animation: emb-cae .62s cubic-bezier(.45, 0, .75, 1.25) forwards; }
-.emb-cinta { position: absolute; left: 50%; top: 24px; width: 26px; height: 0; margin-left: -13px; z-index: 5; background: #8ee021; opacity: .93; border-radius: 2px; transition: height .32s ease-out; }
-.emb-caja.cinta .emb-cinta { height: 50px; }
-.emb-sello { position: absolute; left: 50%; top: 64%; z-index: 6; padding: 5px 10px; border: 3px solid #2f8a1f; border-radius: 8px; background: rgba(255, 255, 255, .8); color: #2f8a1f;
-  font: 900 17px/1 Poppins, system-ui, sans-serif; letter-spacing: 1px; white-space: nowrap; opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(2.6); }
+/* La animación de la caída deja fijos el transform y la opacidad: se hunden con translate (que va aparte) y se esconden con visibility. */
+.emb-caja.cerrada .emb-item { translate: 0 30px; visibility: hidden; transition: translate .2s ease-in, visibility 0s .2s; }
+.emb-item { position: absolute; left: 50%; top: 8px; width: 46px; height: 46px; margin-left: -23px; z-index: 2; display: grid; place-items: center; border-radius: 14px;
+  background: #fff; border: 2px solid #8ee021; box-shadow: 0 5px 10px rgba(18, 20, 58, .22), inset 0 -3px 0 rgba(142, 224, 33, .18); font-style: normal; opacity: 0; }
+.emb-item.cae { animation: emb-cae .62s forwards; }
+/* La cinta: baja por el frente y cruza la tapa; las rayitas más claras le dan el brillo del plástico. */
+.emb-cinta { position: absolute; left: 50%; top: 26px; width: 28px; height: 54px; margin-left: -14px; z-index: 5; border-radius: 0 0 2px 2px; transform-origin: 50% 0; transform: scaleY(0); transition: transform .32s ease-out;
+  background: linear-gradient(90deg, rgba(255, 255, 255, .3) 0 18%, transparent 18% 82%, rgba(0, 0, 0, .08) 82%), #8ee021; opacity: .95;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 83% 94%, 67% 100%, 50% 94%, 33% 100%, 17% 94%, 0 100%); }
+.emb-caja.cinta .emb-cinta { transform: scaleY(1); }
+.emb-sello { position: absolute; left: 56%; top: 66%; z-index: 6; padding: 5px 10px; border: 3px solid #2f8a1f; border-radius: 8px; background: rgba(255, 255, 255, .88); color: #2f8a1f;
+  font: 900 17px/1 Poppins, system-ui, sans-serif; letter-spacing: 1px; white-space: nowrap; opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(2.6); box-shadow: 0 0 0 2px rgba(255, 255, 255, .6) inset; }
 .emb-caja.sellada .emb-sello { animation: emb-sello .3s cubic-bezier(.5, 0, .7, 1.4) forwards; }
-.chispin-embalar.golpe .emb-caja { animation: emb-golpe .32s ease .22s; }
-.chispin-embalar.vuela .emb-caja { transition: transform .85s cubic-bezier(.55, 0, .8, .2), opacity .85s ease-in; transform: translate(var(--vx), var(--vy)) scale(.12) rotate(30deg); opacity: .15; }
+/* Los brillitos del sellado: estrellitas de cuatro puntas con los colores de los papelitos, alrededor de la caja. */
+.emb-brillos { position: absolute; inset: 0; z-index: 7; }
+.emb-brillos i { position: absolute; width: 16px; height: 16px; background: var(--c, #ffd76a); opacity: 0; clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.emb-brillos i:nth-child(1) { left: -22px; top: 30px; --c: #8ee021; --d: .26s; }
+.emb-brillos i:nth-child(2) { right: -24px; top: 16px; --c: #ffd76a; --d: .32s; width: 22px; height: 22px; }
+.emb-brillos i:nth-child(3) { left: 24px; top: -18px; --c: #65a7dd; --d: .4s; width: 20px; height: 20px; }
+.emb-brillos i:nth-child(4) { right: 30px; top: -22px; --c: #ff7d74; --d: .36s; width: 13px; height: 13px; }
+.emb-brillos i:nth-child(5) { right: -18px; bottom: 18px; --c: #8ee021; --d: .5s; width: 12px; height: 12px; }
+.emb-brillos i:nth-child(6) { left: -28px; bottom: 6px; --c: #ffd76a; --d: .46s; width: 12px; height: 12px; }
+.emb-brillos i:nth-child(7) { left: 50%; top: -30px; --c: #ffd76a; --d: .56s; width: 14px; height: 14px; }
+.emb-caja.sellada .emb-brillos i { animation: emb-brillo .75s ease-out var(--d) both; }
+.chispin-embalar.golpe .emb-caja { animation: emb-salto .62s ease .2s; }
+.chispin-embalar.golpe .emb-sombra { animation: emb-sombra-salto .62s ease .2s; }
+.chispin-embalar.vuela .emb-caja { animation: emb-vuela .88s forwards; }
+.chispin-embalar.vuela .emb-sombra, .chispin-embalar.vuela .emb-halo { opacity: 0; animation: none; transition: opacity .25s; }
 .chispin-embalar.vuela .emb-lista { opacity: 0; transition: opacity .3s; }
-.emb-lista { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: min(92vw, 440px); }
-.emb-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px 4px 7px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface);
-  color: var(--ui-ink); box-shadow: var(--shadow-float); font-size: 12.5px; font-weight: 600; opacity: 0; animation: emb-chip .4s ease .5s forwards; }
-.emb-chip-ic { display: grid; font-style: normal; color: var(--formas-green, #5cb84e); }
+.emb-lista { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: min(92vw, 440px); }
+.emb-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px 3px 4px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface);
+  color: var(--ui-ink); box-shadow: var(--shadow-float); font-size: 12.5px; font-weight: 600; opacity: 0; animation: emb-chip .45s cubic-bezier(.3, 1.5, .5, 1) var(--d, .5s) forwards; }
+/* Los íconos traen sus colores fijos (contorno azul Formas): el redondelito claro los deja leerse igual en tema oscuro. */
+.emb-chip-ic { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #eef1ff; font-style: normal; }
 @keyframes emb-aparece { from { opacity: 0; transform: scale(.6) translateY(30px); } to { opacity: 1; transform: none; } }
+@keyframes emb-halo { from { opacity: 0; } to { opacity: 1; } }
+/* Cae girando, se aplasta contra el fondo, rebota y se acomoda. */
 @keyframes emb-cae {
-  0% { opacity: 1; transform: translate(var(--x), -60vh) rotate(calc(var(--r) * -5)); }
-  82% { opacity: 1; transform: translate(var(--x), calc(var(--y) + 8px)) rotate(var(--r)); }
+  0% { opacity: 1; transform: translate(var(--x), -60vh) rotate(calc(var(--r) * -5)) scale(.9, 1.12); animation-timing-function: cubic-bezier(.5, 0, .9, .6); }
+  68% { opacity: 1; transform: translate(var(--x), calc(var(--y) + 9px)) rotate(var(--r)) scale(1.16, .8); animation-timing-function: ease-out; }
+  84% { opacity: 1; transform: translate(var(--x), calc(var(--y) - 9px)) rotate(calc(var(--r) * .7)) scale(.95, 1.06); animation-timing-function: ease-in; }
   100% { opacity: 1; transform: translate(var(--x), var(--y)) rotate(var(--r)); }
 }
+@keyframes emb-pum { 0%, 100% { transform: none; } 40% { transform: scale(1.025, .955); } }
 @keyframes emb-sello { to { opacity: 1; transform: translate(-50%, -50%) rotate(-10deg) scale(1); } }
-@keyframes emb-golpe { 0%, 100% { transform: none; } 25% { transform: translate(-3px, 2px) rotate(-1.5deg); } 50% { transform: translate(3px, -1px) rotate(1deg); } 75% { transform: translate(-2px, 1px); } }
-@keyframes emb-chip { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+/* El saltito de contenta: acusa el sellazo, se agacha, salta estirada y aterriza blandito. */
+@keyframes emb-salto {
+  0%, 100% { transform: none; } 12% { transform: translate(-2px, 2px) rotate(-1.5deg); } 26% { transform: scale(1.08, .88); }
+  52% { transform: translateY(-26px) scale(.95, 1.07) rotate(2deg); } 76% { transform: scale(1.06, .92); } 88% { transform: scale(.99, 1.02); }
+}
+@keyframes emb-sombra-salto { 0%, 26%, 76%, 100% { transform: none; opacity: 1; } 52% { transform: scale(.72); opacity: .55; } }
+@keyframes emb-brillo { 0% { opacity: 0; transform: scale(0) rotate(-40deg); } 40% { opacity: 1; transform: scale(1.25) rotate(10deg); } 100% { opacity: 0; transform: scale(.4) rotate(60deg) translateY(-8px); } }
+/* El vuelo a Chispín, en curva: toma carrera para atrás, sube y cae achicándose sobre él. */
+@keyframes emb-vuela {
+  0% { transform: none; opacity: 1; animation-timing-function: ease-out; }
+  22% { transform: translate(calc(var(--vx) * -.05), -30px) rotate(-12deg) scale(1.05); opacity: 1; animation-timing-function: cubic-bezier(.5, 0, .8, .5); }
+  62% { transform: translate(calc(var(--vx) * .45), calc(var(--vy) * .18 - 46px)) rotate(10deg) scale(.62); opacity: 1; animation-timing-function: cubic-bezier(.3, .3, .7, 1); }
+  100% { transform: translate(var(--vx), var(--vy)) rotate(32deg) scale(.1); opacity: .1; }
+}
+@keyframes emb-chip { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
 
 /* Pedido entregado (camion en Chispin.tsx): el camión de Formas cruza la pantalla con los productos en la carga, frena en el
-   medio a tocar bocina y sigue. */
-.chispin-camion { position: fixed; left: 0; right: 0; bottom: 14vh; height: 150px; z-index: 305; overflow: hidden; pointer-events: none; }
-.cam-auto { position: absolute; left: 0; bottom: 0; width: 220px; height: 112px; animation: cam-cruza 4.8s forwards; }
-.cam-auto svg { display: block; animation: cam-bache .26s ease-in-out infinite alternate; filter: drop-shadow(0 8px 10px rgba(18, 20, 58, .3)); }
-.cam-rueda { transform-box: fill-box; transform-origin: center; animation: cam-rueda .4s linear infinite; }
-.cam-carga { position: absolute; left: 12px; top: 22px; width: 124px; height: 52px; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 4px; }
-.cam-item { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: #fff; color: #000085; font-style: normal; }
-.cam-bocina { position: absolute; left: 140px; top: -34px; padding: 3px 9px; border: 2px solid #12143a; border-radius: 10px; background: #fff; color: #12143a;
-  font: 800 13px/1.3 Poppins, system-ui, sans-serif; white-space: nowrap; opacity: 0; animation: cam-bip 4.8s ease forwards; }
-.cam-humo { position: absolute; left: -4px; bottom: 26px; }
-.cam-humo i { position: absolute; width: 13px; height: 13px; border-radius: 50%; background: rgba(140, 142, 165, .5); animation: cam-humo .9s ease-out infinite; }
+   medio a tocar bocina y sigue. El camioncito con más onda (Rodrigo, 19/11/2026): la carrocería se hamaca y cabecea al frenar
+   y al arrancar (las ruedas no), los productos saltan en la vidriera, el farol guiña con la bocina, humito, polvo y viento.
+   Todas las animaciones largas duran los mismos 4,8 s que el cruce, así el frenazo (42 %–60 %) les cae a todas a la vez. */
+.chispin-camion { position: fixed; left: 0; right: 0; bottom: 14vh; height: 190px; z-index: 305; overflow: hidden; pointer-events: none; }
+/* En el celular el globo de Chispín ocupa todo el ancho de abajo y lo tapaba: ahí el camión pasa más arriba. */
+@media (max-width: 640px) { .chispin-camion { bottom: max(14vh, 340px); } }
+.cam-auto { position: absolute; left: 0; bottom: 8px; width: 250px; height: 120px; animation: cam-cruza 4.8s forwards; }
+.cam-inercia { position: absolute; inset: 0; transform-origin: 50% 100%; animation: cam-inercia 4.8s ease-in-out forwards; }
+.cam-cuerpo { position: absolute; inset: 0; animation: cam-bache .24s ease-in-out infinite alternate; }
+.cam-cuerpo svg, .cam-ruedas { display: block; overflow: visible; }
+.cam-cuerpo svg { filter: drop-shadow(0 3px 0 rgba(18, 20, 58, .18)); }
+.cam-ruedas { position: absolute; inset: 0; }
+.cam-rueda { transform-box: fill-box; transform-origin: center; animation: cam-rueda 4.8s forwards; }
+.cam-sombra { position: absolute; left: 4px; right: 2px; bottom: -6px; height: 14px; border-radius: 50%; background: radial-gradient(closest-side, rgba(18, 20, 58, .34), transparent); }
+.cam-luz { animation: cam-luz 4.8s forwards; }
+.cam-ondas { opacity: 0; transform-box: fill-box; transform-origin: 0 50%; animation: cam-ondas 4.8s forwards; }
+/* La vidriera de la carga: los productos van en fichitas blancas y saltan desparejos, como con los pozos. */
+.cam-carga { position: absolute; left: 16px; top: 22px; width: 126px; height: 36px; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 2px 3px; }
+.cam-item { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: #fff; box-shadow: 0 2px 0 rgba(0, 0, 133, .16); font-style: normal; animation: cam-salta .42s ease-in-out infinite alternate; }
+.cam-item svg { width: 22px; height: 22px; }
+.cam-item:nth-child(2n) { animation-delay: -.2s; animation-duration: .36s; } .cam-item:nth-child(3n) { animation-delay: -.33s; animation-duration: .48s; }
+.cam-carga.muchos { gap: 1px 2px; }
+.cam-carga.muchos .cam-item { width: 17px; height: 17px; border-radius: 5px; box-shadow: none; } .cam-carga.muchos .cam-item svg { width: 15px; height: 15px; }
+/* El globito de la bocina, con su piquito apuntando a la cabina; hace «bip» dos veces. */
+.cam-bocina { position: absolute; left: 166px; top: -30px; padding: 5px 12px 6px; border: 2.5px solid #12143a; border-radius: 16px; background: #fff; color: #000085; box-shadow: 3px 3px 0 #8ee021;
+  font: 800 14px/1.2 Poppins, system-ui, sans-serif; white-space: nowrap; opacity: 0; transform-origin: 18% 120%; animation: cam-bip 4.8s ease forwards; }
+.cam-bocina::after { content: ''; position: absolute; left: 16px; bottom: -8px; width: 11px; height: 11px; background: #fff; border: solid #12143a; border-width: 0 2.5px 2.5px 0; transform: rotate(45deg) skew(8deg, 8deg); }
+.cam-humo { position: absolute; left: -6px; bottom: 26px; }
+.cam-humo i { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: rgba(150, 152, 178, .55); box-shadow: inset -2px -2px 0 rgba(110, 112, 140, .25); opacity: 0; animation: cam-humo .9s ease-out infinite; }
 .cam-humo i:nth-child(2) { animation-delay: .3s; } .cam-humo i:nth-child(3) { animation-delay: .6s; }
+/* El polvo que levantan las ruedas de atrás al arrancar de nuevo. */
+.cam-polvo { position: absolute; left: 30px; bottom: 0; }
+.cam-polvo i { position: absolute; bottom: 0; width: 16px; height: 16px; border-radius: 50%; background: rgba(214, 190, 150, .8); opacity: 0; animation: cam-polvo 4.8s ease-out forwards; }
+.cam-polvo i:nth-child(2) { --px: -46px; --py: -10px; --pd: 2.5%; } .cam-polvo i:nth-child(3) { --px: -24px; --py: -26px; --pd: 5%; width: 11px; height: 11px; } .cam-polvo i:nth-child(4) { --px: -58px; --py: -18px; width: 10px; height: 10px; }
+/* Las rayitas de viento atrás del camión: solo mientras anda. */
+.cam-viento { position: absolute; right: 100%; top: 0; bottom: 0; width: 90px; animation: cam-anda 4.8s forwards; }
+.cam-viento i { position: absolute; right: 6px; height: 3px; border-radius: 3px; background: #65a7dd; opacity: 0; animation: cam-viento .5s linear infinite; }
+.cam-viento i:nth-child(1) { top: 26px; width: 42px; } .cam-viento i:nth-child(2) { top: 52px; width: 26px; animation-delay: .17s; background: #8ee021; } .cam-viento i:nth-child(3) { top: 74px; width: 54px; animation-delay: .33s; }
 @keyframes cam-cruza {
-  0% { transform: translateX(-240px); animation-timing-function: cubic-bezier(.2, .6, .35, 1); }
-  42%, 60% { transform: translateX(calc(50vw - 110px)); animation-timing-function: cubic-bezier(.55, 0, .8, .4); }
-  100% { transform: translateX(calc(100vw + 30px)); }
+  0% { transform: translateX(-270px); animation-timing-function: cubic-bezier(.2, .6, .35, 1); }
+  42%, 60% { transform: translateX(calc(50vw - 125px)); animation-timing-function: cubic-bezier(.55, 0, .8, .4); }
+  100% { transform: translateX(calc(100vw + 100px)); }
 }
-@keyframes cam-bache { from { transform: translateY(0); } to { transform: translateY(-2px); } }
-@keyframes cam-rueda { to { transform: rotate(360deg); } }
-@keyframes cam-bip { 0%, 44% { opacity: 0; transform: scale(.5); } 49% { opacity: 1; transform: scale(1.12); } 54%, 60% { opacity: 1; transform: scale(1); } 66%, 100% { opacity: 0; transform: scale(.9); } }
-@keyframes cam-humo { from { opacity: .8; transform: translate(0, 0) scale(.4); } to { opacity: 0; transform: translate(-28px, -14px) scale(1.7); } }
+/* Giran lo que avanza el camión (más o menos): rápido al entrar, quietas en el frenazo, y de nuevo al irse. */
+@keyframes cam-rueda {
+  0% { transform: rotate(0); animation-timing-function: cubic-bezier(.2, .6, .35, 1); }
+  42%, 60% { transform: rotate(900deg); animation-timing-function: cubic-bezier(.55, 0, .8, .4); }
+  100% { transform: rotate(2100deg); }
+}
+/* La suspensión: clava la trompa al frenar, rebota, pega dos saltitos con los bocinazos y se sienta de cola al arrancar. */
+@keyframes cam-inercia {
+  0%, 30% { transform: rotate(-.5deg); } 41% { transform: rotate(2.6deg); } 45% { transform: rotate(-1.1deg); } 48% { transform: rotate(0); }
+  50% { transform: translateY(-4px) scale(1.01, .99); } 52% { transform: none; } 54% { transform: translateY(-4px) scale(1.01, .99); } 56%, 60% { transform: none; }
+  65% { transform: rotate(-3deg); } 76% { transform: rotate(-1deg); } 100% { transform: rotate(-.5deg); }
+}
+@keyframes cam-bache { from { transform: translateY(0); } to { transform: translateY(-1.8px); } }
+@keyframes cam-salta { from { transform: translateY(1px) rotate(-3deg); } to { transform: translateY(-3px) rotate(4deg); } }
+@keyframes cam-luz { 0%, 47% { opacity: .55; } 50% { opacity: 1; } 52% { opacity: .2; } 54% { opacity: 1; } 57%, 100% { opacity: .55; } }
+@keyframes cam-ondas { 0%, 48% { opacity: 0; transform: scale(.5); } 50% { opacity: 1; transform: scale(1.1); } 52% { opacity: .2; transform: scale(.7); } 54% { opacity: 1; transform: scale(1.1); } 58%, 100% { opacity: 0; transform: scale(1.3); } }
+@keyframes cam-bip {
+  0%, 45% { opacity: 0; transform: scale(.3) rotate(-12deg); } 49% { opacity: 1; transform: scale(1.14) rotate(3deg); } 51.5% { opacity: 1; transform: scale(.96) rotate(-2deg); }
+  54% { opacity: 1; transform: scale(1.1) rotate(2deg); } 56%, 61% { opacity: 1; transform: scale(1) rotate(0); } 66%, 100% { opacity: 0; transform: scale(.7) translateY(-10px); }
+}
+@keyframes cam-humo { from { opacity: .85; transform: translate(0, 0) scale(.4); } to { opacity: 0; transform: translate(-30px, -16px) scale(1.8); } }
+@keyframes cam-polvo { 0%, 60% { opacity: 0; transform: scale(.3); } 63% { opacity: .9; transform: translate(-8px, -3px) scale(.8); } 78%, 100% { opacity: 0; transform: translate(var(--px, -34px), var(--py, -14px)) scale(2); } }
+@keyframes cam-anda { 0%, 3% { opacity: 0; } 8%, 30% { opacity: 1; } 38%, 63% { opacity: 0; } 70%, 100% { opacity: 1; } }
+@keyframes cam-viento { 0% { opacity: 0; transform: translateX(10px) scaleX(.4); } 30% { opacity: .75; } 100% { opacity: 0; transform: translateX(-44px) scaleX(1); } }
 @keyframes chispin-cae { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), 105vh) rotate(var(--r)); } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {

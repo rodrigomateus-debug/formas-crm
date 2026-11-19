@@ -165,34 +165,48 @@ export interface FestejoPedido {
 let revisarDesdeAfuera: (() => void) | null = null;
 type Grupo = { sub: Subcategoria; cantidad: number };
 const MAX_EN_CAJA = 6;
+// El iconito va más grande en la caja y en el camión (ahí se luce el dibujo) y chiquito en las fichas de la lista.
+const TAM_ICONO: Record<string, number> = { 'emb-item': 30, 'cam-item': 22 };
 const fichaProducto = (g: Grupo, clase: string) => {
   const i = document.createElement('i');
   i.className = clase;
   i.title = g.sub.tipo;
-  i.innerHTML = svgIcono(g.sub.d, clase === 'emb-item' ? 26 : 17);
+  i.innerHTML = svgIcono(g.sub.svg, TAM_ICONO[clase] ?? 17);
   return i;
 };
 const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// El moño de Formas (el isotipo, CINTA) como SVG suelto, para el sticker de la caja y el costado del camión.
+const monio = (color: string, ancho: number) =>
+  `<svg viewBox="78 221 544 258" width="${ancho}" height="${Math.round(ancho * 258 / 544 * 10) / 10}" aria-hidden="true"><path d="${CINTA}" fill="${color}"/></svg>`;
 
 // La caja: aparece abierta, caen los productos uno por uno, se cierran las solapas, la cinta, el sello «LISTO ✓» y vuela a Chispín.
+// Con más onda («ponele un poco más de onda al camioncito, cajita e iconitos», Rodrigo, 19/11/2026): cartón kraft con el sticker
+// del moño y las flechitas de «este lado arriba», los productos rebotan al caer (y la caja acusa el golpe), pega un saltito
+// de contenta cuando la sellan, le saltan brillitos y se va volando en curva. Los tiempos son los de siempre: lo que cambia
+// es el dibujo (styles.css, .emb-*); si se toca una duración allá, acá van los mismos milisegundos.
 async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
   if (reducido()) return;
   const capa = document.createElement('div');
   capa.className = 'chispin-embalar';
-  capa.innerHTML = '<div class="emb-caja"><span class="emb-fondo"></span><span class="emb-solapa izq"></span><span class="emb-solapa der"></span>'
-    + '<span class="emb-frente"><span class="emb-marca">formas</span></span><span class="emb-cinta"></span><span class="emb-sello">LISTO ✓</span></div><div class="emb-lista"></div>';
+  capa.innerHTML = '<span class="emb-halo"></span><div class="emb-escena"><span class="emb-sombra"></span><div class="emb-caja">'
+    + '<span class="emb-solapa atras"></span><span class="emb-fondo"></span>'
+    + `<span class="emb-frente"><span class="emb-sticker">${monio('#fff', 24)}</span>`
+    + '<svg class="emb-estampa" viewBox="0 0 40 24" width="40" height="24" aria-hidden="true"><path d="M8 20V6M3.5 10.5 8 6l4.5 4.5M21 20V6M16.5 10.5 21 6l4.5 4.5M30 8h8l-1 5a3 3 0 0 1-6 0zM34 16v4M31.5 20h5"/></svg></span>'
+    + '<span class="emb-solapa izq"></span><span class="emb-solapa der"></span><span class="emb-cinta"></span><span class="emb-sello">LISTO ✓</span>'
+    + '<span class="emb-brillos"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="emb-lista"></div>';
   const caja = capa.querySelector('.emb-caja') as HTMLElement;
   const lista = capa.querySelector('.emb-lista') as HTMLElement;
   const enCaja = grupos.slice(0, MAX_EN_CAJA);
   enCaja.forEach((g, k) => {
     const it = fichaProducto(g, 'emb-item');
     // Repartidos a lo ancho de la caja, un poco desordenados.
-    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 22 : 30) + (Math.random() * 8 - 4)}px`);
+    it.style.setProperty('--x', `${(k - (enCaja.length - 1) / 2) * (enCaja.length > 4 ? 23 : 32) + (Math.random() * 8 - 4)}px`);
     it.style.setProperty('--r', `${Math.random() * 40 - 20}deg`);
     it.style.setProperty('--y', `${-4 - (k % 2) * 10}px`);
     caja.insertBefore(it, caja.querySelector('.emb-frente'));
     const chip = document.createElement('span');
     chip.className = 'emb-chip';
+    chip.style.setProperty('--d', `${500 + k * 90}ms`);
     chip.appendChild(fichaProducto(g, 'emb-chip-ic'));
     chip.appendChild(document.createTextNode(`${g.cantidad ? `${g.cantidad} ` : ''}${(g.cantidad === 1 ? g.sub.tipo.split(' / ')[0] : g.sub.plural).toLowerCase()}`));
     lista.appendChild(chip);
@@ -200,7 +214,12 @@ async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
   document.body.appendChild(capa);
   await esperar(350);
   const items = [...caja.querySelectorAll<HTMLElement>('.emb-item')];
-  for (const it of items) { it.classList.add('cae'); await esperar(420); }
+  for (const it of items) {
+    it.classList.add('cae');
+    // Cuando toca fondo (a los ~430 ms de los 620 de la caída) la caja acusa el golpe: se reinicia la animación en cada producto.
+    setTimeout(() => { caja.classList.remove('pum'); void caja.offsetWidth; caja.classList.add('pum'); }, 430);
+    await esperar(420);
+  }
   await esperar(450);
   caja.classList.add('cerrada');
   await esperar(450);
@@ -218,21 +237,50 @@ async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
   capa.remove();
 }
 
-// El camión: cruza la pantalla de izquierda a derecha con los productos en la caja de carga, tocando bocina.
+// El camión: cruza la pantalla de izquierda a derecha con los productos en la caja de carga, frena en el medio a tocar bocina
+// y sigue. El camioncito con más onda (Rodrigo, 19/11/2026): redondeado, con el moño y «formas» en el costado, la vidriera de
+// la carga donde saltan los productos, el chofer, el farol que hace guiños al tocar bocina, la suspensión que cabecea al
+// frenar y al arrancar, humito, polvo y rayitas de viento. Va en dos SVG: la carrocería (que se hamaca) y las ruedas (que no).
+// Todo el dibujo es nuestro y fijo: lo único que viene de afuera son los productos, y entran por fichaProducto (title).
+const RUEDA = (cx: number) => `<g class="cam-rueda"><circle cx="${cx}" cy="97" r="15.5" fill="#12143a"/><circle cx="${cx}" cy="97" r="11.6" fill="none" stroke="#2c2f5c" stroke-width="1.6"/>`
+  + `<circle cx="${cx}" cy="97" r="8" fill="#e4e7f5"/><path d="M${cx} 90.2v13.6M${cx - 6.8} 97h13.6M${cx - 4.8} 92.2l9.6 9.6M${cx + 4.8} 92.2l-9.6 9.6" stroke="#a9adcd" stroke-width="1.7" stroke-linecap="round"/>`
+  + `<circle cx="${cx}" cy="97" r="3" fill="#8ee021" stroke="#12143a" stroke-width="1.2"/></g>`;
 function camion(grupos: Grupo[]) {
   if (reducido()) return;
   const capa = document.createElement('div');
   capa.className = 'chispin-camion';
-  capa.innerHTML = `<div class="cam-auto"><svg viewBox="0 0 220 112" width="220" height="112" aria-hidden="true">
-      <rect x="4" y="8" width="140" height="72" rx="7" fill="#000085"/><rect x="4" y="8" width="140" height="10" rx="5" fill="#8ee021"/>
-      <path d="M146 32h40l24 26v22h-64z" fill="#8ee021"/><path d="M153 39h30l17 18h-47z" fill="#d9eeff"/><rect x="203" y="63" width="6" height="7" rx="2" fill="#ffd76a"/>
-      <rect x="4" y="78" width="206" height="9" rx="3" fill="#12143a"/>
-      <g class="cam-rueda"><circle cx="42" cy="92" r="14" fill="#12143a"/><circle cx="42" cy="92" r="5.5" fill="#c9cbe0"/><path d="M42 80v24M30 92h24" stroke="#45476b" stroke-width="2.5"/></g>
-      <g class="cam-rueda"><circle cx="176" cy="92" r="14" fill="#12143a"/><circle cx="176" cy="92" r="5.5" fill="#c9cbe0"/><path d="M176 80v24M164 92h24" stroke="#45476b" stroke-width="2.5"/></g>
-    </svg><div class="cam-carga"></div><span class="cam-bocina">¡Bip bip! 📯</span><span class="cam-humo"><i></i><i></i><i></i></span></div>`;
+  capa.innerHTML = `<div class="cam-auto"><span class="cam-viento"><i></i><i></i><i></i></span><span class="cam-sombra"></span>
+    <span class="cam-humo"><i></i><i></i><i></i></span><span class="cam-polvo"><i></i><i></i><i></i><i></i></span>
+    <div class="cam-inercia"><div class="cam-cuerpo"><svg viewBox="0 0 250 120" width="250" height="120" aria-hidden="true">
+      <defs><linearGradient id="cam-luz-g" x1="0" x2="1"><stop offset="0" stop-color="#ffe88a" stop-opacity=".95"/><stop offset="1" stop-color="#ffe88a" stop-opacity="0"/></linearGradient>
+        <clipPath id="cam-vidrio-c"><path d="M161 41h27.5a7 7 0 0 1 5.4 2.6L207.5 60H161z"/></clipPath><clipPath id="cam-caja-c"><rect x="6" y="9" width="146" height="77" rx="12"/></clipPath></defs>
+      <path class="cam-luz" d="M229 66 250 56v26l-21-7z" fill="url(#cam-luz-g)"/>
+      <rect x="0" y="86" width="12" height="5" rx="2.5" fill="#6d7096"/>
+      <rect x="6" y="9" width="146" height="77" rx="12" fill="#000085"/>
+      <g clip-path="url(#cam-caja-c)"><rect x="6" y="9" width="146" height="6" fill="#8ee021"/><rect x="6" y="64" width="146" height="3" fill="#8ee021"/><path d="M6 15h146v3H6z" fill="#fff" opacity=".12"/></g>
+      <rect x="14" y="20" width="130" height="40" rx="8" fill="#12143a"/><rect x="15.5" y="21.5" width="127" height="37" rx="6.5" fill="#dcecff"/>
+      <path d="M15.5 30v-2a6.5 6.5 0 0 1 6.5-6.5h114a6.5 6.5 0 0 1 6.5 6.5v2z" fill="#fff" opacity=".55"/>
+      <g transform="translate(72 69.6) scale(.044) translate(-78 -221)"><path d="${CINTA}" fill="#8ee021"/></g>
+      <text x="100" y="80.5" fill="#fff" font-family="Poppins, system-ui, sans-serif" font-weight="800" font-size="12.5" letter-spacing=".3">formas</text>
+      <path d="M154 86V42a9 9 0 0 1 9-9h26.5a12 12 0 0 1 9.3 4.4L218 60.5l9.5 3.8a7 7 0 0 1 4.5 6.5V86z" fill="#8ee021"/>
+      <path d="M154 70h78v16h-78z" fill="#7bcb14"/><path d="M154 68.5h77.4" stroke="#fff" stroke-width="2" opacity=".5"/>
+      <path d="M161 41h27.5a7 7 0 0 1 5.4 2.6L207.5 60H161z" fill="#d9eeff" stroke="#12143a" stroke-width="2.2" stroke-linejoin="round"/>
+      <g clip-path="url(#cam-vidrio-c)"><rect x="170" y="56" width="20" height="8" rx="4" fill="#000085"/><circle cx="180" cy="51" r="6.8" fill="#ffd9b8"/>
+        <path d="M172.8 50a7.2 7.2 0 0 1 14.4 0z" fill="#000085"/><path d="M186 50h5.5" stroke="#000085" stroke-width="2.4" stroke-linecap="round"/>
+        <circle cx="182.6" cy="52.3" r=".9" fill="#12143a"/><path d="M181 55.2c1.2.9 2.6.8 3.6-.2" stroke="#12143a" stroke-width="1" fill="none" stroke-linecap="round"/>
+        <path d="M164 58 174 42M168.5 58l6-9.5" stroke="#fff" stroke-width="2" opacity=".8" stroke-linecap="round"/></g>
+      <path d="M165 66.5h7" stroke="#12143a" stroke-width="2.2" stroke-linecap="round"/><rect x="207" y="52" width="5" height="8" rx="2" fill="#12143a"/>
+      <rect x="222" y="65" width="8.5" height="10" rx="3.5" fill="#ffd76a" stroke="#12143a" stroke-width="1.6"/>
+      <rect x="2" y="83" width="234" height="8.5" rx="4" fill="#12143a"/><rect x="226" y="80" width="12" height="9" rx="4" fill="#c9cbe0" stroke="#12143a" stroke-width="1.6"/>
+      <path d="M28 91a20 20 0 0 1 40 0zM170 91a20 20 0 0 1 40 0z" fill="#12143a"/>
+      <g class="cam-ondas" fill="none" stroke="#000085" stroke-width="2.4" stroke-linecap="round"><path d="M236 40c2.5 2 2.5 6 0 8"/><path d="M241 36c4.5 4 4.5 12 0 16"/></g>
+    </svg><div class="cam-carga"></div><span class="cam-bocina">¡Bip, bip!</span></div></div>
+    <svg class="cam-ruedas" viewBox="0 0 250 120" width="250" height="120" aria-hidden="true">${RUEDA(48)}${RUEDA(190)}</svg></div>`;
   const carga = capa.querySelector('.cam-carga') as HTMLElement;
-  for (const g of grupos.slice(0, MAX_EN_CAJA)) carga.appendChild(fichaProducto(g, 'cam-item'));
-  if (!grupos.length) for (const g of agruparProductos([{ nombre: '', cantidad: null }])) carga.appendChild(fichaProducto(g, 'cam-item'));
+  const enCarga = grupos.length ? grupos.slice(0, MAX_EN_CAJA) : agruparProductos([{ nombre: '', cantidad: null }]);
+  // Con más de cuatro no entran en una fila de la vidriera: van más chicos, en dos.
+  if (enCarga.length > 4) carga.classList.add('muchos');
+  for (const g of enCarga) carga.appendChild(fichaProducto(g, 'cam-item'));
   document.body.appendChild(capa);
   setTimeout(() => capa.remove(), 5200);
 }

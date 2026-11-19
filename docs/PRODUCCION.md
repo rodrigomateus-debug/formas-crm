@@ -146,6 +146,13 @@ Es la misma regla que el estado del pedido (`generalStage` en `clickup.ts`, ver 
 | algunos entregados / todos entregados | Entregado parcial / Entregado |
 | todos anulados (o el PDV anulado) | Anulado |
 
+**Pendiente de anticipo** (pedido de Rodrigo del 19/11/2026). Un estado que no existe en ClickUp: en la vista de
+Producción lo tienen el PDV y los artículos que todavía no arrancaron («ingreso de pedido» o «pdv») de un pedido que
+está en «$ Pendiente de Anticipo», para ver lo que está por entrar y todavía no se pagó. En la lista de estados (y en
+el filtro por estado) va antes de «en espera de confirmación». Sale de la etapa del pedido y no se elige: cuando la
+vendedora pasa el pedido a «Listo para producción», o producción mueve el artículo, vuelve el estado de ClickUp
+(`PENDIENTE_ANTICIPO` y `conAnticipo` en `produccion.ts`).
+
 Al lado, cuántos artículos están listos («2/3»; los anulados no cuentan). Cuando producción cambia el estado de un
 artículo desde el CRM, el CRM relee el PDV y el pedido cambia de etapa en el momento, sin esperar la sincronización.
 En el historial del pedido el cambio queda a nombre de quien lo hizo.
@@ -311,7 +318,7 @@ Pedido de Rodrigo del 19/11/2026: los PDV vienen ordenados por fecha de creació
 
 - **Qué fecha es**: la del pedido de venta en Finnegans (`fecha_pedido`, la misma de Inicio de Producción). Si el pedido
   todavía no la tiene (recién cargado, antes de la corrida de totales de la mañana), el alta de la tarea del PDV en
-  ClickUp (`date_created`, columna `produccion.creado`, migración `0093`, que llena la sincronización) y, si el pedido no
+  ClickUp (`date_created`, columna `produccion.creado`, migración `0095`, que llena la sincronización) y, si el pedido no
   vino de ClickUp, su alta en el CRM (`SELECT_PDV` en `src/worker/produccion.ts`).
 - **Orden**: por defecto, los más nuevos primero (sin fecha, al final). Un clic en el encabezado **Creado** lo da vuelta;
   en **Real**, por fecha de entrega (la real o, si no tiene, la pactada), como era antes. El orden se guarda en las vistas

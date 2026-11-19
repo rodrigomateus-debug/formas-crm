@@ -792,6 +792,7 @@ export const estiloEstado = (color: string | null | undefined) => {
 const ICONOS_ESTADO: Record<string, string> = {
   'ingreso de pedido': 'M4 13h4.5l1.5 2.5h4l1.5-2.5H20M4 13l2.5-8h11L20 13v6H4zM12 4.5v6M9.5 8 12 10.5 14.5 8',   // bandeja que entra
   pdv: 'M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3',                                                   // la orden
+  'pendiente de anticipo': 'M2.5 6.5h19v11h-19zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM6 9.5v5M18 9.5v5',                    // billete
   'en espera de confirmación': 'M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9',          // reloj de arena
   'personales': 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM5 21a7 7 0 0 1 14 0',                                    // una persona
   'boceto pendiente': 'M4 20l4-1L19 8a2.1 2.1 0 0 0-3-3L5 16zM14 7l3 3',                                     // lápiz

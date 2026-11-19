@@ -8,6 +8,16 @@ import InicioDireccion from './InicioDireccion';
 import InicioProduccion from './InicioProduccion';
 import { SinRespuestaInicio } from './Consultas';
 
+interface Vendedora {
+  estimacion: { semana: number; mes: number; negocios_semana: number; negocios_mes: number; tasa_cierre: number | null; cerrados: number; lag_mediana: number | null;
+    fuentes: { vendedora: number; equipo: number; etapa: number };
+    negocios: Array<{ id: number; name: string; owner_id: number | null; stage_id: string; amount: number; dias_en_etapa: number; p: number; p7: number; p30: number; esperado_mes: number; cierre_estimado: string | null; fuente: string; parecidos: number }> };
+  negocios_abiertos: { n: number; monto: number };
+  pedidos: { abiertos: number; monto: number; previos: { n: number; monto: number }; produccion: { n: number; monto: number }; listos: { n: number; monto: number } };
+  producciones: { articulos: number; pedidos: number };
+}
+const pct = (x: number | null) => (x == null ? '—' : `${Math.round(x * 100)} %`);
+
 interface Dash {
   open: Array<{ pipeline_id: string; stage_id: string; n: number; amount: number }>;
   won: Array<{ owner_id: number; pipeline_id: string; n: number; amount: number }>;
@@ -47,6 +57,9 @@ function InicioEquipo() {
   const [unidades, setUnidades] = useState<string[]>([]);
   const u = unidades.length ? unidades.join(',') : undefined;
   const dash = useAsync(() => http<Dash>('GET', `/dashboard${qs({ owner, unidades: u })}`), [owner, u]);
+  // Estimación de ventas, pedidos y producciones (forecast.ts). Sin filtro de unidad: es lo de la vendedora.
+  const vend = useAsync(() => prod ? Promise.resolve(null) : http<Vendedora>('GET', `/dashboard/vendedora${qs({ owner })}`), [owner]);
+  const v = vend.data;
   const tasks = useAsync(() => http<{ results: Activity[] }>('GET', `/tasks${qs({ due: 'today', limit: 8, unidades: u })}`), [u]);
   const closed = meta.pipelines.flatMap((p) => p.stages.filter((s) => s.is_closed).map((s) => s.id));
   const stale = useAsync(() => prod ? Promise.resolve({ results: [] as CrmRecord[], total: 0 }) : http<{ results: CrmRecord[]; total: number }>('GET', `/records/deal${qs({
@@ -83,6 +96,19 @@ function InicioEquipo() {
         <div className="panel kpi"><div className="label">Negocios nuevos en {month}</div><div className="value">{sum(d?.created)}</div></div>
         </>}
       </div>
+      {!prod && <div className="kpis">
+        <div className="panel kpi" title="Lo que se espera ganar en los próximos 7 días: cada negocio abierto por la probabilidad de ganarlo en ese plazo, según los negocios parecidos del último año (misma etapa, mismo tiempo quieto)">
+          <div className="label">Estimado próximos 7 días</div><div className="value">{v ? fmtMoney(v.estimacion.semana) || '$ 0' : '–'}</div>
+          <div className="small muted">{v ? `${v.estimacion.negocios_semana} ${v.estimacion.negocios_semana === 1 ? 'negocio' : 'negocios'} con chance esta semana` : ''}</div></div>
+        <div className="panel kpi" title="Lo mismo para los próximos 30 días (incluye la semana)">
+          <div className="label">Estimado próximos 30 días</div><div className="value">{v ? fmtMoney(v.estimacion.mes) || '$ 0' : '–'}</div>
+          <div className="small muted">{v ? `cierre ${pct(v.estimacion.tasa_cierre)} · lag ${v.estimacion.lag_mediana == null ? '—' : `${Math.round(v.estimacion.lag_mediana)} días`}` : ''}</div></div>
+        <div className="panel kpi" title="Pedidos no entregados ni anulados"><div className="label">Pedidos abiertos</div><div className="value">{v?.pedidos.abiertos ?? '–'}</div>
+          <div className="small muted">{v ? `${v.pedidos.previos.n} por arrancar · ${v.pedidos.produccion.n} en producción · ${v.pedidos.listos.n} listos` : ''}</div></div>
+        <div className="panel kpi" title="Artículos de sus pedidos que hoy se están produciendo (pedidos al proveedor, en depósito, en el impresor, con logo o en revisión)">
+          <div className="label">Producciones en curso hoy</div><div className="value">{v?.producciones.articulos ?? '–'}</div>
+          <div className="small muted">{v ? `en ${v.producciones.pedidos} ${v.producciones.pedidos === 1 ? 'pedido' : 'pedidos'}` : ''}</div></div>
+      </div>}
       <div className="grid-2">
         <div className="panel">
           <div className="panel-head"><h2>Tareas para hoy y vencidas</h2><Link to="/tasks" className="small">Todas</Link></div>
@@ -94,6 +120,18 @@ function InicioEquipo() {
           )) : <div className="empty">Nada pendiente para hoy.</div>}
         </div>
         {!prod && <>
+        <div className="panel">
+          <div className="panel-head"><h2>Lo que más pesa en los próximos 30 días</h2><span className="small muted" title="Probabilidad de ganarlo en 30 días y monto esperado">chance · esperado</span></div>
+          {v?.estimacion.negocios.length ? v.estimacion.negocios.map((n) => (
+            <div key={n.id} className="assoc-item">
+              <div className="grow" style={{ minWidth: 0 }}><Link to={recordUrl('deal', n.id)} className="ellipsis" style={{ display: 'block' }}>{n.name}</Link>
+                <div className="small muted">{stageOf(meta, n.stage_id)?.stage.label} · {n.dias_en_etapa} días en la etapa{owner === 'all' ? <> · <UserChip id={n.owner_id} size="xs" /></> : null}{n.fuente === 'equipo' ? ' · según el equipo' : ''}</div></div>
+              <span className="small num" style={{ textAlign: 'right' }} title={`Probabilidad de ganarlo: ${pct(n.p)} en total, ${pct(n.p7)} en 7 días, ${pct(n.p30)} en 30 días (${n.parecidos} negocios parecidos). Monto ${fmtMoney(n.amount)}.`}>
+                {pct(n.p30)} · <b>{fmtMoney(n.esperado_mes)}</b></span>
+            </div>
+          )) : <div className="empty">{vend.loading ? 'Calculando…' : 'Sin negocios con chance de cerrarse en 30 días.'}</div>}
+          {v && v.estimacion.fuentes.etapa > 0 && <div className="small muted" style={{ padding: '8px 20px' }}>{v.estimacion.fuentes.etapa} negocios sin historial parecido: no suman a la estimación.</div>}
+        </div>
         {/* Los clientes que escribieron por WhatsApp y nadie les contestó (Consultas.tsx, darwin.ts). */}
         <SinRespuestaInicio />
         <div className="panel">

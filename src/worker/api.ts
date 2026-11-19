@@ -37,9 +37,11 @@ import { fin, finnegansState, finnegansToken, pedidoIds, syncFacturas, type Dest
 import { actualizarFotos, fotosEstado } from './fotos';
 import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
+import { borrarIdea, cambiarEstadoIdea, crearIdea, editarIdea, listarIdeas, votarIdea } from './ideas';
 import { Budget } from './budget';
 import { resumenDireccion } from './direccion';
 import { inicioProduccion } from './inicioprod';
+import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
@@ -885,6 +887,14 @@ api.get('/dashboard', async (c) => {
   return c.json({ month: m, open: open.results, won: won.results, created: created.results, lost: lost.results, tasks: tasks.results[0] });
 });
 
+// Inicio de Ventas (forecast.ts): estimación de la semana y del mes, negocios y pedidos abiertos y producciones en curso. Como
+// /dashboard: el perfil Ventas, siempre lo suyo.
+api.get('/dashboard/vendedora', async (c) => {
+  const ctx = c.get('ctx');
+  const owner = restringido(ctx.user) ? 'me' : c.req.query('owner') ?? 'me';
+  return c.json(await inicioVendedora(c.env.DB, owner === 'all' ? null : Number(owner === 'me' ? ctx.user.id : owner)));
+});
+
 // Inicio de Dirección (direccion.ts): solo para los usuarios con la marca «Dirección».
 api.get('/dashboard/direccion', async (c) => c.json(await resumenDireccion(c.env.DB, c.get('ctx'), c.req.query())));
 // Inicio de Producción (inicioprod.ts): pedidos, cumplimiento de lo pactado y tiempos de entrega. No se llama /produccion
@@ -1559,6 +1569,16 @@ api.delete('/productos/notas/:id', async (c) => {
   return c.json(await borrarNotaProducto(c.env, ctx, Number(c.req.param('id'))));
 });
 api.get('/productos/notas/:id/foto', async (c) => fotoNotaProducto(c.env, Number(c.req.param('id'))));
+
+// ---------- Buzón de ideas (ideas.ts): Chispín, abajo a la derecha. Todos proponen y votan; los administradores las marcan ----------
+
+api.get('/ideas', async (c) => c.json(await listarIdeas(c.env.DB, c.get('ctx').user)));
+api.post('/ideas', async (c) => c.json(await crearIdea(c.env.DB, c.get('ctx'), await c.req.json()), 201));
+api.patch('/ideas/:id', async (c) => c.json(await editarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
+api.delete('/ideas/:id', async (c) => c.json(await borrarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.put('/ideas/:id/voto', async (c) => c.json(await votarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), true)));
+api.delete('/ideas/:id/voto', async (c) => c.json(await votarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), false)));
+api.post('/ideas/:id/estado', async (c) => c.json(await cambiarEstadoIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 
 // ---------- Recorridos (recorridos.ts): los encargos al recorrido y la base de destinos ----------
 // Para todos los perfiles (también Ventas): cada uno carga y ve lo suyo; Logística, todo.

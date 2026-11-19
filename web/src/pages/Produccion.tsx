@@ -537,7 +537,8 @@ function EstadoCelda({ a, v, editable, onChange }: { a: Articulo; v: Vista; edit
 const cacheEstados = new WeakMap<Estado[], ReactNode>();
 function useOpcionesEstado(estados: Estado[]) {
   if (!cacheEstados.has(estados)) {
-    cacheEstados.set(estados, estados.map((e) => <option key={e.status} value={e.status}><EstadoClickup estado={e.status} color={e.color} /></option>));
+    cacheEstados.set(estados, // «Pendiente de anticipo» sale de la etapa del pedido: se ve en la lista, pero no se elige.
+      estados.map((e) => <option key={e.status} value={e.status} disabled={e.status === 'pendiente de anticipo'}><EstadoClickup estado={e.status} color={e.color} /></option>));
   }
   return cacheEstados.get(estados);
 }

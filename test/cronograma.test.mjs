@@ -226,8 +226,17 @@ test('cronograma: estados de despacho, con lo que falta y a quién le toca', asy
   assert.equal((await saldo(1500)).status, 200);
   caja = mov(await otra(), 'entrega', 'Caja').despacho;
   assert.deepEqual([caja.estado, caja.quien], ['nopago', 'ventas']);
-  assert.match(caja.checks.find((c) => c.k === 'pago').t, /Saldo de \$ 1\.500 en Finnegans/);
+  assert.equal(caja.checks.find((c) => c.k === 'pago').v, 'no');
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /No pagó nada: falta \$ 1\.500 en Finnegans/);
+  // Con el total del pedido en $ 3.000, ya pagó la mitad: «pagó una parte» (naranja), sigue trabando.
+  const totales = await fetch(`${BASE}/hooks/pedidos/totales`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+    body: JSON.stringify({ totales: { [`PEDVTASTP - ${PDV}`]: 3000 } }) });
+  assert.equal(totales.status, 200);
+  caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.deepEqual([caja.estado, caja.checks.find((c) => c.k === 'pago').v], ['nopago', 'parcial']);
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /Pagó una parte: falta \$ 1\.500 de \$ 3\.000/);
   await saldo(0);
+  assert.equal(mov(await otra(), 'entrega', 'Caja').despacho.checks.find((c) => c.k === 'pago').v, 'ok');
 
   // El remito: Finnegans no lo tiene todavía; cuando aparece, «Remitido».
   const sync = () => api('POST', '/integrations/finnegans/sync', { barrido: false });
@@ -1038,4 +1047,46 @@ test('cronograma: un pedido repartido en varias direcciones lleva a cada parada 
   await api('PUT', url, { direcciones: [] });
   await api('POST', '/cronograma/mover', { ids: [m.task_id], tipo: 'entrega', fecha: m.fecha });
   sql(`DELETE FROM line_items WHERE record_id = ${m.record_id};`);
+});
+
+test('cronograma: un colgado destrabado avisa a Logística, y una anotación «solo esta vez» puede trabar la entrega', async (t) => {
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('sin ClickUp de prueba'); return; }
+  asUser = null;
+  // Otras pruebas la mueven de día: se la busca en un rango amplio.
+  const otra = async () => (await api('GET', '/cronograma?desde=2026-10-01&hasta=2027-03-31')).data;
+  const caja = mov(await otra(), 'entrega', 'Caja');
+  assert.ok(caja, 'la caja');
+  // Una anotación que traba la entrega queda en el movimiento, con su estado (la pantalla la usa para el despacho).
+  const nota = await api('POST', '/logistica/notas', { record_id: caja.record_id, tipo: 'entrega', alcance: 'puntual', texto: `Falta la OC ${RUN}`, traba: 'info' });
+  assert.equal(nota.status, 201, JSON.stringify(nota.data));
+  assert.equal(nota.data.traba, 'info');
+  assert.equal(mov(await otra(), 'entrega', 'Caja').notas.find((n) => n.texto === `Falta la OC ${RUN}`)?.traba, 'info');
+  // Las de siempre no traban (trabarían todas las entregas a ese lugar).
+  const siempre = await api('POST', '/logistica/notas', { record_id: caja.record_id, tipo: 'entrega', alcance: 'siempre', texto: `Portón gris ${RUN}`, traba: 'info' });
+  assert.equal(siempre.data.traba, undefined);
+  await api('DELETE', `/logistica/notas/${nota.data.id}`);
+  await api('DELETE', `/logistica/notas/${siempre.data.id}`);
+
+  // La caja ya está remitida (prueba de los estados de despacho): se cuelga igual (el cliente pidió reprogramar) y, como
+  // no la traba nada, a Logística le llega «ya se puede reprogramar». Una sola vez.
+  await api('POST', '/users', { email: `logi2.${RUN}@formas.ar`, name: `Logi2 ${RUN}`, profile: 'logistica' });
+  assert.equal((await api('POST', '/cronograma/colgar', { ids: [caja.task_id], tipo: 'entrega', motivo: 'El cliente pidió reprogramar' })).status, 200);
+  let r = await api('POST', '/cronograma/colgados/revisar');
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.listos >= 1);
+  asUser = `logi2.${RUN}@formas.ar`;
+  const avisos = (await api('GET', '/notificaciones')).data.items.filter((x) => x.kind === 'colgado_listo' && x.record_id === caja.record_id);
+  assert.equal(avisos.length, 1, 'Logística recibe el aviso');
+  assert.match(avisos[0].texto, /ya se puede reprogramar/);
+  asUser = null;
+  await api('POST', '/cronograma/colgados/revisar');
+  asUser = `logi2.${RUN}@formas.ar`;
+  assert.equal((await api('GET', '/notificaciones')).data.items.filter((x) => x.kind === 'colgado_listo' && x.record_id === caja.record_id).length, 1, 'no se repite');
+  asUser = null;
+  // Solo un administrador lo fuerza.
+  asUser = `logi2.${RUN}@formas.ar`;
+  assert.equal((await api('POST', '/cronograma/colgados/revisar')).status, 403);
+  asUser = null;
+  // Se le da fecha: sale de Colgados.
+  assert.equal((await api('POST', '/cronograma/mover', { ids: [caja.task_id], tipo: 'entrega', fecha: '2026-11-25' })).status, 200);
 });

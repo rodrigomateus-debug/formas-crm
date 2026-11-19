@@ -145,14 +145,14 @@ parada del mismo lugar en la ruta del día.
 ## Estados de despacho
 
 Pedido de Logística (Rodrigo, 19/11/2026). Reemplaza los colores que Logística pintaba a mano en la planilla. El estado
-**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Etapas 1 y 2: el estado,
-los puntitos, el reloj, el filtro «Le toca a», la semana llena y la sección «Despacho» en la vista previa del pedido (los
-colgados mejorados vienen después; la maqueta con las ideas está en el artifact «Estados de despacho»).
+**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Tres etapas: el estado,
+los puntitos, el reloj y el filtro «Le toca a»; la semana llena y la sección «Despacho» en la vista previa del pedido; y
+los colgados que no se olvidan y la corrección a mano (la maqueta con las ideas está en el artifact «Estados de despacho»).
 
 | Estado | Color | Cuándo | Le toca a |
 |---|---|---|---|
 | Entregado / Llegó / Retirado / Llevado | verde | hecho (como siempre) | — |
-| No pagó | amarillo flúor | el pedido está en «$ Pendiente de Anticipo» **o** tiene saldo en Finnegans (lo que falta cobrar más lo que falta facturar) | la vendedora (propietaria del pedido) |
+| No pagó nada / Pagó una parte | amarillo flúor | el pedido está en «$ Pendiente de Anticipo» **o** tiene saldo en Finnegans (lo que falta cobrar más lo que falta facturar). Como en Pedidos (`cobroPedido`): si lo pagado pasa el 1 % del total, «pagó una parte» | la vendedora (propietaria del pedido) |
 | Falta información | rojo | la dirección de la parada falta o no se encontró en el mapa | la vendedora (en un retiro o un egreso, Logística: es la dirección del proveedor o el impresor) |
 | No llegó | gris | lo que tenía que llegar antes (ingreso o retiro del proveedor, vuelta del impresor) tiene fecha pasada, no se marcó y el artículo sigue antes de ese paso; o un ingreso con fecha pasada | el proveedor o el impresor (Compras) |
 | En cola de producción | violeta | algún artículo todavía no está «listo para entregar»; en un egreso, la mercadería todavía no llegó al depósito | Producción |
@@ -164,7 +164,7 @@ colgados mejorados vienen después; la maqueta con las ideas está en el artifac
 - **Los puntitos** (checklist de salida): en las entregas, producción completa · mercadería en el depósito · pago ·
   dirección · remito; en los egresos, mercadería en el depósito · dirección · remito de traslado; en los retiros, la
   dirección. Los ingresos no tienen (llegan o no). Verde sí, rojo no, violeta en parte (2 de 3 productos listos), gris
-  pendiente. Al lado, lo que falta en pocas palabras; con el mouse encima, el detalle («Saldo de $ 1.240.000 en Finnegans»).
+  pendiente. El de pago: rojo no pagó nada, naranja pagó una parte, verde pagó. Al lado, lo que falta en pocas palabras; con el mouse encima, el detalle («Saldo de $ 1.240.000 en Finnegans»).
 - **Si llega a tiempo** (el reloj): solo cuando algo traba (no pagó, falta información, no llegó, en cola). Cuenta días
   hábiles hasta el día del movimiento (sin fines de semana ni feriados): «Atrasado · es mañana» (o hoy, o ya pasó) en rojo,
   «Justo · en 2 días hábiles» en ámbar. Lo listo, remitido o programado no lo lleva.
@@ -173,6 +173,20 @@ colgados mejorados vienen después; la maqueta con las ideas está en el artifac
 - **En la vista previa del pedido**: al tocar la tarjeta se abre la vista previa de siempre con la sección «Despacho»
   arriba (el estado, el reloj, a quién le toca, el motivo si está colgado y el checklist entero con el detalle de cada
   control). `RecordPreview` recibe `arriba` (lo que quiera mostrar primero la pantalla que la abre).
+- **Corregir la dirección desde la tarjeta** se ve enseguida en la tarjeta y en su despacho (la de la semana se vuelve a
+  pedir de fondo, que tarda porque arma la ruta de cada día).
+- **Corrección a mano**: una anotación de logística «solo esta vez» puede **trabar la entrega** (al escribirla:
+  «¿Traba la entrega?» No · Falta información · No pagó · No llegó). Mientras esté, la tarjeta queda en ese estado (si es
+  más grave que el automático), con el puntito «Anotación» en rojo y el texto como detalle; se ve en la tarjeta con la
+  etiqueta «Traba: …». Borrarla la devuelve a lo automático. Las de siempre no traban. Columna `traba` de
+  `logistica_notas` (migración `0100_colgados_avisos.sql`).
+- **Colgados que no se olvidan** (etapa 3): cada colgado dice hace cuántos días está colgado (en rojo desde la semana);
+  arriba van los que ya se pueden reprogramar y después, del más viejo al más nuevo. Si se destraba lo que lo colgó (todo
+  queda listo o remitido: entró el pago, llegó la mercadería), la etiqueta pasa a **«Listo para reprogramar»** y a
+  Logística le llega el aviso (campanita y mail) una vez; si se vuelve a trabar y se destraba, de nuevo. Si pasa una
+  semana colgado, al responsable del pedido le llega otra vez el aviso, una vez. Lo revisa `revisarColgados`
+  (`cronograma.ts`) a los :25 de cada hora; `POST /api/cronograma/colgados/revisar` lo fuerza (administradores). Columnas
+  `listo_avisado_at` y `reavisado_at` de `cronograma_colgados`; avisos `colgado_listo` y `colgado_reaviso`.
 - **Le toca a**: en la barra, Producción · Ventas · Proveedor · Logística con cuántas tarjetas tiene cada uno (también las
   colgadas); un clic deja solo esas.
 - **Cómo está hecho**: el servidor arma el despacho de cada movimiento (`despachoDe` en `cronograma.ts`, campo `despacho`

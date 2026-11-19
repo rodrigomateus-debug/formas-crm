@@ -2,6 +2,7 @@ import type { Ctx } from './env';
 import { HttpError, now } from './env';
 import { estadosPec } from './produccion';
 import { visibleSql } from './alcance';
+import { bajarArchivo, borrarArchivos, subirArchivo } from './archivos';
 
 // Conversación de un pedido (o de un negocio), como los comentarios de una tarea de ClickUp (pedido de Rodrigo del
 // 12/11/2026): un chat grupal entre el vendedor, producción y logística, con @menciones, que queda registrado. Entre los
@@ -285,15 +286,17 @@ export async function reaccionar(db: D1Database, ctx: Ctx, id: number, emoji: un
   return { reacciones: await reaccionesDe(db, id) };
 }
 
-export async function borrarMensaje(db: D1Database, ctx: Ctx, id: number) {
+export async function borrarMensaje(db: D1Database, ctx: Ctx, id: number, r2?: R2Bucket) {
   const m = await propio(db, ctx, id);
   if (m.user_id !== ctx.user.id && ctx.user.role !== 'admin') throw new HttpError(403, 'Solo quien escribió el mensaje (o un administrador) lo puede borrar.');
-  // Las imágenes de un mensaje borrado no se ven más: se borran (y liberan lugar en la base).
+  // Las imágenes de un mensaje borrado no se ven más: se borran (y liberan lugar en la base y en R2).
+  const claves = await clavesR2(db, 'mensaje_id = ?', id);
   await db.batch([
     db.prepare('UPDATE mensajes SET borrado_at = ? WHERE id = ?').bind(now(), id),
     borrarPartes(db, 'mensaje_id = ?', id),
     db.prepare('DELETE FROM mensaje_adjuntos WHERE mensaje_id = ?').bind(id),
   ]);
+  await borrarArchivos({ ARCHIVOS: r2 }, claves);
   return { ok: true };
 }
 
@@ -381,10 +384,13 @@ export const seVe = (mime: string) => MIMES_IMAGEN.includes(mime) || mime === 'a
 
 const borrarPartes = (db: D1Database, where: string, ...binds: unknown[]) =>
   db.prepare(`DELETE FROM mensaje_adjunto_partes WHERE adjunto_id IN (SELECT id FROM mensaje_adjuntos WHERE ${where})`).bind(...binds);
+// Las claves en R2 de los adjuntos que se van a borrar (para borrarlos también de ahí).
+const clavesR2 = async (db: D1Database, where: string, ...binds: unknown[]) =>
+  (await db.prepare(`SELECT r2_key FROM mensaje_adjuntos WHERE r2_key IS NOT NULL AND ${where}`).bind(...binds).all<{ r2_key: string }>()).results.map((x) => x.r2_key);
 
 // Sube un archivo para el próximo mensaje (queda sin mensaje hasta que se manda). Se mira el contenido, no solo lo que dice
 // el navegador: una imagen o un PDF tienen que serlo de verdad; lo demás va por la extensión y se baja como archivo.
-export async function subirAdjunto(db: D1Database, ctx: Ctx, recordId: number, archivo: File, medidas: { ancho?: unknown; alto?: unknown } = {}) {
+export async function subirAdjunto(db: D1Database, ctx: Ctx, recordId: number, archivo: File, medidas: { ancho?: unknown; alto?: unknown } = {}, r2?: R2Bucket) {
   await registro(db, recordId);
   const bytes = new Uint8Array(await archivo.arrayBuffer());
   if (!bytes.length) throw new HttpError(400, 'El archivo está vacío.');
@@ -397,34 +403,46 @@ export async function subirAdjunto(db: D1Database, ctx: Ctx, recordId: number, a
   const nombre = (archivo.name || (mime === 'application/pdf' ? 'documento.pdf' : 'imagen')).replace(/[\r\n]/g, ' ').slice(0, 160);
   // De paso, los que alguien subió y nunca mandó (de hace más de un día).
   const viejo = new Date(Date.now() - 86_400_000).toISOString();
+  const viejos = await clavesR2(db, 'user_id = ? AND mensaje_id IS NULL AND created_at < ?', ctx.user.id, viejo);
   await db.batch([
     borrarPartes(db, 'user_id = ? AND mensaje_id IS NULL AND created_at < ?', ctx.user.id, viejo),
     db.prepare('DELETE FROM mensaje_adjuntos WHERE user_id = ? AND mensaje_id IS NULL AND created_at < ?').bind(ctx.user.id, viejo),
   ]);
-  const row = await db.prepare(`INSERT INTO mensaje_adjuntos (record_id, user_id, nombre, mime, size, ancho, alto, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  await borrarArchivos({ ARCHIVOS: r2 }, viejos);
+  // El archivo entero va a R2 (archivos.ts) y en la base queda la clave (data vacío: la columna no admite NULL). Sin R2, en
+  // la base en pedazos, como antes.
+  const r2Key = await subirArchivo({ ARCHIVOS: r2 }, 'adjuntos', bytes, mime);
+  const row = await db.prepare(`INSERT INTO mensaje_adjuntos (record_id, user_id, nombre, mime, size, ancho, alto, data, r2_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     RETURNING ${COLS_ADJUNTO}`).bind(recordId, ctx.user.id, nombre, mime, bytes.length, MIMES_IMAGEN.includes(mime) ? dim(medidas.ancho) : null,
-    MIMES_IMAGEN.includes(mime) ? dim(medidas.alto) : null, bytes.subarray(0, PEDAZO)).first<Adjunto>();
-  for (let n = 1; n * PEDAZO < bytes.length; n++) {
+    MIMES_IMAGEN.includes(mime) ? dim(medidas.alto) : null, r2Key ? new Uint8Array(0) : bytes.subarray(0, PEDAZO), r2Key).first<Adjunto>();
+  for (let n = 1; !r2Key && n * PEDAZO < bytes.length; n++) {
     await db.prepare('INSERT INTO mensaje_adjunto_partes (adjunto_id, n, data) VALUES (?, ?, ?)').bind(row!.id, n, bytes.subarray(n * PEDAZO, (n + 1) * PEDAZO)).run();
   }
   return row!;
 }
 
 // Sacar un archivo subido que todavía no se mandó.
-export async function quitarAdjunto(db: D1Database, ctx: Ctx, id: number) {
+export async function quitarAdjunto(db: D1Database, ctx: Ctx, id: number, r2?: R2Bucket) {
+  const claves = await clavesR2(db, 'id = ? AND user_id = ? AND mensaje_id IS NULL', id, ctx.user.id);
   await db.batch([
     borrarPartes(db, 'id = ? AND user_id = ? AND mensaje_id IS NULL', id, ctx.user.id),
     db.prepare('DELETE FROM mensaje_adjuntos WHERE id = ? AND user_id = ? AND mensaje_id IS NULL').bind(id, ctx.user.id),
   ]);
+  await borrarArchivos({ ARCHIVOS: r2 }, claves);
   return { ok: true };
 }
 
 // El archivo entero (los pedazos, en orden): el de un mensaje (no borrado) o, mientras no se mandó, solo para quien lo subió.
-export async function adjunto(db: D1Database, ctx: Ctx, id: number) {
-  const a = await db.prepare(`SELECT a.record_id, a.mensaje_id, a.user_id, a.nombre, a.mime, a.size, a.data FROM mensaje_adjuntos a
+export async function adjunto(db: D1Database, ctx: Ctx, id: number, r2?: R2Bucket) {
+  const a = await db.prepare(`SELECT a.record_id, a.mensaje_id, a.user_id, a.nombre, a.mime, a.size, a.data, a.r2_key FROM mensaje_adjuntos a
       LEFT JOIN mensajes m ON m.id = a.mensaje_id WHERE a.id = ? AND (a.mensaje_id IS NULL OR m.borrado_at IS NULL)`)
-    .bind(id).first<{ record_id: number; mensaje_id: number | null; user_id: number | null; nombre: string; mime: string; size: number; data: ArrayBuffer | number[] }>();
+    .bind(id).first<{ record_id: number; mensaje_id: number | null; user_id: number | null; nombre: string; mime: string; size: number; data: ArrayBuffer | number[]; r2_key: string | null }>();
   if (!a || (a.mensaje_id == null && a.user_id !== ctx.user.id)) throw new HttpError(404, 'No existe el archivo.');
+  if (a.r2_key) {
+    const enR2 = await bajarArchivo({ ARCHIVOS: r2 }, a.r2_key);
+    if (!enR2) throw new HttpError(404, 'No se encontró el archivo.');
+    return { record_id: a.record_id, nombre: a.nombre, mime: a.mime, bytes: enR2 };
+  }
   const aBytes = (d: ArrayBuffer | number[]) => (d instanceof ArrayBuffer ? new Uint8Array(d) : new Uint8Array(d));
   const primero = aBytes(a.data);
   let bytes = primero;

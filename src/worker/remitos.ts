@@ -6,6 +6,7 @@ import { Budget, OutOfBudget } from './budget';
 import { clickupAttachment } from './clickup';
 import { finnegansPedido, finnegansRemitos, finnegansToken } from './finnegans';
 import { orderProducts } from './productos';
+import { bajarArchivo, subirArchivo } from './archivos';
 
 // Remitos de entrega (pedido de Rodrigo del 10/11/2026). Cada foto del remito firmado llega por ClickUp (como hasta
 // ahora), por el CRM (ficha del pedido) o por la app del chofer (/hooks/chofer), y todas van a la misma lista del pedido.
@@ -156,10 +157,12 @@ export async function guardarRemito(env: Env, ctx: Ctx, n: NuevoRemito): Promise
   // Un remito interno no se lee ni se revisa: queda guardado («ok») en los pedidos de su parada.
   const interno = n.tipo === 'interno';
   const pedidos = interno ? [...new Set([n.recordId, ...(n.pedidos ?? [])].filter((x): x is number => !!x))] : [];
-  const r = await db.prepare(`INSERT INTO remitos (record_id, origen, nombre, mime, size, data, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, parada,
+  // La foto va a R2 (archivos.ts) y en la base queda la clave; sin R2, en la base como antes.
+  const r2Key = await subirArchivo(env, 'remitos', n.bytes, mime);
+  const r = await db.prepare(`INSERT INTO remitos (record_id, origen, nombre, mime, size, data, r2_key, hash, clave, subido_por, token_id, chofer, lat, lng, tomada_el, parada,
       tipo, fecha_parada, estado, motivo)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(interno ? pedidos[0] ?? null : n.recordId ?? null, n.origen, n.nombre.slice(0, 200) || 'remito', mime, n.bytes.byteLength,
-    n.bytes, hash, n.clave ?? null, ctx.user.id, n.tokenId ?? null, n.chofer ?? null, num(n.lat), num(n.lng), n.tomadaEl ?? null,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`).bind(interno ? pedidos[0] ?? null : n.recordId ?? null, n.origen, n.nombre.slice(0, 200) || 'remito', mime, n.bytes.byteLength,
+    r2Key ? null : n.bytes, r2Key, hash, n.clave ?? null, ctx.user.id, n.tokenId ?? null, n.chofer ?? null, num(n.lat), num(n.lng), n.tomadaEl ?? null,
     esClaveRuta(n.parada) ? n.parada : null, interno ? 'interno' : 'entrega', n.fechaParada ?? null, interno ? 'ok' : 'sin_leer',
     interno ? 'Remito interno: queda en los pedidos de la parada, para Producción y Logística.' : null).first<{ id: number }>();
   if (pedidos.length > 1) await db.batch(pedidos.slice(1).map((p) => db.prepare('INSERT OR IGNORE INTO remito_pedidos (remito_id, record_id, user_id) VALUES (?, ?, ?)').bind(r!.id, p, ctx.user.id)));
@@ -175,9 +178,13 @@ export async function remitoPorId(db: D1Database, id: number) {
 
 // El archivo: lo guardado, o el adjunto de ClickUp traído en el momento (sus links vencen).
 export async function archivoDeRemito(env: Env, id: number): Promise<{ bytes: ArrayBuffer; mime: string; nombre: string } | null> {
-  const r = await env.DB.prepare('SELECT r.data, r.mime, r.nombre, f.source_ref FROM remitos r LEFT JOIN files f ON f.id = r.file_id WHERE r.id = ?')
-    .bind(id).first<{ data: ArrayBuffer | number[] | null; mime: string | null; nombre: string | null; source_ref: string | null }>();
+  const r = await env.DB.prepare('SELECT r.data, r.r2_key, r.mime, r.nombre, f.source_ref FROM remitos r LEFT JOIN files f ON f.id = r.file_id WHERE r.id = ?')
+    .bind(id).first<{ data: ArrayBuffer | number[] | null; r2_key: string | null; mime: string | null; nombre: string | null; source_ref: string | null }>();
   if (!r) return null;
+  if (r.r2_key) {
+    const bytes = await bajarArchivo(env, r.r2_key);
+    if (bytes) return { bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer, mime: r.mime ?? 'application/octet-stream', nombre: r.nombre ?? 'remito' };
+  }
   if (r.data) return { bytes: aBytes(r.data), mime: r.mime ?? 'application/octet-stream', nombre: r.nombre ?? 'remito' };
   if (!r.source_ref) return null;
   const [task, att] = r.source_ref.split(':');

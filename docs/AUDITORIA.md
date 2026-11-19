@@ -43,6 +43,24 @@ Medido con datos inventados al volumen de 5 años (60.000 contactos, 40.000 nego
 | No se actualizaban las estadísticas de la base. | `PRAGMA optimize` una vez por día (si D1 no lo permite, no corta nada). | `index.ts` |
 | La pantalla bajaba todo el escritorio al abrir, con el mapa (Leaflet) y la lista de localidades, también en el celular; los assets se volvían a pedir en cada apertura. | Configuración, Cronograma, Analíticas y Notas de productos se bajan al abrirlas; el mapa y la lista de localidades, solo en Destinos y la Ruta del día. Producción, Entregas, Recorridos y Choferes siguen en el arranque: la versión celular las usa y quedan en el bloque compartido. Assets con caché de un año (`web/public/_headers`). Arranque: de 337 a 214 kB comprimidos en computadora y de 312 a 193 kB en el celular. | `App.tsx`, `Recorridos.tsx`, `rutaComun.ts`, `analiticasTemas.ts` |
 
+## Archivos fuera de la base (R2)
+
+Las fotos de los remitos (hasta 1,9 MB), los adjuntos del chat (hasta 20 MB) y los PDF de las facturas iban como BLOB dentro
+de D1, que tiene un tope de 10 GB por base: a 15–25 remitos por día se llegaba en unos 2 años. Ahora van al bucket R2
+`formas-crm-archivos` (`src/worker/archivos.ts`) y en la base queda solo la clave (`r2_key`, migración 0094). Prueba:
+`test/archivos.test.mjs`.
+
+- **Lo nuevo** va directo a R2: remitos (`guardarRemito`), adjuntos del chat (`subirAdjunto`, ya sin partir en pedazos) y
+  PDF de facturas (`PUT /hooks/facturas/:id/pdf`). Se lee de R2 si tiene clave; si no, de la base.
+- **Lo de antes** pasa solo, de a poco: en cada corrida del cron de ClickUp y Finnegans (`moverAR2`, hasta 8 archivos o
+  30 MB). Se sube a R2 y recién entonces se saca de la base. En Configuración → Integraciones → «Archivos» se ve cuántos
+  quedan, con un botón para pasar una tanda ya (`POST /api/archivos/mover`, administradores).
+- **Al borrar** un mensaje o un adjunto sin mandar, también se borra de R2.
+- **Publicar**: `scripts/ensure-r2.mjs` crea el bucket si no existe. Si no puede (R2 sin activar en la cuenta de Cloudflare,
+  o el token de la publicación sin permiso «Workers R2 Storage: Edit»), publica sin el binding, con un aviso en GitHub, y
+  todo sigue guardándose en la base como antes.
+- El lugar que se libera en la base lo reusa lo que entra después; D1 no achica el archivo de la base.
+
 ## Pruebas locales
 
 Las pruebas del cronograma usan días fijos (17/11/2026): con muchas corridas sobre la misma base local se acumulan

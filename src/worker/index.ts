@@ -24,6 +24,7 @@ import { leerPendientes } from './remitos';
 import { cerrarPendientes } from './rendimiento';
 import { login } from './login';
 import { resumirPendientes } from './darwin';
+import { moverAR2 } from './archivos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 const GMAIL_CRON = '5-59/10 * * * *';   // el mismo que en wrangler.jsonc
@@ -157,6 +158,8 @@ export default {
           await safe(() => syncFacturas(env, { barrido, budget: b }));
         }
         else await safe(() => (turno === 0 ? syncFacturas(env, { barrido }) : syncClickup(env)));
+        // Los archivos que siguen en la base pasan a R2 de a poco (archivos.ts): unos pocos en cada corrida.
+        await safe(() => moverAR2(env));
         if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día
       }
     })());

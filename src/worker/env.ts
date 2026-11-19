@@ -1,6 +1,7 @@
 export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
+  ARCHIVOS?: R2Bucket;   // fotos de remitos, adjuntos del chat y PDF de facturas (archivos.ts); sin él, en la base
   // Cloudflare Access: el equipo (ej. "formas" en formas.cloudflareaccess.com) y el AUD de la aplicación.
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;

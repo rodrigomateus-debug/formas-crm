@@ -21,6 +21,7 @@ import { aplicarCostosLogo } from './costoslogo';
 import { driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { guardarEvento } from './darwin';
 import { corregirPdv, esClaveParada, esClaveRuta, guardarRemito, itemsDe, leerPendientes, leerRemito, paraChofer, remitoPorId, type RemitoRow } from './remitos';
+import { subirArchivo } from './archivos';
 
 // Lo que entra solo: Darwin, prospección por LinkedIn, formularios web y cualquier integración con token.
 // Todo queda en `inbound_log` para poder auditar qué llegó y qué se hizo.
@@ -259,15 +260,15 @@ async function adminToken(env: Env, req: Request) {
 hooks.get('/facturas/pendientes', async (c) => {
   await adminToken(c.env, c.req.raw);
   const limit = Math.min(Math.max(Number(c.req.query('limit')) || 50, 1), 200);
-  const { results } = await c.env.DB.prepare("SELECT id, name, meta FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL ORDER BY id LIMIT ?").bind(limit).all<{ id: number; name: string; meta: string }>();
-  const total = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL").first<{ n: number }>();
+  const { results } = await c.env.DB.prepare("SELECT id, name, meta FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL AND r2_key IS NULL ORDER BY id LIMIT ?").bind(limit).all<{ id: number; name: string; meta: string }>();
+  const total = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND source = 'finnegans' AND data IS NULL AND r2_key IS NULL").first<{ n: number }>();
   c.header('x-total', String(total?.n ?? results.length));
   return c.json(results.map((f) => { const m = JSON.parse(f.meta || '{}'); return { id: f.id, name: f.name, transaccion_id: m.transaccion_id, empresa: m.empresa, numero: m.numero }; }));
 });
 // Estado de las conexiones de los pedidos (lo mismo que Configuración → Integraciones), para revisarlo con un token.
 hooks.get('/pedidos/estado', async (c) => {
   await adminToken(c.env, c.req.raw);
-  const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
+  const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL AND r2_key IS NULL").first<{ n: number }>();
   return c.json({
     clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
     finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0 },
@@ -623,7 +624,12 @@ hooks.put('/facturas/:id/pdf', async (c) => {
   const head = new TextDecoder().decode(buf.slice(0, 5));
   if (head !== '%PDF-') throw new HttpError(400, 'No es un PDF.');
   if (buf.byteLength > 1_900_000) throw new HttpError(400, 'El PDF pesa más de 1,9 MB.');
-  const r = await c.env.DB.prepare("UPDATE files SET data = ?, size = ?, mime = 'application/pdf' WHERE id = ? AND kind = 'factura'").bind(buf, buf.byteLength, Number(c.req.param('id'))).run();
+  const id = Number(c.req.param('id'));
+  if (!(await c.env.DB.prepare("SELECT 1 FROM files WHERE id = ? AND kind = 'factura'").bind(id).first())) throw new HttpError(404, 'No existe esa factura.');
+  // El PDF va a R2 (archivos.ts) y en la base queda la clave; sin R2, en la base como antes.
+  const r2Key = await subirArchivo(c.env, 'facturas', buf, 'application/pdf');
+  const r = await c.env.DB.prepare("UPDATE files SET data = ?, r2_key = ?, size = ?, mime = 'application/pdf' WHERE id = ? AND kind = 'factura'")
+    .bind(r2Key ? null : buf, r2Key, buf.byteLength, id).run();
   if (!r.meta.changes) throw new HttpError(404, 'No existe esa factura.');
   return c.json({ ok: true, size: buf.byteLength });
 });

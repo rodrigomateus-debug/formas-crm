@@ -57,6 +57,8 @@ jobs:
       - run: npm ci
       - name: Base de datos (la crea si no existe)
         run: node scripts/ensure-d1.mjs
+      - name: Bucket R2 de los archivos (lo crea si no existe; si no se puede, publica sin él)
+        run: node scripts/ensure-r2.mjs
       - run: npm run deploy
       - name: Cuenta de servicio de Gmail (si está cargada en los secretos del repo)
         if: env.GOOGLE_SA_JSON != ''

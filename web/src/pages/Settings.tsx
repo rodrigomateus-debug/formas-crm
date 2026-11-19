@@ -422,7 +422,8 @@ function NewPipeline({ onClose, onCreated }: { onClose: () => void; onCreated: (
 interface SyncState { configured: boolean; at?: string; error?: string | null; creados?: number; actualizados?: number; pendientes?: number; leyendo_lista?: boolean; revisados?: number; facturas?: number; pdf_pendientes?: number }
 function Pedidos() {
   const toast = useToast();
-  const st = useAsync(() => http<{ clickup: SyncState; finnegans: SyncState; remitos?: { configured: boolean; sin_leer: number | null; revisar: number | null; leidos: number | null; at: string | null } }>('GET', '/integrations/pedidos'), []);
+  const st = useAsync(() => http<{ clickup: SyncState; finnegans: SyncState; remitos?: { configured: boolean; sin_leer: number | null; revisar: number | null; leidos: number | null; at: string | null };
+    archivos?: { r2: boolean; en_base: { remitos: number; facturas: number; adjuntos: number; total: number } } }>('GET', '/integrations/pedidos'), []);
   const [busy, setBusy] = useState('');
   const go = async (what: string, path: string, body?: unknown) => {
     setBusy(what);
@@ -432,6 +433,7 @@ function Pedidos() {
   const c = st.data?.clickup;
   const f = st.data?.finnegans;
   const r = st.data?.remitos;
+  const ar = st.data?.archivos;
   const when = (s?: SyncState) => (s?.at ? fmtDate(s.at, true) : 'nunca');
   return (
     <div className="panel"><div className="panel-head"><h2>Pedidos: ClickUp y Finnegans</h2></div><div className="panel-body stack small">
@@ -456,6 +458,13 @@ function Pedidos() {
           : <span className="grow muted">Falta el secreto ANTHROPIC_API_KEY en el repo: los remitos se guardan, pero no se leen ni cuentan para la entrega.</span>}
         <button className="btn sm" disabled={!r?.configured || !!busy} onClick={() => go('rem', '/integrations/remitos/leer')}>{busy === 'rem' ? 'Leyendo…' : 'Leer pendientes'}</button>
       </div>
+      {/* Fotos de remitos, adjuntos del chat y PDF de facturas: en R2, fuera de la base (src/worker/archivos.ts). */}
+      {ar && <div className="row wrap">
+        <b style={{ width: 90 }}>Archivos</b>
+        {ar.r2 ? <span className="grow">Se guardan en R2, fuera de la base.{ar.en_base.total ? ` Quedan por pasar ${ar.en_base.total} de antes (${ar.en_base.remitos} remitos, ${ar.en_base.adjuntos} adjuntos, ${ar.en_base.facturas} facturas): se pasan solos de a poco.` : ' Ya no queda ninguno en la base.'}</span>
+          : <span className="grow muted">Sin el bucket R2 «formas-crm-archivos»: los archivos se siguen guardando dentro de la base (ver docs/AUDITORIA.md).</span>}
+        {ar.r2 && ar.en_base.total > 0 && <button className="btn sm" disabled={!!busy} onClick={() => go('r2', '/archivos/mover')}>{busy === 'r2' ? 'Pasando…' : 'Pasar una tanda ahora'}</button>}
+      </div>}
     </div></div>
   );
 }

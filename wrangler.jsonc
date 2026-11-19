@@ -19,6 +19,9 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Fotos de remitos, adjuntos del chat y PDF de facturas, fuera de la base (src/worker/archivos.ts). La publicación crea el
+  // bucket si no existe (scripts/ensure-r2.mjs); si no puede, publica sin este binding y los archivos siguen en la base.
+  "r2_buckets": [{ "binding": "ARCHIVOS", "bucket_name": "formas-crm-archivos" }],
   "vars": {
     "ACCESS_TEAM_DOMAIN": "cold-mud-48f2.cloudflareaccess.com",
     // «Application Audience (AUD) Tag» de la aplicación de Access del CRM. No es secreto: va en cada redirección al login.

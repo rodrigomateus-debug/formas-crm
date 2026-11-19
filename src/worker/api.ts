@@ -46,6 +46,7 @@ import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esS
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
+import { archivosEnLaBase, bajarArchivo as bajarDeR2, moverAR2 } from './archivos';
 
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
@@ -496,14 +497,14 @@ for (const ruta of ['/records/:type/:id/conversacion/adjuntos', '/records/:type/
     const form = await c.req.formData();
     const archivo = form.get('archivo');
     if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo.');
-    return c.json(await subirAdjunto(c.env.DB, c.get('ctx'), rec.id, archivo, { ancho: form.get('ancho'), alto: form.get('alto') }), 201);
+    return c.json(await subirAdjunto(c.env.DB, c.get('ctx'), rec.id, archivo, { ancho: form.get('ancho'), alto: form.get('alto') }, c.env.ARCHIVOS), 201);
   });
 }
-api.delete('/mensaje-adjuntos/:id', async (c) => c.json(await quitarAdjunto(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.delete('/mensaje-adjuntos/:id', async (c) => c.json(await quitarAdjunto(c.env.DB, c.get('ctx'), Number(c.req.param('id')), c.env.ARCHIVOS)));
 // Las imágenes y los PDF se ven en el CRM; el resto (y con ?descargar=1, todo) se baja como archivo, sin que el navegador
 // lo interprete.
 api.get('/mensaje-adjuntos/:id', async (c) => {
-  const a = await adjunto(c.env.DB, c.get('ctx'), Number(c.req.param('id')));
+  const a = await adjunto(c.env.DB, c.get('ctx'), Number(c.req.param('id')), c.env.ARCHIVOS);
   await registroVisible(c, a.record_id);
   const ver = seVe(a.mime) && !c.req.query('descargar');
   return new Response(a.bytes, { headers: { 'content-type': ver ? a.mime : 'application/octet-stream',
@@ -530,7 +531,7 @@ api.post('/mensajes/:id/reacciones', async (c) => {
   await registroVisible(c, m.record_id);
   return c.json(await reaccionar(c.env.DB, c.get('ctx'), Number(c.req.param('id')), (await c.req.json<{ emoji?: string }>()).emoji));
 });
-api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')), c.env.ARCHIVOS)));
 // «Marcar como no leída» desde la bandeja.
 api.post('/records/:type/:id/conversacion/no-leido', async (c) => {
   const rec = await registroVisible(c, Number(c.req.param('id')));
@@ -1109,7 +1110,7 @@ api.get('/records/:type/:id/files', async (c) => {
     const rec = await getRow(c.env.DB, id);
     await clickupRemitos(c.env, id, JSON.parse(rec.props)).catch((e) => console.error((e as Error).message));
   }
-  const { results } = await c.env.DB.prepare(`SELECT id, kind, name, mime, size, source, meta, created_at, data IS NOT NULL AS has_data
+  const { results } = await c.env.DB.prepare(`SELECT id, kind, name, mime, size, source, meta, created_at, (data IS NOT NULL OR r2_key IS NOT NULL) AS has_data
     FROM files WHERE record_id = ? ORDER BY kind, created_at`).bind(id).all<{ meta: string; has_data: number; source: string }>();
   return c.json(results.map((f) => ({ ...f, meta: JSON.parse(f.meta || '{}'), ready: !!f.has_data || f.source === 'clickup' })));
 });
@@ -1160,10 +1161,13 @@ api.put('/records/order/:id/products/tipo', async (c) => {
 
 // Abrir un archivo: el PDF guardado, o el remito traído de ClickUp en el momento (los links de ClickUp vencen).
 api.get('/files/:id', async (c) => {
-  const f = await c.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(Number(c.req.param('id'))).first<{ name: string; mime: string | null; source: string; source_ref: string; data: ArrayBuffer | null; record_id: number }>();
+  const f = await c.env.DB.prepare('SELECT * FROM files WHERE id = ?').bind(Number(c.req.param('id'))).first<{ name: string; mime: string | null; source: string; source_ref: string; data: ArrayBuffer | null; r2_key: string | null; record_id: number }>();
   if (!f) throw new HttpError(404, 'No existe el archivo.');
   await registroVisible(c, f.record_id);
   const disposition = `inline; filename*=UTF-8''${encodeURIComponent(f.name)}`;
+  // El PDF guardado en R2 (archivos.ts) o, si es de antes, en la base.
+  const enR2 = f.r2_key ? await bajarDeR2(c.env, f.r2_key) : null;
+  if (enR2) return new Response(enR2, { headers: { 'content-type': f.mime ?? 'application/octet-stream', 'content-disposition': disposition, 'cache-control': 'private, max-age=3600' } });
   // D1 devuelve los BLOB como lista de números: se pasan a bytes.
   if (f.data) return new Response(f.data instanceof ArrayBuffer ? f.data : new Uint8Array(f.data as unknown as number[]), { headers: { 'content-type': f.mime ?? 'application/octet-stream', 'content-disposition': disposition, 'cache-control': 'private, max-age=3600' } });
   if (f.source === 'clickup') {
@@ -1744,7 +1748,7 @@ api.post('/darwin/resumir', async (c) => {
 });
 
 api.get('/integrations/pedidos', async (c) => {
-  const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL").first<{ n: number }>();
+  const pend = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM files WHERE kind = 'factura' AND data IS NULL AND r2_key IS NULL").first<{ n: number }>();
   return c.json({
     clickup: { configured: !!c.env.CLICKUP_TOKEN, ...(await clickupStatus(c.env.DB)) },
     finnegans: { configured: !!(c.env.FINNEGANS_CLIENT_ID && c.env.FINNEGANS_CLIENT_SECRET), ...(await finnegansState(c.env.DB)), pdf_pendientes: pend?.n ?? 0,
@@ -1752,6 +1756,8 @@ api.get('/integrations/pedidos', async (c) => {
       pedidos: JSON.parse((await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'pedidos_finnegans'").first<{ value: string }>())?.value ?? 'null'),
       duplicados: await pedidosDuplicados(c.env.DB) },
     remitos: { configured: !!c.env.ANTHROPIC_API_KEY, ...(await estadoRemitos(c.env.DB)) },
+    // Archivos fuera de la base (archivos.ts): si hay R2 y cuántos quedan por mover.
+    archivos: { r2: !!c.env.ARCHIVOS, en_base: await archivosEnLaBase(c.env.DB) },
   });
 });
 // La dirección a la que Finnegans avisa cuando se crea un pedido de venta (hooks.ts, /hooks/finnegans/<llave>). Solo
@@ -2277,3 +2283,9 @@ async function estadoRemitos(db: D1Database) {
   const n = (e: string) => (porEstado.results as Array<{ estado: string; n: number }>).find((x) => x.estado === e)?.n ?? 0;
   return { sin_leer: n('sin_leer'), revisar: n('revisar'), leidos: n('ok'), at: (ultimo.results[0] as { at: string | null } | undefined)?.at ?? null };
 }
+
+// Mover ya a R2 una tanda de los archivos que siguen en la base (el cron lo hace solo, de a poco). Solo administradores.
+api.post('/archivos/mover', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  return c.json(await moverAR2(c.env, { max: 20 }));
+});

@@ -13,7 +13,9 @@ lamparita arriba que se prende cuando hay ideas nuevas, con un número rojo de c
   ya hay una parecida, la muestra: «¿Es alguna de estas? Sumale tu voto en vez de repetirla». La misma idea dos veces no
   entra: el Hub lleva a la que ya está.
 - **Ranking**: arriba lo que está **en marcha**; abajo, **para votar**, de más votos a menos (la primera con 👑, después
-  #2 y #3). La flechita con el número es el voto: se toca para votar y otra vez para sacarlo. Quien propone ya la vota.
+  #2 y #3). Cada idea tiene su botón **Votar** con el número grande: al tocarlo queda lleno y dice **Votaste**; otro toque
+  saca el voto. Se pueden votar todas las que se quiera (una vez cada una) y quien propone ya la vota. Arriba del ranking,
+  una línea lo recuerda y dice cuántas te quedan por votar.
   Se ve quién la propuso, quiénes la votaron y si es nueva (menos de 3 días).
 - **Hechas**: lo que ya se hizo, con la respuesta de quien la hizo («Listo: está en Pedidos → Filtros»), el **Salón de
   la fama** (cuántas ideas de cada uno se hicieron) y, al final, las que **no van** (por ahora).

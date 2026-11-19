@@ -272,6 +272,8 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
   const hechas = ideas.filter((i) => i.estado === 'hecha');
   const noVan = ideas.filter((i) => i.estado === 'descartada');
   const mias = ideas.filter((i) => i.user_id === yo);
+  // Las abiertas que todavía no votó (para invitarlo a votar en el ranking).
+  const sinVotar = [...enMarcha, ...pendientes].filter((i) => !i.votada).length;
   const similares = useMemo(() => (texto.trim().length >= 12 ? parecidas(texto, ideas) : []), [texto, ideas]);
 
   // Ir a una idea (desde la campanita, un link o «ya está en el buzón»).
@@ -328,7 +330,7 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); proponer(); } }} aria-label="Tu idea para mejorar el Hub" />
         {similares.length > 0 && (
           <div className="formi-parecidas">
-            <span className="small">¿Es alguna de estas? Sumale tu voto en vez de repetirla:</span>
+            <span className="small">¿Es alguna de estas? <b>Votala</b> en vez de repetirla:</span>
             {similares.map((i) => (
               <div key={i.id} className="formi-parecida">
                 <span className="grow">{i.texto.length > 90 ? `${i.texto.slice(0, 88)}…` : i.texto}</span>
@@ -353,6 +355,13 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
 
       <div className="formi-lista" ref={listaRef}>
         {pestana === 'ranking' && <>
+          {(pendientes.length + enMarcha.length) > 0 && (
+            <div className="formi-ayuda-voto">
+              <span className="formi-ayuda-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width={14} height={14}><path d="M12 5l7 9h-4.5v5h-5v-5H5z" fill="currentColor" /></svg></span>
+              <span><b>Votá las ideas que te sirven</b> con el botón <b>Votar</b>: las más votadas se hacen primero. Podés votar todas las que quieras.
+                {' '}{sinVotar > 0 ? <b className="formi-faltan">{sinVotar === 1 ? 'Te queda 1 por votar.' : `Te quedan ${sinVotar} por votar.`}</b> : <span className="formi-faltan listo">Ya votaste todas 🙌</span>}</span>
+            </div>
+          )}
           {enMarcha.length > 0 && <div className="formi-grupo"><span className="formi-grupo-ic en_curso"><Icon name="settings" size={12} /></span>En marcha</div>}
           {enMarcha.map((i) => tarjeta(i))}
           {enMarcha.length > 0 && pendientes.length > 0 && <div className="formi-grupo"><span className="formi-grupo-ic"><Icon name="star" size={12} /></span>Para votar</div>}
@@ -410,8 +419,13 @@ function BotonVoto({ idea, cambiar, toast, chico }: { idea: Idea; cambiar: (i: I
     <button type="button" className={`formi-voto${idea.votada ? ' on' : ''}${chico ? ' chico' : ''}${pop ? ' pop' : ''}`} onClick={votar} disabled={!abierta}
       aria-pressed={idea.votada} title={!abierta ? `${idea.votos} ${idea.votos === 1 ? 'voto' : 'votos'}` : idea.votada ? 'Sacar mi voto' : 'Votar esta idea'}
       aria-label={`${idea.votada ? 'Sacar mi voto' : 'Votar'} (${idea.votos} ${idea.votos === 1 ? 'voto' : 'votos'})`}>
-      <svg viewBox="0 0 24 24" width={chico ? 12 : 14} height={chico ? 12 : 14} aria-hidden="true"><path d="M12 5l7 9h-4.5v5h-5v-5H5z" fill="currentColor" /></svg>
-      <b>{idea.votos}</b>
+      {idea.votada && abierta
+        ? <svg viewBox="0 0 24 24" width={chico ? 12 : 15} height={chico ? 12 : 15} aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" /></svg>
+        : <svg viewBox="0 0 24 24" width={chico ? 12 : 15} height={chico ? 12 : 15} aria-hidden="true"><path d="M12 5l7 9h-4.5v5h-5v-5H5z" fill="currentColor" /></svg>}
+      {/* Que se lea que es un voto (pedido de Rodrigo): «Votar» / «Votaste» y el número; cerrada, solo cuántos votos tuvo. */}
+      {chico
+        ? <span className="formi-voto-txt">{idea.votada ? 'Votaste' : 'Votar'} · <b>{idea.votos}</b></span>
+        : <><b>{idea.votos}</b><span className="formi-voto-txt">{!abierta ? (idea.votos === 1 ? 'voto' : 'votos') : idea.votada ? 'Votaste' : 'Votar'}</span></>}
     </button>
   );
 }

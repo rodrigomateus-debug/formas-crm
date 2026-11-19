@@ -2641,7 +2641,7 @@ body:has(#barra-vista > *) .formi-panel { max-height: min(680px, calc(100vh - 17
 .formi-grupo-ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
 .formi-grupo-ic.en_curso { background: var(--ui-info-soft); color: var(--ui-info-ink); }
 .formi-grupo-ic.descartada { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
-.formi-idea { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 10px; padding: 10px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface);
+.formi-idea { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 10px; padding: 10px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface);
   animation: formi-idea-in .32s var(--ease-out) both; animation-delay: calc(min(var(--i), 8) * 25ms); transition: border-color var(--dur), box-shadow var(--dur); }
 .formi-idea:hover { border-color: var(--ui-line-strong); }
 .formi-idea.en_curso { border-color: color-mix(in srgb, var(--ui-info) 40%, var(--ui-line)); background: color-mix(in srgb, var(--ui-info-soft) 55%, var(--ui-surface)); }
@@ -2652,12 +2652,22 @@ body:has(#barra-vista > *) .formi-panel { max-height: min(680px, calc(100vh - 17
 .formi-idea-texto { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ui-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .formi-puesto { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-size: 11px; font-weight: 700; vertical-align: 1px; }
 .formi-puesto.p1 { padding: 0; background: none; font-size: 14px; vertical-align: 0; }
-.formi-voto { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 40px; height: 48px; padding: 0; border: 1px solid var(--ui-line-strong);
-  border-radius: 8px; background: var(--ui-surface); color: var(--ui-ink-2); font: inherit; font-size: 13px; cursor: pointer; transition: all var(--dur) var(--ease); }
-.formi-voto:hover:not(:disabled) { border-color: var(--accent-ink); color: var(--accent-ink); transform: translateY(-1px); }
+/* El voto: un botón que se lee como tal («Votar» / «Votaste»), con el número grande. */
+.formi-voto { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; width: 54px; height: 62px; padding: 0; border: 1.5px solid var(--accent-ink);
+  border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); font: inherit; font-size: 15px; line-height: 1.15; cursor: pointer; transition: all var(--dur) var(--ease); }
+.formi-voto b { font-size: 16px; }
+.formi-voto-txt { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+.formi-voto:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); transform: translateY(-1px); box-shadow: 0 4px 10px -4px rgba(0, 0, 133, .5); }
+.formi-voto:disabled .formi-voto-txt { font-weight: 500; color: var(--ui-ink-2); }
+.formi-voto:disabled { color: var(--ui-ink-2); }
 .formi-voto.on { border-color: transparent; background: var(--accent); color: var(--on-accent); }
 .formi-voto:disabled { cursor: default; border-color: transparent; background: var(--ui-surface-sunken); }
-.formi-voto.chico { flex: none; flex-direction: row; gap: 4px; width: auto; height: 26px; padding: 0 8px; font-size: 12px; }
+.formi-voto.chico { flex: none; flex-direction: row; gap: 5px; width: auto; height: 28px; padding: 0 10px; font-size: 12px; }
+.formi-voto.chico .formi-voto-txt { font-size: 12px; } .formi-voto.chico b { font-size: 12px; }
+.formi-ayuda-voto { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--accent-ink) 45%, transparent);
+  background: var(--accent-soft); font-size: 12.5px; line-height: 1.45; color: var(--ui-ink); }
+.formi-ayuda-ic { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); }
+.formi-faltan { color: var(--accent-ink); } .formi-faltan.listo { color: var(--ui-positive-ink); font-weight: 600; }
 .formi-voto.pop svg { animation: formi-pop .45s var(--ease-out); }
 .formi-idea-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--ui-ink-2); }
 .formi-chip { padding: 1px 7px; border-radius: 999px; background: var(--ui-surface-sunken); font-size: 11px; font-weight: 600; }

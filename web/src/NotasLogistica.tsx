@@ -4,7 +4,10 @@ import { http, qs, useAsync, useMeta, useToast, Icon } from './lib';
 // Anotaciones de logística (logistica.ts, pedido de Producción del 19/11/2026): lo que hay que saber para entregar o
 // retirar, con quién lo escribió. «Solo esta vez» es de este pedido; «siempre» queda en la empresa para las que vengan.
 // Va en la ficha del pedido (la escribe la vendedora) y en la tarjeta del cronograma (Logística y Producción).
-export interface NotaLogistica { id: number; alcance: 'puntual' | 'siempre'; texto: string; por: string | null; user_id: number | null; at: string; destino?: string | null }
+// `traba`: una de «solo esta vez» que traba la entrega: la corrección a mano del estado de despacho (despacho.ts).
+export type Traba = 'info' | 'nopago' | 'nollego';
+export const NOMBRE_TRABA: Record<Traba, string> = { info: 'Falta información', nopago: 'No pagó', nollego: 'No llegó' };
+export interface NotaLogistica { id: number; alcance: 'puntual' | 'siempre'; texto: string; por: string | null; user_id: number | null; at: string; destino?: string | null; traba?: Traba | null }
 interface Datos { notas: NotaLogistica[]; destino: { nombre: string | null } | null; horarios?: Array<{ fecha: string; texto: string }>; edita: boolean }
 const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 const diaDe = (f: string) => { const d = new Date(`${f}T12:00:00`); return `${DIAS[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`; };
@@ -15,9 +18,10 @@ export const nombreCorto = (n: string | null) => (n ?? '').split(' ')[0] || 'Alg
 // Una anotación, como se lee en la tarjeta, la parada y el pedido: el texto, de quién es y si es de siempre.
 export function LineaNota({ n, onBorrar }: { n: NotaLogistica; onBorrar?: () => void }) {
   return (
-    <div className={`lg-nota ${n.alcance}`}>
+    <div className={`lg-nota ${n.alcance}${n.traba ? ' traba' : ''}`}>
       <p>{n.texto}</p>
       <span className="lg-nota-pie">
+        {n.traba && <span className="lg-nota-tag traba" title="Traba la entrega hasta que se borre esta anotación">Traba: {NOMBRE_TRABA[n.traba].toLowerCase()}</span>}
         <span className="lg-nota-tag" title={n.alcance === 'siempre' ? `Queda guardada para todas las veces que se vaya a ${n.destino ?? 'este lugar'}` : 'Solo para esta vez'}>{n.alcance === 'siempre' ? 'Siempre' : 'Solo esta vez'}</span>
         {n.por ? `${nombreCorto(n.por)} · ` : ''}{cuando(n.at)}
         {onBorrar && <button type="button" className="lg-nota-x" aria-label="Borrar la anotación" title="Borrar" onClick={onBorrar}><Icon name="x" size={11} /></button>}
@@ -42,6 +46,7 @@ export function NotasLogistica({ recordId, tipo = 'entrega', destino, titulo, on
   const soloDestino = !recordId;
   const [alcance, setAlcance] = useState<'puntual' | 'siempre'>(soloDestino ? 'siempre' : 'puntual');
   const [ocupado, setOcupado] = useState(false);
+  const [traba, setTraba] = useState<Traba | ''>('');
   const d = res.data;
   const puede = meta.me.role !== 'viewer';
   const esEntrega = tipo === 'entrega';
@@ -49,9 +54,9 @@ export function NotasLogistica({ recordId, tipo = 'entrega', destino, titulo, on
     if (texto.trim().length < 2 || ocupado) return;
     setOcupado(true);
     try {
-      await http('POST', '/logistica/notas', { record_id: recordId, tipo, alcance, texto, destino: destino ?? null });
+      await http('POST', '/logistica/notas', { record_id: recordId, tipo, alcance, texto, destino: destino ?? null, traba: alcance === 'puntual' && traba ? traba : null });
       toast(alcance === 'siempre' ? `Guardada para ${esEntrega ? 'todas las entregas a' : 'cada vez que se vaya a'} ${d?.destino?.nombre ?? 'ese lugar'}.` : `Guardada para ${esEntrega ? 'esta entrega' : 'esta vez'}.`);
-      setTexto(''); res.reload(); onCambio?.();
+      setTexto(''); setTraba(''); res.reload(); onCambio?.();
     } catch (e) { toast((e as Error).message, true); } finally { setOcupado(false); }
   };
   const borrar = async (n: NotaLogistica) => {
@@ -78,6 +83,14 @@ export function NotasLogistica({ recordId, tipo = 'entrega', destino, titulo, on
                   title={d.destino ? `Aparece cada vez que se vaya a ${d.destino.nombre ?? 'ese lugar'}: entregas, retiros y encargos` : 'No se sabe a qué lugar es'}>
                   {esEntrega ? 'Todas las entregas a' : 'Siempre en'} {d.destino?.nombre ?? 'este lugar'}</button>
               </div>)}
+              {!soloDestino && alcance === 'puntual' && (
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap', width: '100%' }} role="group" aria-label="¿Traba la entrega?">
+                  <span className="small muted">¿Traba la entrega?</span>
+                  <button type="button" className={`chip${!traba ? ' on' : ''}`} aria-pressed={!traba} onClick={() => setTraba('')}>No</button>
+                  {(Object.keys(NOMBRE_TRABA) as Traba[]).map((k) => <button key={k} type="button" className={`chip${traba === k ? ' on' : ''}`} aria-pressed={traba === k}
+                    title="La tarjeta queda en este estado hasta que se borre la anotación" onClick={() => setTraba(k)}>{NOMBRE_TRABA[k]}</button>)}
+                </div>
+              )}
               <button type="submit" className="btn sm primary" disabled={ocupado || texto.trim().length < 2}>Guardar</button>
             </div>
           )}

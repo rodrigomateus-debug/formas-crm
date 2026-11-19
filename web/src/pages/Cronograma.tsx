@@ -399,7 +399,7 @@ export default function CronogramaPage() {
                   </header>
                   <div className="cr-carriles">
                     {CARRILES.map((c) => {
-                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false })).filter(pasaToca);
+                      const ts = ordenColgados(tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false })).filter(pasaToca));
                       if (!ts.length) return null;
                       return (
                         <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
@@ -609,11 +609,12 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
         {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
-      {desp && <FilaDespacho d={desp} tipo={t.tipo} reloj={reloj} />}
+      {desp && <FilaDespacho d={desp} tipo={t.tipo} reloj={colgado ? null : reloj} reprogramar={!!colgado && (desp.estado === 'listo' || desp.estado === 'remitido')} />}
       {colgado && (
         <div className="cr-t-motivo">
           {motivos.map((m) => <p key={m}>{m}</p>)}
-          <span className="small">Era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por.split(' ')[0]}` : ''}</span>
+          <span className="small">Era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por.split(' ')[0]}` : ''}
+            {(() => { const n = diasColgado(colgado.at); return <b className={`cr-colg-edad${n >= 7 ? ' vieja' : ''}`}> · colgado {n === 0 ? 'hoy' : `hace ${n} día${n === 1 ? '' : 's'}`}</b>; })()}</span>
         </div>
       )}
       {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
@@ -673,12 +674,13 @@ function Quien({ d }: { d: DespachoTarjeta }) {
   return d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>;
 }
 const RelojTag = ({ r }: { r: Riesgo }) => <span className={`cr-desp-reloj ${r.nivel}`}><Icon name="timer" size={11} />{r.texto}</span>;
-function FilaDespacho({ d, tipo, reloj }: { d: DespachoTarjeta; tipo: Tipo; reloj?: Riesgo | null }) {
+// `reprogramar`: un colgado al que ya se le destrabó lo que lo colgó: se le puede dar fecha.
+function FilaDespacho({ d, tipo, reloj, reprogramar }: { d: DespachoTarjeta; tipo: Tipo; reloj?: Riesgo | null; reprogramar?: boolean }) {
   const falta = faltaTexto(d);
   return (
     <div className="cr-t-desp">
       <div className="cr-t-desp-l1">
-        <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={11} />{nombreEstado(d.estado, tipo)}</span>
+        <span className={`cr-desp-chip cr-d-${reprogramar ? 'listo' : d.estado}`}><Icon name={reprogramar ? 'calendar' : ICONO_ESTADO[d.estado]} size={11} />{reprogramar ? 'Listo para reprogramar' : nombreEstado(d.estado, tipo)}</span>
         {d.quien && <span className="cr-desp-quien" title="A quién le toca el próximo paso"><Quien d={d} /></span>}
       </div>
       {reloj && <RelojTag r={reloj} />}
@@ -722,6 +724,14 @@ function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada;
       </div>
     </section>
   );
+}
+
+// Colgados: cuántos días lleva y en qué orden van (lo que ya se puede reprogramar arriba; después, del más viejo al más nuevo).
+const diasColgado = (at: string) => Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 86_400_000));
+const destrabado = (t: Tarjeta) => { const e = despachoTarjeta(t)?.estado; return e === 'listo' || e === 'remitido'; };
+function ordenColgados(ts: Tarjeta[]) {
+  const desde = (t: Tarjeta) => t.movs.find((m) => m.colgado)?.colgado?.at ?? '';
+  return [...ts].sort((a, b) => Number(destrabado(b)) - Number(destrabado(a)) || desde(a).localeCompare(desde(b)));
 }
 
 // La barrita de cada día: cuánto hay de cada estado, de un vistazo.

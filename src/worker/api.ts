@@ -21,7 +21,7 @@ import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
 import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDeDestino, notasDePedido, type Destino as DestinoNota } from './logistica';
 import { textoPactada, type ModoHora } from '../../web/src/ruta';
-import { asignarChofer, colgarMovimiento, guardarEnviado, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { asignarChofer, colgarMovimiento, revisarColgados, guardarEnviado, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
@@ -1671,6 +1671,8 @@ api.post('/logistica/notas', async (c) => {
 });
 api.delete('/logistica/notas/:id', async (c) => c.json(await borrarNotaLogistica(c.env.DB, c.get('ctx'), Number(c.req.param('id')), puedeEditarCronograma(c.get('ctx').user))));
 api.post('/cronograma/colgar', async (c) => c.json(await colgarMovimiento(c.env, c.get('ctx'), await c.req.json())));
+// Los avisos de los colgados (lo corre la tarea de cada hora; acá, para probarlo o forzarlo).
+api.post('/cronograma/colgados/revisar', async (c) => { requireRole(c.get('ctx'), 'admin'); return c.json(await revisarColgados(c.env)); });
 api.post('/cronograma/mover', async (c) => c.json(await moverMovimiento(c.env, c.get('ctx'), await c.req.json())));
 api.post('/cronograma/hecho', async (c) => c.json(await marcarHecho(c.env, c.get('ctx'), await c.req.json(), { enFondo: (p) => c.executionCtx.waitUntil(p) })));
 api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), null, await c.req.json())));

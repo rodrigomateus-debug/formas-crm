@@ -9,7 +9,7 @@ export interface ControlMov { k: 'prod' | 'dep' | 'pago' | 'remito'; v: 'ok' | '
 export interface DespachoMov {
   estado: Exclude<EstadoDespacho, 'info'>; checks: ControlMov[]; quien: Rol | null; owner_id: number | null; lugar: string | null;
 }
-export interface Control { k: ControlMov['k'] | 'dir'; nombre: string; v: 'ok' | 'no' | 'medio' | 'pend'; t?: string }
+export interface Control { k: ControlMov['k'] | 'dir' | 'nota'; nombre: string; v: 'ok' | 'no' | 'medio' | 'pend'; t?: string }
 export interface DespachoTarjeta { estado: EstadoDespacho; checks: Control[]; quien: Rol | null; owner_id: number | null; lugar: string | null }
 
 type TipoMov = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'retiro_impresor' | 'ingreso_impresor';
@@ -36,13 +36,14 @@ export const ICONO_ESTADO: Record<EstadoDespacho, string> = {
   hecho: 'check', nopago: 'deal', info: 'alert', nollego: 'bag', cola: 'timer', remitido: 'receipt', listo: 'truck', prog: 'calendar',
 };
 const NOMBRE_CONTROL: Record<Control['k'], string> = {
-  prod: 'Producción completa', dep: 'Mercadería en el depósito', pago: 'Pago', dir: 'Dirección', remito: 'Remito',
+  prod: 'Producción completa', dep: 'Mercadería en el depósito', pago: 'Pago', dir: 'Dirección', remito: 'Remito', nota: 'Anotación',
 };
 
 // La dirección de la parada: falta o no se encontró en el mapa → «Falta información». Mientras se busca, no cuenta.
 export type EstadoDir = 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
 
-export function despachoTarjeta(t: { tipo: TipoMov; hecho: boolean; parada: boolean; movs: Array<{ despacho?: DespachoMov }> }, dir?: { estado: EstadoDir } | null): DespachoTarjeta | null {
+type NotaTraba = { alcance: string; texto: string; traba?: 'info' | 'nopago' | 'nollego' | null };
+export function despachoTarjeta(t: { tipo: TipoMov; hecho: boolean; parada: boolean; movs: Array<{ despacho?: DespachoMov; notas?: NotaTraba[] }> }, dir?: { estado: EstadoDir } | null): DespachoTarjeta | null {
   const ds = t.movs.map((m) => m.despacho).filter((d): d is DespachoMov => !!d);
   if (!ds.length) return null;
   if (t.hecho) return { estado: 'hecho', checks: [], quien: null, owner_id: ds[0].owner_id, lugar: null };
@@ -65,6 +66,13 @@ export function despachoTarjeta(t: { tipo: TipoMov; hecho: boolean; parada: bool
     const i = checks.findIndex((x) => x.k === 'remito');
     checks.splice(i < 0 ? checks.length : i, 0, c);
     if (!ok && ['nollego', 'cola', 'remitido', 'listo'].includes(estado)) estado = 'info';
+  }
+  // La corrección a mano: una anotación «solo esta vez» que traba la entrega. Gana sobre lo automático mientras esté.
+  const trabas = t.movs.flatMap((m) => (m.notas ?? []).filter((n) => n.alcance === 'puntual' && n.traba));
+  const traba = (['nopago', 'info', 'nollego'] as const).find((e) => trabas.some((n) => n.traba === e));
+  if (traba) {
+    checks.push({ k: 'nota', nombre: NOMBRE_CONTROL.nota, v: 'no', t: [...new Set(trabas.map((n) => n.texto))].join(' · ') });
+    if (PRIORIDAD.indexOf(traba) < PRIORIDAD.indexOf(estado)) estado = traba;
   }
   const d0 = ds.find((d) => d.estado === estado) ?? ds[0];
   // Sin dirección en un retiro o un egreso es la del proveedor o el impresor: la corrige Logística, no la vendedora.

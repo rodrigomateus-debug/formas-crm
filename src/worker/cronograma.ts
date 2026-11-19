@@ -367,6 +367,56 @@ export async function colgados(db: D1Database): Promise<Movimiento[]> {
   return movs;
 }
 
+// Que los colgados no se olviden (estados de despacho, etapa 3; pedido de Logística del 19/11/2026). Corre cada hora:
+// - Si se destrabó lo que lo colgó (todos sus movimientos quedan listos o remitidos: entró el pago, llegó la mercadería),
+//   a Logística le llega «ya se puede reprogramar». Una vez; si se vuelve a trabar y se destraba, de nuevo.
+// - Si pasó una semana colgado, al responsable del pedido le llega otra vez el aviso. Una vez.
+const SEMANA_MS = 7 * 86_400_000;
+export async function revisarColgados(env: Env) {
+  const db = env.DB;
+  const movs = await colgados(db);
+  const out = { listos: 0, reavisos: 0 };
+  if (!movs.length) return out;
+  const { results: filas } = await db.prepare('SELECT task_id, tipo, dir, motivo, at, listo_avisado_at, reavisado_at FROM cronograma_colgados')
+    .all<{ task_id: string; tipo: string; dir: number; motivo: string; at: string; listo_avisado_at: string | null; reavisado_at: string | null }>();
+  const porId = new Map(filas.map((c) => [claveColgado(c), c]));
+  const grupos = new Map<string, Movimiento[]>();
+  for (const m of movs) {
+    const c = porId.get(m.id) ?? (m.dir != null ? porId.get(`${m.task_id}:${m.tipo}`) : undefined);
+    if (c) grupos.set(claveColgado(c), [...(grupos.get(claveColgado(c)) ?? []), m]);
+  }
+  const logistica = (await db.prepare("SELECT id FROM users WHERE active = 1 AND profile = 'logistica'").all<{ id: number }>()).results.map((u) => u.id);
+  const duenios = new Map((await db.prepare('SELECT id, owner_id FROM records WHERE id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify([...new Set(movs.map((m) => m.record_id).filter((x): x is number => !!x))])).all<{ id: number; owner_id: number | null }>()).results.map((r) => [r.id, r.owner_id]));
+  const ts = now();
+  const avisos = new Map<string, D1PreparedStatement>();   // uno por persona, pedido y tipo de aviso, aunque cuelguen varios artículos
+  const marcas: D1PreparedStatement[] = [];
+  for (const [k, ms] of grupos) {
+    const c = porId.get(k)!, m = ms[0];
+    const que = `${TIPOS[m.tipo].nombre} del PDV ${m.npdv ?? '—'}${m.tipo === 'entrega' ? '' : ` (${m.lugar ?? 'sin lugar'})`}`;
+    const listo = ms.every((x) => x.despacho && ['listo', 'remitido'].includes(x.despacho.estado));
+    if (listo && !c.listo_avisado_at) {
+      for (const u of logistica) avisos.set(`${u}|${m.record_id}|listo`, db.prepare("INSERT INTO avisos (user_id, kind, record_id, detalle) VALUES (?, 'colgado_listo', ?, ?)")
+        .bind(u, m.record_id, `${que}: ya se puede reprogramar. Estaba colgado por «${c.motivo}».`));
+      marcas.push(db.prepare('UPDATE cronograma_colgados SET listo_avisado_at = ? WHERE task_id = ? AND tipo = ? AND dir = ?').bind(ts, c.task_id, c.tipo, c.dir));
+      out.listos++;
+    } else if (!listo && c.listo_avisado_at) {
+      marcas.push(db.prepare('UPDATE cronograma_colgados SET listo_avisado_at = NULL WHERE task_id = ? AND tipo = ? AND dir = ?').bind(c.task_id, c.tipo, c.dir));
+    }
+    const owner = m.record_id ? duenios.get(m.record_id) : null;
+    if (!c.reavisado_at && Date.now() - Date.parse(c.at) > SEMANA_MS && !listo) {
+      const dias = Math.floor((Date.now() - Date.parse(c.at)) / 86_400_000);
+      if (owner) avisos.set(`${owner}|${m.record_id}|reaviso`, db.prepare("INSERT INTO avisos (user_id, kind, record_id, detalle) VALUES (?, 'colgado_reaviso', ?, ?)")
+        .bind(owner, m.record_id, `${que} sigue colgado hace ${dias} días: «${c.motivo}».`));
+      marcas.push(db.prepare('UPDATE cronograma_colgados SET reavisado_at = ? WHERE task_id = ? AND tipo = ? AND dir = ?').bind(ts, c.task_id, c.tipo, c.dir));
+      out.reavisos++;
+    }
+  }
+  const stmts = [...avisos.values(), ...marcas];
+  if (stmts.length) await db.batch(stmts);
+  return out;
+}
+
 const diaMes = (d: string) => `${Number(d.slice(8))}/${Number(d.slice(5, 7))}`;
 // `dirs` (en paralelo con `ids`): en un pedido que va a varios lugares, de cuál es cada entrega (la dirección del pedido).
 const dirsDe = (b: { ids?: unknown; dirs?: unknown }) => {

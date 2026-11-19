@@ -145,9 +145,9 @@ parada del mismo lugar en la ruta del día.
 ## Estados de despacho
 
 Pedido de Logística (Rodrigo, 19/11/2026). Reemplaza los colores que Logística pintaba a mano en la planilla. El estado
-**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Etapas 1 y 2: el estado,
-los puntitos, el reloj, el filtro «Le toca a», la semana llena y la sección «Despacho» en la vista previa del pedido (los
-colgados mejorados vienen después; la maqueta con las ideas está en el artifact «Estados de despacho»).
+**no se pinta: sale de los datos**, y cada tarjeta pendiente dice qué falta y a quién le toca. Tres etapas: el estado,
+los puntitos, el reloj y el filtro «Le toca a»; la semana llena y la sección «Despacho» en la vista previa del pedido; y
+los colgados que no se olvidan y la corrección a mano (la maqueta con las ideas está en el artifact «Estados de despacho»).
 
 | Estado | Color | Cuándo | Le toca a |
 |---|---|---|---|
@@ -173,6 +173,18 @@ colgados mejorados vienen después; la maqueta con las ideas está en el artifac
 - **En la vista previa del pedido**: al tocar la tarjeta se abre la vista previa de siempre con la sección «Despacho»
   arriba (el estado, el reloj, a quién le toca, el motivo si está colgado y el checklist entero con el detalle de cada
   control). `RecordPreview` recibe `arriba` (lo que quiera mostrar primero la pantalla que la abre).
+- **Corrección a mano**: una anotación de logística «solo esta vez» puede **trabar la entrega** (al escribirla:
+  «¿Traba la entrega?» No · Falta información · No pagó · No llegó). Mientras esté, la tarjeta queda en ese estado (si es
+  más grave que el automático), con el puntito «Anotación» en rojo y el texto como detalle; se ve en la tarjeta con la
+  etiqueta «Traba: …». Borrarla la devuelve a lo automático. Las de siempre no traban. Columna `traba` de
+  `logistica_notas` (migración `0100_colgados_avisos.sql`).
+- **Colgados que no se olvidan** (etapa 3): cada colgado dice hace cuántos días está colgado (en rojo desde la semana);
+  arriba van los que ya se pueden reprogramar y después, del más viejo al más nuevo. Si se destraba lo que lo colgó (todo
+  queda listo o remitido: entró el pago, llegó la mercadería), la etiqueta pasa a **«Listo para reprogramar»** y a
+  Logística le llega el aviso (campanita y mail) una vez; si se vuelve a trabar y se destraba, de nuevo. Si pasa una
+  semana colgado, al responsable del pedido le llega otra vez el aviso, una vez. Lo revisa `revisarColgados`
+  (`cronograma.ts`) a los :25 de cada hora; `POST /api/cronograma/colgados/revisar` lo fuerza (administradores). Columnas
+  `listo_avisado_at` y `reavisado_at` de `cronograma_colgados`; avisos `colgado_listo` y `colgado_reaviso`.
 - **Le toca a**: en la barra, Producción · Ventas · Proveedor · Logística con cuántas tarjetas tiene cada uno (también las
   colgadas); un clic deja solo esas.
 - **Cómo está hecho**: el servidor arma el despacho de cada movimiento (`despachoDe` en `cronograma.ts`, campo `despacho`

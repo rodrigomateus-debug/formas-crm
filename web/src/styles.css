@@ -2535,3 +2535,212 @@ thead .ds-acciones { z-index: 2; }
 .cr-editar-fila { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
 .cr-editar textarea.input { resize: vertical; min-height: 52px; font: inherit; }
 .cr-p-obs { font-style: italic; }
+
+/* ---------- Chispín: el buzón de ideas, abajo a la derecha (Chispin.tsx, src/worker/ideas.ts, docs/IDEAS.md) ----------
+   Una «forma» que cambia de forma (es de Formas), con una lamparita que se prende cuando hay ideas nuevas. Sigue el mouse
+   con los ojos (--mx, --my), parpadea, saluda, se duerme y festeja. Con «reducir movimiento», quieto. */
+:root, [data-theme="light"] {
+  --chispin-cuerpo: #000085; --chispin-brillo: #2b2bd9; --chispin-mejilla: #8ee021; --chispin-lampara: #8ee021; --chispin-lampara-off: #d9dce6; --chispin-tinta: #fff;
+}
+[data-theme="dark"] { --chispin-cuerpo: #2f2fc8; --chispin-brillo: #6b70ff; --chispin-lampara-off: #4b4f6b; }
+[data-theme="contrast"] { --chispin-cuerpo: #000085; --chispin-brillo: #000085; }
+.chispin-zona { position: fixed; right: 20px; bottom: 18px; z-index: 45; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; pointer-events: none; }
+.chispin-zona > * { pointer-events: auto; }
+/* Arriba de la barra de las vistas (Guardar, Exportar…), cuando la pantalla la tiene. */
+body:has(#barra-vista > *) .chispin-zona { bottom: 74px; }
+body.movil .chispin-zona { right: 10px; bottom: calc(78px + env(safe-area-inset-bottom)); }
+body.movil .chispin-zona .chispin-lugar { transform: scale(.8); transform-origin: bottom right; }
+@media print { .chispin-zona { display: none; } }
+
+.chispin-lugar { position: relative; transition: transform var(--dur-slow) var(--ease-out); }
+.chispin { position: relative; display: block; width: 64px; height: 72px; padding: 0; border: 0; background: none; cursor: pointer; transition: transform var(--dur-emphasis) var(--ease-out); }
+.chispin:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px; border-radius: 18px; }
+.chispin::before { content: ''; position: absolute; left: 15px; right: 15px; bottom: 0; height: 6px; border-radius: 50%; background: rgba(18, 20, 58, .2); animation: chispin-sombra 4.2s ease-in-out infinite; }
+.chispin-bicho { position: absolute; inset: 0; display: block; animation: chispin-flota 4.2s ease-in-out infinite; }
+.chispin-cuerpo { position: absolute; left: 6px; right: 6px; bottom: 7px; height: 50px; background: radial-gradient(circle at 34% 28%, var(--chispin-brillo), var(--chispin-cuerpo) 68%);
+  border-radius: 50% 50% 46% 54% / 56% 52% 48% 44%; box-shadow: 0 6px 16px -4px rgba(0, 0, 133, .45), inset 0 -4px 0 rgba(0, 0, 0, .16); animation: chispin-forma 11s ease-in-out infinite; }
+[data-theme="contrast"] .chispin-cuerpo { box-shadow: 0 0 0 2px #000; }
+.chispin-ojos { --mx: 0px; --my: 0px; position: absolute; top: 13px; left: 50%; display: flex; gap: 6px; transform: translateX(-50%); }
+.chispin-ojo { position: relative; width: 12px; height: 14px; border-radius: 50%; background: #fff; overflow: hidden; animation: chispin-parpadeo 5.3s infinite; transition: height var(--dur) var(--ease), margin var(--dur) var(--ease), border-radius var(--dur); }
+.chispin-ojo + .chispin-ojo { animation-delay: .04s; }
+.chispin-pupila { position: absolute; left: 3px; top: 3.5px; width: 6px; height: 7px; border-radius: 50%; background: #12143a; transform: translate(var(--mx), var(--my)); transition: transform 140ms var(--ease-out); }
+.chispin-pupila::after { content: ''; position: absolute; right: 1px; top: 1px; width: 2px; height: 2px; border-radius: 50%; background: #fff; }
+.chispin-cachetes { position: absolute; top: 28px; left: 8px; right: 8px; display: flex; justify-content: space-between; }
+.chispin-cachetes span { width: 7px; height: 4px; border-radius: 50%; background: var(--chispin-mejilla); opacity: .75; }
+.chispin-boca { position: absolute; top: 30px; left: 50%; width: 10px; height: 5px; border: 2px solid var(--chispin-tinta); border-top: 0; border-radius: 0 0 10px 10px; transform: translateX(-50%);
+  transition: all var(--dur) var(--ease); }
+.chispin-antena { position: absolute; left: 50%; top: 3px; width: 2px; height: 14px; margin-left: -1px; background: var(--chispin-cuerpo); border-radius: 2px; transform-origin: 50% 100%; animation: chispin-antena 3.4s ease-in-out infinite; }
+.chispin-lampara { position: absolute; left: 50%; top: -8px; width: 11px; height: 11px; border-radius: 50%; transform: translateX(-50%); background: var(--chispin-lampara-off); border: 2px solid var(--chispin-cuerpo); transition: background var(--dur-slow), box-shadow var(--dur-slow); }
+.chispin-antena.prendida .chispin-lampara { background: var(--chispin-lampara); box-shadow: 0 0 0 3px rgba(142, 224, 33, .25), 0 0 14px 4px rgba(142, 224, 33, .55); animation: chispin-brilla 1.8s ease-in-out infinite; }
+.chispin-mano { position: absolute; bottom: 15px; width: 11px; height: 11px; border-radius: 50%; background: var(--chispin-cuerpo); transition: transform var(--dur-slow) var(--ease-out); }
+.chispin-mano.izq { left: 0; } .chispin-mano.der { right: 0; transform-origin: 0 100%; }
+.chispin-zzz { position: absolute; right: -4px; top: 2px; font-size: 11px; font-weight: 700; color: var(--ui-ink-3); opacity: 0; transition: opacity var(--dur-slow); pointer-events: none; }
+.chispin-zzz i { position: absolute; font-style: normal; opacity: 0; }
+/* Al pasar el mouse: abre la boca («o») y saluda. */
+.chispin-bicho.mira .chispin-boca { width: 8px; height: 8px; border: 2px solid var(--chispin-tinta); border-radius: 50%; }
+.chispin-bicho.mira .chispin-mano.der { animation: chispin-saluda .7s ease-in-out 2; }
+.chispin-bicho.mira .chispin-ojo { height: 15px; }
+/* Feliz (se hizo una idea, propusiste una): ojos ^ ^, sonrisa grande, manos arriba y salta. */
+.chispin-bicho.feliz { animation: chispin-salta .55s ease-in-out 3; }
+.chispin-bicho.feliz .chispin-ojo { height: 6px; margin-top: 5px; border-radius: 7px 7px 0 0; animation: none; }
+.chispin-bicho.feliz .chispin-pupila { opacity: 0; }
+.chispin-bicho.feliz .chispin-boca { width: 15px; height: 8px; border: 0; background: var(--chispin-tinta); border-radius: 0 0 15px 15px; }
+.chispin-bicho.feliz .chispin-mano.izq { transform: translate(-3px, -16px); } .chispin-bicho.feliz .chispin-mano.der { transform: translate(3px, -16px); }
+/* Traga una idea nueva. */
+.chispin-bicho.traga .chispin-cuerpo { animation: chispin-traga .8s var(--ease-out); }
+.chispin-bicho.traga .chispin-boca { width: 12px; height: 10px; border: 0; background: #12143a; border-radius: 50%; }
+/* Dormido (nadie movió el mouse en un buen rato). */
+.chispin-bicho.duerme { animation-duration: 7s; }
+.chispin-bicho.duerme .chispin-ojo { height: 2px; margin-top: 7px; animation: none; }
+.chispin-bicho.duerme .chispin-pupila { opacity: 0; }
+.chispin-bicho.duerme .chispin-boca { width: 6px; height: 6px; border: 2px solid var(--chispin-tinta); border-radius: 50%; }
+.chispin-bicho.duerme .chispin-antena { animation: none; transform: rotate(18deg); }
+.chispin-bicho.duerme .chispin-zzz { opacity: 1; }
+.chispin-bicho.duerme .chispin-zzz i { animation: chispin-z 3s ease-in infinite; }
+.chispin-bicho.duerme .chispin-zzz i:nth-child(2) { animation-delay: 1s; } .chispin-bicho.duerme .chispin-zzz i:nth-child(3) { animation-delay: 2s; }
+
+.chispin-n { position: absolute; top: 6px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ui-negative); color: var(--on-negative);
+  font-size: 11px; font-weight: 700; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--ui-canvas); animation: chispin-pop .5s var(--ease-out); }
+.chispin-esconder { position: absolute; top: 2px; left: -6px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 1px solid var(--ui-line-strong); background: var(--ui-surface);
+  color: var(--ui-ink-2); display: grid; place-items: center; cursor: pointer; opacity: 0; transition: opacity var(--dur); }
+.chispin-lugar:hover .chispin-esconder, .chispin-esconder:focus-visible { opacity: 1; }
+.chispin-esconder:hover { color: var(--ui-ink); border-color: var(--ui-ink-2); }
+/* Escondido: espía desde el borde; al pasar el mouse se asoma un poco más. */
+.chispin-zona.escondido { right: 0; }
+.chispin-zona.escondido .chispin { transform: translateX(36px) rotate(-18deg); }
+.chispin-zona.escondido .chispin:hover, .chispin-zona.escondido .chispin:focus-visible { transform: translateX(22px) rotate(-10deg); }
+.chispin-zona.escondido .chispin-n { right: auto; left: 0; }
+@media (hover: none) { .chispin-esconder { opacity: .85; } }
+
+/* El globito de lo que dice. */
+.chispin-globo { position: relative; max-width: 270px; margin-right: 34px; padding: 10px 30px 10px 12px; border: 1px solid var(--ui-line); border-radius: 14px 14px 4px 14px;
+  background: var(--ui-surface); color: var(--ui-ink); box-shadow: var(--shadow-float); font-size: 13px; line-height: 1.4; animation: chispin-globo-in .38s var(--ease-out); transform-origin: bottom right; }
+.chispin-globo::after { content: ''; position: absolute; right: -7px; bottom: 6px; width: 12px; height: 12px; background: inherit; border-right: 1px solid var(--ui-line); border-bottom: 1px solid var(--ui-line);
+  transform: rotate(-45deg) skew(10deg, 10deg); border-radius: 0 0 3px 0; }
+.chispin-globo.festejo { border-color: var(--formas-green); background: color-mix(in srgb, var(--formas-green) 12%, var(--ui-surface)); }
+.chispin-globo.festejo::after { border-color: var(--formas-green); }
+.chispin-globo-texto { display: block; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.chispin-globo-x { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--ui-ink-3); display: grid; place-items: center; cursor: pointer; }
+.chispin-globo-x:hover { background: var(--ui-surface-sunken); color: var(--ui-ink); }
+
+/* El buzón. */
+.chispin-panel { width: min(420px, calc(100vw - 32px)); max-height: min(680px, calc(100vh - 120px)); display: flex; flex-direction: column; overflow: hidden; background: var(--ui-surface);
+  border: 1px solid var(--ui-line); border-radius: 14px; box-shadow: 0 22px 50px -14px rgba(18, 20, 58, .38), var(--shadow-pop); animation: chispin-panel-in .3s var(--ease-out); transform-origin: bottom right; }
+body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 176px)); }
+.chispin-panel.cargando { padding: 28px; align-items: center; }
+.chispin-cab { display: flex; align-items: flex-start; gap: 10px; padding: 14px 10px 12px 16px; background: linear-gradient(130deg, var(--chispin-cuerpo), var(--chispin-brillo)); color: #fff; }
+.chispin-cab-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.chispin-cab-txt b { font-size: 15px; }
+.chispin-cab-txt span { font-size: 12px; color: rgba(255, 255, 255, .78); line-height: 1.4; }
+.chispin-cab .btn.ghost { color: rgba(255, 255, 255, .85); }
+.chispin-cab .btn.ghost:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+.chispin-escribir { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--ui-line); }
+.chispin-escribir textarea.input, .chispin-editar textarea.input { width: 100%; height: auto; min-height: 58px; padding: 8px 10px; resize: vertical; font: inherit; font-size: 13.5px; line-height: 1.45; }
+.chispin-escribir-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+@media (hover: none) { .chispin-atajo { visibility: hidden; } }
+.chispin-parecidas { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 8px; background: var(--ui-warning-soft); color: var(--ui-warning-ink); animation: fade-in var(--dur) var(--ease); }
+.chispin-parecida { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ui-ink); }
+.chispin-pestanas { align-self: flex-start; margin: 10px 14px 2px; }
+.chispin-lista { flex: 1; min-height: 120px; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 14px; }
+.chispin-grupo { display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); }
+.chispin-grupo-ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-ink); }
+.chispin-grupo-ic.en_curso { background: var(--ui-info-soft); color: var(--ui-info-ink); }
+.chispin-grupo-ic.descartada { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.chispin-idea { display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 10px; padding: 10px; border: 1px solid var(--ui-line); border-radius: 10px; background: var(--ui-surface);
+  animation: chispin-idea-in .32s var(--ease-out) both; animation-delay: calc(min(var(--i), 8) * 25ms); transition: border-color var(--dur), box-shadow var(--dur); }
+.chispin-idea:hover { border-color: var(--ui-line-strong); }
+.chispin-idea.en_curso { border-color: color-mix(in srgb, var(--ui-info) 40%, var(--ui-line)); background: color-mix(in srgb, var(--ui-info-soft) 55%, var(--ui-surface)); }
+.chispin-idea.hecha { box-shadow: inset 3px 0 0 var(--ui-positive); }
+.chispin-idea.descartada { opacity: .75; }
+.chispin-idea.descartada .chispin-idea-texto { text-decoration: line-through; text-decoration-color: var(--ui-ink-3); }
+.chispin-idea.resaltada { animation: chispin-resalta 2.6s var(--ease-out); }
+.chispin-idea-texto { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ui-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.chispin-puesto { display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-size: 11px; font-weight: 700; vertical-align: 1px; }
+.chispin-puesto.p1 { padding: 0; background: none; font-size: 14px; vertical-align: 0; }
+/* El voto: un botón que se lee como tal («Votar» / «Votaste»), con el número grande. */
+.chispin-voto { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; width: 54px; height: 62px; padding: 0; border: 1.5px solid var(--accent-ink);
+  border-radius: 10px; background: var(--accent-soft); color: var(--accent-ink); font: inherit; font-size: 15px; line-height: 1.15; cursor: pointer; transition: all var(--dur) var(--ease); }
+.chispin-voto b { font-size: 16px; }
+.chispin-voto-txt { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+.chispin-voto:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); transform: translateY(-1px); box-shadow: 0 4px 10px -4px rgba(0, 0, 133, .5); }
+.chispin-voto:disabled .chispin-voto-txt { font-weight: 500; color: var(--ui-ink-2); }
+.chispin-voto:disabled { color: var(--ui-ink-2); }
+.chispin-voto.on { border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.chispin-voto:disabled { cursor: default; border-color: transparent; background: var(--ui-surface-sunken); }
+.chispin-voto.chico { flex: none; flex-direction: row; gap: 5px; width: auto; height: 28px; padding: 0 10px; font-size: 12px; }
+.chispin-voto.chico .chispin-voto-txt { font-size: 12px; } .chispin-voto.chico b { font-size: 12px; }
+.chispin-ayuda-voto { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--accent-ink) 45%, transparent);
+  background: var(--accent-soft); font-size: 12.5px; line-height: 1.45; color: var(--ui-ink); }
+.chispin-ayuda-ic { flex: none; width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); }
+.chispin-faltan { color: var(--accent-ink); } .chispin-faltan.listo { color: var(--ui-positive-ink); font-weight: 600; }
+.chispin-voto.pop svg { animation: chispin-pop .45s var(--ease-out); }
+.chispin-idea-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--ui-ink-2); }
+.chispin-chip { padding: 1px 7px; border-radius: 999px; background: var(--ui-surface-sunken); font-size: 11px; font-weight: 600; }
+.chispin-chip.nueva { background: color-mix(in srgb, var(--formas-green) 22%, transparent); color: var(--ui-positive-ink); }
+.chispin-chip.en_curso { background: var(--ui-info-soft); color: var(--ui-info-ink); }
+.chispin-chip.hecha { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+.chispin-chip.descartada { background: var(--ui-negative-soft); color: var(--ui-negative-ink); }
+.chispin-votantes { display: inline-flex; align-items: center; margin-left: auto; padding-left: 5px; }
+.chispin-votantes .avatar { margin-left: -4px; box-shadow: 0 0 0 2px var(--ui-surface); }
+.chispin-mas { margin-left: 4px; font-size: 10.5px; font-weight: 600; }
+.chispin-respuesta { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; padding: 7px 9px; border-radius: 8px; background: var(--ui-surface-sunken); font-size: 12.5px; line-height: 1.4; white-space: pre-wrap; }
+.chispin-acciones { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; transition: opacity var(--dur); }
+.chispin-acciones .btn.sm { height: 24px; padding: 0 7px; font-size: 11.5px; gap: 4px; }
+.chispin-acciones .chispin-hecha { color: var(--ui-positive-ink); }
+.chispin-editar { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.chispin-editar .chispin-acciones { justify-content: flex-end; gap: 6px; margin-top: 0; }
+/* Con mouse, las acciones flotan arriba a la derecha de la idea al pasar por encima (sin dejar un hueco); en el celular, abajo. */
+.chispin-idea { position: relative; }
+@media (hover: hover) {
+  .chispin-idea > .chispin-idea-cuerpo > .chispin-acciones { position: absolute; top: 6px; right: 6px; z-index: 1; margin: 0; padding: 2px; border: 1px solid var(--ui-line);
+    border-radius: 8px; background: var(--ui-surface); box-shadow: var(--shadow-pop); opacity: 0; pointer-events: none; }
+  .chispin-idea:hover > .chispin-idea-cuerpo > .chispin-acciones, .chispin-idea:focus-within > .chispin-idea-cuerpo > .chispin-acciones { opacity: 1; pointer-events: auto; }
+}
+.chispin-fama { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--ui-line); border-radius: 10px;
+  background: linear-gradient(130deg, color-mix(in srgb, var(--formas-green) 16%, var(--ui-surface)), var(--ui-surface)); }
+.chispin-fama-lista { display: flex; flex-wrap: wrap; gap: 12px; }
+.chispin-fama-u { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.chispin-vacio { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 26px 16px; text-align: center; color: var(--ui-ink-2); font-size: 13px; }
+.chispin-vacio .chispin-bicho { position: relative; inset: auto; width: 64px; height: 72px; }
+/* Celular y pantallas angostas: el buzón sube desde abajo, a todo el ancho. */
+.chispin-velo { display: none; }
+@media (max-width: 640px) {
+  .chispin-zona.abierto, body.movil .chispin-zona.abierto { right: 0; left: 0; bottom: 0; }
+  .chispin-velo { display: block; position: fixed; inset: 0; z-index: -1; background: var(--scrim); animation: fade-in var(--dur) var(--ease); }
+  .chispin-zona.abierto .chispin-lugar { display: none; }
+  .chispin-panel { width: 100%; max-height: 88dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); animation-name: chispin-subir; }
+}
+
+/* Papelitos de colores (festejar en Chispin.tsx). */
+.chispin-papelitos { position: fixed; z-index: 300; width: 0; height: 0; pointer-events: none; }
+.chispin-papelitos i { position: absolute; left: -3px; top: -5px; width: 7px; height: 11px; border-radius: 2px; opacity: 0; animation: chispin-papel 1.35s cubic-bezier(.15, .7, .3, 1) var(--d) forwards; }
+.chispin-papelitos i[data-c="0"] { background: #000085; } .chispin-papelitos i[data-c="1"] { background: #8ee021; } .chispin-papelitos i[data-c="2"] { background: #65a7dd; }
+.chispin-papelitos i[data-c="3"] { background: #f0b45a; } .chispin-papelitos i[data-c="4"] { background: #ff7d74; border-radius: 50%; width: 8px; height: 8px; }
+
+@keyframes chispin-flota { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes chispin-sombra { 0%, 100% { transform: scaleX(1); opacity: 1; } 50% { transform: scaleX(.82); opacity: .7; } }
+/* Formas: gota, casi cuadrado, huevo, círculo. */
+@keyframes chispin-forma {
+  0%, 100% { border-radius: 50% 50% 46% 54% / 56% 52% 48% 44%; }
+  22% { border-radius: 26% 26% 22% 22% / 26% 26% 22% 22%; }
+  30% { border-radius: 26% 26% 22% 22% / 26% 26% 22% 22%; }
+  52% { border-radius: 58% 42% 50% 50% / 66% 66% 34% 34%; }
+  76% { border-radius: 50%; }
+}
+@keyframes chispin-parpadeo { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+@keyframes chispin-antena { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+@keyframes chispin-brilla { 0%, 100% { box-shadow: 0 0 0 3px rgba(142, 224, 33, .25), 0 0 12px 3px rgba(142, 224, 33, .45); } 50% { box-shadow: 0 0 0 4px rgba(142, 224, 33, .32), 0 0 18px 6px rgba(142, 224, 33, .7); } }
+@keyframes chispin-saluda { 0%, 100% { transform: rotate(0) translateY(0); } 30% { transform: rotate(-40deg) translate(2px, -10px); } 65% { transform: rotate(-10deg) translate(2px, -12px); } }
+@keyframes chispin-salta { 0%, 100% { transform: translateY(0) scale(1, 1); } 15% { transform: translateY(0) scale(1.1, .9); } 50% { transform: translateY(-14px) scale(.95, 1.06); } 85% { transform: translateY(0) scale(1.06, .94); } }
+@keyframes chispin-traga { 0% { transform: scale(1); } 25% { transform: scale(1.18, .86); } 55% { transform: scale(.92, 1.1); } 100% { transform: scale(1); } }
+@keyframes chispin-z { 0% { opacity: 0; transform: translate(0, 10px) scale(.6); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(10px, -14px) scale(1.2); } }
+@keyframes chispin-pop { 0% { transform: scale(.4); } 60% { transform: scale(1.3); } 100% { transform: scale(1); } }
+@keyframes chispin-globo-in { from { opacity: 0; transform: translateY(8px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes chispin-panel-in { from { opacity: 0; transform: translateY(12px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes chispin-subir { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes chispin-idea-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes chispin-resalta { 0%, 40% { box-shadow: 0 0 0 3px var(--formas-lime); border-color: var(--formas-green); } 100% { box-shadow: 0 0 0 0 transparent; } }
+@keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
+@media (prefers-reduced-motion: reduce) {
+  .chispin::before, .chispin-bicho, .chispin-cuerpo, .chispin-ojo, .chispin-antena, .chispin-lampara, .chispin-zzz i, .chispin-n, .chispin-globo, .chispin-panel, .chispin-idea, .chispin-mano { animation: none !important; }
+}

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { http, qs, useMeta, Icon, recordUrl, fmtDate, fmtRelative, userOf, type ObjectType } from './lib';
 import { UserAvatar } from './components';
 import { refrescarNoLeidas } from './pages/Conversacion';
+import { abrirChispin } from './Chispin';
 
 // La campanita de arriba a la derecha (pedido de Rodrigo del 13/11/2026; src/worker/notificaciones.ts): lo último que te
 // pasó en el CRM —te mencionaron, te respondieron, te asignaron una tarea o un registro, faltan entregas— con lo no leído
@@ -13,6 +14,7 @@ export interface Notificacion {
   name: string | null; activity_id: number | null; subject: string | null; mensaje_id: number | null; texto: string | null; by_user: number | null;
   created_at: string; leido_at: string | null;
   encargo_id?: number | null; encargo_destino?: string | null; encargo_fecha?: string | null;
+  idea_id?: number | null;
 }
 interface Res { no_leidas: number; items: Notificacion[] }
 
@@ -53,6 +55,12 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
     case 'encargo': return { titulo: <>Tu encargo a <b>{n.encargo_destino ?? 'un destino'}</b>{n.encargo_fecha ? ` (${Number(n.encargo_fecha.slice(8))}/${Number(n.encargo_fecha.slice(5, 7))})` : ''}</>, detalle: n.texto, icono: 'route', destino: `/recorridos?tab=encargos&encargo=${n.encargo_id ?? ''}` };
     // Entró un pedido con un producto que tiene notas de Producción (notasproducto.ts): el texto dice cuál y qué pasa.
     case 'producto': return { titulo: <>Ojo con un producto de {reg}</>, detalle: n.texto, icono: 'alert', destino: aReg };
+    // El buzón de ideas (Chispin.tsx): «chispin:<id>» abre el buzón en esa idea, sin cambiar de pantalla.
+    case 'idea_nueva': return { titulo: <><b>{quien}</b> propuso una idea para el Hub</>, detalle: n.texto, icono: 'spark', destino: `chispin:${n.idea_id ?? ''}` };
+    case 'idea_en_curso': return { titulo: <>Tu idea está <b>en marcha</b> 🔧</>, detalle: n.texto, icono: 'spark', destino: `chispin:${n.idea_id ?? ''}` };
+    case 'idea_hecha': return { titulo: <>¡Se hizo tu idea! 🎉</>, detalle: n.texto, icono: 'check', destino: `chispin:${n.idea_id ?? ''}` };
+    case 'idea_votada_hecha': return { titulo: <>Se hizo una idea que votaste 🎉</>, detalle: n.texto, icono: 'check', destino: `chispin:${n.idea_id ?? ''}` };
+    case 'idea_descartada': return { titulo: <>Tu idea quedó en <b>no va</b> (por ahora)</>, detalle: n.texto, icono: 'spark', destino: `chispin:${n.idea_id ?? ''}` };
     case 'entrega': return { titulo: <>Faltan entregas en {reg}</>, detalle: 'Según los remitos, todavía falta entregar algo.', icono: 'truck', destino: aReg };
     default: return { titulo: <><b>{quien}</b> te asignó {reg}</>, detalle: null, icono: n.object_type ?? 'note', destino: aReg };
   }
@@ -88,6 +96,7 @@ export function Campanita() {
   const abrir = (n: Notificacion, destino: string) => {
     setAbierto(false);
     if (!n.leido_at) marcar([n.id], true);
+    if (destino.startsWith('chispin:')) { abrirChispin(Number(destino.slice(8)) || undefined); return; }
     navigate(destino);
     setTimeout(() => refrescarNoLeidas(), 1500);
   };

@@ -10,6 +10,7 @@ import { orderProducts } from './productos';
 import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 import { buscarConsultas, cargarConversacion, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
+import { cambiarEstadoIdea, listarIdeas } from './ideas';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
@@ -487,6 +488,30 @@ const TOOLS: Tool[] = [
     readOnly: true,
     inputSchema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
     run: async (a, _ctx, env) => getActivity(env.DB, Number(a.id)),
+  },
+  {
+    name: 'ideas_del_hub',
+    description: 'El buzón de ideas del Hub (Chispín, abajo a la derecha): las mejoras que propone el equipo, en el orden del ranking (en marcha, después las pendientes de más votos a menos, '
+      + 'después las hechas y las descartadas). Cada una con su texto, quién la propuso, votos y estado. `estado` filtra: pendiente, en_curso, hecha, descartada o abiertas (pendientes y en marcha).',
+    readOnly: true,
+    inputSchema: { type: 'object', properties: { estado: { type: 'string', enum: ['abiertas', 'pendiente', 'en_curso', 'hecha', 'descartada'] } } },
+    run: async (a, ctx, env, base) => {
+      const { ideas } = await listarIdeas(env.DB, ctx.user);
+      const { results: users } = await env.DB.prepare('SELECT id, name FROM users').all<{ id: number; name: string }>();
+      const nombre = (id: number | null) => users.find((u) => u.id === id)?.name ?? null;
+      const filtro = String(a.estado ?? '');
+      return ideas.filter((i) => !filtro || (filtro === 'abiertas' ? ['pendiente', 'en_curso'].includes(i.estado) : i.estado === filtro)).map((i) => ({
+        id: i.id, texto: i.texto, propuso: nombre(i.user_id), estado: i.estado, votos: i.votos, votaron: i.votantes.map(nombre), respuesta: i.respuesta,
+        creada: i.created_at, estado_at: i.estado_at, url: `${base}/?idea=${i.id}`,
+      }));
+    },
+  },
+  {
+    name: 'marcar_idea',
+    description: 'Solo administradores: pasa una idea del buzón a en_curso («en marcha»), hecha, descartada («no va») o de vuelta a pendiente, con una respuesta opcional para el equipo '
+      + '(«Listo: está en Pedidos → Filtros»). Avisa en la campanita a quien la propuso y, si se hizo, a los que la votaron.',
+    inputSchema: { type: 'object', properties: { id: { type: 'integer' }, estado: { type: 'string', enum: ['pendiente', 'en_curso', 'hecha', 'descartada'] }, respuesta: { type: 'string' } }, required: ['id', 'estado'] },
+    run: async (a, ctx, env) => cambiarEstadoIdea(env.DB, ctx, Number(a.id), { estado: a.estado, respuesta: a.respuesta }),
   },
 ];
 

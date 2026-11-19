@@ -2,7 +2,7 @@ import { logosDeArticulos } from './logos';
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
 import { Budget, OutOfBudget } from './budget';
-import { createRecord, updateRecord } from './records';
+import { createRecord, updateRecord, ORDER_ANTICIPO } from './records';
 import { API, cu, generalStage, leerArticulo, LIST, norm, STAGE, upsertPdv, usuarioPorNombre, type CuTask } from './clickup';
 import { fotosDeArticulos } from './productos';
 import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
@@ -66,6 +66,19 @@ export const ESTADOS_PEC: Array<{ status: string; color: string; type: string }>
   { status: 'anulado', color: '#8d8d8d', type: 'done' },
   { status: 'entregados', color: '#008844', type: 'closed' },
 ];
+// «Pendiente de anticipo» (pedido de Rodrigo del 19/11/2026): un estado que no existe en ClickUp. Lo tienen, en la vista
+// de Producción, el PDV y los artículos que todavía no arrancaron («ingreso de pedido» o «pdv») de un pedido que está en
+// «$ Pendiente de Anticipo»: lo que está por entrar pero todavía no se pagó. Sale de la etapa del pedido, no se elige:
+// cuando la vendedora lo pasa a «Listo para producción» (o producción mueve el artículo), vuelve el estado de ClickUp.
+export const PENDIENTE_ANTICIPO = 'pendiente de anticipo';
+const SIN_ARRANCAR = ['ingreso de pedido', 'pdv'];
+// La lista de estados con ese, antes de «en espera de confirmación».
+export function conAnticipo<T extends { status: string }>(estados: T[]): Array<T | { status: string; color: string; type: string }> {
+  if (estados.some((e) => e.status === PENDIENTE_ANTICIPO)) return estados;
+  const i = estados.findIndex((e) => e.status.startsWith('en espera de confirmaci'));
+  const en = i >= 0 ? i : Math.max(0, estados.findIndex((e) => !SIN_ARRANCAR.includes(e.status)));
+  return [...estados.slice(0, en), { status: PENDIENTE_ANTICIPO, color: '#12a594', type: 'custom' }, ...estados.slice(en)];
+}
 export const CERRADOS = ['entregados', 'anulado', 'anulada', 'cancelado'];
 const LISTOS = ['listo para entergar', 'listo para entregar', 'entregados'];
 
@@ -499,13 +512,16 @@ function armarPdv(p: FilaDb & { pedido: string | null; owner_id: number | null; 
   const vivos = arts.filter((a) => !CERRADOS.slice(1).includes(a.estado));
   const { etapa, auto } = etapaPdv(p.estado, arts.map((a) => a.estado), p.etapa_pedido);
   const visibles = verCerrados ? arts : arts.filter((a) => !CERRADOS.includes(a.estado));
+  // El pedido espera el anticipo y la producción no arrancó: lo que sigue sin arrancar se ve «pendiente de anticipo».
+  const anticipo = !auto && p.etapa_pedido === ORDER_ANTICIPO;
+  const ver = (e: string) => (anticipo && SIN_ARRANCAR.includes(e) ? PENDIENTE_ANTICIPO : e);
   const todos = new Set<number>(lista(p.asignados).map(Number));
   for (const a of vivos) for (const x of lista(a.asignados)) todos.add(Number(x));
   return {
-    ...articulo(p), npdv: p.npdv, unidad: p.unidad, vendedor: p.vendedor, record_id: p.record_id, pedido: p.pedido, owner_id: p.owner_id,
+    ...articulo(p), estado: ver(p.estado), npdv: p.npdv, unidad: p.unidad, vendedor: p.vendedor, record_id: p.record_id, pedido: p.pedido, owner_id: p.owner_id,
     entrega_prometida: p.entrega_prometida, etapa, etapa_auto: auto, editable: editables.includes(p.unidad ?? ''),
     listos: vivos.filter((a) => LISTOS.includes(a.estado)).length, total: vivos.length, asignados_todos: [...todos],
-    articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), foto: fotos.get(a.task_id) ?? null,
+    articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), estado: ver(a.estado), foto: fotos.get(a.task_id) ?? null,
       // El aviso del logo, solo mientras falta producirlo (ya listo, entregado o anulado no importa).
       logo: LISTOS.includes(a.estado) || CERRADOS.includes(a.estado) ? null : logos.get(a.task_id) ?? null, ...notasDe(notas, a.task_id),
       costo_logo: costos.get(a.task_id) ?? null, oc: ocsDeCodigo(ocs.get(p.record_id ?? -1), notas.skus.get(a.task_id)) })),
@@ -581,7 +597,7 @@ export async function referencias(db: D1Database) {
     db.prepare(`SELECT o.campo, o.option_id, o.nombre, o.color, o.orden, o.company_id, r.name AS empresa
       FROM produccion_opciones o LEFT JOIN records r ON r.id = o.company_id AND r.archived = 0 ORDER BY o.campo, o.orden`),
   ]);
-  return { personas: personas.results, opciones: opciones.results, estados: await estadosPec(db) };
+  return { personas: personas.results, opciones: opciones.results, estados: conAnticipo(await estadosPec(db)) };
 }
 
 async function pdvVista(db: D1Database, pdvTask: string) {
@@ -629,6 +645,7 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   let local: Record<string, unknown> = {};
   if (c === 'estado') {
     const v = String(valor ?? '').toLowerCase().trim();
+    if (v === PENDIENTE_ANTICIPO) throw new HttpError(400, '«Pendiente de anticipo» no se elige: sale del pedido, mientras está en «$ Pendiente de Anticipo».');
     const estados = await estadosPec(db);
     if (!estados.some((e) => e.status === v)) throw new HttpError(400, `«${valor}» no es un estado de la lista de producción.`);
     await escribir(env, 'PUT', path, { status: v });

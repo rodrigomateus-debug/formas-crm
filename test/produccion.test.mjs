@@ -528,3 +528,28 @@ test('producción: cada artículo con lo que se tomó para el logo en la cotizac
   assert.deepEqual(otra.articulos.find((a) => a.nombre.startsWith('Necessaire')).costo_logo, { logo: 100, setup: 0, cantidad: 600, fuente: 'pedido' });
   assert.equal(otra.articulos.find((a) => a.nombre.startsWith('Pelota')).costo_logo, null);
 });
+
+// «Pendiente de anticipo» (pedido de Rodrigo del 19/11/2026): el PDV y los artículos sin arrancar de un pedido que está
+// en «$ Pendiente de Anticipo» se ven con ese estado, que sale del pedido y no se elige.
+test('producción: lo que no arrancó de un pedido en «$ Pendiente de Anticipo» se ve «pendiente de anticipo»', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
+  const antes = pdvDe(await vista(), PDV_Z);
+  assert.ok(antes.articulos.every((a) => a.estado === 'pdv'), 'antes, el estado de ClickUp');
+  // En la lista de estados va antes de «en espera de confirmación» (acá el ClickUp simulado no lo tiene: antes de lo que ya arrancó).
+  const orden = (await vista()).estados.map((e) => e.status);
+  const i = orden.indexOf('pendiente de anticipo');
+  assert.ok(i >= 0 && i < orden.indexOf('en revision') && orden.slice(0, i).every((e) => ['ingreso de pedido', 'pdv'].includes(e)), orden.join(', '));
+  assert.equal((await api('PATCH', `/records/order/${antes.record_id}`, { props: { hs_pipeline_stage: ANTICIPO } })).status, 200);
+  const z = pdvDe(await vista(), PDV_Z);
+  assert.equal(z.etapa, ANTICIPO);
+  assert.equal(z.estado, 'pendiente de anticipo', 'el PDV');
+  assert.ok(z.articulos.length && z.articulos.every((a) => a.estado === 'pendiente de anticipo'), 'y sus artículos');
+  // Un pedido que ya arrancó no cambia aunque diga otra cosa.
+  assert.equal(pdvDe(await vista(), PDV).articulos.some((a) => a.estado === 'pendiente de anticipo'), false);
+  assert.equal((await api('PATCH', `/produccion/${z.articulos[0].task_id}`, { campo: 'estado', valor: 'pendiente de anticipo' })).status, 400, 'no se elige');
+  // Pagó: la vendedora lo pasa a «Listo para producción» y vuelve el estado de ClickUp.
+  assert.equal((await api('PATCH', `/records/order/${antes.record_id}`, { props: { hs_pipeline_stage: '3725360f-519b-4b18-a593-494d60a29c9f' } })).status, 200);
+  assert.ok(pdvDe(await vista(), PDV_Z).articulos.every((a) => a.estado !== 'pendiente de anticipo'));
+});

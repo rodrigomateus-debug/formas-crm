@@ -37,6 +37,7 @@ import { fin, finnegansState, finnegansToken, pedidoIds, syncFacturas, type Dest
 import { actualizarFotos, fotosEstado } from './fotos';
 import { agregarFotosNota, borrarFotoNota, borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, primeraFotoNota, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
+import { borrarIdea, cambiarEstadoIdea, crearIdea, editarIdea, listarIdeas, votarIdea } from './ideas';
 import { Budget } from './budget';
 import { resumenDireccion } from './direccion';
 import { inicioProduccion } from './inicioprod';
@@ -1582,6 +1583,16 @@ api.delete('/productos/notas/fotos/:fotoId', async (c) => {
 });
 api.get('/productos/notas/fotos/:fotoId', async (c) => fotoNotaProducto(c.env, Number(c.req.param('fotoId'))));
 api.get('/productos/notas/:id/foto', async (c) => primeraFotoNota(c.env, Number(c.req.param('id'))));
+
+// ---------- Buzón de ideas (ideas.ts): Chispín, abajo a la derecha. Todos proponen y votan; los administradores las marcan ----------
+
+api.get('/ideas', async (c) => c.json(await listarIdeas(c.env.DB, c.get('ctx').user)));
+api.post('/ideas', async (c) => c.json(await crearIdea(c.env.DB, c.get('ctx'), await c.req.json()), 201));
+api.patch('/ideas/:id', async (c) => c.json(await editarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
+api.delete('/ideas/:id', async (c) => c.json(await borrarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
+api.put('/ideas/:id/voto', async (c) => c.json(await votarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), true)));
+api.delete('/ideas/:id/voto', async (c) => c.json(await votarIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), false)));
+api.post('/ideas/:id/estado', async (c) => c.json(await cambiarEstadoIdea(c.env.DB, c.get('ctx'), Number(c.req.param('id')), await c.req.json())));
 
 // ---------- Recorridos (recorridos.ts): los encargos al recorrido y la base de destinos ----------
 // Para todos los perfiles (también Ventas): cada uno carga y ve lo suyo; Logística, todo.

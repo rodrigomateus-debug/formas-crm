@@ -19,7 +19,7 @@ import { clickupAttachment, clickupRemitos, clickupStatus, syncClickup } from '.
 import { corregir, marcarPropio, medirAMano, rendimiento } from './rendimiento';
 import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
-import { asignarChofer, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { asignarChofer, colgarMovimiento, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
@@ -1643,6 +1643,7 @@ api.get('/cronograma', async (c) => {
   const q = c.req.query();
   return c.json(await vistaCronograma(c.env.DB, c.get('ctx').user, { desde: q.desde, hasta: q.hasta, rd: q.rd, rh: q.rh }));
 });
+api.post('/cronograma/colgar', async (c) => c.json(await colgarMovimiento(c.env, c.get('ctx'), await c.req.json())));
 api.post('/cronograma/mover', async (c) => c.json(await moverMovimiento(c.env, c.get('ctx'), await c.req.json())));
 api.post('/cronograma/hecho', async (c) => c.json(await marcarHecho(c.env, c.get('ctx'), await c.req.json(), { enFondo: (p) => c.executionCtx.waitUntil(p) })));
 api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), null, await c.req.json())));

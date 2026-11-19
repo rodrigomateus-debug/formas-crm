@@ -39,7 +39,8 @@ La planilla DESTINOS puede seguir usándose mientras tanto; cuando todos carguen
 
 ## Cargar un encargo
 
-«Nuevo encargo», en tres pasos:
+«Nuevo encargo» en Recorridos o, desde cualquier pantalla, **Crear → Encargo** arriba a la derecha (pedido de Rodrigo del
+19/11/2026; también para Producción y Logística, que en «Crear» solo tienen Pedido), en tres pasos:
 
 1. **¿A dónde?** Se busca en toda la base, o se elige de las sugerencias de cada persona:
    - **A donde más mandás**: sus destinos de los últimos 6 meses (también los de la planilla vieja, si se trajo el

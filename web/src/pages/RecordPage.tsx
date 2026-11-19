@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
 } from '../lib';
-import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
+import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, NombreEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
@@ -173,6 +173,7 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
   const props = propsOf(meta, type);
   const [hist, setHist] = useState<string | null>(null);
   const [merge, setMerge] = useState(false);
+  const [editNombre, setEditNombre] = useState(false);
   const [filter, setFilter] = useState('');
   const groups = useMemo(() => {
     const m = new Map<string, Property[]>();
@@ -200,7 +201,7 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
       <div className="rec-head">
         <div className="crumb"><Link to={`/${OBJECTS[type].path}`}>← {OBJECTS[type].plural}</Link></div>
         <div className="title"><Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
-          <div className="grow"><h1>{record.name}</h1>
+          <div className="grow"><NombreEditable type={type} record={record} onSaved={onChange} edit={editNombre} onEdit={setEditNombre} />
             {type === 'deal'
               ? <div className="muted small rec-valor"><ValorEditable record={record} onSaved={onChange} />{stageOf(meta, record.props.dealstage) ? <span className="rec-etapa">{` · ${stageOf(meta, record.props.dealstage)!.stage.label}`}</span> : ''}</div>
               : <div className="muted small">{subtitle(meta, type, record)}</div>}
@@ -213,6 +214,7 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
             )}
             <TagChips meta={meta} ids={record.tags} /></div>
           <RecordMenu items={[
+            ...(meta.me.role !== 'viewer' ? [{ label: 'Cambiar nombre', icon: 'edit', onClick: () => setEditNombre(true) }] : []),
             { label: 'Combinar con otro…', icon: 'merge', onClick: () => setMerge(true) },
             ...(type === 'deal' && meta.me.role !== 'viewer' ? [{
               label: 'Clonar', icon: 'plus', title: 'Crea una copia con los mismos datos y asociaciones, en la primera etapa', onClick: async () => {
@@ -1338,7 +1340,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <Avatar name={record.name} type={type} size="lg" domain={record.props.domain} email={record.props.email} />
           <div className="grow" style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, fontSize: 18, lineHeight: 1.3 }}><Link to={recordUrl(type, id)}>{record.name}</Link></h2>
+            <NombreEditable as="h2" type={type} record={record} onSaved={changed} link={recordUrl(type, id)} />
             <TagChips meta={meta} ids={record.tags} />
             <div className="preview-sum">
               {summary.map(([k, v]) => <div key={k}><span className="muted">{k}:</span> {v}</div>)}

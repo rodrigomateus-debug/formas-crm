@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, faltanObligatorias, UNIDADES, type UnidadKey,
@@ -204,6 +204,96 @@ export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved:
           onClick={(e) => { e.stopPropagation(); setV(record.props.amount == null ? '' : String(record.props.amount)); setEdit(true); }}><Icon name="edit" size={14} /></button>
       )}
     </span>
+  );
+}
+
+// El nombre del registro, arriba de la ficha y de la vista previa, se cambia ahí mismo, sin cuadros ni botones: el texto
+// pasa a ser editable con la misma letra y en el mismo lugar (no se mueve nada). Se abre con el lápiz que aparece al lado
+// (al pasar el mouse; en el celular queda siempre a la vista) o, en la ficha, tocando el nombre. Enter o un clic afuera
+// guarda; Esc deja lo que estaba. Al contacto se le cambian nombre y apellido por separado (con los dos vacíos se ve el
+// mail, como hasta ahora). `link`: el nombre sigue llevando a la ficha (vista previa) y se edita solo con el lápiz.
+// `edit`/`onEdit`: para abrirlo desde afuera (los tres puntitos).
+const CAMPOS_NOMBRE: Record<ObjectType, Array<{ k: string; label: string }>> = {
+  contact: [{ k: 'firstname', label: 'Nombre' }, { k: 'lastname', label: 'Apellido' }],
+  company: [{ k: 'name', label: 'Nombre de la empresa' }],
+  deal: [{ k: 'dealname', label: 'Nombre del negocio' }],
+  order: [{ k: 'hs_order_name', label: 'Nombre del pedido' }],
+};
+export function NombreEditable({ type, record, onSaved, as: H = 'h1', link, edit: editExt, onEdit }: {
+  type: ObjectType; record: CrmRecord; onSaved: () => void; as?: 'h1' | 'h2'; link?: string; edit?: boolean; onEdit?: (v: boolean) => void;
+}) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const [editInt, setEditInt] = useState(false);
+  const puede = meta.me.role !== 'viewer';
+  const edit = puede && (editExt ?? editInt);
+  const setEdit = (v: boolean) => { setEditInt(v); onEdit?.(v); };
+  const campos = CAMPOS_NOMBRE[type];
+  const guardado = () => Object.fromEntries(campos.map((c) => [c.k, record.props[c.k] == null ? '' : String(record.props[c.k])]));
+  const [v, setV] = useState<Record<string, string>>(guardado);
+  const [error, setError] = useState(false);
+  // Mientras guarda (y hasta que llega el registro actualizado) se ve el nombre nuevo, sin volver un instante al viejo.
+  const [nuevo, setNuevo] = useState<string | null>(null);
+  useEffect(() => setNuevo(null), [record]);
+  const cerrado = useRef(false);
+  const primero = useRef<HTMLTextAreaElement>(null);
+  // Al abrirlo arranca con lo guardado y el cursor al final del primer campo (sin pintar todo de azul).
+  useEffect(() => {
+    if (!edit) return;
+    cerrado.current = false;
+    setV(guardado()); setError(false);
+    requestAnimationFrame(() => { const el = primero.current; if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
+  }, [edit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cerrar = () => { cerrado.current = true; setEdit(false); };
+  const guardar = async (seguir: boolean) => {
+    if (cerrado.current) return;
+    const limpio = Object.fromEntries(campos.map((c) => [c.k, (v[c.k] ?? '').trim()]));
+    const antes = guardado();
+    if (campos.every((c) => limpio[c.k] === antes[c.k].trim())) { cerrar(); return; }
+    // Contacto: alcanza con uno de los dos (o ninguno, si tiene mail). Empresa, negocio y pedido necesitan nombre.
+    if (type !== 'contact' && !limpio[campos[0].k]) {
+      if (seguir) { setError(true); toast('El nombre no puede quedar vacío', true); return; }
+      cerrar(); return; // con un clic afuera, queda el que estaba
+    }
+    cerrar();
+    setNuevo(type === 'contact' ? [limpio.firstname, limpio.lastname].filter(Boolean).join(' ') || record.props.email || record.name : limpio[campos[0].k]);
+    try {
+      await http('PATCH', `/records/${type}/${record.id}`, { props: Object.fromEntries(campos.map((c) => [c.k, limpio[c.k] || null])) });
+      toast('Nombre guardado');
+      onSaved();
+    } catch (err) { setNuevo(null); toast((err as Error).message, true); }
+  };
+  if (edit) {
+    return (
+      <H className={`nombre-rec editando${error ? ' error' : ''}`}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) void guardar(false); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); void guardar(true); }
+          else if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); cerrar(); }
+        }}>
+        {campos.map((c, i) => (
+          // El campo crece con lo escrito y, si no entra, pasa al renglón de abajo como el título: el texto oculto de al lado
+          // le da el tamaño (funciona en todos los navegadores). Es de un solo renglón: Enter guarda y un salto pegado es un espacio.
+          <span key={c.k} className="nombre-campo" data-v={v[c.k] || c.label}>
+            <textarea ref={i === 0 ? primero : undefined} rows={1} cols={1} value={v[c.k] ?? ''} placeholder={c.label} aria-label={c.label}
+              enterKeyHint="done" autoComplete="off" spellCheck={false}
+              onChange={(e) => { setError(false); setV((x) => ({ ...x, [c.k]: e.target.value.replace(/\s*\n\s*/g, ' ') })); }} />
+          </span>
+        ))}
+      </H>
+    );
+  }
+  const nombre = nuevo ?? record.name;
+  return (
+    <H className="nombre-rec">
+      {link ? <Link to={link}>{nombre}</Link>
+        : <span className={puede ? 'nombre-txt editable' : 'nombre-txt'} title={puede ? 'Tocá para cambiar el nombre' : undefined}
+          onClick={puede ? () => setEdit(true) : undefined}>{nombre}</span>}
+      {puede && (
+        <button type="button" className="nombre-lapiz" title="Cambiar el nombre" aria-label={`Cambiar el nombre de ${nombre}`}
+          onClick={(e) => { e.stopPropagation(); setEdit(true); }}><Icon name="edit" size={13} /></button>
+      )}
+    </H>
   );
 }
 

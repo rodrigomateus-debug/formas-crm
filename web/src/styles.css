@@ -1565,6 +1565,18 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-dia { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); min-width: 0; display: flex; flex-direction: column; min-height: 220px; transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .cr-dia.sobre { border-color: var(--accent-ink); box-shadow: var(--ui-focus-ring); }
 .cr-dia.feriado { background: var(--ui-surface-sunken); }
+/* Colgados: lo que no se pudo hacer. No es un día: borde punteado y cabecera rayada, del color de los avisos. */
+.cr-dia.cr-colgados { border: 2px dashed var(--ui-warning); background: color-mix(in srgb, var(--ui-warning-soft) 45%, var(--ui-surface)); }
+@media (min-width: 1200px) { .cr-dia.cr-colgados { position: sticky; right: 0; z-index: 2; box-shadow: -8px 0 12px -10px rgba(0, 0, 0, .25); } }
+.cr-colgados .cr-dia-cab { border-bottom-color: var(--ui-warning); border-radius: calc(var(--r-panel) - 2px) calc(var(--r-panel) - 2px) 0 0;
+  background: repeating-linear-gradient(-45deg, var(--ui-warning-soft) 0 10px, color-mix(in srgb, var(--ui-warning) 22%, var(--ui-warning-soft)) 10px 20px); }
+.cr-colgados .cr-dia-tit { align-items: center; color: var(--ui-warning-ink); } .cr-colgados .cr-dia-tit b { color: var(--ui-warning-ink); text-transform: uppercase; letter-spacing: .05em; font-size: 13px; }
+.cr-colgados .cr-dia-tit span { margin-left: auto; color: var(--ui-warning-ink); font-weight: 600; }
+.cr-colgados .cr-dia-sub { color: var(--ui-warning-ink); line-height: 1.35; }
+.cr-colgados.sobre { border-style: solid; }
+.cr-colgados-vacio { padding: 14px 12px; color: var(--ui-warning-ink); line-height: 1.45; }
+.cr-t-motivo { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--ui-warning); background: var(--ui-warning-soft); color: var(--ui-warning-ink); border-radius: 0 6px 6px 0; }
+.cr-t-motivo p { margin: 0 0 2px; font-size: 12.5px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; } .cr-t-motivo span { opacity: .85; }
 .cr-dia-cab { padding: 12px 12px 10px; border-bottom: 1px solid var(--ui-line); display: flex; flex-direction: column; gap: 4px; }
 .cr-dia-tit { display: flex; align-items: baseline; gap: 8px; }
 .cr-dia-tit b { font-size: 15px; font-weight: 600; } .cr-dia-tit span { color: var(--text-3); }

@@ -7,6 +7,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 
 const CRM = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
@@ -183,20 +184,43 @@ test('el formulario público carga solo datos de contacto y vuelve solo a sitios
 });
 
 // Segunda tanda (misma auditoría): tokens, actividades ajenas, filtros, administrador principal, CSV.
-test('cada token sirve solo en su entrada, y no en la dirección', async () => {
-  const mcpA = (await call('POST', '/api/tokens', { name: `Claude tanda2 ${RUN}`, source: 'mcp', user_id: ids.A })).data.token;
+test('el token de «Conectar con Claude» y el del webhook de Darwin sirven solo en su entrada; ninguno en la dirección', async () => {
+  // Una vendedora conecta su Claude (OAuth con PKCE, como lo hace claude.ai) y se queda con el token.
+  const VUELTA = 'https://claude.ai/api/mcp/auth_callback';
+  const b64url = (b) => Buffer.from(b).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const reg = await (await fetch(`${CRM}/mcp/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ client_name: 'Claude', redirect_uris: [VUELTA] }) })).json();
+  const verifier = b64url(randomBytes(32));
+  const q = { response_type: 'code', client_id: reg.client_id, redirect_uri: VUELTA, code_challenge: b64url(createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256' };
+  const ok = await fetch(`${CRM}/conectar/autorizar`, { method: 'POST', redirect: 'manual', headers: { ...como(A), 'content-type': 'application/x-www-form-urlencoded', origin: CRM },
+    body: new URLSearchParams({ ...q, decision: 'permitir' }) });
+  const code = new URL(ok.headers.get('location')).searchParams.get('code');
+  const tok = await (await fetch(`${CRM}/mcp/oauth/token`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', code, code_verifier: verifier, client_id: reg.client_id, redirect_uri: VUELTA }) })).json();
+  assert.ok(tok.access_token, JSON.stringify(tok));
   const bearer = (t) => ({ authorization: `Bearer ${t}` });
-  assert.equal((await call('GET', '/api/me', undefined, bearer(mcpA))).status, 403, 'el de Claude no abre /api');
-  const bundle = await call('POST', '/hooks/bundle', { contact: { email: `colado-${RUN}@example.com` } }, bearer(mcpA));
+  assert.equal((await call('GET', '/api/me', undefined, bearer(tok.access_token))).status, 403, 'no abre /api');
+  const bundle = await call('POST', '/hooks/bundle', { contact: { email: `colado-${RUN}@example.com` } }, bearer(tok.access_token));
   assert.equal(bundle.status, 403, `ni /hooks/bundle (${JSON.stringify(bundle.data)})`);
-  const init = await fetch(`${CRM}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', ...bearer(mcpA) },
+  const lista = await fetch(`${CRM}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', ...bearer(tok.access_token) },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }) });
-  assert.equal(init.status, 200, 'en /mcp sí');
-  const darwin = (await call('POST', '/api/tokens', { name: `Darwin tanda2 ${RUN}`, source: 'darwin' })).data.token;
-  assert.equal((await call('GET', '/api/users', undefined, bearer(darwin))).status, 403, 'el de Darwin (de un administrador) no abre /api');
-  assert.equal((await call('GET', `/crm/v3/objects/companies?limit=1`, undefined, bearer(darwin))).status, 403, 'ni la API compatible');
-  const api = (await call('POST', '/api/tokens', { name: `API tanda2 ${RUN}`, source: 'api' })).data.token;
-  assert.equal((await call('GET', '/api/me', undefined, bearer(api))).status, 200, 'uno de tipo API, en /api sí');
+  assert.equal(lista.status, 200, 'en /mcp sí');
+
+  // El token del webhook de Darwin (de un administrador, viaja en la dirección): solo para sus eventos.
+  const darwin = (await call('POST', '/api/tokens', { name: `Darwin webhook ${RUN}`, source: 'darwin' })).data.token;
+  const darwinId = (await call('GET', '/api/tokens')).data.find((t) => t.name === `Darwin webhook ${RUN}`).id;
+  const antes = JSON.parse(execFileSync('npx', ['wrangler', 'd1', 'execute', 'formas-crm', '--local', '--json', '--command', "SELECT value FROM settings WHERE key = 'darwin_webhook'"], { stdio: 'pipe' }).toString())[0].results[0]?.value ?? null;
+  sql(`INSERT OR REPLACE INTO settings (key, value) VALUES ('darwin_webhook', '${JSON.stringify({ token_id: darwinId })}')`);
+  try {
+    assert.equal((await call('GET', '/api/users', undefined, bearer(darwin))).status, 403, 'no abre /api');
+    assert.equal((await call('GET', '/crm/v3/objects/companies?limit=1', undefined, bearer(darwin))).status, 403, 'ni la API compatible');
+    assert.equal((await call('POST', '/hooks/darwin/evento', { event: 'session.opened', data: {} }, bearer(darwin))).status !== 403, true, 'sus eventos, sí');
+  } finally {
+    sql(antes ? `INSERT OR REPLACE INTO settings (key, value) VALUES ('darwin_webhook', '${antes.replace(/'/g, "''")}')` : "DELETE FROM settings WHERE key = 'darwin_webhook'");
+  }
+  // Los que crea un administrador en Integraciones siguen sirviendo (tableros, Pipedream), pero no en la dirección.
+  const api = (await call('POST', '/api/tokens', { name: `API tanda2 ${RUN}`, source: 'mcp' })).data.token;
+  assert.equal((await call('GET', '/api/me', undefined, bearer(api))).status, 200, 'uno creado por un administrador, en /api sí');
   assert.equal((await call('GET', `/api/me?token=${api}`)).status, 401, 'pero en la dirección, no');
 });
 

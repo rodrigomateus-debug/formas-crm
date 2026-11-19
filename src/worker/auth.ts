@@ -17,17 +17,17 @@ export function newToken() {
   return 'fcrm_' + [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function userFromToken(env: Env, token: string): Promise<{ user: User; source: string; name: string; tokenId: number } | null> {
+export async function userFromToken(env: Env, token: string): Promise<{ user: User; source: string; name: string; tokenId: number; conector: boolean } | null> {
   if (!token.startsWith('fcrm_')) return null;
   const hash = await sha256(token);
   const row = await env.DB.prepare(
-    `SELECT t.id AS token_id, t.source, t.name AS token_name, u.* FROM api_tokens t JOIN users u ON u.id = t.user_id
+    `SELECT t.id AS token_id, t.source, t.name AS token_name, t.client_id AS token_cliente, u.* FROM api_tokens t JOIN users u ON u.id = t.user_id
      WHERE t.token_hash = ? AND t.revoked = 0 AND u.active = 1 AND (t.expires_at IS NULL OR t.expires_at > ?)`,
-  ).bind(hash, new Date().toISOString()).first<User & { token_id: number; source: string; token_name: string }>();
+  ).bind(hash, new Date().toISOString()).first<User & { token_id: number; source: string; token_name: string; token_cliente: string | null }>();
   if (!row) return null;
   await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').bind(new Date().toISOString(), row.token_id).run();
-  const { token_id, source, token_name, ...user } = row;
-  return { user: user as User, source, name: token_name, tokenId: token_id };
+  const { token_id, source, token_name, token_cliente, ...user } = row;
+  return { user: user as User, source, name: token_name, tokenId: token_id, conector: !!token_cliente };
 }
 
 let jwksCache: { at: number; keys: JsonWebKey[] } | null = null;
@@ -133,15 +133,20 @@ export async function userByEmail(env: Env, email: string): Promise<User> {
 
 // Los links de los choferes (tokens tipo «chofer») solo sirven para la app de remitos (/hooks/chofer/api): si uno se
 // filtra, no abre el resto del CRM.
-// Cada token sirve solo en su entrada (auditoría del 19/11/2026): el de Claude (tipo «mcp», también el que da «Conectar con
-// Claude» a cualquier usuario) solo en /mcp, y el de Darwin (que viaja en la dirección del webhook) solo en /hooks/darwin.
-// Antes cualquiera abría todo /api y /hooks como su usuario: con /hooks/bundle una vendedora completaba contactos ajenos y
-// pasaba a verlos. El token en la dirección (?token=) se acepta solo en /hooks (webhooks que no mandan cabeceras): en el
-// resto queda en los registros de Cloudflare.
-const SUPERFICIE: Record<string, { prefijo: string; nombre: string }> = {
-  mcp: { prefijo: '/mcp', nombre: 'Claude (MCP)' },
-  darwin: { prefijo: '/hooks/darwin', nombre: 'Darwin' },
-};
+// Tokens que sirven solo en su entrada (auditoría del 19/11/2026):
+// - el que da «Conectar con Claude» (OAuth, lo saca cualquier usuario para sí mismo), solo en /mcp. Antes abría todo /api y
+//   /hooks como su usuario: con /hooks/bundle una vendedora completaba contactos ajenos y pasaba a verlos;
+// - el de «Conectar Darwin» (de un administrador, y viaja en la dirección del webhook), solo en /hooks/darwin.
+// Los que crea un administrador en Configuración → Integraciones siguen sirviendo donde se usen (tableros, Pipedream…).
+// El token en la dirección (?token=) se acepta solo en /hooks (webhooks que no mandan cabeceras): en el resto queda en los
+// registros de Cloudflare.
+async function entradaDelToken(env: Env, t: { source: string; tokenId: number; conector: boolean }, ruta: string) {
+  if (t.conector && !ruta.startsWith('/mcp')) throw new HttpError(403, 'Este token es de un conector de Claude: solo sirve para Claude (/mcp).');
+  if (t.source === 'darwin' && !ruta.startsWith('/hooks/darwin')) {
+    const w = await env.DB.prepare("SELECT json_extract(value, '$.token_id') AS id FROM settings WHERE key = 'darwin_webhook'").first<{ id: number | null }>();
+    if (w?.id === t.tokenId) throw new HttpError(403, 'Este token es el del webhook de Darwin: solo sirve para recibir sus eventos.');
+  }
+}
 export async function authenticate(env: Env, req: Request, pathToken?: string, opts: { chofer?: boolean } = {}): Promise<Ctx> {
   const auth = req.headers.get('authorization');
   const url = new URL(req.url);
@@ -154,8 +159,7 @@ export async function authenticate(env: Env, req: Request, pathToken?: string, o
     const t = await userFromToken(env, bearer);
     if (!t) throw new HttpError(401, 'Token inválido o revocado.');
     if ((t.source === 'chofer') !== !!opts.chofer) throw new HttpError(t.source === 'chofer' ? 403 : 401, t.source === 'chofer' ? 'El link del chofer solo sirve para mandar remitos.' : 'Este token no es de un chofer.');
-    const sup = SUPERFICIE[t.source];
-    if (sup && !url.pathname.startsWith(sup.prefijo)) throw new HttpError(403, `Este token es de ${sup.nombre}: no sirve en ${url.pathname.split('/').slice(0, 3).join('/')}.`);
+    await entradaDelToken(env, t, url.pathname);
     return { user: t.user, source: t.source, sourceDetail: t.name, tokenId: t.tokenId };
   }
   if (opts.chofer) throw new HttpError(401, 'Falta el link del chofer.');

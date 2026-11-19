@@ -2,7 +2,7 @@ import { avisarAsignacion } from './avisos';
 import { controlAlGanar } from './facturar';
 import { agradecerReferido } from './referidos';
 import type { Ctx, ObjectType } from './env';
-import { HttpError, now } from './env';
+import { HttpError, hoyEnBuenosAires, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
 import { emitDealEvent } from './events';
 import { esVentas, restringido, visibleSql } from './alcance';
@@ -176,13 +176,29 @@ export function rowToRecord(row: RecordRow): CrmRecord {
 
 // ---------- Validación ----------
 
+// Un número escrito a mano, como en Argentina («1.500», «1.234.567,89», «12,5») o con punto decimal («0.125», «1234.56»,
+// «1,234.56»). Antes todo punto seguido de 3 cifras se tomaba como de miles: «0.125» quedaba 125 y «1234.567», 1234567
+// (auditoría del 19/11/2026). Ahora el punto es de miles solo si arma grupos de miles («1.500», «12.000», «1.234.567»).
+export function numeroEscrito(texto: string) {
+  const t = texto.replace(/[^\d.,-]/g, '');
+  if (!/\d/.test(t)) return NaN;   // «abc» no es 0
+  const coma = t.lastIndexOf(','), punto = t.lastIndexOf('.');
+  if (coma >= 0 && punto >= 0) {
+    // Los dos: el que va último es el decimal.
+    return Number(coma > punto ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, ''));
+  }
+  if (coma >= 0) return Number(/^-?\d{1,3}(,\d{3}){2,}$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.'));
+  if (punto >= 0 && /^-?[1-9]\d{0,2}(\.\d{3})+$/.test(t)) return Number(t.replace(/\./g, ''));
+  return Number(t);
+}
+
 function coerce(p: Property, raw: unknown): unknown {
   if (raw === null || raw === undefined || raw === '') return null;
   const s = typeof raw === 'string' ? raw.trim() : raw;
   switch (p.type) {
     case 'number':
     case 'currency': {
-      const n = typeof s === 'number' ? s : Number(String(s).replace(/[^\d.,-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+      const n = typeof s === 'number' ? s : numeroEscrito(String(s));
       if (!Number.isFinite(n)) throw new HttpError(400, `"${p.label}" tiene que ser un número (llegó "${raw}").`);
       return n;
     }
@@ -382,7 +398,15 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   return row!;
 }
 
-export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, id: number, input: Props, opts: { strict?: boolean; system?: boolean } = {}) {
+// Dos cambios a la vez sobre el mismo registro (dos personas, o una persona y la sincronización con ClickUp o Finnegans)
+// leían las propiedades, cada uno sumaba lo suyo y el último en guardar pisaba lo del otro: el historial decía una cosa y
+// el dato otra (auditoría del 19/11/2026: de 10 cambios a la vez quedaban 3). Ahora se guarda solo si las propiedades
+// siguen como se leyeron; si no, se vuelve a leer y se reintenta. EDICION_PISADA hace fallar la tanda (y que no quede nada
+// a medias) cuando el UPDATE no encontró el registro como estaba.
+const EDICION_PISADA = "SELECT CASE WHEN changes() = 0 THEN json('edicion pisada') ELSE 1 END";
+const REINTENTOS_EDICION = 6;
+
+export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, id: number, input: Props, opts: { strict?: boolean; system?: boolean } = {}, intento = 0): Promise<RecordRow> {
   const meta = new Meta(db);
   const row = await getRow(db, id, type);
   const current = JSON.parse(row.props) as Props;
@@ -418,9 +442,9 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   const stageMoved = changed.includes('dealstage');
   const stmts = [
     db.prepare(`UPDATE records SET name = ?, props = ?, owner_id = ?, email = ?, domain = ?, phone = ?, pipeline_id = ?, stage_id = ?,
-      amount = ?, close_date = ?, stage_entered_at = CASE WHEN ? THEN ? ELSE stage_entered_at END, updated_at = ? WHERE id = ?`)
+      amount = ?, close_date = ?, stage_entered_at = CASE WHEN ? THEN ? ELSE stage_entered_at END, updated_at = ? WHERE id = ? AND props = ?`)
       .bind(c.name, JSON.stringify(next), c.owner_id, c.email, c.domain, c.phone, c.pipeline_id, c.stage_id, c.amount, c.close_date,
-        stageMoved ? 1 : 0, ts, ts, id),
+        stageMoved ? 1 : 0, ts, ts, id, row.props),
     ...changed.map((k) => db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
       .bind(id, k, current[k] == null ? null : String(current[k]), next[k] == null ? null : String(next[k]), ts, quien(ctx), ctx.source, ctx.actor?.name ?? null)),
   ];
@@ -428,15 +452,30 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   if (type === 'deal' && stageMoved) {
     const st = await meta.stage(next.dealstage as string);
     if (st?.is_closed && !props.closedate) {
-      next.closedate = ts.slice(0, 10);
+      next.closedate = hoyEnBuenosAires(ts);
       stmts[0] = db.prepare(`UPDATE records SET name = ?, props = ?, owner_id = ?, pipeline_id = ?, stage_id = ?, amount = ?, close_date = ?,
-        stage_entered_at = ?, updated_at = ? WHERE id = ?`)
-        .bind(c.name, JSON.stringify(next), c.owner_id, c.pipeline_id, c.stage_id, c.amount, next.closedate, ts, ts, id);
+        stage_entered_at = ?, updated_at = ? WHERE id = ? AND props = ?`)
+        .bind(c.name, JSON.stringify(next), c.owner_id, c.pipeline_id, c.stage_id, c.amount, next.closedate, ts, ts, id, row.props);
+      // La fecha de cierre que se completa sola también queda en el historial.
+      if (String(current.closedate ?? '') !== next.closedate) {
+        stmts.push(db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source, actor) VALUES (?, 'closedate', ?, ?, ?, ?, ?, ?)")
+          .bind(id, current.closedate == null ? null : String(current.closedate), next.closedate, ts, quien(ctx), ctx.source, ctx.actor?.name ?? null));
+      }
     }
   }
   // Mover de etapa un negocio o un pedido cuenta como actividad.
   if (stageMoved || changed.includes('hs_pipeline_stage')) stmts.push(tocarActividad(db, id, ts));
-  await db.batch(stmts);
+  stmts.splice(1, 0, db.prepare(EDICION_PISADA));
+  try {
+    await db.batch(stmts);
+  } catch (e) {
+    const ahora = await db.prepare('SELECT props FROM records WHERE id = ?').bind(id).first<{ props: string }>();
+    if (ahora && ahora.props !== row.props) {
+      if (intento < REINTENTOS_EDICION) return updateRecord(db, ctx, type, id, input, opts, intento + 1);
+      throw new HttpError(409, `Alguien cambió «${row.name}» al mismo tiempo: volvé a intentar.`);
+    }
+    throw e;
+  }
   if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
   // La empresa cambió de tipo de relación: sus contactos lo siguen (relacion.ts).
   if (type === 'company' && changed.includes('tipo_de_relacion')) await propagarRelacion(db, ctx, id, current.tipo_de_relacion, next.tipo_de_relacion);
@@ -478,6 +517,22 @@ export async function restoreRecord(db: D1Database, ctx: Ctx, id: number) {
 }
 
 // Combinar: el registro `loserId` se archiva y todo lo suyo (asociaciones, actividades, propiedades vacías) pasa al primario.
+// Las tablas que apuntan a un registro (contacto, empresa, negocio o pedido) y pasan al que queda al combinar. No están:
+// associations, activity_links y files (van aparte, abajo), line_items (se vuelven a leer de Finnegans), changes (el
+// historial del archivado queda con él) y clickup_salida (acciones pendientes del PDV del archivado).
+const REFERENCIAS_A_REGISTRO: Array<[string, string]> = [
+  ['mensajes', 'record_id'], ['mensaje_adjuntos', 'record_id'], ['conversacion_participantes', 'record_id'],
+  ['bocetos', 'record_id'], ['logos', 'record_id'], ['logos', 'company_id'], ['producto_logos', 'record_id'], ['producto_notas', 'record_id'],
+  ['remitos', 'record_id'], ['remito_pedidos', 'record_id'], ['remito_asignaciones', 'record_id'],
+  ['entrega_direcciones', 'record_id'], ['entrega_expresos', 'record_id'], ['direcciones_finnegans', 'record_id'], ['direcciones_revisadas', 'record_id'],
+  ['encargos', 'record_id'], ['encargos', 'company_id'], ['lugares', 'company_id'], ['destino_grupos', 'company_id'],
+  ['produccion', 'record_id'], ['produccion_cambios', 'record_id'], ['produccion_opciones', 'company_id'], ['razones_sociales', 'company_id'],
+  ['facturas_pendientes', 'record_id'], ['ordenes_compra', 'record_id'], ['line_item_tipos', 'record_id'],
+  ['referidos', 'contacto_id'], ['referidos', 'empresa_id'], ['referidos', 'negocio_id'], ['referidos', 'referidor_contacto_id'], ['referidos', 'referidor_empresa_id'],
+  ['consultas', 'contact_id'], ['consultas', 'company_id'], ['consultas', 'deal_id'],
+  ['darwin_conversaciones', 'contact_id'], ['darwin_resumenes', 'contact_id'], ['avisos', 'record_id'],
+];
+
 export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, primaryId: number, loserId: number) {
   if (primaryId === loserId) throw new HttpError(400, 'No se puede combinar un registro consigo mismo.');
   const primary = await getRow(db, primaryId, type);
@@ -489,8 +544,22 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
   if (type === 'contact' && lp.email && pp.email && lp.email !== pp.email) {
     fill.hs_additional_emails = [pp.hs_additional_emails, lp.email].filter(Boolean).join(';');
   }
+  // Primero lo que puede rebotar (las propiedades que el que queda no tenía): antes se archivaba el duplicado y después,
+  // si una propiedad no pasaba la validación, quedaba combinado a medias.
+  if (Object.keys(fill).length) {
+    const meta = new Meta(db);
+    const known: Props = {};
+    for (const [k, v] of Object.entries(fill)) if (await meta.property(type, k)) known[k] = v;
+    // `system`: también las de solo lectura (pedido de Finnegans, razón social, CUIT, link de ClickUp…), que el duplicado ya
+    // tenía; sin eso, al combinar un pedido de HubSpot con su PDV de Finnegans se perdían y Finnegans no lo reconocía más.
+    if (Object.keys(known).length) await updateRecord(db, ctx, type, primaryId, known, { strict: false, system: true });
+  }
   const ts = now();
   await db.batch([
+    // Todo lo que cuelga del duplicado pasa al que queda (auditoría del 19/11/2026: antes solo las asociaciones, la actividad
+    // y los archivos; la conversación, los bocetos, los logos, los remitos, los encargos, los referidos y las consultas
+    // quedaban en el archivado). OR IGNORE: si el que queda ya tiene la misma fila (misma clave), queda la suya.
+    ...REFERENCIAS_A_REGISTRO.map(([tabla, col]) => db.prepare(`UPDATE OR IGNORE ${tabla} SET ${col} = ? WHERE ${col} = ?`).bind(primaryId, loserId)),
     db.prepare(`INSERT OR IGNORE INTO associations (from_type, from_id, to_type, to_id, label, is_primary, created_at)
       SELECT ?, ?, to_type, to_id, label, 0, created_at FROM associations WHERE from_id = ? AND to_id != ?`).bind(type, primaryId, loserId, primaryId),
     db.prepare(`INSERT OR IGNORE INTO associations (from_type, from_id, to_type, to_id, label, is_primary, created_at)
@@ -506,14 +575,6 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, 'merged', ?, ?, ?, ?, ?)")
       .bind(primaryId, String(loserId), loser.name, ts, ctx.user.id, ctx.source),
   ]);
-  if (Object.keys(fill).length) {
-    const meta = new Meta(db);
-    const known: Props = {};
-    for (const [k, v] of Object.entries(fill)) if (await meta.property(type, k)) known[k] = v;
-    // `system`: también las de solo lectura (pedido de Finnegans, razón social, CUIT, link de ClickUp…), que el duplicado ya
-    // tenía; sin eso, al combinar un pedido de HubSpot con su PDV de Finnegans se perdían y Finnegans no lo reconocía más.
-    if (Object.keys(known).length) await updateRecord(db, ctx, type, primaryId, known, { strict: false, system: true });
-  }
   await refreshActivityDates(db, [primaryId]);
   return getRow(db, primaryId);
 }

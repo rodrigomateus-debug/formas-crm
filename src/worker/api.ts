@@ -3,7 +3,7 @@ import { buscarConsultas, conectarDarwin, estadoDarwin, pendientesDeRespuesta, r
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
 import type { Ctx, Env, ObjectType, User } from './env';
-import { assertType, HttpError, now, OBJECT_TYPES, PROFILES } from './env';
+import { assertType, HttpError, hoyEnBuenosAires, now, OBJECT_TYPES, PROFILES } from './env';
 import { requireRole, canWrite, esSuperadmin, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
@@ -337,6 +337,8 @@ api.delete('/records/:type/:id', async (c) => {
   const rec = await getRow(c.env.DB, Number(c.req.param('id')), assertType(c.req.param('type')));
   await soloLoSuyoVentas(c, rec);
   await archiveRecords(c.env.DB, ctx, [rec.id]);
+  // Un pedido archivado deja de contar en el monto de su negocio (montos.ts); antes quedaba el total viejo.
+  if (rec.object_type === 'order') await montosDesdePedidos(c.env.DB, [rec.id], ctx);
   return c.json({ ok: true });
 });
 
@@ -349,6 +351,7 @@ api.post('/records/:type/:id/restore', async (c) => {
   const merged = await c.env.DB.prepare('SELECT merged_into FROM records WHERE id = ?').bind(rec.id).first<{ merged_into: number | null }>();
   if (merged?.merged_into) throw new HttpError(409, `«${rec.name}» se combinó con el registro ${merged.merged_into}: no se puede restaurar.`);
   await restoreRecord(c.env.DB, ctx, rec.id);
+  if (rec.object_type === 'order') await montosDesdePedidos(c.env.DB, [rec.id], ctx);
   return c.json({ ok: true });
 });
 
@@ -368,7 +371,9 @@ api.post('/records/:type/batch', async (c) => {
       if (rec.object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
       await soloLoSuyoVentas(c, rec);
     }
-    return c.json({ archived: await archiveRecords(c.env.DB, ctx, ids), failed: [] });
+    const archived = await archiveRecords(c.env.DB, ctx, ids);
+    if (type === 'order') await montosDesdePedidos(c.env.DB, ids, ctx);
+    return c.json({ archived, failed: [] });
   }
   const failed: Array<{ id: number; name?: string; error: string; missing?: string[] }> = [];
   let updated = 0;
@@ -900,8 +905,9 @@ api.get('/dashboard', async (c) => {
   // Perfil Ventas: Inicio con sus números, no los del equipo (alcance.ts).
   const owner = restringido(ctx.user) ? 'me' : c.req.query('owner');
   const ownerId = owner === 'all' ? null : owner ? Number(owner === 'me' ? ctx.user.id : owner) : null;
-  const month = new Date(); month.setUTCDate(1); month.setUTCHours(3, 0, 0, 0);
-  const m = month.toISOString();
+  // El mes en curso en Buenos Aires (empieza el día 1 a las 0 de acá, 3 UTC). Antes se tomaba el mes UTC: el último día del
+  // mes, de 21 a 24, Inicio mostraba el mes siguiente, vacío.
+  const m = new Date(`${hoyEnBuenosAires().slice(0, 7)}-01T03:00:00.000Z`).toISOString();
   const hidden = await hiddenPipelines(db, ctx);
   // Unidades de negocio: los negocios de los pipelines de esos equipos.
   const teams = (c.req.query('unidades') ?? '').split(',').filter((k) => UNIDADES[k]).map((k) => UNIDADES[k].team);
@@ -1868,7 +1874,7 @@ api.patch('/properties/:type/:name', async (c) => {
   await c.env.DB.prepare(`UPDATE properties SET label = ?, options = ?, group_name = ?, description = ?, in_create_form = ?, required = ?, archived = ?, display_order = ?
     WHERE object_type = ? AND name = ?`).bind(b.label ?? p.label, b.options ? JSON.stringify(b.options) : p.options, b.group_name ?? p.group_name,
     b.description ?? p.description, b.in_create_form === undefined ? p.in_create_form : b.in_create_form ? 1 : 0,
-    b.required === undefined ? p.required : b.required ? 1 : 0, b.archived ? 1 : 0, b.display_order ?? p.display_order, type, c.req.param('name')).run();
+    b.required === undefined ? p.required : b.required ? 1 : 0, b.archived === undefined ? p.archived : b.archived ? 1 : 0, b.display_order ?? p.display_order, type, c.req.param('name')).run();
   return c.json({ ok: true });
 });
 

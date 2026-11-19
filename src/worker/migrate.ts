@@ -18,9 +18,15 @@ migrate.use('*', async (c, next) => { requireRole(c.get('ctx'), 'admin'); await 
 const HS_TYPES: Record<string, ObjectType> = { contacts: 'contact', companies: 'company', deals: 'deal', orders: 'order' };
 const PROP_TYPE: Record<string, string> = { number: 'number', date: 'date', datetime: 'datetime', bool: 'bool', booleancheckbox: 'bool' };
 
+// Propietarios de HubSpot → usuarios del CRM. Los eliminados en el CRM no cuentan (auditoría del 19/11/2026): sus registros
+// ya se pasaron a otra persona al eliminarlo, y la sincronización los devolvía a su nombre (invisibles para Ventas).
 async function ownerIds(db: D1Database) {
-  const { results } = await db.prepare('SELECT id, hs_owner_id FROM users WHERE hs_owner_id IS NOT NULL').all<{ id: number; hs_owner_id: string }>();
-  return new Map(results.map((u) => [u.hs_owner_id, u.id]));
+  const { results } = await db.prepare('SELECT id, hs_owner_id, deleted_at FROM users WHERE hs_owner_id IS NOT NULL').all<{ id: number; hs_owner_id: string; deleted_at: string | null }>();
+  return new Map(results.filter((u) => !u.deleted_at).map((u) => [u.hs_owner_id, u.id]));
+}
+async function ownersEliminados(db: D1Database) {
+  const { results } = await db.prepare('SELECT hs_owner_id FROM users WHERE hs_owner_id IS NOT NULL AND deleted_at IS NOT NULL').all<{ hs_owner_id: string }>();
+  return new Set(results.map((u) => String(u.hs_owner_id)));
 }
 
 // Valor de HubSpot → valor del CRM según el tipo de la propiedad. Lo que no encaja se guarda como texto.
@@ -69,6 +75,7 @@ migrate.post('/', async (c) => {
   const items = body.items ?? [];
   const stmts: D1PreparedStatement[] = [];
   const meta = new Meta(db);
+  let rechazados = 0;   // registros con id de los propios del CRM (NATIVE_ID_START): no se cargan
 
   switch (body.kind) {
     case 'users': {
@@ -78,16 +85,16 @@ migrate.post('/', async (c) => {
         // Quien ya está ligado a ese propietario de HubSpot conserva su usuario aunque en HubSpot tenga otro mail
         // (ej. entra con el de formas.ar y en HubSpot figura el de formaspublicitarias.com): no se crea otro.
         // Uno eliminado en el CRM sigue eliminado: no se lo reactiva ni se lo vuelve a crear.
+        // Quién entra al CRM lo decide Configuración → Usuarios, no HubSpot: la sincronización no activa ni desactiva a nadie
+        // que ya existe (auditoría del 19/11/2026: reactivaba a los desactivados en el CRM, y sus tokens volvían a servir).
         stmts.push(db.prepare(`UPDATE users SET team_id = COALESCE(team_id, (SELECT id FROM teams WHERE hs_id = ?)),
-            extra_teams = CASE WHEN extra_teams = '[]' THEN (SELECT json_group_array(id) FROM teams WHERE id IN (SELECT value FROM json_each(?))) ELSE extra_teams END,
-            active = CASE WHEN role = 'admin' THEN active ELSE ? END
-          WHERE hs_owner_id = ? AND deleted_at IS NULL`).bind(u.team_hs_id ?? null, extra, u.active ? 1 : 0, hs));
+            extra_teams = CASE WHEN extra_teams = '[]' THEN (SELECT json_group_array(id) FROM teams WHERE id IN (SELECT value FROM json_each(?))) ELSE extra_teams END
+          WHERE hs_owner_id = ? AND deleted_at IS NULL`).bind(u.team_hs_id ?? null, extra, hs));
         stmts.push(db.prepare(`INSERT INTO users (id, email, name, role, team_id, extra_teams, active, hs_owner_id)
           SELECT ?, ?, ?, 'member', (SELECT id FROM teams WHERE hs_id = ?), (SELECT json_group_array(id) FROM teams WHERE id IN (SELECT value FROM json_each(?))), ?, ?
           WHERE NOT EXISTS (SELECT 1 FROM users WHERE hs_owner_id = ?)
           ON CONFLICT (email) DO UPDATE SET hs_owner_id = excluded.hs_owner_id, team_id = COALESCE(users.team_id, excluded.team_id),
-            extra_teams = CASE WHEN users.extra_teams = '[]' THEN excluded.extra_teams ELSE users.extra_teams END,
-            active = CASE WHEN users.role = 'admin' OR users.deleted_at IS NOT NULL THEN users.active ELSE excluded.active END`)
+            extra_teams = CASE WHEN users.extra_teams = '[]' THEN excluded.extra_teams ELSE users.extra_teams END`)
           .bind(Number(u.hs_owner_id), String(u.email).toLowerCase(), u.name || u.email, u.team_hs_id ?? null, extra, u.active ? 1 : 0, hs, hs));
       }
       break;
@@ -142,8 +149,13 @@ migrate.post('/', async (c) => {
         const { results } = await db.prepare('SELECT id, props FROM records WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<{ id: number; props: string }>();
         for (const row of results) prev.set(row.id, JSON.parse(row.props || '{}'));
       }
-      const guard = body.force ? '' : 'WHERE records.updated_at <= excluded.updated_at';
+      // Solo se pisa un registro del mismo tipo (auditoría del 19/11/2026: un contacto y una empresa con el mismo número de
+      // HubSpot terminaban en un solo registro con datos de los dos).
+      const guard = `WHERE records.object_type = excluded.object_type${body.force ? '' : ' AND records.updated_at <= excluded.updated_at'}`;
+      const eliminados = await ownersEliminados(db);
       for (const r of items) {
+        // Los ids desde NATIVE_ID_START son de lo que se crea en el CRM: uno de HubSpot ahí pisaría un registro propio.
+        if (Number(r.hs_id) >= NATIVE_ID_START) { rechazados++; continue; }
         const type = HS_TYPES[r.type] ?? r.type as ObjectType;
         const defs = await meta.properties(type);
         const props: Props = {};
@@ -152,6 +164,8 @@ migrate.post('/', async (c) => {
           const name = k === 'hubspot_owner_id' ? 'owner_id' : k;
           const def = defs.find((d) => d.name === name);
           if (!def || def.read_only || CRM_PROPIAS.has(`${type}:${name}`)) continue;
+          // De alguien eliminado en el CRM: queda el propietario que tiene acá (a quien se le pasaron sus cosas).
+          if (name === 'owner_id' && raw != null && eliminados.has(String(raw))) continue;
           const v = convert(def, raw, owners);
           if (v != null) props[name] = v;
           else vaciadas.push(name);
@@ -332,5 +346,5 @@ migrate.post('/', async (c) => {
       merged++;
     }
   }
-  return c.json({ ok: true, statements: stmts.length, merged });
+  return c.json({ ok: true, statements: stmts.length, merged, ...(rechazados ? { rechazados } : {}) });
 });

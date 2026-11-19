@@ -905,11 +905,16 @@ export async function recalcularEntrega(env: Env, orderId: number, opts: { ctx?:
   const nuevo: Record<string, unknown> = { estado_entrega: e.estado, falta_entregar: e.falta_texto };
   const cambios = Object.keys(nuevo).filter((k) => String(props[k] ?? '') !== String(nuevo[k] ?? ''));
   if (!cambios.length) return e;
-  const next = { ...props, ...nuevo };
-  for (const k of Object.keys(next)) if (next[k] == null) delete next[k];
+  // Solo estos dos campos (json_set / json_remove), no las propiedades enteras: esto corre también al abrir la tarjeta
+  // Entrega, y con una copia leída antes pisaba lo que otro estaba guardando en el pedido (auditoría del 19/11/2026).
+  const poner = Object.entries(nuevo).filter(([, v]) => v != null);
+  const sacar = Object.keys(nuevo).filter((k) => nuevo[k] == null);
+  let expr = 'props';
+  if (sacar.length) expr = `json_remove(${expr}, ${sacar.map((k) => `'$.${k}'`).join(', ')})`;
+  if (poner.length) expr = `json_set(${expr}, ${poner.map(([k]) => `'$.${k}', ?`).join(', ')})`;
   const ts = now();
   await db.batch([
-    db.prepare('UPDATE records SET props = ? WHERE id = ?').bind(JSON.stringify(next), orderId),
+    db.prepare(`UPDATE records SET props = ${expr} WHERE id = ?`).bind(...poner.map(([, v]) => v), orderId),
     ...cambios.map((k) => db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, ?, ?, ?, ?, 'remitos')")
       .bind(orderId, k, props[k] == null ? null : String(props[k]), nuevo[k] == null ? null : String(nuevo[k]), ts, opts.ctx?.user.id ?? null)),
   ]);

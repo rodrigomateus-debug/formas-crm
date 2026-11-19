@@ -111,3 +111,7 @@ export function assertType(t: string): ObjectType {
 }
 
 export const now = () => new Date().toISOString();
+// El día y el mes como en Buenos Aires: Argentina no tiene horario de verano desde 2009 (UTC−3 todo el año). Antes la fecha
+// de cierre y el «mes» de Inicio salían en UTC: lo ganado después de las 21 quedaba en el día (o el mes) siguiente.
+export const AR_OFFSET_MS = 3 * 3600_000;
+export const hoyEnBuenosAires = (iso = now()) => new Date(new Date(iso).getTime() - AR_OFFSET_MS).toISOString().slice(0, 10);

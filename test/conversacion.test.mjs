@@ -180,3 +180,14 @@ test('combinar dos pedidos lleva la conversación al que queda', async () => {
   const deCeci = (await call('GET', '/conversaciones?no_leidas=1', undefined, C)).data.conversaciones.find((c) => c.record_id === queda.id);
   assert.equal(deCeci?.menciones, 1);
 });
+
+// El buscador encuentra un pedido por su número de PDV aunque el nombre no lo tenga (los que vinieron de HubSpot).
+test('el buscador encuentra el pedido por el número de PDV', async () => {
+  const n = String(Date.now()).slice(-7);
+  const pedido = (await call('POST', '/records/order', { props: { hs_order_name: `Roxana ${RUN}`, pdv_finnegans: n } })).data;
+  for (const q of [n, `PDV ${n}`, `pdv${n}`]) {
+    const r = (await call('GET', `/search?q=${encodeURIComponent(q)}`)).data;
+    assert.ok(r.order.some((o) => o.id === pedido.id), `con «${q}»`);
+    assert.equal(r.deal.length, 0);
+  }
+});

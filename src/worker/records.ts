@@ -785,6 +785,10 @@ export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params:
     binds.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
     if (digits.length >= 6) { parts.push('r.phone LIKE ?'); binds.push(`%${digits.slice(-10)}%`); }
     if (/^\d+$/.test(q)) { parts.push('r.id = ?'); binds.push(Number(q)); }
+    // Pedidos: también por el número de PDV («31644» o «PDV 31644»), aunque no esté en el nombre (los que vienen de
+    // HubSpot se llaman como el negocio).
+    const pdv = type === 'order' ? q.match(/^(?:pdv\s*)?(\d{3,})$/i)?.[1] : null;
+    if (pdv) { parts.push("CAST(json_extract(r.props, '$.pdv_finnegans') AS TEXT) LIKE ?"); binds.push(`%${pdv}%`); }
     where.push(`(${parts.join(' OR ')})`);
   }
   if (params.associatedWith) {

@@ -108,7 +108,7 @@ export type EstadoDespacho = 'hecho' | 'nopago' | 'nollego' | 'cola' | 'remitido
 export type Control = 'prod' | 'dep' | 'pago' | 'remito';
 export interface Despacho {
   estado: EstadoDespacho;
-  checks: Array<{ k: Control; v: 'ok' | 'no' | 'pend'; t?: string }>;   // t: el detalle («Saldo de $ 1.240.000 en Finnegans»)
+  checks: Array<{ k: Control; v: 'ok' | 'no' | 'pend' | 'parcial'; t?: string }>;   // t: el detalle; «parcial»: pagó una parte
   quien: 'produccion' | 'ventas' | 'proveedor' | 'logistica' | null;    // a quién le toca el próximo paso
   owner_id: number | null;   // la vendedora (el propietario del pedido), para «le toca a» cuando es de Ventas
   lugar: string | null;      // el proveedor o el impresor que no trajo (o al que se espera)
@@ -119,7 +119,7 @@ const pos = (estado: string) => POS.get(estado) ?? -1;
 const EN_DEPOSITO = pos('en control de depósito'), DE_VUELTA = pos('articulo con logo');
 const LISTOS_DESP = ['listo para entergar', 'listo para entregar', 'parcial entregado', 'entregados'];
 const plata = (n: number) => `$ ${Math.round(n).toLocaleString('es-AR')}`;
-type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
+type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; total?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
 type Check = Despacho['checks'][number];
 
 export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolean, hechos: Map<string, unknown>, hoy: string,
@@ -146,9 +146,12 @@ export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolea
     return { estado: extra.traslado ? 'remitido' : 'listo', checks, quien: 'logistica', owner_id, lugar: null };
   }
   // Entrega.
-  const saldo = Number(f.saldo) || 0;
-  const pago: Check = f.etapa === ORDER_ANTICIPO ? { k: 'pago', v: 'no', t: 'Pendiente de anticipo' }
-    : saldo > 0.5 ? { k: 'pago', v: 'no', t: `Saldo de ${plata(saldo)} en Finnegans` } : { k: 'pago', v: 'ok' };
+  // El pago, como en Pedidos (cobroPedido): no pagó nada, pagó una parte (lo pagado pasa el 1 % del total) o pagó. El saldo
+  // y el total son sin IVA, de Finnegans.
+  const saldo = Number(f.saldo) || 0, total = Number(f.total) || 0;
+  const pago: Check = f.etapa === ORDER_ANTICIPO ? { k: 'pago', v: 'no', t: 'No pagó nada: pendiente de anticipo' }
+    : saldo > 0.5 && total > 0 && total - saldo > total * 0.01 ? { k: 'pago', v: 'parcial', t: `Pagó una parte: falta ${plata(saldo)} de ${plata(total)} en Finnegans` }
+    : saldo > 0.5 ? { k: 'pago', v: 'no', t: `No pagó nada: falta ${plata(saldo)} en Finnegans` } : { k: 'pago', v: 'ok', t: 'Pagó' };
   const listo = LISTOS_DESP.includes(f.estado);
   const noVino = !listo && (noVinoProv || noVinoImp);
   const checks: Check[] = [
@@ -157,7 +160,7 @@ export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolea
     pago,
     f.remito_fin ? { k: 'remito', v: 'ok', t: String(f.remito_fin) } : { k: 'remito', v: 'pend' },
   ];
-  if (pago.v === 'no') return { estado: 'nopago', checks, quien: 'ventas', owner_id, lugar: null };
+  if (pago.v !== 'ok') return { estado: 'nopago', checks, quien: 'ventas', owner_id, lugar: null };
   if (noVino) return { estado: 'nollego', checks, quien: 'proveedor', owner_id, lugar: extra.lugar(noVinoProv ? 'proveedor' : 'impresor') };
   if (!listo) return { estado: 'cola', checks, quien: 'produccion', owner_id, lugar: null };
   return { estado: f.remito_fin ? 'remitido' : 'listo', checks, quien: 'logistica', owner_id, lugar: null };
@@ -179,7 +182,7 @@ const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stoc
 
 const SELECT_MOV = `SELECT a.*, p.npdv AS pdv_npdv, p.cliente AS pdv_cliente, p.unidad AS pdv_unidad, p.record_id AS pdv_record, p.entrega_real AS pdv_entrega,
     json_extract(r.props, '$.tipo_de_pedido') AS evento, json_extract(r.props, '$.fecha_de_entrega') AS pactada,
-    json_extract(r.props, '$.hs_pipeline_stage') AS etapa, json_extract(r.props, '$.saldo_pendiente_de_pago_mxn') AS saldo,
+    json_extract(r.props, '$.hs_pipeline_stage') AS etapa, json_extract(r.props, '$.saldo_pendiente_de_pago_mxn') AS saldo, json_extract(r.props, '$.hs_total_price') AS total,
     json_extract(r.props, '$.remito_finnegans') AS remito_fin, r.owner_id AS owner_id
   FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0
   WHERE (a.es_pdv = 0 OR NOT EXISTS (SELECT 1 FROM produccion h WHERE h.pdv_task = a.task_id AND h.es_pdv = 0))
@@ -365,6 +368,56 @@ export async function colgados(db: D1Database): Promise<Movimiento[]> {
   for (const m of movs) { const c = deMov(m)!; m.colgado = { motivo: c.motivo, at: c.at, por: c.por, fecha: c.fecha }; m.avisos = []; }
   await ponerExtras(db, movs);
   return movs;
+}
+
+// Que los colgados no se olviden (estados de despacho, etapa 3; pedido de Logística del 19/11/2026). Corre cada hora:
+// - Si se destrabó lo que lo colgó (todos sus movimientos quedan listos o remitidos: entró el pago, llegó la mercadería),
+//   a Logística le llega «ya se puede reprogramar». Una vez; si se vuelve a trabar y se destraba, de nuevo.
+// - Si pasó una semana colgado, al responsable del pedido le llega otra vez el aviso. Una vez.
+const SEMANA_MS = 7 * 86_400_000;
+export async function revisarColgados(env: Env) {
+  const db = env.DB;
+  const movs = await colgados(db);
+  const out = { listos: 0, reavisos: 0 };
+  if (!movs.length) return out;
+  const { results: filas } = await db.prepare('SELECT task_id, tipo, dir, motivo, at, listo_avisado_at, reavisado_at FROM cronograma_colgados')
+    .all<{ task_id: string; tipo: string; dir: number; motivo: string; at: string; listo_avisado_at: string | null; reavisado_at: string | null }>();
+  const porId = new Map(filas.map((c) => [claveColgado(c), c]));
+  const grupos = new Map<string, Movimiento[]>();
+  for (const m of movs) {
+    const c = porId.get(m.id) ?? (m.dir != null ? porId.get(`${m.task_id}:${m.tipo}`) : undefined);
+    if (c) grupos.set(claveColgado(c), [...(grupos.get(claveColgado(c)) ?? []), m]);
+  }
+  const logistica = (await db.prepare("SELECT id FROM users WHERE active = 1 AND profile = 'logistica'").all<{ id: number }>()).results.map((u) => u.id);
+  const duenios = new Map((await db.prepare('SELECT id, owner_id FROM records WHERE id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify([...new Set(movs.map((m) => m.record_id).filter((x): x is number => !!x))])).all<{ id: number; owner_id: number | null }>()).results.map((r) => [r.id, r.owner_id]));
+  const ts = now();
+  const avisos = new Map<string, D1PreparedStatement>();   // uno por persona, pedido y tipo de aviso, aunque cuelguen varios artículos
+  const marcas: D1PreparedStatement[] = [];
+  for (const [k, ms] of grupos) {
+    const c = porId.get(k)!, m = ms[0];
+    const que = `${TIPOS[m.tipo].nombre} del PDV ${m.npdv ?? '—'}${m.tipo === 'entrega' ? '' : ` (${m.lugar ?? 'sin lugar'})`}`;
+    const listo = ms.every((x) => x.despacho && ['listo', 'remitido'].includes(x.despacho.estado));
+    if (listo && !c.listo_avisado_at) {
+      for (const u of logistica) avisos.set(`${u}|${m.record_id}|listo`, db.prepare("INSERT INTO avisos (user_id, kind, record_id, detalle) VALUES (?, 'colgado_listo', ?, ?)")
+        .bind(u, m.record_id, `${que}: ya se puede reprogramar. Estaba colgado por «${c.motivo}».`));
+      marcas.push(db.prepare('UPDATE cronograma_colgados SET listo_avisado_at = ? WHERE task_id = ? AND tipo = ? AND dir = ?').bind(ts, c.task_id, c.tipo, c.dir));
+      out.listos++;
+    } else if (!listo && c.listo_avisado_at) {
+      marcas.push(db.prepare('UPDATE cronograma_colgados SET listo_avisado_at = NULL WHERE task_id = ? AND tipo = ? AND dir = ?').bind(c.task_id, c.tipo, c.dir));
+    }
+    const owner = m.record_id ? duenios.get(m.record_id) : null;
+    if (!c.reavisado_at && Date.now() - Date.parse(c.at) > SEMANA_MS && !listo) {
+      const dias = Math.floor((Date.now() - Date.parse(c.at)) / 86_400_000);
+      if (owner) avisos.set(`${owner}|${m.record_id}|reaviso`, db.prepare("INSERT INTO avisos (user_id, kind, record_id, detalle) VALUES (?, 'colgado_reaviso', ?, ?)")
+        .bind(owner, m.record_id, `${que} sigue colgado hace ${dias} días: «${c.motivo}».`));
+      marcas.push(db.prepare('UPDATE cronograma_colgados SET reavisado_at = ? WHERE task_id = ? AND tipo = ? AND dir = ?').bind(ts, c.task_id, c.tipo, c.dir));
+      out.reavisos++;
+    }
+  }
+  const stmts = [...avisos.values(), ...marcas];
+  if (stmts.length) await db.batch(stmts);
+  return out;
 }
 
 const diaMes = (d: string) => `${Number(d.slice(8))}/${Number(d.slice(5, 7))}`;

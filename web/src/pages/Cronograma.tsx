@@ -4,7 +4,7 @@ import { http, qs, useToast, Icon } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, EditarEnLinea, Modal, QuienPidio, UserChip, alEsc } from '../components';
-import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
+import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -399,7 +399,7 @@ export default function CronogramaPage() {
                   </header>
                   <div className="cr-carriles">
                     {CARRILES.map((c) => {
-                      const ts = tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false })).filter(pasaToca);
+                      const ts = ordenColgados(tarjetas(colg.filter((m) => c.tipos.includes(m.tipo))).map((t) => ({ ...t, parada: false })).filter(pasaToca));
                       if (!ts.length) return null;
                       return (
                         <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
@@ -444,7 +444,12 @@ export default function CronogramaPage() {
         <Modal title={`Dirección de ${lindo(corrigiendo.d.nombre)}`} onClose={() => setCorrigiendo(null)}>
           <EditarDireccion p={{ nombre: corrigiendo.d.nombre, direccion: corrigiendo.d.direccion, horario_texto: corrigiendo.d.horario, company_id: corrigiendo.d.company_id,
             detalle: corrigiendo.d.detalle, observaciones: corrigiendo.d.observaciones }}
-            pedidos={corrigiendo.d.record_ids} onListo={() => { setCorrigiendo(null); void cargarDirs(); }} />
+            pedidos={corrigiendo.d.record_ids} onListo={(g) => {
+              // Lo guardado se ve enseguida en la tarjeta (y su despacho); la semana se vuelve a pedir de fondo.
+              if (g) { const k = corrigiendo.k; setDirs((ds) => (ds[k] ? { ...ds, [k]: { ...ds[k], direccion: g.direccion.trim() || null, detalle: g.detalle.trim() || null, horario: g.horario.trim() || ds[k].horario,
+                estado: !g.direccion.trim() ? 'sin_direccion' : g.validada ? 'ok' : 'buscando' } } : ds)); }
+              setCorrigiendo(null); void cargarDirs();
+            }} />
         </Modal>
       )}
       {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); }} />}
@@ -609,11 +614,12 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
         {t.movs[0]?.hora && <span className="cr-tag fija" title="Hora fijada en la ruta del día"><Icon name="timer" size={11} />{t.movs[0].hora}</span>}
         {t.evento && <span className="cr-evento"><svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path fill="currentColor" d="M12 2l3 7 7 .6-5.3 4.7 1.7 7.2L12 17.8 5.6 21.5l1.7-7.2L2 9.6 9 9z" /></svg>Evento</span>}
       </div>
-      {desp && <FilaDespacho d={desp} tipo={t.tipo} reloj={reloj} />}
+      {desp && <FilaDespacho d={desp} tipo={t.tipo} reloj={colgado ? null : reloj} reprogramar={!!colgado && (desp.estado === 'listo' || desp.estado === 'remitido')} />}
       {colgado && (
         <div className="cr-t-motivo">
           {motivos.map((m) => <p key={m}>{m}</p>)}
-          <span className="small">Era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por.split(' ')[0]}` : ''}</span>
+          <span className="small">Era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por.split(' ')[0]}` : ''}
+            {(() => { const n = diasColgado(colgado.at); return <b className={`cr-colg-edad${n >= 7 ? ' vieja' : ''}`}> · colgado {n === 0 ? 'hoy' : `hace ${n} día${n === 1 ? '' : 's'}`}</b>; })()}</span>
         </div>
       )}
       {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
@@ -666,19 +672,20 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
 }
 
 // El estado de despacho de una tarjeta: el estado, a quién le toca y los puntitos del checklist con lo que falta.
-const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8' };
-const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente' } as const;
+const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend' | 'parcial', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8', parcial: 'M4 8h8' };
+const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente', parcial: 'una parte' } as const;
 function Quien({ d }: { d: DespachoTarjeta }) {
   if (!d.quien) return null;
   return d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>;
 }
 const RelojTag = ({ r }: { r: Riesgo }) => <span className={`cr-desp-reloj ${r.nivel}`}><Icon name="timer" size={11} />{r.texto}</span>;
-function FilaDespacho({ d, tipo, reloj }: { d: DespachoTarjeta; tipo: Tipo; reloj?: Riesgo | null }) {
+// `reprogramar`: un colgado al que ya se le destrabó lo que lo colgó: se le puede dar fecha.
+function FilaDespacho({ d, tipo, reloj, reprogramar }: { d: DespachoTarjeta; tipo: Tipo; reloj?: Riesgo | null; reprogramar?: boolean }) {
   const falta = faltaTexto(d);
   return (
     <div className="cr-t-desp">
       <div className="cr-t-desp-l1">
-        <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={11} />{nombreEstado(d.estado, tipo)}</span>
+        <span className={`cr-desp-chip cr-d-${reprogramar ? 'listo' : d.estado}`}><Icon name={reprogramar ? 'calendar' : ICONO_ESTADO[d.estado]} size={11} />{reprogramar ? 'Listo para reprogramar' : etiquetaEstado(d, tipo)}</span>
         {d.quien && <span className="cr-desp-quien" title="A quién le toca el próximo paso"><Quien d={d} /></span>}
       </div>
       {reloj && <RelojTag r={reloj} />}
@@ -697,7 +704,7 @@ function FilaDespacho({ d, tipo, reloj }: { d: DespachoTarjeta; tipo: Tipo; relo
 }
 
 // El despacho en la vista previa del pedido (arriba de todo): el estado, a quién le toca, si llega y el checklist entero.
-const V_LARGO = { ok: 'Sí', no: 'No', medio: 'En parte', pend: 'Pendiente' } as const;
+const V_LARGO = { ok: 'Sí', no: 'No', medio: 'En parte', pend: 'Pendiente', parcial: 'Una parte' } as const;
 function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada; hoy: string; feriados?: Record<string, string> }) {
   const d = despachoTarjeta(t, dir);
   if (!d) return null;
@@ -708,7 +715,7 @@ function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada;
       <div className="panel-head"><h3>Despacho</h3><span className="small muted">{carrilDe(t.tipo).uno}{t.tipo === 'entrega' ? '' : ` · ${t.titulo}`} · {diaLargo(t.fecha)}</span></div>
       <div className="cr-pv-desp-body">
         <div className="row wrap" style={{ gap: 8 }}>
-          <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={12} />{nombreEstado(d.estado, t.tipo)}</span>
+          <span className={`cr-desp-chip cr-d-${d.estado}`}><Icon name={ICONO_ESTADO[d.estado]} size={12} />{etiquetaEstado(d, t.tipo)}</span>
           {r && <RelojTag r={r} />}
         </div>
         {d.quien && <div className="small row" style={{ gap: 6 }}><span className="muted">Le toca a</span><Quien d={d} /></div>}
@@ -722,6 +729,14 @@ function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada;
       </div>
     </section>
   );
+}
+
+// Colgados: cuántos días lleva y en qué orden van (lo que ya se puede reprogramar arriba; después, del más viejo al más nuevo).
+const diasColgado = (at: string) => Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 86_400_000));
+const destrabado = (t: Tarjeta) => { const e = despachoTarjeta(t)?.estado; return e === 'listo' || e === 'remitido'; };
+function ordenColgados(ts: Tarjeta[]) {
+  const desde = (t: Tarjeta) => t.movs.find((m) => m.colgado)?.colgado?.at ?? '';
+  return [...ts].sort((a, b) => Number(destrabado(b)) - Number(destrabado(a)) || desde(a).localeCompare(desde(b)));
 }
 
 // La barrita de cada día: cuánto hay de cada estado, de un vistazo.

@@ -16,6 +16,7 @@ import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup } from './clickup';
 import { revisarRemitos, syncFacturas } from './finnegans';
+import { revisarColgados } from './cronograma';
 import { sincronizarOrdenesCompra } from './ordenescompra';
 import { reatarPendientes } from './productos';
 import { refrescarFce } from './facturar';
@@ -123,6 +124,8 @@ export default {
       if (event.cron === GMAIL_CRON) {
         // Primero los avisos por mail (pocos y con hora), después la lectura de Gmail con lo que quede del tope.
         const b = Budget.of(env);
+        // Los colgados del cronograma que ya se pueden reprogramar o que llevan una semana (solo la base), una vez por hora.
+        if (turno === 2) await safe(() => revisarColgados(env));
         await safe(() => correrAvisos(env, b));
         await safe(() => procesarSalidaClickup(env, b));   // lo que quedó pendiente para ClickUp (pedidos a «pdv»)
         await safe(() => actualizarFotos(env, b));          // fotos de Google de los usuarios: unas pocas, una vez por semana

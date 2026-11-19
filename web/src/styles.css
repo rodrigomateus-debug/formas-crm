@@ -1576,6 +1576,8 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-punto { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; background: var(--ui-surface); color: var(--text-3); }
 .cr-punto.ok { background: var(--d-hecho-bg); color: var(--d-hecho); } .cr-punto.no { background: var(--d-info-bg); color: var(--d-info); }
 .cr-punto.medio { background: var(--d-cola-bg); color: var(--d-cola); }
+/* El pago: rojo no pagó nada, naranja pagó una parte, verde pagó (como en Pedidos). */
+.cr-punto.parcial { background: var(--d-remitido-bg); color: var(--d-remitido); }
 .cr-toca .chip .num { color: var(--text-3); font-weight: 500; } .cr-toca .chip.on .num { color: inherit; }
 /* Si llega a tiempo: solo cuando hay riesgo. */
 .cr-desp-reloj { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--ui-warning-ink); }
@@ -1586,6 +1588,8 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-compacta-tit { flex: 1; min-width: 0; font-size: 12px; color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-compacta-pdv { font-size: 11px; color: var(--text-3); flex: none; }
 .cr-tarjeta.compacta .cr-mini { opacity: 1; flex: none; }
+/* Cuánto hace que está colgado: en rojo desde la semana. */
+.cr-colg-edad { font-weight: 600; } .cr-colg-edad.vieja { color: var(--d-info); }
 /* La barrita del día. */
 .cr-dia-mezcla { display: flex; gap: 1px; height: 6px; border-radius: var(--r-pill); overflow: hidden; background: var(--ui-surface-sunken); margin-top: 2px; }
 .cr-dia-mezcla i { display: block; background: var(--d); min-width: 4px; }
@@ -1597,7 +1601,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-pv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .cr-pv-checks li { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 8px; align-items: start; }
 .cr-pv-checks .cr-punto { margin-top: 2px; background: var(--ui-surface-sunken); }
-.cr-pv-checks .cr-punto.ok { background: var(--d-hecho-bg); } .cr-pv-checks .cr-punto.no { background: var(--d-info-bg); } .cr-pv-checks .cr-punto.medio { background: var(--d-cola-bg); }
+.cr-pv-checks .cr-punto.ok { background: var(--d-hecho-bg); } .cr-pv-checks .cr-punto.no { background: var(--d-info-bg); } .cr-pv-checks .cr-punto.medio { background: var(--d-cola-bg); } .cr-pv-checks .cr-punto.parcial { background: var(--d-remitido-bg); }
 .cr-page .page-head { margin-bottom: 12px; }
 .cr-leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ui-ink-2); }
 .cr-leyenda i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--k); margin-right: 6px; }
@@ -1663,6 +1667,8 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .lg-nota-pie { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 10.5px; color: var(--ui-ink-2); }
 .lg-nota-tag { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: 9.5px; color: var(--ui-warning-ink); }
 .lg-nota.siempre .lg-nota-tag { color: var(--accent-ink); }
+.lg-nota.traba { border-left-color: var(--d-info); background: var(--d-info-bg); }
+.lg-nota-tag.traba { color: var(--d-info); }
 .lg-nota-x { margin-left: auto; border: 0; background: none; padding: 2px; cursor: pointer; color: var(--ui-ink-2); border-radius: 4px; display: grid; place-items: center; }
 .lg-nota-x:hover { background: var(--ui-surface); color: var(--ui-ink); }
 .lg-form .chip { white-space: normal; text-align: left; height: auto; min-height: 26px; padding-top: 3px; padding-bottom: 3px; line-height: 1.25; }

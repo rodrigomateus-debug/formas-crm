@@ -13,14 +13,16 @@ import { companyKey } from './clickup';
 // Reemplazan las observaciones de entrega de la dirección y de la ficha de la empresa (migración 0097).
 
 export const TIPOS_NOTA = ['entrega', 'ingreso', 'retiro_proveedor', 'egreso', 'retiro_impresor', 'ingreso_impresor'] as const;
-export interface NotaLogistica { id: number; alcance: 'puntual' | 'siempre'; texto: string; por: string | null; user_id: number | null; at: string; destino?: string | null }
+// `traba`: una anotación «solo esta vez» que traba la entrega (la corrección a mano del estado de despacho).
+export type Traba = 'info' | 'nopago' | 'nollego';
+export interface NotaLogistica { id: number; alcance: 'puntual' | 'siempre'; texto: string; por: string | null; user_id: number | null; at: string; destino?: string | null; traba?: Traba | null }
 // A dónde se va: lo que se sepa de la empresa, el lugar de la libreta y el nombre.
 export interface Destino { company_id?: number | null; lugar_id?: number | null; nombre?: string | null }
 interface Fila { id: number; alcance: 'puntual' | 'siempre'; record_id: number | null; tipo: string | null; company_id: number | null; lugar_id: number | null; nombre: string | null;
-  clave: string | null; texto: string; user_id: number | null; created_at: string; por: string | null }
-const SELECT = `SELECT n.id, n.alcance, n.record_id, n.tipo, n.company_id, n.lugar_id, n.nombre, n.clave, n.texto, n.user_id, n.created_at, u.name AS por
+  clave: string | null; texto: string; user_id: number | null; created_at: string; por: string | null; traba: Traba | null }
+const SELECT = `SELECT n.id, n.alcance, n.record_id, n.tipo, n.company_id, n.lugar_id, n.nombre, n.clave, n.texto, n.user_id, n.created_at, n.traba, u.name AS por
   FROM logistica_notas n LEFT JOIN users u ON u.id = n.user_id WHERE n.borrada_at IS NULL`;
-const nota = (f: Fila): NotaLogistica => ({ id: f.id, alcance: f.alcance, texto: f.texto, por: f.por, user_id: f.user_id, at: f.created_at, ...(f.alcance === 'siempre' ? { destino: f.nombre } : {}) });
+const nota = (f: Fila): NotaLogistica => ({ id: f.id, alcance: f.alcance, texto: f.texto, por: f.por, user_id: f.user_id, at: f.created_at, ...(f.alcance === 'siempre' ? { destino: f.nombre } : {}), ...(f.traba ? { traba: f.traba } : {}) });
 const claveDe = (nombre: string | null | undefined) => { const k = companyKey(String(nombre ?? '')); return k.length >= 3 ? k : null; };
 
 // La empresa de cada pedido (la principal), para las anotaciones «siempre» de sus entregas.
@@ -81,11 +83,13 @@ export async function notasDeDestino(db: D1Database, d: Destino) {
   return { notas, destino: d.nombre || d.company_id || d.lugar_id ? { nombre: d.nombre ?? null } : null };
 }
 
-export async function crearNota(db: D1Database, ctx: Ctx, b: { record_id?: unknown; tipo?: unknown; alcance?: unknown; texto?: unknown; destino?: Destino | null }) {
+export async function crearNota(db: D1Database, ctx: Ctx, b: { record_id?: unknown; tipo?: unknown; alcance?: unknown; texto?: unknown; destino?: Destino | null; traba?: unknown }) {
   if (ctx.user.role === 'viewer') throw new HttpError(403, 'Tu usuario es de solo lectura.');
   const texto = String(b.texto ?? '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 500);
   if (texto.length < 2) throw new HttpError(400, 'Falta la anotación.');
   const alcance = b.alcance === 'siempre' ? 'siempre' : 'puntual';
+  // Solo las de esta vez traban (una de siempre trabaría todas las entregas a ese lugar).
+  const traba = alcance === 'puntual' && ['info', 'nopago', 'nollego'].includes(String(b.traba)) ? String(b.traba) as Traba : null;
   const tipo = (TIPOS_NOTA as readonly string[]).includes(String(b.tipo)) ? String(b.tipo) : 'entrega';
   const recordId = Number(b.record_id) || null;
   if (recordId && !(await db.prepare("SELECT 1 FROM records WHERE id = ? AND object_type = 'order' AND archived = 0").bind(recordId).first())) throw new HttpError(404, 'Ese pedido ya no está.');
@@ -97,9 +101,9 @@ export async function crearNota(db: D1Database, ctx: Ctx, b: { record_id?: unkno
     if (!d.company_id && !d.lugar_id && !claveDe(d.nombre)) throw new HttpError(400, 'No se sabe a qué lugar es: guardala solo para esta vez.');
   } else if (!recordId) throw new HttpError(400, 'Falta de qué pedido es.');
   const ts = now();
-  const f = await db.prepare(`INSERT INTO logistica_notas (alcance, record_id, tipo, company_id, lugar_id, nombre, clave, texto, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
-    .bind(alcance, recordId, alcance === 'puntual' ? tipo : null, d.company_id ?? null, d.lugar_id ?? null, d.nombre ?? null, claveDe(d.nombre), texto, ctx.user.id, ts).first<{ id: number }>();
-  return { id: f!.id, alcance, texto, por: ctx.user.name, user_id: ctx.user.id, at: ts, ...(alcance === 'siempre' ? { destino: d.nombre ?? null } : {}) } satisfies NotaLogistica;
+  const f = await db.prepare(`INSERT INTO logistica_notas (alcance, record_id, tipo, company_id, lugar_id, nombre, clave, texto, user_id, created_at, traba) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+    .bind(alcance, recordId, alcance === 'puntual' ? tipo : null, d.company_id ?? null, d.lugar_id ?? null, d.nombre ?? null, claveDe(d.nombre), texto, ctx.user.id, ts, traba).first<{ id: number }>();
+  return { id: f!.id, alcance, texto, por: ctx.user.name, user_id: ctx.user.id, at: ts, ...(alcance === 'siempre' ? { destino: d.nombre ?? null } : {}), ...(traba ? { traba } : {}) } satisfies NotaLogistica;
 }
 
 // La borra quien la escribió, un administrador o quien edita el cronograma (`edita`).

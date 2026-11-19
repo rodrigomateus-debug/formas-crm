@@ -272,8 +272,13 @@ cada vez que ese producto se vuelve a vender, aparece sola.
   Producción la marca **«Ya no aplica»**: deja de avisar y queda en el historial.
 - Código: `src/worker/notasproducto.ts`, `web/src/notasProducto.tsx`, `web/src/pages/NotasProductos.tsx`. API:
   `GET /api/productos/notas`, `GET /api/productos/sku/:sku`, `POST /api/productos/sku/:sku/notas` (JSON o formulario con
-  `foto`), `PATCH`/`DELETE /api/productos/notas/:id`, `GET /api/productos/notas/:id/foto`. Migración
-  `0067_notas_producto.sql`; prueba en `test/notas-producto.test.mjs`.
+  `foto` repetido, una vez por foto), `PATCH`/`DELETE /api/productos/notas/:id`, `POST /api/productos/notas/:id/fotos`,
+  `GET`/`DELETE /api/productos/notas/fotos/:fotoId` y `GET /api/productos/notas/:id/foto` (la primera). Migraciones
+  `0067_notas_producto.sql` y `0094_notas_producto_fotos.sql`; pruebas en `test/notas-producto.test.mjs` y
+  `test/notas-producto-fotos.test.mjs`.
+- **Fotos:** cada nota lleva hasta 10 (JPG, PNG, WEBP o GIF, hasta 15 MB cada una), en Drive (`Notas de productos/<SKU>`).
+  Se eligen varias a la vez o se pegan en el texto (Ctrl+V). Después, quien escribió la nota o un administrador agrega o
+  saca fotos desde «Editar» (se guarda en el momento; la sacada queda en Drive).
 
 ## Cómo está hecho
 

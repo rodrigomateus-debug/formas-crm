@@ -35,7 +35,7 @@ import { actualizarBoceto, bocetoPorId, bocetosDe, bocetosDeNegocios, quitarBoce
 import { bajarArchivo, driveConfig, guardarDriveConfig, probarDrive } from './drive';
 import { fin, finnegansState, finnegansToken, pedidoIds, syncFacturas, type Destino } from './finnegans';
 import { actualizarFotos, fotosEstado } from './fotos';
-import { borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, productosConNotas } from './notasproducto';
+import { agregarFotosNota, borrarFotoNota, borrarNotaProducto, crearNotaProducto, editarNotaProducto, fichaProducto, fotoNotaProducto, primeraFotoNota, productosConNotas } from './notasproducto';
 import { montosDesdePedidos, tienePedidos } from './montos';
 import { Budget } from './budget';
 import { resumenDireccion } from './direccion';
@@ -1544,7 +1544,8 @@ api.get('/productos/notas', async (c) => {
   return c.json(await productosConNotas(c.env.DB, { buscar: q.q, tipo: q.tipo, gravedad: q.gravedad, archivadas: q.archivadas === '1' }));
 });
 api.get('/productos/sku/:sku', async (c) => c.json(await fichaProducto(c.env, c.get('ctx').user, c.req.param('sku'))));
-// Una nota nueva: JSON o, con foto, un formulario (texto, tipo, gravedad, todos_colores, record_id, task_id, producto, foto).
+// Una nota nueva: JSON o, con fotos, un formulario (texto, tipo, gravedad, todos_colores, record_id, task_id, producto y
+// `foto` repetido, una vez por foto).
 api.post('/productos/sku/:sku/notas', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
@@ -1552,8 +1553,8 @@ api.post('/productos/sku/:sku/notas', async (c) => {
     const form = await c.req.formData();
     const datos: Record<string, unknown> = {};
     for (const k of ['texto', 'tipo', 'gravedad', 'todos_colores', 'record_id', 'task_id', 'producto']) { const v = form.get(k); if (typeof v === 'string') datos[k] = v; }
-    const foto = form.get('foto');
-    return c.json(await crearNotaProducto(c.env, ctx, c.req.param('sku'), datos, foto instanceof File ? foto : null), 201);
+    const fotos = form.getAll('foto').filter((f): f is File => f instanceof File);
+    return c.json(await crearNotaProducto(c.env, ctx, c.req.param('sku'), datos, fotos), 201);
   }
   return c.json(await crearNotaProducto(c.env, ctx, c.req.param('sku'), await c.req.json()), 201);
 });
@@ -1567,7 +1568,20 @@ api.delete('/productos/notas/:id', async (c) => {
   canWrite(ctx);
   return c.json(await borrarNotaProducto(c.env, ctx, Number(c.req.param('id'))));
 });
-api.get('/productos/notas/:id/foto', async (c) => fotoNotaProducto(c.env, Number(c.req.param('id'))));
+// Las fotos de una nota: agregar (formulario con `foto` repetido), sacar una y verla. «/notas/:id/foto» es la primera.
+api.post('/productos/notas/:id/fotos', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  const form = await c.req.formData();
+  return c.json(await agregarFotosNota(c.env, ctx, Number(c.req.param('id')), form.getAll('foto').filter((f): f is File => f instanceof File)), 201);
+});
+api.delete('/productos/notas/fotos/:fotoId', async (c) => {
+  const ctx = c.get('ctx');
+  canWrite(ctx);
+  return c.json(await borrarFotoNota(c.env, ctx, Number(c.req.param('fotoId'))));
+});
+api.get('/productos/notas/fotos/:fotoId', async (c) => fotoNotaProducto(c.env, Number(c.req.param('fotoId'))));
+api.get('/productos/notas/:id/foto', async (c) => primeraFotoNota(c.env, Number(c.req.param('id'))));
 
 // ---------- Recorridos (recorridos.ts): los encargos al recorrido y la base de destinos ----------
 // Para todos los perfiles (también Ventas): cada uno carga y ve lo suyo; Logística, todo.

@@ -22,6 +22,7 @@ export type Gravedad = (typeof GRAVEDADES)[number];
 const PESO: Record<Gravedad, number> = { info: 0, ojo: 1, no: 2 };
 const MAX_TEXTO = 2000;
 const MAX_FOTO = 15 * 1024 * 1024;
+export const MAX_FOTOS = 10;       // por nota
 const FOTOS: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 
 export const skuDe = (s: unknown) => String(s ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
@@ -87,7 +88,7 @@ export async function skusDeArticulos(db: D1Database, arts: Array<{ task_id: str
 
 export interface NotaProducto {
   id: number; sku: string; modelo: string | null; producto: string | null; tipo: string; gravedad: Gravedad; texto: string;
-  record_id: number | null; pedido: string | null; task_id: string | null; foto: boolean; user_id: number | null; autor: string | null;
+  record_id: number | null; pedido: string | null; task_id: string | null; fotos: number[]; user_id: number | null; autor: string | null;
   created_at: string; updated_at: string | null; archivada_at: string | null; archivada_por: number | null; puede_editar: boolean;
 }
 
@@ -103,14 +104,14 @@ function validarSku(sku: string) {
 // se muestra solo si quien mira lo ve (una vendedora no ve los pedidos de otra).
 async function notasDe(db: D1Database, user: User, sku: string): Promise<NotaProducto[]> {
   const { results } = await db.prepare(`SELECT n.id, n.sku, n.modelo, n.producto, n.tipo, n.gravedad, n.texto, n.task_id,
-        n.foto_drive_id IS NOT NULL AS foto, n.user_id, u.name AS autor, n.created_at, n.updated_at, n.archivada_at, n.archivada_por,
+        (SELECT json_group_array(f.id) FROM (SELECT id FROM producto_nota_fotos WHERE nota_id = n.id AND borrada_at IS NULL ORDER BY id) f) AS fotos, n.user_id, u.name AS autor, n.created_at, n.updated_at, n.archivada_at, n.archivada_por,
         CASE WHEN r.id IS NOT NULL AND ${visibleSql('r', user)} THEN r.id END AS record_id,
         CASE WHEN r.id IS NOT NULL AND ${visibleSql('r', user)} THEN r.name END AS pedido
       FROM producto_notas n LEFT JOIN users u ON u.id = n.user_id LEFT JOIN records r ON r.id = n.record_id AND r.archived = 0
       WHERE n.borrada_at IS NULL AND ${APLICA('n', '?1')}
       ORDER BY n.archivada_at IS NOT NULL, CASE n.gravedad WHEN 'no' THEN 0 WHEN 'ojo' THEN 1 ELSE 2 END, n.created_at DESC`)
-    .bind(sku).all<Omit<NotaProducto, 'foto' | 'puede_editar'> & { foto: number }>();
-  return results.map((n) => ({ ...n, foto: !!n.foto, puede_editar: puedeEscribirNotas(user) && (user.role === 'admin' || n.user_id === user.id) }));
+    .bind(sku).all<Omit<NotaProducto, 'fotos' | 'puede_editar'> & { fotos: string | null }>();
+  return results.map((n) => ({ ...n, fotos: JSON.parse(n.fotos ?? '[]') as number[], puede_editar: puedeEscribirNotas(user) && (user.role === 'admin' || n.user_id === user.id) }));
 }
 
 export async function fichaProducto(env: Env, user: User, skuCrudo: string) {
@@ -199,18 +200,31 @@ function validar(d: DatosNota, parcial = false) {
 }
 const verdad = (v: unknown) => v === true || v === 1 || v === '1' || v === 'true';
 
-async function subirFoto(env: Env, sku: string, foto: File) {
-  if (foto.size > MAX_FOTO) throw new HttpError(400, 'La foto es muy grande (máximo 15 MB).');
-  const ext = FOTOS[foto.type];
-  if (!ext) throw new HttpError(400, 'La foto tiene que ser JPG, PNG, WEBP o GIF.');
+// Revisa las fotos antes de subir ninguna (si una no sirve, no queda nada a medias en Drive).
+async function validarFotos(env: Env, fotos: File[], yaTiene = 0) {
+  if (!fotos.length) return;
+  if (yaTiene + fotos.length > MAX_FOTOS) throw new HttpError(400, `Una nota lleva hasta ${MAX_FOTOS} fotos${yaTiene ? ` (ya tiene ${yaTiene})` : ''}.`);
+  for (const foto of fotos) {
+    if (foto.size > MAX_FOTO) throw new HttpError(400, `${foto.name || 'La foto'} es muy grande (máximo 15 MB por foto).`);
+    if (!FOTOS[foto.type]) throw new HttpError(400, `${foto.name || 'La foto'}: tiene que ser JPG, PNG, WEBP o GIF.`);
+  }
   const cfg = await driveConfig(env);
   if (!cfg.carpeta || !cfg.usuario || !env.GOOGLE_SA_JSON) throw new HttpError(400, 'Para guardar fotos falta elegir la carpeta de Drive (Configuración → Integraciones).');
-  const nombre = `${sku} ${now().slice(0, 10)}.${ext}`;
-  const f = await subirArchivo(env, ['Notas de productos', sku.replace(/[\\/]/g, '-')], nombre, foto.type, await foto.arrayBuffer());
-  return { id: f.id, mime: foto.type, nombre };
 }
 
-export async function crearNotaProducto(env: Env, ctx: Ctx, skuCrudo: string, d: DatosNota, foto?: File | null) {
+// Sube las fotos a Drive (de a una, en orden) y las ata a la nota.
+async function guardarFotos(env: Env, notaId: number, sku: string, fotos: File[], userId: number) {
+  const dia = now().slice(0, 10);
+  for (const [i, foto] of fotos.entries()) {
+    const nombre = `${sku} ${dia}${fotos.length > 1 ? ` (${i + 1})` : ''}.${FOTOS[foto.type]}`;
+    const f = await subirArchivo(env, ['Notas de productos', sku.replace(/[\\/]/g, '-')], nombre, foto.type, await foto.arrayBuffer());
+    await env.DB.prepare('INSERT INTO producto_nota_fotos (nota_id, drive_id, mime, nombre, user_id) VALUES (?, ?, ?, ?, ?)')
+      .bind(notaId, f.id, foto.type, nombre, userId).run();
+  }
+}
+const soloFotos = (fotos?: Array<File | null | undefined> | null) => (fotos ?? []).filter((f): f is File => !!f && f.size > 0);
+
+export async function crearNotaProducto(env: Env, ctx: Ctx, skuCrudo: string, d: DatosNota, fotosCrudas?: Array<File | null> | null) {
   if (!puedeEscribirNotas(ctx.user)) throw new HttpError(403, 'Las notas de producto las escriben Producción y los administradores.');
   const db = env.DB;
   const sku = validarSku(skuCrudo);
@@ -219,18 +233,21 @@ export async function crearNotaProducto(env: Env, ctx: Ctx, skuCrudo: string, d:
   if (verdad(d.todos_colores) && !modelo) throw new HttpError(400, `No se puede separar el color de ${sku}: la nota queda solo para ese SKU.`);
   const recordId = Number(d.record_id) > 0 ? Number(d.record_id) : null;
   if (recordId && !(await db.prepare("SELECT 1 FROM records WHERE id = ? AND object_type = 'order'").bind(recordId).first())) throw new HttpError(400, 'Ese pedido no existe.');
-  const f = foto && foto.size ? await subirFoto(env, sku, foto) : null;
+  const fotos = soloFotos(fotosCrudas);
+  await validarFotos(env, fotos);
   const producto = String(d.producto ?? '').trim().slice(0, 200) || null;
-  const row = await db.prepare(`INSERT INTO producto_notas (sku, modelo, producto, tipo, gravedad, texto, record_id, task_id, foto_drive_id, foto_mime, foto_nombre, user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
-    .bind(sku, modelo, producto, v.tipo, v.gravedad, v.texto, recordId, String(d.task_id ?? '').trim() || null, f?.id ?? null, f?.mime ?? null, f?.nombre ?? null, ctx.user.id)
+  const row = await db.prepare(`INSERT INTO producto_notas (sku, modelo, producto, tipo, gravedad, texto, record_id, task_id, user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+    .bind(sku, modelo, producto, v.tipo, v.gravedad, v.texto, recordId, String(d.task_id ?? '').trim() || null, ctx.user.id)
     .first<{ id: number }>();
+  // Si Drive falla a mitad de camino, la nota queda con las fotos que llegaron a subir (y se pueden agregar las otras).
+  await guardarFotos(env, row!.id, sku, fotos, ctx.user.id);
   return (await notasDe(db, ctx.user, sku)).find((n) => n.id === row!.id)!;
 }
 
 async function notaPorId(db: D1Database, id: number) {
   const n = await db.prepare('SELECT * FROM producto_notas WHERE id = ? AND borrada_at IS NULL').bind(id)
-    .first<{ id: number; sku: string; user_id: number | null; foto_drive_id: string | null; foto_mime: string | null; foto_nombre: string | null; archivada_at: string | null }>();
+    .first<{ id: number; sku: string; user_id: number | null; archivada_at: string | null }>();
   if (!n) throw new HttpError(404, 'No existe la nota.');
   return n;
 }
@@ -268,15 +285,55 @@ export async function borrarNotaProducto(env: Env, ctx: Ctx, id: number) {
   return { ok: true };
 }
 
-// La foto, desde Drive (la ven todos los que ven la nota).
-export async function fotoNotaProducto(env: Env, id: number) {
+// ---------- Las fotos ----------
+
+// Agregar fotos a una nota que ya existe: quien la escribió o un administrador.
+export async function agregarFotosNota(env: Env, ctx: Ctx, id: number, fotosCrudas: Array<File | null>) {
   const n = await notaPorId(env.DB, id);
-  if (!n.foto_drive_id) throw new HttpError(404, 'La nota no tiene foto.');
-  const res = await bajarArchivo(env, n.foto_drive_id);
+  if (!puedeEscribirNotas(ctx.user) || !esAutorOAdmin(ctx, n)) throw new HttpError(403, 'Solo quien escribió la nota (o un administrador) le puede agregar fotos.');
+  const fotos = soloFotos(fotosCrudas);
+  if (!fotos.length) throw new HttpError(400, 'Elegí al menos una foto.');
+  const ya = await env.DB.prepare('SELECT COUNT(*) AS n FROM producto_nota_fotos WHERE nota_id = ? AND borrada_at IS NULL').bind(id).first<{ n: number }>();
+  await validarFotos(env, fotos, ya?.n ?? 0);
+  await guardarFotos(env, id, n.sku, fotos, ctx.user.id);
+  return (await notasDe(env.DB, ctx.user, n.sku)).find((x) => x.id === id)!;
+}
+
+async function fotoPorId(db: D1Database, fotoId: number) {
+  const f = await db.prepare(`SELECT f.id, f.nota_id, f.drive_id, f.mime, f.nombre FROM producto_nota_fotos f
+      JOIN producto_notas n ON n.id = f.nota_id AND n.borrada_at IS NULL WHERE f.id = ? AND f.borrada_at IS NULL`).bind(fotoId)
+    .first<{ id: number; nota_id: number; drive_id: string; mime: string | null; nombre: string | null }>();
+  if (!f) throw new HttpError(404, 'No existe la foto.');
+  return f;
+}
+
+// Sacar una foto de la nota (el archivo queda en Drive): quien la escribió o un administrador.
+export async function borrarFotoNota(env: Env, ctx: Ctx, fotoId: number) {
+  const f = await fotoPorId(env.DB, fotoId);
+  const n = await notaPorId(env.DB, f.nota_id);
+  if (!puedeEscribirNotas(ctx.user) || !esAutorOAdmin(ctx, n)) throw new HttpError(403, 'Solo quien escribió la nota (o un administrador) le puede sacar fotos.');
+  await env.DB.prepare('UPDATE producto_nota_fotos SET borrada_at = ? WHERE id = ?').bind(now(), fotoId).run();
+  return (await notasDe(env.DB, ctx.user, n.sku)).find((x) => x.id === n.id)!;
+}
+
+// Una foto, desde Drive (la ven todos los que ven la nota).
+async function servirFoto(env: Env, f: { drive_id: string; mime: string | null; nombre: string | null }) {
+  const res = await bajarArchivo(env, f.drive_id);
   return new Response(res.body, { headers: {
-    'content-type': n.foto_mime ?? 'application/octet-stream', 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(n.foto_nombre ?? 'foto')}`,
+    'content-type': f.mime ?? 'application/octet-stream', 'content-disposition': `inline; filename*=UTF-8''${encodeURIComponent(f.nombre ?? 'foto')}`,
     'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff',
   } });
+}
+export async function fotoNotaProducto(env: Env, fotoId: number) {
+  return servirFoto(env, await fotoPorId(env.DB, fotoId));
+}
+// La primera foto de una nota (la dirección de antes, cuando las notas tenían una sola).
+export async function primeraFotoNota(env: Env, id: number) {
+  await notaPorId(env.DB, id);
+  const f = await env.DB.prepare('SELECT drive_id, mime, nombre FROM producto_nota_fotos WHERE nota_id = ? AND borrada_at IS NULL ORDER BY id LIMIT 1')
+    .bind(id).first<{ drive_id: string; mime: string | null; nombre: string | null }>();
+  if (!f) throw new HttpError(404, 'La nota no tiene foto.');
+  return servirFoto(env, f);
 }
 
 // ---------- El aviso: entró (o se volvió a leer) un pedido con un producto que tiene notas ----------

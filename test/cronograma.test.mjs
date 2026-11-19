@@ -928,7 +928,7 @@ test('cronograma: un pedido repartido en varias direcciones lleva a cada parada 
   const ruta = (await api('GET', `/cronograma/ruta?fecha=${m.fecha}`)).data;
   const paradas = [`p:${m.pdv_task}`, `p:${m.pdv_task}:2`, `p:${m.pdv_task}:3`].map((c) => ruta.paradas.find((p) => p.clave === c));
   assert.ok(paradas.every(Boolean), 'las tres paradas');
-  assert.deepEqual(paradas.map((p) => [p.sitio, p.movimientos.find((x) => x.id === m.id)?.cantidad]), [['Central', 250], ['Sucursal Santa Fe', 500], ['Depósito de stock', 250]]);
+  assert.deepEqual(paradas.map((p) => [p.sitio, p.movimientos.find((x) => x.task_id === m.task_id)?.cantidad]), [['Central', 250], ['Sucursal Santa Fe', 500], ['Depósito de stock', 250]]);
   assert.deepEqual(paradas.map((p) => [p.observaciones ?? null, p.observaciones_por ?? null]), [[null, null], [lugares[1].observaciones, `Rep ${RUN}`], [null, null]]);
   // En la tarjeta de la semana, cada lugar con lo que va ahí.
   const dirs = (await api('GET', `/cronograma/direcciones?desde=${m.fecha}&hasta=${m.fecha}`)).data.direcciones[`${m.fecha}|p:${m.pdv_task}`];
@@ -938,7 +938,45 @@ test('cronograma: un pedido repartido en varias direcciones lleva a cada parada 
   const otra = await api('PUT', url, { direcciones: conId, cantidades: [300, 500, 200].map((cantidad, direccion) => ({ direccion, clave: codigo, cantidad })) });
   assert.equal(otra.status, 200, JSON.stringify(otra.data));
   assert.equal((await api('GET', url)).data.direcciones[1].obs_por, `Rep ${RUN}`, 'la anotación sigue a nombre de quien la escribió');
+  // ---- La logística se bifurca: cada lugar con su día, su «hecho» y sus Colgados. La producción sigue siendo una.
+  const [central, santaFe, deposito] = (await api('GET', url)).data.direcciones.map((x) => x.id);
+  const suyos = async () => (await api('GET', rango)).data.movimientos.filter((x) => x.task_id === m.task_id && x.tipo === 'entrega').sort((a, b) => a.dir - b.dir);
+  let ms = await suyos();
+  assert.deepEqual(ms.map((x) => [x.dir, x.sitio, x.cantidad, x.fecha]), [[central, 'Central', 300, m.fecha], [santaFe, 'Sucursal Santa Fe', 500, m.fecha], [deposito, 'Depósito de stock', 200, m.fecha]], 'una entrega por lugar, el mismo día');
+  // Santa Fe pasa a otro día: los otros dos quedan donde estaban.
+  const otroDia = m.fecha === '2026-11-20' ? '2026-11-19' : '2026-11-20';
+  assert.equal((await api('POST', '/cronograma/mover', { ids: [m.task_id], dirs: [santaFe], tipo: 'entrega', fecha: otroDia })).status, 200);
+  ms = await suyos();
+  assert.deepEqual(ms.map((x) => [x.sitio, x.fecha]), [['Central', m.fecha], ['Sucursal Santa Fe', otroDia], ['Depósito de stock', m.fecha]]);
+  const clavesDe = async (dia) => (await api('GET', `/cronograma/ruta?fecha=${dia}`)).data.paradas.filter((p) => p.clave.startsWith(`p:${m.pdv_task}`)).map((p) => p.clave).sort();
+  assert.deepEqual(await clavesDe(m.fecha), [`p:${m.pdv_task}`, `p:${m.pdv_task}:3`], 'en la ruta de ese día, los dos que quedaron');
+  assert.deepEqual(await clavesDe(otroDia), [`p:${m.pdv_task}:2`], 'y Santa Fe, en la del otro día');
+  // El depósito queda colgado: solo ese lugar. Pasarlo a un día lo devuelve.
+  const col = await api('POST', '/cronograma/colgar', { ids: [m.task_id], dirs: [deposito], tipo: 'entrega', motivo: 'El depósito estaba cerrado' });
+  assert.equal(col.status, 200, JSON.stringify(col.data));
+  let v2 = (await api('GET', rango)).data;
+  assert.deepEqual(v2.movimientos.filter((x) => x.task_id === m.task_id && x.tipo === 'entrega').map((x) => x.sitio).sort(), ['Central', 'Sucursal Santa Fe']);
+  assert.deepEqual(v2.colgados.filter((x) => x.task_id === m.task_id).map((x) => [x.sitio, x.colgado.motivo]), [['Depósito de stock', 'El depósito estaba cerrado']]);
+  assert.equal((await api('POST', '/cronograma/mover', { ids: [m.task_id], dirs: [deposito], tipo: 'entrega', fecha: m.fecha })).status, 200);
+  assert.equal((await suyos()).length, 3, 'volvió al cronograma');
+  // Hecho lugar por lugar: con uno, el artículo no está entregado todavía; con todos, sí.
+  const hecho = (dirs, h = true) => api('POST', '/cronograma/hecho', { ids: dirs.map(() => m.task_id), dirs, tipo: 'entrega', hecho: h });
+  assert.equal((await hecho([central])).status, 200);
+  ms = await suyos();
+  assert.deepEqual(ms.map((x) => [x.sitio, x.hecho]), [['Central', true], ['Sucursal Santa Fe', false], ['Depósito de stock', false]]);
+  assert.notEqual(ms[0].estado, 'entregados', 'el artículo sigue abierto: faltan lugares');
+  assert.equal((await hecho([santaFe, deposito])).status, 200);
+  ms = await suyos();
+  assert.ok(ms.every((x) => x.hecho), 'los tres hechos');
+  assert.equal(ms[0].estado, 'entregados', 'con todos los lugares, el artículo queda entregado en ClickUp');
+  // Desmarcar uno lo vuelve a abrir.
+  assert.equal((await hecho([santaFe], false)).status, 200);
+  ms = await suyos();
+  assert.deepEqual(ms.map((x) => x.hecho), [true, false, true]);
+  assert.notEqual(ms[0].estado, 'entregados');
+  await hecho([central, deposito], false);
   // Vuelve a una sola dirección, para no cambiarles el día a las otras pruebas.
   await api('PUT', url, { direcciones: [] });
+  await api('POST', '/cronograma/mover', { ids: [m.task_id], tipo: 'entrega', fecha: m.fecha });
   sql(`DELETE FROM line_items WHERE record_id = ${m.record_id};`);
 });

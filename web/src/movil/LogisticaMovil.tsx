@@ -5,6 +5,7 @@ import { Avatar } from '../components';
 import {
   CARRILES, carrilDe, cantidad, diaCorto, diaLargo, lindo, lunesDe, sumar, tarjetas, NuevoTransportista,
   type Mov, type Tarjeta, type Tipo, type Vista,
+  idsYLugares,
 } from '../pages/Cronograma';
 import { MOTIVO, hechaParada, type Datos as Ruta, type Parada } from '../pages/CronogramaRuta';
 import { ESTADO as ESTADO_ENC, itemTexto, resumen, hoyIso, type Encargo } from '../pages/Recorridos';
@@ -49,11 +50,11 @@ function useAcciones(recargar: () => void) {
   return {
     // Marcar hechos (o pendientes) los artículos y encargos: los artículos cambian de estado en ClickUp.
     async hecho(movs: Mov[], encs: Encargo[], hecho: boolean, nombre: string, deshacer?: () => void) {
-      const porTipo = new Map<Tipo, string[]>();
-      for (const m of movs) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
+      const porTipo = new Map<Tipo, Mov[]>();
+      for (const m of movs) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m]);
       try {
         let cambiados = 0;
-        for (const [tipo, ids] of porTipo) for (let i = 0; i < ids.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + TANDA), tipo, hecho })).cambiados;
+        for (const [tipo, ms] of porTipo) for (let i = 0; i < ms.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ...idsYLugares(ms.slice(i, i + TANDA)), tipo, hecho })).cambiados;
         for (const e of encs.filter((x) => (x.estado === 'hecho') !== hecho)) await http('PATCH', `/recorridos/encargos/${e.id}`, { estado: hecho ? 'hecho' : 'pendiente' });
         toast(!hecho ? `${nombre}: quedó pendiente.` : `${nombre}: hecho.${cambiados ? ` ${cambiados === 1 ? 'El artículo cambió' : `${cambiados} artículos cambiaron`} de estado en ClickUp.` : ''}`, false,
           deshacer ? { label: 'Deshacer', onClick: deshacer } : undefined);
@@ -73,8 +74,7 @@ function useAcciones(recargar: () => void) {
     async mover(t: Tarjeta | Encargo, fecha: string) {
       try {
         if ('movs' in t) {
-          const ids = t.movs.map((m) => m.task_id);
-          for (let i = 0; i < ids.length; i += TANDA) await http('POST', '/cronograma/mover', { ids: ids.slice(i, i + TANDA), tipo: t.tipo, fecha });
+          for (let i = 0; i < t.movs.length; i += TANDA) await http('POST', '/cronograma/mover', { ...idsYLugares(t.movs.slice(i, i + TANDA)), tipo: t.tipo, fecha });
           toast(`${t.pdv}: ${carrilDe(t.tipo).uno.toLowerCase()} pasó al ${diaCorto(fecha)}. Ya está en ClickUp.`);
         } else {
           await http('PATCH', `/recorridos/encargos/${t.id}`, { fecha });

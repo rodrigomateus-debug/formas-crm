@@ -100,6 +100,8 @@ export async function productosDelPedido(db: D1Database, orderId: number): Promi
 
 interface FilaDireccion { id: number; position: number; direccion: string; detalle: string | null; observaciones: string | null; place_id: string | null; lat: number | null; lng: number | null;
   precisa: number; localidad: string | null; provincia: string | null; codigo_postal: string | null; retira: string | null; user_id: number | null; updated_at: string;
+  fecha: string | null;                                   // el día en que se entrega en este lugar (NULL: el del artículo en ClickUp)
+  hecho_at: string | null; hecho_por: number | null; hecho_chofer: string | null;   // cuándo se entregó acá y quién lo marcó
   nombre: string | null;                                  // cómo se llama ese lugar («Central», «Sucursal Santa Fe»)
   obs_user_id: number | null; obs_at: string | null }      // quién escribió la anotación de ese lugar (`observaciones`) y cuándo
 
@@ -174,10 +176,12 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
   // Cada dirección: con place_id, la arma Google (se valida acá, no en la pantalla); sin place_id, la escrita, sin validar.
   // Retira en Formas: la dirección es la de esa base (la pone el servidor, no la pantalla).
   const { bases } = await cronogramaConfig(db);
-  const nuevas: Array<Omit<FilaDireccion, 'id' | 'position' | 'user_id' | 'updated_at' | 'nombre' | 'obs_user_id' | 'obs_at'>> = [];
+  const nuevas: Array<Omit<FilaDireccion, 'id' | 'position' | 'user_id' | 'updated_at' | 'nombre' | 'obs_user_id' | 'obs_at' | 'fecha' | 'hecho_at' | 'hecho_por' | 'hecho_chofer'>> = [];
   // El nombre del lugar y de quién es su anotación, en el mismo orden que `nuevas`. La anotación queda a nombre de quien
   // la escribió o la cambió; si no se tocó, sigue con el autor que tenía.
-  const extras: Array<{ nombre: string | null; obs_user_id: number | null; obs_at: string | null }> = [];
+  // `previa`: la dirección que ya estaba (si la fila viene con su id): conserva su id, su fecha y si ya se entregó, así
+  // cambiar el reparto o una anotación no pierde lo que hizo Logística con ese lugar.
+  const extras: Array<{ nombre: string | null; obs_user_id: number | null; obs_at: string | null; previa: FilaDireccion | null }> = [];
   const ahora = now();
   for (const [i, d] of lista.entries()) {
     const detalle = d.detalle?.toString().trim().slice(0, 300) || null;
@@ -185,7 +189,8 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
     const observaciones = d.observaciones === undefined ? previa?.observaciones ?? null : d.observaciones?.toString().trim().slice(0, 500) || null;
     const mismaObs = (previa?.observaciones ?? null) === observaciones;
     extras.push({ nombre: d.nombre === undefined ? previa?.nombre ?? null : d.nombre?.toString().trim().slice(0, 80) || null,
-      obs_user_id: !observaciones ? null : mismaObs ? previa?.obs_user_id ?? null : ctx.user.id, obs_at: !observaciones ? null : mismaObs ? previa?.obs_at ?? null : ahora });
+      obs_user_id: !observaciones ? null : mismaObs ? previa?.obs_user_id ?? null : ctx.user.id, obs_at: !observaciones ? null : mismaObs ? previa?.obs_at ?? null : ahora,
+      previa: previa && !extras.some((x) => x.previa?.id === previa.id) ? previa : null });
     if (d.retira) {
       const base = bases.find((x) => x.id === d.retira);
       if (!base) throw new HttpError(400, `No hay una dirección de Formas «${d.retira}» para retirar.`);
@@ -234,13 +239,16 @@ export async function guardarDirecciones(env: Env, ctx: Ctx, orderId: number, b:
     db.prepare('DELETE FROM entrega_direcciones WHERE record_id = ?').bind(orderId),
   ];
   const base = (await db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM entrega_direcciones').first<{ m: number }>())!.m + 1;
+  // Cada dirección que ya estaba queda con su id (se borran y se vuelven a escribir en el mismo lote); las nuevas, con uno nuevo.
+  const idDe = (i: number) => extras[i].previa?.id ?? base + i;
   nuevas.forEach((d, i) => {
     stmts.push(db.prepare(`INSERT INTO entrega_direcciones (id, record_id, position, direccion, detalle, observaciones, place_id, lat, lng, precisa, localidad, provincia, codigo_postal, retira, user_id, updated_at,
-        nombre, obs_user_id, obs_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(base + i, orderId, i, d.direccion, d.detalle, d.observaciones, d.place_id, d.lat, d.lng, d.precisa, d.localidad, d.provincia, d.codigo_postal, d.retira, ctx.user.id, ts,
-      extras[i].nombre, extras[i].obs_user_id, extras[i].obs_at));
+        nombre, obs_user_id, obs_at, fecha, hecho_at, hecho_por, hecho_chofer)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).bind(idDe(i), orderId, i, d.direccion, d.detalle, d.observaciones, d.place_id, d.lat, d.lng, d.precisa, d.localidad, d.provincia, d.codigo_postal, d.retira, ctx.user.id, ts,
+      extras[i].nombre, extras[i].obs_user_id, extras[i].obs_at,
+      extras[i].previa?.fecha ?? null, extras[i].previa?.hecho_at ?? null, extras[i].previa?.hecho_por ?? null, extras[i].previa?.hecho_chofer ?? null));
   });
-  for (const f of filas) stmts.push(db.prepare('INSERT INTO entrega_cantidades (direccion_id, clave, cantidad) VALUES (?, ?, ?)').bind(base + f.direccion, f.clave, f.cantidad));
+  for (const f of filas) stmts.push(db.prepare('INSERT INTO entrega_cantidades (direccion_id, clave, cantidad) VALUES (?, ?, ?)').bind(idDe(f.direccion), f.clave, f.cantidad));
   // El punto de Google va al mapa de la ruta del cronograma (geocodigos), salvo que alguien ya haya corrido el punto a mano.
   for (const d of nuevas) {
     if (d.place_id && d.lat != null && d.lng != null && claveDireccion(d.direccion)) {
@@ -282,24 +290,25 @@ export async function direccionDesdeRuta(env: Env, ctx: Ctx, orderId: number, te
 // `nombre`: cómo se llama el lugar; `observaciones_por`: quién escribió su anotación; `cantidades`: con varias direcciones,
 // cuánto de cada producto (por su clave) va a esa.
 export interface DireccionPedido { id: number; direccion: string; detalle: string | null; observaciones: string | null; lat: number | null; lng: number | null; validada: boolean; retira: string | null;
-  nombre: string | null; observaciones_por: string | null; cantidades: Map<string, number> }
+  nombre: string | null; observaciones_por: string | null; cantidades: Map<string, number>;
+  fecha: string | null; hecho_at: string | null; hecho_por: number | null }   // el día de este lugar (NULL: el del artículo) y si ya se entregó acá
 export async function direccionesDePedidos(db: D1Database, ids: number[]) {
   const out = new Map<number, DireccionPedido[]>();
   if (!ids.length) return out;
   const [dirs, cants] = await db.batch([
-    db.prepare(`SELECT d.id, d.record_id, d.direccion, d.detalle, d.observaciones, d.lat, d.lng, d.place_id, d.retira, d.nombre, u.name AS observaciones_por FROM entrega_direcciones d
+    db.prepare(`SELECT d.id, d.record_id, d.direccion, d.detalle, d.observaciones, d.lat, d.lng, d.place_id, d.retira, d.nombre, d.fecha, d.hecho_at, d.hecho_por, u.name AS observaciones_por FROM entrega_direcciones d
       LEFT JOIN users u ON u.id = d.obs_user_id WHERE d.record_id IN (SELECT value FROM json_each(?)) ORDER BY d.record_id, d.position, d.id`).bind(JSON.stringify(ids)),
     db.prepare(`SELECT c.direccion_id, c.clave, c.cantidad FROM entrega_cantidades c JOIN entrega_direcciones d ON d.id = c.direccion_id
       WHERE d.record_id IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(ids)),
   ]);
   const results = dirs.results as Array<{ id: number; record_id: number; direccion: string; detalle: string | null; observaciones: string | null; lat: number | null; lng: number | null; place_id: string | null;
-    retira: string | null; nombre: string | null; observaciones_por: string | null }>;
+    retira: string | null; nombre: string | null; observaciones_por: string | null; fecha: string | null; hecho_at: string | null; hecho_por: number | null }>;
   const porDir = new Map<number, Map<string, number>>();
   for (const c of cants.results as Array<{ direccion_id: number; clave: string; cantidad: number }>) { const m = porDir.get(c.direccion_id) ?? new Map<string, number>(); m.set(c.clave, c.cantidad); porDir.set(c.direccion_id, m); }
   for (const r of results) {
     const l = out.get(r.record_id) ?? [];
     l.push({ id: r.id, direccion: r.direccion, detalle: r.detalle, observaciones: r.observaciones, lat: r.lat, lng: r.lng, validada: !!r.place_id, retira: r.retira,
-      nombre: r.nombre, observaciones_por: r.observaciones_por, cantidades: porDir.get(r.id) ?? new Map() });
+      nombre: r.nombre, observaciones_por: r.observaciones_por, cantidades: porDir.get(r.id) ?? new Map(), fecha: r.fecha, hecho_at: r.hecho_at, hecho_por: r.hecho_por });
     out.set(r.record_id, l);
   }
   return out;

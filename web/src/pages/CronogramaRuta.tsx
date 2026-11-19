@@ -6,7 +6,7 @@ import { QuienPidio, alEsc, useEsc } from '../components';
 import { Select, useFloating } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
-import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
+import { idsYLugares, lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
 import { LineaNota } from '../NotasLogistica';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
@@ -273,15 +273,15 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   async function marcar(p: Parada) {
     if (marcando) return;
     const hecho = !hechaParada(p);
-    const porTipo = new Map<Tipo, string[]>();
-    for (const m of p.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
+    const porTipo = new Map<Tipo, Mov[]>();
+    for (const m of p.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m]);
     const encs = (p.encargos ?? []).filter((e) => (e.estado === 'hecho') !== hecho), cambian = new Set(encs.map((e) => e.id));
     setMarcando(p.clave);
     setDatos((d) => d && { ...d, paradas: d.paradas.map((x) => (x.clave === p.clave ? { ...x, movimientos: x.movimientos.map((m) => ({ ...m, hecho })),
       encargos: (x.encargos ?? []).map((e) => (cambian.has(e.id) ? { ...e, estado: hecho ? 'hecho' : 'pendiente' } : e)) } : x)) });
     try {
       let cambiados = 0;
-      for (const [tipo, ids] of porTipo) for (let i = 0; i < ids.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + TANDA), tipo, hecho })).cambiados;
+      for (const [tipo, ms] of porTipo) for (let i = 0; i < ms.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ...idsYLugares(ms.slice(i, i + TANDA)), tipo, hecho })).cambiados;
       for (const e of encs) await http('PATCH', `/recorridos/encargos/${e.id}`, { estado: hecho ? 'hecho' : 'pendiente' });
       const deshacer = { label: 'Deshacer', onClick: () => { const q = datosRef.current?.paradas.find((x) => x.clave === p.clave); if (q) void marcar(q); } };
       toast(!hecho ? `${lindo(p.nombre)}: quedó como pendiente.` : `${lindo(p.nombre)}: hecha.${cambiados ? ` ${cambiados} artículo${cambiados === 1 ? ' cambió' : 's cambiaron'} de estado en ClickUp.` : ''}`, false, deshacer);

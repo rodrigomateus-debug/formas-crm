@@ -854,6 +854,9 @@ export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params:
   return { whereSql: where.join(' AND '), binds };
 }
 
+// Columnas de records que nunca están vacías (NOT NULL o la clave).
+const NUNCA_VACIAS = new Set(['r.id', 'r.name', 'r.created_at', 'r.updated_at', 'r.source']);
+
 export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, params: SearchParams & { noCount?: boolean }) {
   const meta = new Meta(db);
   const { whereSql, binds } = await buildWhere(meta, ctx, type, params);
@@ -862,7 +865,10 @@ export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, 
   const dir = params.dir === 'asc' ? 'ASC' : 'DESC';
   const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 500);
   const offset = Math.max(Number(params.offset) || 0, 0);
-  const listSql = db.prepare(`SELECT r.* FROM records r WHERE ${whereSql} ORDER BY ${sortExpr} IS NULL, ${sortExpr} ${dir}, r.id DESC LIMIT ${limit} OFFSET ${offset}`).bind(...binds);
+  // Los vacíos van al final; en una columna que nunca está vacía, sin el «IS NULL» delante: con él SQLite no puede usar el
+  // índice y ordena todo el tipo en cada página (la lista por defecto: de 60.000 filas leídas a 50; auditoría del 19/11/2026).
+  const vaciosAlFinal = NUNCA_VACIAS.has(sortExpr) ? '' : `${sortExpr} IS NULL, `;
+  const listSql = db.prepare(`SELECT r.* FROM records r WHERE ${whereSql} ORDER BY ${vaciosAlFinal}${sortExpr} ${dir}, r.id DESC LIMIT ${limit} OFFSET ${offset}`).bind(...binds);
   if (params.noCount) {
     const { results } = await listSql.all<RecordRow>();
     return { results: results.map(rowToRecord), total: results.length, offset, limit };
@@ -879,7 +885,7 @@ export async function searchRecords(db: D1Database, ctx: Ctx, type: ObjectType, 
 // de la conversación, los cambios de etapa (de negocios y pedidos) y los bocetos y logos que se suben. Va sobre la fila
 // de `records` que se actualiza; `ts` es el parámetro con la hora de ahora (las reuniones por venir no cuentan).
 export const ultimaActividadSql = (ts: string) => `MAX(records.created_at, COALESCE(records.stage_entered_at, ''),
-    COALESCE((SELECT MAX(CASE WHEN a.type = 'task' THEN a.completed_at ELSE a.occurred_at END) FROM activities a JOIN activity_links l ON l.activity_id = a.id
+    COALESCE((SELECT MAX(CASE WHEN a.type = 'task' THEN a.completed_at ELSE a.occurred_at END) FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
       WHERE l.record_id = records.id AND a.archived = 0 AND (a.type != 'task' OR a.status = 'COMPLETED') AND a.occurred_at <= ${ts}), ''),
     COALESCE((SELECT MAX(m.created_at) FROM mensajes m WHERE m.record_id = records.id AND m.borrado_at IS NULL), ''),
     COALESCE((SELECT MAX(c.changed_at) FROM changes c WHERE c.record_id = records.id AND c.prop IN ('dealstage', 'hs_pipeline_stage')), ''),
@@ -897,10 +903,10 @@ export async function refreshActivityDates(db: D1Database, recordIds: number[]) 
   const ts = now();
   const stmts = ids.map((id) => db.prepare(`UPDATE records SET
     last_activity_at = ${ultimaActividadSql('?2')},
-    last_contacted_at = (SELECT MAX(a.occurred_at) FROM activities a JOIN activity_links l ON l.activity_id = a.id
+    last_contacted_at = (SELECT MAX(a.occurred_at) FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
       WHERE l.record_id = ?1 AND a.archived = 0 AND a.type IN ('email', 'call', 'meeting', 'whatsapp') AND a.occurred_at <= ?2
       AND (a.type != 'email' OR a.direction = 'out')),
-    next_activity_at = (SELECT MIN(COALESCE(a.due_at, a.occurred_at)) FROM activities a JOIN activity_links l ON l.activity_id = a.id
+    next_activity_at = (SELECT MIN(COALESCE(a.due_at, a.occurred_at)) FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
       WHERE l.record_id = ?1 AND a.archived = 0 AND ((a.type = 'task' AND a.status != 'COMPLETED') OR (a.type = 'meeting' AND a.occurred_at > ?2)))
     WHERE id = ?1`).bind(id, ts));
   for (let i = 0; i < stmts.length; i += 50) await db.batch(stmts.slice(i, i + 50));

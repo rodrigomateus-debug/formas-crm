@@ -748,7 +748,7 @@ async function cardInfo(db: D1Database, ids: number[]) {
       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'contact' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
     db.prepare(`SELECT a.from_id, r.id, r.name, NULLIF(json_extract(r.props, '$.domain'), '') AS domain FROM associations a JOIN records r ON r.id = a.to_id AND r.archived = 0
       WHERE a.from_id IN (SELECT value FROM json_each(?)) AND a.to_type = 'company' ORDER BY a.is_primary DESC, a.created_at`).bind(list),
-    db.prepare(`SELECT l.record_id, a.type, a.subject, COALESCE(a.due_at, a.occurred_at) AS at FROM activity_links l JOIN activities a ON a.id = l.activity_id
+    db.prepare(`SELECT l.record_id, a.type, a.subject, COALESCE(a.due_at, a.occurred_at) AS at FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
       WHERE l.record_id IN (SELECT value FROM json_each(?)) AND a.archived = 0
         AND ((a.type = 'task' AND COALESCE(a.status, '') != 'COMPLETED') OR (a.type = 'meeting' AND a.occurred_at > ?))
       ORDER BY at`).bind(list, now()),
@@ -1075,8 +1075,12 @@ api.get('/export/:type', async (c) => {
     return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [['ID', ...columns.map(label)].map(esc).join(',')];
-  for (let offset = 0; offset < 20000; offset += 500) {
-    const page = await searchRecords(db, c.get('ctx'), type, { ...params, limit: 500, offset });
+  // Hasta 20.000 filas, de a 500, sin volver a contar el total en cada tanda. Si quedan más, la última fila lo dice: antes
+  // el CSV se cortaba sin avisar (auditoría del 19/11/2026).
+  let cortado = false;
+  for (let offset = 0; ; offset += 500) {
+    if (offset >= 20000) { cortado = true; break; }
+    const page = await searchRecords(db, c.get('ctx'), type, { ...params, limit: 500, offset, noCount: true });
     // Empresa principal de cada registro de la página, en una sola consulta.
     const companies = new Map<number, string>();
     if (columns.includes('__company') && page.results.length) {
@@ -1087,8 +1091,10 @@ api.get('/export/:type', async (c) => {
     for (const r of page.results) lines.push([r.id, ...columns.map((k) => (k === '__company' ? companies.get(r.id) ?? '' : show(k, r.props[k])))].map(esc).join(','));
     if (page.results.length < 500) break;
   }
+  if (cortado) lines.push(esc('Se exportaron los primeros 20.000. Hay más: filtrá la lista y exportá por partes.'));
   return new Response('\ufeff' + lines.join('\n'), {
-    headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${type}s-${now().slice(0, 10)}.csv"` },
+    headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="${type}s-${now().slice(0, 10)}.csv"`,
+      ...(cortado ? { 'x-exportacion-cortada': '20000' } : {}) },
   });
 });
 
@@ -1745,8 +1751,7 @@ api.get('/integrations/pedidos', async (c) => {
       // Los pedidos que se dieron de alta desde el informe de Finnegans (pedidosfin.ts) y los repetidos, para control.
       pedidos: JSON.parse((await c.env.DB.prepare("SELECT value FROM settings WHERE key = 'pedidos_finnegans'").first<{ value: string }>())?.value ?? 'null'),
       duplicados: await pedidosDuplicados(c.env.DB) },
-    remitos: { configured: !!c.env.ANTHROPIC_API_KEY, ...(await c.env.DB.prepare(`SELECT SUM(estado = 'sin_leer') AS sin_leer, SUM(estado = 'revisar') AS revisar,
-      SUM(estado = 'ok') AS leidos, MAX(leido_at) AS at FROM remitos`).first<{ sin_leer: number | null; revisar: number | null; leidos: number | null; at: string | null }>()) },
+    remitos: { configured: !!c.env.ANTHROPIC_API_KEY, ...(await estadoRemitos(c.env.DB)) },
   });
 });
 // La dirección a la que Finnegans avisa cuando se crea un pedido de venta (hooks.ts, /hooks/finnegans/<llave>). Solo
@@ -2261,3 +2266,14 @@ api.put('/webhooks', async (c) => {
   await c.env.DB.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('webhooks', ?)").bind(JSON.stringify(hooks)).run();
   return c.json(hooks);
 });
+
+// Cuántos remitos hay en cada estado y cuándo se leyó el último (Configuración → Integraciones), por índices: la foto va
+// en el medio de la fila y un SUM sobre la tabla la leía entera (auditoría del 19/11/2026).
+async function estadoRemitos(db: D1Database) {
+  const [porEstado, ultimo] = await db.batch([
+    db.prepare('SELECT estado, COUNT(*) AS n FROM remitos GROUP BY estado'),
+    db.prepare('SELECT MAX(leido_at) AS at FROM remitos'),
+  ]);
+  const n = (e: string) => (porEstado.results as Array<{ estado: string; n: number }>).find((x) => x.estado === e)?.n ?? 0;
+  return { sin_leer: n('sin_leer'), revisar: n('revisar'), leidos: n('ok'), at: (ultimo.results[0] as { at: string | null } | undefined)?.at ?? null };
+}

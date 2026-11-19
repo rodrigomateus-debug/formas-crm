@@ -174,8 +174,7 @@ export async function registrarEvento(env: Env, user: User, e: GEvent, cfg: Cale
 
 export async function syncCalendar(env: Env, user: User, cfg: CalendarConfig, b: Budget = Budget.of(env)) {
   const db = env.DB;
-  b.take();
-  const token = await serviceToken(env, user.email, CALENDAR_SCOPE);
+  const token = await serviceToken(env, user.email, CALENDAR_SCOPE, { guardar: true, budget: b });
   const stateKey = `calendar_state:${user.email}`;
   const state = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(stateKey).first<{ value: string }>();
   const prev = state ? (JSON.parse(state.value) as { after: string }) : null;
@@ -281,7 +280,7 @@ export async function limpiarGrupales(env: Env, ctx: Ctx, aplicar: boolean) {
   const fuera = JSON.stringify(grupales.map((r) => r.id));
   // Lo que le queda a un registro sin esas reuniones: actividades, negocios, pedidos (y, a una empresa, contactos).
   const queda = (tipo: string) => db.prepare(`SELECT r.id, r.name,
-      (SELECT COUNT(*) FROM activity_links l JOIN activities a ON a.id = l.activity_id AND a.archived = 0
+      (SELECT COUNT(*) FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id AND a.archived = 0
         WHERE l.record_id = r.id AND a.id NOT IN (SELECT value FROM json_each(?1))) AS acts,
       (SELECT COUNT(*) FROM associations x JOIN records o ON o.id = x.to_id AND o.archived = 0 WHERE x.from_id = r.id AND x.to_type IN ('deal', 'order')) AS negocios,
       (SELECT COUNT(*) FROM associations x JOIN records o ON o.id = x.to_id AND o.archived = 0 AND o.source != 'calendar'

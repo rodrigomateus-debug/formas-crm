@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
 import { InfoTip, Modal, QuienPidio, alEsc } from '../components';
@@ -7,7 +7,8 @@ import { SelectorFecha } from '../Fecha';
 import { lindo } from './Cronograma';
 import { marcaProveedor } from '../proveedores';
 import { ZONAS, nombreZona, type Zona } from '../zonas';
-import { DestinosTab } from './RecorridosDestinos';
+// La pestaña Destinos trae el mapa (Leaflet) y la lista de localidades: se baja recién al abrirla (auditoría del 19/11/2026).
+const DestinosTab = lazy(() => import('./RecorridosDestinos').then((m) => ({ default: m.DestinosTab })));
 
 // Recorridos (pedido de Rodrigo del 13/11/2026; src/worker/recorridos.ts, docs/RECORRIDOS.md): reemplaza la planilla
 // «Recorridos» de Logística. Cualquiera carga un encargo al recorrido de un día —llevar o retirar muestras, un sobre,
@@ -107,7 +108,7 @@ export default function RecorridosPage() {
       </div>
       {tab === 'agenda' && <Agenda version={version} puede={puede} onNuevo={(destino, fecha) => setNuevo({ destino, fecha })} onAbrir={(id) => ir({ encargo: String(id) })} />}
       {tab === 'encargos' && <ListaEncargos version={version} onAbrir={(id) => ir({ encargo: String(id) })} />}
-      {tab === 'destinos' && <DestinosTab slot={slot} admin={meta.me.role === 'admin' ? <AdminRecorridos abierto /> : null} />}
+      {tab === 'destinos' && <Suspense fallback={<Cargando />}><DestinosTab slot={slot} admin={meta.me.role === 'admin' ? <AdminRecorridos abierto /> : null} /></Suspense>}
       {nuevo && <EncargoModal inicial={nuevo} onClose={() => { setNuevo(null); ir({ nuevo: null }); }} onListo={() => { setNuevo(null); ir({ nuevo: null }); cambio(); }} />}
       {abierto && <EncargoModal id={abierto} onClose={() => ir({ encargo: null })} onListo={() => { ir({ encargo: null }); cambio(); }} />}
     </div>

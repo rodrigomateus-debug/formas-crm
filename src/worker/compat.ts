@@ -96,7 +96,7 @@ async function recordOut(db: D1Database, rows: RecordRow[], wanted: string[] | n
       `SELECT l.record_id AS id, MAX(CASE WHEN a.type = 'email' AND a.direction = 'out' THEN a.occurred_at END) AS em,
          MAX(CASE WHEN a.type = 'call' THEN a.occurred_at END) AS ca, MAX(CASE WHEN a.type = 'meeting' THEN a.occurred_at END) AS me,
          SUM(a.type IN ('email', 'call', 'meeting', 'whatsapp')) AS contacted
-       FROM activity_links l JOIN activities a ON a.id = l.activity_id AND a.archived = 0 WHERE l.record_id IN (SELECT value FROM json_each(?)) GROUP BY l.record_id`,
+       FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id AND a.archived = 0 WHERE l.record_id IN (SELECT value FROM json_each(?)) GROUP BY l.record_id`,
     ).bind(JSON.stringify(rows.map((r) => r.id))).all<{ id: number; em: string; ca: string; me: string; contacted: number }>();
     for (const r of last.results) Object.assign(extra.get(r.id) ?? extra.set(r.id, {}).get(r.id)!, {
       hs_last_logged_outgoing_email_date: r.em, hs_last_logged_call_date: r.ca, hs_last_booked_meeting_date: r.me, num_contacted_notes: r.contacted,
@@ -227,16 +227,28 @@ async function searchActivities(db: D1Database, type: ActivityRow['type'], body:
   const sort = (body.sorts?.[0] ?? {}) as { propertyName?: string; direction?: string };
   const sortCol = ACT_COL[sort.propertyName ?? 'hs_timestamp'] ?? ACT_COL.hs_timestamp;
   const limit = Math.min(Number(body.limit) || 10, 200);
-  const offset = Number(body.after) || 0;
+  const asc = sort.direction === 'ASCENDING';
+  // Por fecha (el orden de siempre), «after» es «c:<fecha>~<id>» del último de la página anterior y la siguiente arranca
+  // ahí, sin saltear las anteriores; un número sigue siendo una posición (como en los registros, auditoría del 19/11/2026).
+  // Solo con órdenes que nunca están vacíos (la fecha de la actividad o el vencimiento de la tarea).
+  const porFecha = sortCol === ACT_COL.hs_timestamp || sortCol === 'a.occurred_at';
+  const cursor = porFecha && typeof body.after === 'string' ? /^c:(.+)~(\d+)$/.exec(body.after) : null;
+  const offset = cursor ? 0 : Number(body.after) || 0;
+  const whereLista = cursor ? `${where} AND (${sortCol} ${asc ? '>' : '<'} ? OR (${sortCol} = ? AND a.id > ?))` : where;
+  const bindsLista = cursor ? [...binds, cursor[1], cursor[1], Number(cursor[2])] : binds;
   const [list, count] = await db.batch([
-    db.prepare(`SELECT a.* FROM activities a WHERE ${where} ORDER BY ${sortCol} ${sort.direction === 'ASCENDING' ? 'ASC' : 'DESC'}, a.id LIMIT ${limit} OFFSET ${offset}`).bind(...binds),
+    db.prepare(`SELECT a.*, ${sortCol} AS orden_cursor FROM activities a WHERE ${whereLista} ORDER BY ${sortCol} ${asc ? 'ASC' : 'DESC'}, a.id LIMIT ${limit} OFFSET ${offset}`).bind(...bindsLista),
     db.prepare(`SELECT COUNT(*) AS n FROM activities a WHERE ${where}`).bind(...binds),
   ]);
   const total = (count.results[0] as { n: number }).n;
+  const filas = list.results as unknown as Array<ActivityRow & { orden_cursor: string }>;
+  const ultima = filas[filas.length - 1];
+  const hayMas = cursor ? filas.length === limit : offset + limit < total;
+  const siguiente = porFecha && ultima ? `c:${ultima.orden_cursor}~${ultima.id}` : String(offset + limit);
   return {
     total,
-    results: (list.results as unknown as ActivityRow[]).map((a) => activityOut(a, body.properties ?? null, om)),
-    ...(offset + limit < total ? { paging: { next: { after: String(offset + limit) } } } : {}),
+    results: filas.map((a) => activityOut(a, body.properties ?? null, om)),
+    ...(hayMas ? { paging: { next: { after: siguiente } } } : {}),
   };
 }
 
@@ -289,6 +301,9 @@ compat.get('/crm/v3/properties/:objectType', async (c) => {
   });
 });
 
+// Desde acá, «after» es un id (los de HubSpot y los propios son de miles de millones); por debajo, una posición.
+const CURSOR_DESDE = 1_000_000;
+
 compat.post('/crm/v3/objects/:objectType/search', async (c) => {
   const t = c.req.param('objectType');
   const body = await c.req.json<Record<string, any>>();
@@ -300,15 +315,31 @@ compat.post('/crm/v3/objects/:objectType/search', async (c) => {
   const sortProp = typeof sort === 'string' ? sort.replace(/^-/, '') : sort.propertyName;
   const dir = typeof sort === 'string' ? (sort.startsWith('-') ? 'desc' : 'asc') : sort.direction === 'DESCENDING' ? 'desc' : 'asc';
   const limit = Math.min(Number(body.limit) || 10, 200);
-  const offset = Number(body.after) || 0;
-  const res = await searchRecords(c.env.DB, c.get('ctx'), type, {
-    q: body.query, groups, sort: sortProp ? (ALIAS[sortProp] ?? sortProp) : 'hs_object_id', dir: sortProp ? dir : 'asc', limit, offset,
-  });
-  const rows = await Promise.all(res.results.map((r) => getRow(c.env.DB, r.id)));
+  // Sin un orden pedido (por id, lo que usan los tableros para recorrer todo), «after» es el último id de la página anterior
+  // y la siguiente arranca ahí, por la clave: antes era una posición y cada página salteaba (y ordenaba) todas las
+  // anteriores, más de 1 s en el fondo de la lista (auditoría del 19/11/2026). Un número chico sigue siendo una posición,
+  // así los recorridos que estaban en curso al publicar siguen andando.
+  const after = Number(body.after) || 0;
+  const porClave = !sortProp && after >= CURSOR_DESDE;
+  const offset = porClave ? 0 : after;
+  const desde = porClave ? [{ prop: 'hs_object_id', op: 'gt' as const, value: after }] : [];
+  const params = { q: body.query, sort: sortProp ? (ALIAS[sortProp] ?? sortProp) : 'hs_object_id', dir: (sortProp ? dir : 'asc') as 'asc' | 'desc', limit, offset };
+  const res = await searchRecords(c.env.DB, c.get('ctx'), type, porClave
+    ? { ...params, groups: groups.length ? groups.map((g) => [...g, ...desde]) : [desde], noCount: true }
+    : { ...params, groups });
+  // El total es el de toda la búsqueda, no el de lo que queda después del cursor.
+  if (porClave) res.total = (await searchRecords(c.env.DB, c.get('ctx'), type, { ...params, groups, limit: 1, offset: 0 })).total;
+  // Las filas de la página en una sola consulta (antes, una por registro).
+  const ids = res.results.map((r) => r.id);
+  const { results: filas } = await c.env.DB.prepare('SELECT * FROM records WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<RecordRow>();
+  const porId = new Map(filas.map((f) => [f.id, f]));
+  const rows = ids.map((id) => porId.get(id)!).filter(Boolean);
+  const hayMas = sortProp ? offset + limit < res.total : porClave ? res.results.length === limit : offset + limit < res.total;
+  const siguiente = sortProp ? String(offset + limit) : ids.length ? String(ids[ids.length - 1]) : null;
   return c.json({
     total: res.total,
     results: await recordOut(c.env.DB, rows, body.properties?.length ? body.properties : null),
-    ...(offset + limit < res.total ? { paging: { next: { after: String(offset + limit) } } } : {}),
+    ...(hayMas && siguiente ? { paging: { next: { after: siguiente } } } : {}),
   });
 });
 

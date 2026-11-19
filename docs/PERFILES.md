@@ -127,10 +127,11 @@ Cuatro agentes (dos de Fable y dos de Opus) auditaron los perfiles y reprodujero
 
 Segunda tanda:
 
-- **Cada token sirve solo en su entrada** (`SUPERFICIE` en `src/worker/auth.ts`): el de Claude (tipo «mcp», también el que
-  da «Conectar con Claude» a cualquiera) solo en `/mcp`; el de Darwin (que viaja en la dirección del webhook y es de un
-  administrador) solo en `/hooks/darwin`. Antes con el de Claude una vendedora usaba `/hooks/bundle` y se hacía visibles
-  clientes ajenos. El token en la dirección (`?token=`) se acepta solo en `/hooks`.
+- **El token de «Conectar con Claude» sirve solo en `/mcp`** (`entradaDelToken` en `src/worker/auth.ts`): lo saca
+  cualquier usuario para sí mismo, y antes abría también `/api` y `/hooks` (con `/hooks/bundle` una vendedora se hacía
+  visibles clientes ajenos). El del webhook de Darwin (de un administrador, viaja en la dirección) sirve solo en
+  `/hooks/darwin`. Los que crea un administrador en Configuración → Integraciones siguen sirviendo donde se usan. El token
+  en la dirección (`?token=`) se acepta solo en `/hooks`.
 - **Ventas cambia y borra solo sus notas, mails y tareas** (las que tiene asignadas, cargó o colabora; la gerenta, las de su
   equipo), aunque vea las de otra en un registro que ve (`actividadSuyaVentas`).
 - **Filtros por datos de un asociado** («negocio.monto > X» en empresas): solo entre los asociados que ve quien busca.

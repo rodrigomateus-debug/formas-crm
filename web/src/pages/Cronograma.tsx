@@ -159,8 +159,16 @@ export default function CronogramaPage() {
       if (r.buscando > 0 && intento < 10) sondeoDirs.current = window.setTimeout(() => { if (n === pedidoDirs.current) void cargarDirs(intento + 1); }, 2500);
     } catch { /* sin direcciones: las tarjetas se ven igual */ }
   }, [semana]);
-  // Se piden cuando llega (o cambia) la semana: un chofer, un día o una dirección nuevos cambian las paradas.
-  useEffect(() => { if (datos?.desde === semana && vista === 'semana') void cargarDirs(); }, [datos, semana, vista, cargarDirs]);
+  // Se piden cuando llega (o cambia) la semana: un chofer, un día o una dirección nuevos cambian las paradas. El refresco
+  // de cada 2 minutos que trae lo mismo no las vuelve a pedir: eran unas 155 consultas cada vez (auditoría del 19/11/2026).
+  const firmaDirs = useRef('');
+  useEffect(() => {
+    if (datos?.desde !== semana || vista !== 'semana') return;
+    const firma = `${semana}|${JSON.stringify(datos)}`;
+    if (firma === firmaDirs.current) return;
+    firmaDirs.current = firma;
+    void cargarDirs();
+  }, [datos, semana, vista, cargarDirs]);
   useEffect(() => () => { pedidoDirs.current++; window.clearTimeout(sondeoDirs.current); }, []);
   // Lo que cambian en ClickUp llega cada 10 minutos: la pantalla se pone al día sola.
   useEffect(() => { const t = window.setInterval(() => { if (!document.hidden && !arrastre.current) void cargar(); }, 120_000); return () => window.clearInterval(t); }, [cargar]);

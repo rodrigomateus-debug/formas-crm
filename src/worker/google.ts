@@ -10,7 +10,23 @@ export function b64url(data: ArrayBuffer | string) {
   return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-export async function serviceToken(env: Env, subject: string, scope = 'https://www.googleapis.com/auth/gmail.readonly'): Promise<string> {
+// El acceso de Google dura una hora. Con `guardar` (las corridas de Gmail y Calendar, cada 10 minutos) se guarda en memoria
+// 50 minutos por persona y permiso: antes cada corrida pedía uno nuevo por buzón para Gmail y otro para Calendar, y eso se
+// comía un tercio del tope de consultas de la corrida (auditoría del 19/11/2026). `budget`: se descuenta solo si de verdad
+// hay que pedirlo.
+const accesos = new Map<string, { token: string; hasta: number }>();
+export async function serviceToken(env: Env, subject: string, scope = 'https://www.googleapis.com/auth/gmail.readonly',
+  opts: { guardar?: boolean; budget?: { take(): void } } = {}): Promise<string> {
+  const clave = `${env.GOOGLE_TOKEN_URL ?? ''}|${subject}|${scope}`;
+  const guardado = opts.guardar ? accesos.get(clave) : undefined;
+  if (guardado && guardado.hasta > Date.now()) return guardado.token;
+  opts.budget?.take();
+  const token = await pedirAcceso(env, subject, scope);
+  if (opts.guardar) accesos.set(clave, { token, hasta: Date.now() + 50 * 60_000 });
+  return token;
+}
+
+async function pedirAcceso(env: Env, subject: string, scope: string): Promise<string> {
   const sa = JSON.parse(env.GOOGLE_SA_JSON!) as { client_email: string; private_key: string; token_uri?: string };
   const pem = sa.private_key.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
   const der = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));

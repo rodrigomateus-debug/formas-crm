@@ -6,7 +6,8 @@ import {
   CARRILES, carrilDe, cantidad, diaCorto, diaLargo, lindo, lunesDe, sumar, tarjetas, NuevoTransportista,
   type Mov, type Tarjeta, type Tipo, type Vista,
 } from '../pages/Cronograma';
-import { MOTIVO, hechaParada, type Datos as Ruta, type Parada } from '../pages/CronogramaRuta';
+import type { Datos as Ruta, Parada } from '../pages/CronogramaRuta';
+import { MOTIVO, hechaParada } from '../pages/rutaComun';
 import { ESTADO as ESTADO_ENC, itemTexto, resumen, hoyIso, type Encargo } from '../pages/Recorridos';
 import type { Remito } from '../pages/Remitos';
 import { ChoferesPanel } from '../pages/Choferes';

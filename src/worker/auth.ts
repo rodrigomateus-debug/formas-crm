@@ -21,12 +21,16 @@ export async function userFromToken(env: Env, token: string): Promise<{ user: Us
   if (!token.startsWith('fcrm_')) return null;
   const hash = await sha256(token);
   const row = await env.DB.prepare(
-    `SELECT t.id AS token_id, t.source, t.name AS token_name, t.client_id AS token_cliente, u.* FROM api_tokens t JOIN users u ON u.id = t.user_id
+    `SELECT t.id AS token_id, t.source, t.name AS token_name, t.client_id AS token_cliente, t.last_used_at AS token_uso, u.* FROM api_tokens t JOIN users u ON u.id = t.user_id
      WHERE t.token_hash = ? AND t.revoked = 0 AND u.active = 1 AND (t.expires_at IS NULL OR t.expires_at > ?)`,
-  ).bind(hash, new Date().toISOString()).first<User & { token_id: number; source: string; token_name: string; token_cliente: string | null }>();
+  ).bind(hash, new Date().toISOString()).first<User & { token_id: number; source: string; token_name: string; token_cliente: string | null; token_uso: string | null }>();
   if (!row) return null;
-  await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').bind(new Date().toISOString(), row.token_id).run();
-  const { token_id, source, token_name, token_cliente, ...user } = row;
+  // «Último uso», como mucho una vez cada 10 minutos: antes era una escritura por pedido (la app del chofer pregunta cada
+  // 20 s, los tableros recorren cientos de páginas) en una base que escribe de a una cosa por vez.
+  if (!row.token_uso || Date.parse(row.token_uso) < Date.now() - 10 * 60_000) {
+    await env.DB.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').bind(new Date().toISOString(), row.token_id).run();
+  }
+  const { token_id, source, token_name, token_cliente, token_uso, ...user } = row;
   return { user: user as User, source, name: token_name, tokenId: token_id, conector: !!token_cliente };
 }
 

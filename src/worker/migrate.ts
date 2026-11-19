@@ -271,9 +271,9 @@ migrate.post('/', async (c) => {
       const ts = now();
       await db.prepare(`UPDATE records SET
         last_activity_at = ${ultimaActividadSql('?1')},
-        last_contacted_at = (SELECT MAX(a.occurred_at) FROM activities a JOIN activity_links l ON l.activity_id = a.id
+        last_contacted_at = (SELECT MAX(a.occurred_at) FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
           WHERE l.record_id = records.id AND a.archived = 0 AND a.type IN ('email', 'call', 'meeting', 'whatsapp') AND a.occurred_at <= ?1 AND (a.type != 'email' OR a.direction = 'out')),
-        next_activity_at = (SELECT MIN(COALESCE(a.due_at, a.occurred_at)) FROM activities a JOIN activity_links l ON l.activity_id = a.id
+        next_activity_at = (SELECT MIN(COALESCE(a.due_at, a.occurred_at)) FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
           WHERE l.record_id = records.id AND a.archived = 0 AND ((a.type = 'task' AND a.status != 'COMPLETED') OR (a.type = 'meeting' AND a.occurred_at > ?1)))
         WHERE id IN (SELECT value FROM json_each(?2))`).bind(ts, JSON.stringify(results.map((r) => r.id))).run();
       return c.json({ done: !!body.ids || results.length < limit, next: (body.offset ?? 0) + results.length });

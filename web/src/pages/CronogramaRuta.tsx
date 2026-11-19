@@ -9,6 +9,8 @@ import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destin
 import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, type Mov, type Tipo } from './Cronograma';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
+import { MOTIVO, hechaParada } from './rutaComun';
+export { MOTIVO, hechaParada };
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -31,7 +33,6 @@ export interface Parada {
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
 }
-export const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontró la dirección', rechazo: 'No lo quisieron recibir', no_listo: 'No estaba listo', otro: 'No se pudo' };
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 // `a_mano`: alguien movió sus paradas. Si no, se ordena solo por el recorrido más corto (igual que en el servidor y en la
 // app del chofer): así quedan los que se arman eligiendo el chofer desde las tarjetas de la semana.
@@ -55,7 +56,6 @@ const ROUTER = 'https://router.project-osrm.org/route/v1/driving/';
 const punto = (p: { lat: number | null; lng: number | null } | undefined | null) => (p && p.lat != null && p.lng != null ? { lat: p.lat, lng: p.lng } : null);
 
 // Una parada está hecha cuando están hechos sus movimientos de ClickUp y sus encargos (una sin nada para hacer, no).
-export const hechaParada = (p: Pick<Parada, 'movimientos' | 'encargos'>) => p.movimientos.length + (p.encargos?.length ?? 0) > 0 && p.movimientos.every((m) => m.hecho) && (p.encargos ?? []).every((e) => e.estado === 'hecho');
 // De dónde salió la dirección, cuando no es la del pedido: se dice en la tarjeta si es una suposición.
 const ORIGEN_DUDOSO: Partial<Record<NonNullable<Parada['origen']>, string>> = { ultima_entrega: 'de la última entrega', libreta: 'de la libreta' };
 

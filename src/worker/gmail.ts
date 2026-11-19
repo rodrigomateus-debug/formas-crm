@@ -104,8 +104,10 @@ export async function openDealOf(db: D1Database, contactId: number) {
 export async function syncMailbox(env: Env, user: User, cfg: GmailConfig, b: Budget = Budget.of(env)) {
   const db = env.DB;
   const api = env.GMAIL_API_URL ?? 'https://gmail.googleapis.com';
+  // El acceso se guarda 50 minutos (google.ts), pero en Gmail se sigue contando en el tope de la corrida: así cada corrida
+  // pide como mucho 43 mails, como siempre (test/gmail.test.mjs).
   b.take();
-  const token = await serviceToken(env, user.email);
+  const token = await serviceToken(env, user.email, undefined, { guardar: true });
   const stateKey = `gmail_state:${user.email}`;
   const state = await db.prepare('SELECT value FROM settings WHERE key = ?').bind(stateKey).first<{ value: string }>();
   const prev = state ? (JSON.parse(state.value) as { after: number; seen_ids?: Array<[string, number]> }) : null;

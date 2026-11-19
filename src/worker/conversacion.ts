@@ -101,7 +101,7 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
     db.prepare(`SELECT id, numero, estado, origen, chofer, subido_por, created_at FROM remitos
       WHERE record_id = ? AND created_at > ? AND estado NOT IN ('duplicado', 'descartado') ORDER BY id DESC LIMIT 100`).bind(recordId, desde),
     db.prepare(`SELECT a.id, a.type, a.subject, substr(a.body, 1, 600) AS body, a.direction, a.status, a.due_at, a.occurred_at, a.created_at, a.owner_id, a.created_by
-      FROM activities a JOIN activity_links l ON l.activity_id = a.id AND l.record_id = ?
+      FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id AND l.record_id = ?
       WHERE a.archived = 0 AND (CASE WHEN a.type = 'task' THEN a.created_at ELSE a.occurred_at END) > ?
       ORDER BY a.id DESC LIMIT 150`).bind(recordId, desde),
     db.prepare('SELECT user_id, leido_hasta, siguiendo, motivo FROM conversacion_participantes WHERE record_id = ?').bind(recordId),

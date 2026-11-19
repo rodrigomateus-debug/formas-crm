@@ -1,20 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, esOperaciones, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
+import { http, qs, useMeta, Cargando, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, esOperaciones, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
 import { Avatar, CreateRecord, Modal, UserChip } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
 import RecordPage from './pages/RecordPage';
 import Tasks from './pages/Tasks';
-import Settings from './pages/Settings';
-import RemitosPage from './pages/Remitos';
-import ProduccionPage from './pages/Produccion';
-import CronogramaPage from './pages/Cronograma';
-import RecorridosPage from './pages/Recorridos';
-import AnaliticasPage, { analiticasDe } from './pages/Analiticas';
-import NotasProductosPage from './pages/NotasProductos';
-import ChoferesPage from './pages/Choferes';
+import { analiticasDe } from './pages/analiticasTemas';
+// Las pantallas que no son de todos los días se bajan al abrirlas (auditoría del 19/11/2026: el arranque bajaba todo el
+// escritorio, con Configuración, Producción, Cronograma, Recorridos y Entregas).
+const Settings = lazy(() => import('./pages/Settings'));
+const RemitosPage = lazy(() => import('./pages/Remitos'));
+const ProduccionPage = lazy(() => import('./pages/Produccion'));
+const CronogramaPage = lazy(() => import('./pages/Cronograma'));
+const RecorridosPage = lazy(() => import('./pages/Recorridos'));
+const AnaliticasPage = lazy(() => import('./pages/Analiticas'));
+const NotasProductosPage = lazy(() => import('./pages/NotasProductos'));
+const ChoferesPage = lazy(() => import('./pages/Choferes'));
 import ConversacionesPage, { useNoLeidas } from './pages/Conversacion';
 import { TEMAS, useTema } from './theme';
 import { BotonConectarClaude } from './ConectarClaude';
@@ -33,8 +36,13 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
   // Antes de dibujar la pantalla nueva: así cada lista sabe si se vuelve a ella desde una ficha o se entra de cero.
   registrarRuta(loc.pathname);
   useEffect(() => setMenu(false), [loc.pathname]);
+  // Los globitos del menú (tareas para hoy, remitos para revisar): al cambiar de pantalla, pero como mucho una vez por
+  // minuto. Antes eran dos consultas en cada navegación (auditoría del 19/11/2026).
+  const contados = useRef({ tareas: 0, remitos: 0 });
+  const toca = (k: 'tareas' | 'remitos') => { if (Date.now() - contados.current[k] < 60_000) return false; contados.current[k] = Date.now(); return true; };
   const [tasks, setTasks] = useState<number | null>(null);
   useEffect(() => {
+    if (!toca('tareas')) return;
     http<{ total: number }>('GET', `/tasks${qs({ due: 'today', limit: 1 })}`).then((r) => setTasks(r.total)).catch(() => {});
   }, [loc.pathname]);
   // Remitos para revisar (bandeja de Logística, pestaña «Entregas»).
@@ -45,6 +53,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
   const logistica = meta.me.profile === 'logistica';   // la barra lateral de Logística suma Choferes
   useEffect(() => {
     if (ventas) { setRemitos(null); return; }
+    if (!toca('remitos')) return;
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
   }, [loc.pathname, ventas]);
 
@@ -108,6 +117,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
           {puedeVolver && <button type="button" className="btn" onClick={() => usarVersionCompleta(false)}>Versión celular</button>}
           <CreateMenu />
         </header>
+        <Suspense fallback={<Cargando />}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/tasks" element={<Tasks />} />
@@ -127,6 +137,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
           <Route path="/:objectPath" element={produccion ? <SoloPedidos /> : <ObjectIndex />} />
           <Route path="/:objectPath/:id" element={<RecordPage />} />
         </Routes>
+        </Suspense>
         {/* Al pie: la barra de las vistas (BarraVista en vistas.tsx) se dibuja acá cuando la pantalla tiene vistas. */}
         <div id="barra-vista" />
       </div>

@@ -908,8 +908,12 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   for (const p of lista_) { const x = visitas.get(p.clave); p.visita = x ? { resultado: x.resultado, motivo: x.motivo, nota: x.nota, chofer: x.chofer, at: x.at } : null; }
   // Las fotos del remito de cada parada (pedido de Rodrigo del 16/11/2026): las que el chofer sacó desde esa parada y, en
   // una entrega, también las que mandó ese día con el botón general y se ataron a su pedido.
-  const fotos = (await db.prepare(`SELECT id, parada, record_id FROM remitos WHERE estado != 'descartado'
-      AND (fecha_parada = ?1 OR (origen = 'chofer' AND substr(datetime(created_at, '-3 hours'), 1, 10) = ?1))`).bind(fecha)
+  // Dos búsquedas por índice (la parada del día, y lo que mandó el chofer ese día en hora de Buenos Aires): con el OR y la
+  // fecha calculada recorría todos los remitos, y con ellos sus fotos, en cada carga (auditoría del 19/11/2026).
+  const manana = new Date(Date.parse(`${fecha}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const fotos = (await db.prepare(`SELECT id, parada, record_id FROM remitos WHERE fecha_parada = ?1 AND estado != 'descartado'
+      UNION SELECT id, parada, record_id FROM remitos WHERE origen = 'chofer' AND created_at >= ?2 AND created_at < ?3 AND estado != 'descartado'`)
+    .bind(fecha, `${fecha}T03:00:00`, `${manana}T03:00:00`)
     .all<{ id: number; parada: string | null; record_id: number | null }>()).results;
   for (const p of lista_) {
     const pedidos = new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!));

@@ -46,4 +46,6 @@ OAuth 2.1 como lo piden los conectores remotos de Claude:
 - Tablas: `oauth_clientes`, `oauth_codigos` y columnas nuevas en `api_tokens` (migración 0046).
 - `wrangler.jsonc`: `/conectar/*` y `/.well-known/*` van primero al Worker (si no, se sirve la pantalla del CRM).
 - Los links con token (`/mcp/fcrm_…`, Configuración → Integraciones) siguen andando para Cowork y scripts.
+- El token que entrega este flujo sirve solo en `/mcp` (auditoría del 19/11/2026, `entradaDelToken` en `auth.ts`): no abre
+  `/api`, `/hooks` ni la API compatible con HubSpot, aunque sea del mismo usuario.
 - Prueba: `test/claude.test.mjs`.

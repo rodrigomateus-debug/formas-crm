@@ -133,6 +133,9 @@ export default {
         // movimiento, de a 15 por corrida (cada una es una consulta a Claude).
         const horaUtc = new Date(event.scheduledTime).getUTCHours();
         if (horaUtc >= 3 && horaUtc < 9) await safe(() => resumirPendientes(env, { budget: b, max: 15 }));
+        // Una vez por día (a las 4:25 de Buenos Aires), las estadísticas de la base: sin ellas SQLite elegía mal algunos
+        // índices (las tareas abiertas recorrían todas las tareas; auditoría del 19/11/2026). Si D1 no lo permite, no pasa nada.
+        if (horaUtc === 7 && turno === 2) await safe(() => env.DB.prepare('PRAGMA optimize').run());
         await safe(() => syncAll(env, b));
         await safe(() => syncCalendars(env, b));   // reuniones de Google Calendar (calendar.ts)
       }

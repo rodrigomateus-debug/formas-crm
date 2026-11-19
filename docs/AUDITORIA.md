@@ -23,6 +23,26 @@ Pruebas: `test/datos.test.mjs` (los 6 casos fallan con el código anterior).
 | La sincronización con HubSpot reactivaba a los usuarios desactivados en el CRM (y sus tokens volvían a servir), devolvía registros a usuarios eliminados, y un contacto y una empresa con el mismo número de HubSpot terminaban en un solo registro. | No toca `active`; ignora a los eliminados (queda el propietario del CRM); solo pisa un registro del mismo tipo; rechaza ids desde 900000000001 (`rechazados` en la respuesta). | `migrate.ts` |
 | Editar una propiedad archivada la desarchivaba. | Queda como estaba si no se manda `archived`. | `api.ts` |
 
+## Rendimiento
+
+Medido con datos inventados al volumen de 5 años (60.000 contactos, 40.000 negocios, 400.000 actividades). Pruebas:
+`test/paginas.test.mjs` y la suite completa.
+
+| Qué pasaba | Qué cambió | Dónde |
+|---|---|---|
+| Cada nota, mail o negocio nuevo recalculaba «Último contacto» recorriendo todos los mails de la base (SQLite elegía el índice por tipo): 1,3 s por nota y 2,5 s por negocio a 5 años, con la base sin aceptar otras escrituras. | Las consultas arrancan por los vínculos del registro (`activity_links l CROSS JOIN activities a`). 200 registros: de 2.411 ms a 6 ms. Lo mismo en el tablero de negocios, la conversación, el calendario, Claude y la migración. | `records.ts`, `api.ts` y otros |
+| El contador de tareas (en cada cambio de pantalla), Inicio y el resumen diario recorrían todas las tareas. | Índice parcial de tareas abiertas: 25 usuarios, de 256 ms a 0,2 ms. El contador del menú y el de remitos, como mucho una vez por minuto. | migración 0093, `App.tsx` |
+| La campanita (cada 45 s) contaba todos los avisos de cada uno. | Índice de no leídos. | migración 0093 |
+| Las fotos de los remitos están en la base, en el medio de la fila: el Cronograma (cada 2 minutos) y Configuración recorrían la tabla y con ella las fotos. | Consultas por índice (`UNION` por parada y por día del chofer; conteo por estado). | `cronograma.ts`, `api.ts`, migración 0093 |
+| El Cronograma volvía a pedir las direcciones (unas 155 consultas) en cada refresco de 2 minutos. | Solo si cambió algo. | `Cronograma.tsx` |
+| Las listas ordenaban todo el tipo en cada página (`IS NULL` delante del orden). | Sin el `IS NULL` en columnas que nunca están vacías: la lista por defecto usa el índice. | `searchRecords` en `records.ts` |
+| API de los tableros: cada página salteaba (y ordenaba) todas las anteriores, contaba todo y hacía una consulta por registro. | «after» es el último id (en actividades, fecha~id) y la página siguiente arranca ahí; las filas en una sola consulta. Un número chico sigue siendo una posición. | `compat.ts` |
+| Exportar recontaba en cada tanda y se cortaba en 20.000 sin avisar. | Cuenta una vez; si quedan más, la última fila lo dice. | `api.ts` |
+| Cada pedido con token escribía «último uso» (la app del chofer pregunta cada 20 s). | Como mucho una vez cada 10 minutos. | `auth.ts` |
+| Gmail y Calendar pedían un acceso nuevo a Google por buzón en cada corrida. | Se guarda 50 minutos. Calendar ya no lo descuenta del tope de la corrida (Gmail sí, para no cambiar cuántos mails lee por corrida). | `google.ts` |
+| No se actualizaban las estadísticas de la base. | `PRAGMA optimize` una vez por día (si D1 no lo permite, no corta nada). | `index.ts` |
+| La pantalla bajaba todo el escritorio al abrir, con el mapa (Leaflet) y la lista de localidades, también en el celular; los assets se volvían a pedir en cada apertura. | Configuración, Producción, Cronograma, Recorridos, Entregas, Analíticas, Notas de productos y Choferes se bajan al abrirlas; el mapa solo en Destinos y la Ruta del día. Assets con caché de un año (`web/public/_headers`). Arranque: de 337 a 214 kB comprimidos en computadora y de 312 a 193 kB en el celular. | `App.tsx`, `Recorridos.tsx`, `rutaComun.ts`, `analiticasTemas.ts` |
+
 ## Pruebas locales
 
 Las pruebas del cronograma usan días fijos (17/11/2026): con muchas corridas sobre la misma base local se acumulan

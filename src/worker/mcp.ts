@@ -384,7 +384,7 @@ const TOOLS: Tool[] = [
         const dia = a.fecha ? new Date(String(a.fecha)) : new Date();
         if (Number.isNaN(dia.getTime())) throw new HttpError(400, '"fecha" no es una fecha válida.');
         // La reunión de ese día en el registro (o en sus contactos, si es una empresa o un negocio), la más cercana.
-        const r = await db.prepare(`SELECT a.id FROM activities a JOIN activity_links l ON l.activity_id = a.id
+        const r = await db.prepare(`SELECT a.id FROM activity_links l CROSS JOIN activities a ON a.id = l.activity_id
             WHERE a.type = 'meeting' AND a.archived = 0 AND l.record_id = ?1 AND a.occurred_at BETWEEN ?2 AND ?3
             ORDER BY abs(julianday(a.occurred_at) - julianday(?4)) LIMIT 1`)
           .bind(Number(a.record_id), new Date(dia.getTime() - 86_400_000).toISOString(), new Date(dia.getTime() + 86_400_000).toISOString(), dia.toISOString()).first<{ id: number }>();

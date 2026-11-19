@@ -2756,3 +2756,12 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 @media (prefers-reduced-motion: reduce) {
   .chispin::before, .chispin-bicho, .chispin-cuerpo, .chispin-ojo, .chispin-antena, .chispin-lampara, .chispin-zzz i, .chispin-n, .chispin-globo, .chispin-panel, .chispin-idea, .chispin-mano { animation: none !important; }
 }
+
+/* «Cargar en un producto» sobre las imágenes de la conversación (CargarAdjunto.tsx): aparece al pasar el mouse. */
+.msg-img-caja { position: relative; display: block; min-width: 0; }
+.msg-imagenes:not(.una) .msg-img { width: 100%; }
+.msg-imagenes.una .msg-img-caja { display: inline-block; max-width: 100%; vertical-align: top; }
+.msg-img-cargar { position: absolute; top: 6px; right: 6px; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--ui-line); border-radius: 6px;
+  background: var(--ui-surface); color: var(--ui-ink); cursor: pointer; opacity: 0; transition: opacity .12s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
+.msg-img-caja:hover .msg-img-cargar, .msg-img-cargar:focus-visible { opacity: 1; }
+@media (hover: none) { .msg-img-cargar { opacity: 1; } }

@@ -81,7 +81,8 @@ export async function detectar(file: File, productos: ProductoRef[]) {
 }
 
 // Con XMLHttpRequest y no con fetch: es lo único que avisa cuánto se mandó del archivo, para mostrar el avance.
-function subir(type: ObjectType, recordId: number, p: Pendiente, onAvance: (pct: number) => void) {
+// También la usa «Cargar en un producto» de la conversación (CargarAdjunto.tsx).
+export function subir(type: ObjectType, recordId: number, p: Pendiente, onAvance: (pct: number) => void) {
   return new Promise<Boceto>((resolve, reject) => {
     const fd = new FormData();
     fd.append('archivo', p.file);

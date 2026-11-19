@@ -7,6 +7,7 @@ import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, Cr
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
+import { useCambioArchivos } from './CargarAdjunto';
 import { Select, useFloating } from '../Select';
 import { RemitosCard } from './Remitos';
 import { ConsultasCard } from './Consultas';
@@ -862,6 +863,8 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const sub = useSubirBocetos('order', recordId, productos, (s) => { cambio(); abrir(s[0], s); });
   // El logo original de cada producto (logos.ts): el elegido o el principal de la empresa.
   const lg = useLogos('order', recordId, empresas);
+  // Se cargó un boceto o un logo desde la conversación del pedido (CargarAdjunto.tsx).
+  useCambioArchivos(recordId, () => { bo.reload(); lg.reload(); onCambio?.(); });
   const bocetos = bo.data?.bocetos ?? [];
   const deProducto = (k: string) => bocetos.filter((b) => b.producto === k);
   const sinProducto = bocetos.filter((b) => !productos.some((p) => p.key === b.producto));

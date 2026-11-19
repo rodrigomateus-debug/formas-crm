@@ -143,7 +143,7 @@ con empresa principal, historia de etapas, notas, mails, llamadas, reuniones, ta
 | Darwin (WhatsApp) | Workflow de Darwin con 3 pasos de HubSpot (vía Pipedream) | Un solo paso `http-request` del workflow → `POST https://<crm>/hooks/darwin` con el evento entero. Y al ganar un negocio el CRM le avisa a Darwin. Paso a paso en [docs/DARWIN.md](docs/DARWIN.md). |
 | Prospección por LinkedIn | Zapier → HubSpot (~300 leads por mes, con perfiles duplicados) | La herramienta de LinkedIn → `POST https://<crm>/hooks/linkedin` directo, con token tipo «LinkedIn». Deduplica por URL del perfil. Zapier se da de baja. |
 | Cualquier otra | — | `POST https://<crm>/hooks/bundle` con `{ contact, company, deal, note, task, owner_email }`. |
-| Formularios web | Formularios de HubSpot | `POST https://<crm>/hooks/form/<nombre>`; cada formulario se configura con la clave `form:<nombre>` en `settings`. |
+| Formularios web | Formularios de HubSpot | `POST https://<crm>/hooks/form/<nombre>`; cada formulario se configura con la clave `form:<nombre>` en `settings`: `contact_defaults` (lo que se fija, como el canal), `campos` (propiedades que el visitante puede cargar además de las de contacto de siempre, `CAMPOS_FORMULARIO` en `hooks.ts`) y `redirects` (sitios a los que vuelve, además de los de Formas). |
 | Mails | Conexión de bandeja de HubSpot | Gmail: ver abajo. |
 | Tableros | API de HubSpot | Ver [docs/CAMBIO-TABLEROS.md](docs/CAMBIO-TABLEROS.md). |
 

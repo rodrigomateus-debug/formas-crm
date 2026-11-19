@@ -14,8 +14,19 @@ export const login = new Hono<App>();
 const DOMINIOS = (env: Env) => (env.LOGIN_DOMINIOS ?? 'formas.ar,formaspublicitarias.com,soutex.com.ar').split(',').map((d) => d.trim().toLowerCase()).filter(Boolean);
 const configurado = (env: Env) => !!(env.GOOGLE_OAUTH_CLIENT_ID && env.GOOGLE_OAUTH_CLIENT_SECRET && env.SESSION_SECRET);
 const COOKIE_IDA = 'crm_login';   // el estado del ida y vuelta a Google (10 minutos)
-// Solo se vuelve a una página del mismo CRM («/pedidos/123»), nunca a otro sitio.
-const volverSeguro = (v: string | null | undefined) => (v && /^\/(?!\/)/.test(v) && !v.startsWith('/auth/') && !v.startsWith('/login') ? v : '/');
+// Solo se vuelve a una página del mismo CRM («/pedidos/123»), nunca a otro sitio. El navegador toma «/\otro.com» (y con
+// tabulaciones o saltos de línea en el medio) como «//otro.com», otro sitio: se rechaza cualquier barra invertida o carácter
+// de control, y además se comprueba que la dirección armada siga en el mismo origen (auditoría del 19/11/2026).
+export const volverSeguro = (v: string | null | undefined) => {
+  if (!v || !v.startsWith('/') || v.startsWith('//') || /[\\\u0000-\u001f\u007f]/.test(v)) return '/';
+  if (v.startsWith('/auth/') || v.startsWith('/login')) return '/';
+  try {
+    const base = 'https://hub.invalid';
+    return new URL(v, base).origin === base ? v : '/';
+  } catch {
+    return '/';
+  }
+};
 const seguro = (req: Request) => new URL(req.url).protocol === 'https:';
 const cookie = (req: Request, nombre: string, valor: string, maxAge: number, path = '/') =>
   `${nombre}=${encodeURIComponent(valor)}; Path=${path}; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${seguro(req) ? '; Secure' : ''}`;

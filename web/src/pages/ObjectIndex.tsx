@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, useTransition } from 'r
 import { createPortal } from 'react-dom';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, Cargando, defaultPipeline, TagChips, vuelveALaLista,
+  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, precargar, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, fmtMoneyExact, recordUrl, Icon, Cargando, defaultPipeline, TagChips, vuelveALaLista,
   type Activity, type CrmRecord, type Filter, type ObjectType, unidadesDe, unidadDeEmpresa, origenUnidad, unidadDeEquipo, type UnidadKey,
 } from '../lib';
 import { Avatar, CreateRecord, Drawer, FilterRow, Modal, PropertyInput, StageSelect, describeFilter, filterableProps, opsFor } from '../components';
@@ -560,8 +560,8 @@ function IndexFor({ type }: { type: ObjectType }) {
             <button type="button" className={mode === 'board' ? 'on' : ''} aria-pressed={mode === 'board'} onClick={() => setMode('board')}><Icon name="board" size={14} />Tablero</button>
           </div>
         )}
-        {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). Exportar está en la barra de abajo. */}
-        {!esVentas(meta.me) && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
+        {/* Perfiles Ventas, Producción y Logística: no importan ni exportan listas (cuida la base de clientes). Exportar está en la barra de abajo. */}
+        {!esVentas(meta.me) && !esOperaciones(meta.me) && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
@@ -687,7 +687,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         onDescartar={() => applyView(activeView)} onGuardar={saveView} actual={current}
         onCreada={(id) => { views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }}
         crear={crear} setCrear={setCrear} onRecargar={() => { list.reload(); setBoardKey((k) => k + 1); }}
-        onExportar={esVentas(meta.me) ? undefined : exportCsv} onRenombrada={() => views.reload()} />
+        onExportar={esVentas(meta.me) || esOperaciones(meta.me) ? undefined : exportCsv} onRenombrada={() => views.reload()} />
     </div>
   );
 }

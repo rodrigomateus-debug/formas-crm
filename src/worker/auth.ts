@@ -169,7 +169,8 @@ export function esSuperadmin(env: Env, u: User) {
 // «Ver como» (pedido de Rodrigo del 12/11/2026): un superadmin, desde su sesión, mira el CRM como lo ve otro usuario
 // (sus pipelines, sus tareas, sus conversaciones, lo que puede y no puede hacer). La pantalla manda el id en la cabecera
 // x-ver-como en cada pedido. Solo con la sesión (Cloudflare Access o «Ingresar con Google»; nunca con un token) y solo para mirar: cualquier
-// cambio se rechaza (api.ts), así nada queda hecho a nombre del otro.
+// cambio se rechaza acá, para todo el CRM (la pantalla, la API compatible con HubSpot, «Conectar con Claude»),
+// así nada queda hecho a nombre del otro.
 async function verComo(env: Env, req: Request, ctx: Ctx): Promise<Ctx> {
   const v = req.headers.get('x-ver-como');
   if (!v) return ctx;
@@ -180,6 +181,9 @@ async function verComo(env: Env, req: Request, ctx: Ctx): Promise<Ctx> {
   const otro = Number.isInteger(id) && id > 0
     ? await env.DB.prepare('SELECT * FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL').bind(id).first<User>() : null;
   if (!otro) throw invalido('Ese usuario ya no está activo: volvés a tu usuario.');
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    throw new HttpError(403, `Estás viendo el CRM como ${otro.name}: es solo para mirar. Volvé a tu usuario para hacer cambios.`, { ver_como: true });
+  }
   return { ...ctx, user: otro, realUser: ctx.user };
 }
 

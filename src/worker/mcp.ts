@@ -397,6 +397,14 @@ const TOOLS: Tool[] = [
       }
       const cur = await getActivity(db, id);
       if (cur.type !== 'meeting') throw new HttpError(400, `La actividad ${id} no es una reunión.`);
+      // Como update_activity: salvo los administradores, solo una reunión que ve y que es suya (o que cargó). Si no, con el id
+      // de cualquier reunión se pisaba su resumen y se leían el asunto y la fecha (auditoría del 19/11/2026).
+      if (ctx.user.role !== 'admin') {
+        await assertActividadVisible(db, ctx.user, id);
+        if (cur.owner_id !== ctx.user.id && cur.created_by !== ctx.user.id) {
+          throw new HttpError(403, 'Esa reunión es de otra persona: desde Claude solo podés resumir tus reuniones. Pedile que lo cargue ella.');
+        }
+      }
       const act = await updateActivity(db, ctx, id, { meta: { resumen, resumen_de: fuente } });
       return { id: act.id, creada: false, subject: act.subject, occurred_at: act.occurred_at };
     },

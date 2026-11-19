@@ -50,24 +50,19 @@ import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcul
 type App = { Bindings: Env; Variables: { ctx: Ctx } };
 export const api = new Hono<App>();
 
-// Mirando como otro usuario («Ver como», auth.ts) no se cambia nada: ni datos, ni lo leído, ni lo que sigue.
-api.use('*', async (c, next) => {
-  const ctx = c.get('ctx');
-  if (ctx.realUser && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
-    throw new HttpError(403, `Estás viendo el CRM como ${ctx.user.name}: es solo para mirar. Volvé a tu usuario para hacer cambios.`, { ver_como: true });
-  }
-  await next();
-});
+// Mirando como otro usuario («Ver como») no se cambia nada: lo rechaza auth.ts (verComo) para todo el CRM, no solo /api.
 
 // Perfil Ventas (alcance.ts): sin Producción, Entregas, Cronograma, importar ni exportar (los remitos de sus pedidos sí los ve y los
 // baja, para mandárselos al cliente; revisarlos, cargarlos y cerrar entregas es de Logística); y cualquier ruta de un registro
 // (/records/<tipo>/<id>/…: la ficha, su historial, actividad, conversación, archivos, bocetos, productos, datos para
 // facturar, cambios, clonar, combinar, restaurar) solo si el registro es de ella, no tiene propietario o está asociado a lo suyo.
 const SIN_VENTAS: Array<[RegExp, string]> = [
-  [/\/produccion(\/|$)/, 'Producción'], [/\/(remitos|entrega|choferes)(\/|$)/, 'Entregas'], [/\/(import|export)\//, 'Importar y exportar listas'],
-  [/\/cronograma(\/|$)/, 'Cronograma'],
+  [/\/produccion(\/|$)/, 'Producción'], [/\/(remitos|entrega|choferes)(\/|$)/, 'Entregas'], [/\/cronograma(\/|$)/, 'Cronograma'],
 ];
-const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order)\/(\d+)(?:\/|$)/;
+// Cualquier ruta de un registro: /records/<tipo>/<id>/… El id tiene que ser un número tal cual («123»): «123.0», «+123» o
+// « 123» los toma igual Number() en cada ruta, pero no esta revisión, y así se salteaba el alcance (auditoría del 19/11/2026).
+const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order)\/([^/]*)/;
+const NO_ES_ID = new Set(['search', 'ids', 'batch']);   // /records/<tipo>/search, /ids y /batch
 const REMITOS_VENTAS = [/\/records\/order\/\d+\/remitos$/, /\/remitos\/\d+\/archivo$/];
 api.use('*', async (c, next) => {
   const ctx = c.get('ctx');
@@ -76,11 +71,15 @@ api.use('*', async (c, next) => {
     const sin = verRemitos ? undefined : SIN_VENTAS.find(([re]) => re.test(c.req.path));
     if (sin) sinVentas(ctx, sin[1]);
   }
+  // Importar y exportar listas: ni Ventas, ni Producción, ni Logística (cuida la base de clientes; si necesitan una lista,
+  // se la baja un administrador). Importar además crea y completa registros sin pasar por el alcance de cada perfil.
+  if (restringido(ctx.user) && /\/(import|export)\//.test(c.req.path)) throw new HttpError(403, `Importar y exportar listas no está en el perfil ${nombrePerfil(ctx.user)}.`);
   // Perfiles Producción y Logística: no crean negocios (no los ven).
   if (esOperaciones(ctx.user) && c.req.method === 'POST' && /\/records\/deal$/.test(c.req.path)) throw new HttpError(403, `Los negocios no están en el perfil ${nombrePerfil(ctx.user)}.`);
-  if (restringido(ctx.user)) {
-    const m = RUTA_REGISTRO.exec(c.req.path);
-    if (m) await registroVisible(c, Number(m[1]));
+  const m = RUTA_REGISTRO.exec(c.req.path);
+  if (m && !NO_ES_ID.has(m[1])) {
+    if (!/^\d{1,15}$/.test(m[1])) throw new HttpError(400, `«${m[1].slice(0, 40)}» no es un número de registro.`);
+    if (restringido(ctx.user)) await registroVisible(c, Number(m[1]));
   }
   await next();
 });
@@ -223,6 +222,9 @@ api.post('/records/:type', async (c) => {
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
   const body = await c.req.json<{ props: Record<string, unknown>; associations?: number[] }>();
+  // Perfil Ventas: lo que crea queda a su nombre (o de su equipo, si es gerenta), no al de otra vendedora: un negocio
+  // cargado a nombre de otra le sumaría en sus números.
+  await soloLoSuyoVentas(c, { name: 'Lo nuevo', owner_id: null }, body.props);
   const assoc = [...new Set((body.associations ?? []).map(Number))];
   // Se revisa todo antes de crear: si una asociación no se puede hacer, no queda creado un registro suelto.
   const bad = assoc.find((id) => !Number.isInteger(id));
@@ -327,18 +329,26 @@ api.patch('/records/:type/:id', async (c) => {
   return c.json(rowToRecord(row));
 });
 
+// Borrar (archivar) y restaurar: el registro tiene que ser del tipo de la ruta y, en el perfil Ventas, suyo o sin propietario
+// (ver una empresa ajena porque está asociada a lo suyo no la habilita a borrarla).
 api.delete('/records/:type/:id', async (c) => {
   const ctx = c.get('ctx');
   requireRole(ctx, 'admin', 'manager');
-  assertType(c.req.param('type'));
-  await archiveRecords(c.env.DB, ctx, [Number(c.req.param('id'))]);
+  const rec = await getRow(c.env.DB, Number(c.req.param('id')), assertType(c.req.param('type')));
+  await soloLoSuyoVentas(c, rec);
+  await archiveRecords(c.env.DB, ctx, [rec.id]);
   return c.json({ ok: true });
 });
 
 api.post('/records/:type/:id/restore', async (c) => {
   const ctx = c.get('ctx');
   requireRole(ctx, 'admin', 'manager');
-  await restoreRecord(c.env.DB, ctx, Number(c.req.param('id')));
+  const rec = await getRow(c.env.DB, Number(c.req.param('id')), assertType(c.req.param('type')));
+  await soloLoSuyoVentas(c, rec);
+  // Uno que se combinó con otro no vuelve: quedaría activo, sin sus asociaciones (pasaron al otro) y con el mismo mail o dominio.
+  const merged = await c.env.DB.prepare('SELECT merged_into FROM records WHERE id = ?').bind(rec.id).first<{ merged_into: number | null }>();
+  if (merged?.merged_into) throw new HttpError(409, `«${rec.name}» se combinó con el registro ${merged.merged_into}: no se puede restaurar.`);
+  await restoreRecord(c.env.DB, ctx, rec.id);
   return c.json({ ok: true });
 });
 
@@ -353,7 +363,11 @@ api.post('/records/:type/batch', async (c) => {
   if (ids.length > 200) throw new HttpError(400, 'Mandá hasta 200 registros por vez.');
   if (body.archive) {
     requireRole(ctx, 'admin', 'manager');
-    for (const id of ids) await registroVisible(c, id);
+    for (const id of ids) {
+      const rec = await registroVisible(c, id);
+      if (rec.object_type !== type) throw new HttpError(404, `No existe el registro ${id} (${type}).`);
+      await soloLoSuyoVentas(c, rec);
+    }
     return c.json({ archived: await archiveRecords(c.env.DB, ctx, ids), failed: [] });
   }
   const failed: Array<{ id: number; name?: string; error: string; missing?: string[] }> = [];
@@ -392,7 +406,10 @@ api.post('/records/:type/:id/clone', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
-  const src = rowToRecord(await getRow(c.env.DB, Number(c.req.param('id')), type));
+  const srcRow = await getRow(c.env.DB, Number(c.req.param('id')), type);
+  // Perfil Ventas: clona lo suyo (la copia sale con los datos y el propietario del original).
+  await soloLoSuyoVentas(c, srcRow);
+  const src = rowToRecord(srcRow);
   const meta = new Meta(c.env.DB);
   if (type === 'deal') await assertDealVisible(meta, ctx.user, String(src.props.pipeline));
   const defs = await meta.properties(type);
@@ -418,7 +435,10 @@ api.post('/records/:type/:id/merge', async (c) => {
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
   const { other_id } = await c.req.json<{ other_id: number }>();
-  await registroVisible(c, Number(other_id));
+  // Perfil Ventas: los dos tienen que ser suyos (o sin propietario). Combinar archiva uno y pasa todo lo suyo al otro:
+  // con una empresa ajena que ve por estar asociada a lo suyo, se quedaría con el cliente de otra vendedora.
+  await soloLoSuyoVentas(c, await registroVisible(c, Number(c.req.param('id'))));
+  await soloLoSuyoVentas(c, await registroVisible(c, Number(other_id)));
   const row = await mergeRecords(c.env.DB, ctx, type, Number(c.req.param('id')), Number(other_id));
   // Dos empresas proveedoras combinadas: las opciones de ClickUp de la que se va pasan a la que queda (produccion.ts).
   if (type === 'company') await opcionesAEmpresa(c.env.DB, [Number(other_id)], row.id);
@@ -1235,9 +1255,12 @@ async function codigoNuevo(db: D1Database) {
     if (!(await db.prepare('SELECT 1 FROM api_tokens WHERE codigo = ?').bind(codigo).first())) return codigo;
   }
 }
-function logistica(ctx: Ctx) { if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador.'); }
+// Crear, dar de baja y ver el link o el código de un chofer (que sirve para mandar remitos): Logística que edita o un
+// administrador. La lista, sin links ni códigos, la ve también Logística con «Solo mira».
+function logistica(ctx: Ctx) { if (!puedeFinalizar(ctx)) throw new HttpError(403, ctx.user.role === 'viewer' ? 'Tu usuario es de solo lectura.' : 'Solo Logística o un administrador.'); }
+function veChoferes(ctx: Ctx) { if (ctx.user.role !== 'admin' && ctx.user.profile !== 'logistica') throw new HttpError(403, 'Solo Logística o un administrador.'); }
 api.get('/choferes', async (c) => {
-  logistica(c.get('ctx'));
+  veChoferes(c.get('ctx'));
   const { results } = await c.env.DB.prepare(`SELECT t.id, t.name, t.created_at, t.last_used_at, t.revoked, u.name AS user_name,
       (SELECT COUNT(*) FROM remitos r WHERE r.token_id = t.id) AS remitos,
       (SELECT MAX(r.created_at) FROM remitos r WHERE r.token_id = t.id) AS ultimo
@@ -1247,7 +1270,7 @@ api.get('/choferes', async (c) => {
 // Los choferes de la lista del cronograma (transportistas) que todavía no tienen código activo: en la pantalla Choferes
 // aparecen para crearles el código con un clic, con el mismo nombre (así ven su recorrido).
 api.get('/choferes/sugeridos', async (c) => {
-  logistica(c.get('ctx'));
+  veChoferes(c.get('ctx'));
   const igual = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
   const [ts, activos] = await c.env.DB.batch([
     c.env.DB.prepare("SELECT nombre FROM transportistas WHERE activo = 1 AND tipo = 'chofer' ORDER BY nombre"),

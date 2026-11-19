@@ -65,6 +65,8 @@ Producción trabaja con los pedidos, no con la parte comercial:
   contactos). En la ficha del cliente no aparecen sus negocios.
 - **Inicio**: sus tareas, sin los números de ventas. **Crear**: solo pedidos.
 - **Tareas, actividad y conversaciones**: las suyas y las de lo que ve.
+- **Importar** ni **exportar** listas, no (auditoría del 19/11/2026: importar creaba negocios y completaba contactos sin pasar
+  por el alcance del perfil). Vale igual para Logística.
 
 Se controla en el mismo lugar que Ventas (`src/worker/alcance.ts`, `esProduccion`), también con Claude.
 
@@ -97,8 +99,34 @@ cronograma y la ruta del día y organiza los encargos de Recorridos. La pantalla
 En la barra lateral tiene además **Choferes** (el código de cada chofer para su app; pedido de Rodrigo del 16/11/2026),
 que solo aparece en el perfil Logística: los administradores lo tienen en Entregas → Choferes.
 
+Con permiso **Solo mira**, Logística ve la lista de Choferes pero no crea ni da de baja links, no ve los links ni los
+códigos (sirven para mandar remitos), no cambia el tipo de un remito ni finaliza entregas (`puedeFinalizar` en
+`src/worker/remitos.ts`).
+
 Se controla en el mismo lugar (`src/worker/alcance.ts`, `esOperaciones`: Producción o Logística), también con Claude.
 Prueba: `test/ventas.test.mjs`.
+
+## Auditoría del 19/11/2026: lo que se cerró
+
+Cuatro agentes (dos de Fable y dos de Opus) auditaron los perfiles y reprodujeron estos casos; ahora los cubre
+`test/auditoria.test.mjs`:
+
+- **El id de un registro tiene que ser un número tal cual.** `/records/deal/123.0`, `+123`, `%20123` o `0x7b` llegaban a la
+  ficha (Number() los acepta) sin pasar por la revisión del alcance, que buscaba solo dígitos: Ventas, Producción y
+  Logística abrían, copiaban o archivaban cualquier registro. Ahora contestan 400 (`RUTA_REGISTRO` en `api.ts`).
+- **Ventas borra, restaura, combina y clona solo lo suyo** (o lo sin propietario), como ya pasaba al editar: ver una
+  empresa ajena porque está asociada a lo suyo no la habilita a borrarla ni a combinarla con la suya (`soloLoSuyoVentas`).
+  Tampoco crea registros a nombre de otra vendedora. Un registro combinado no se restaura (quedaba duplicado).
+- **«Ver como» no escribe por ninguna entrada**: la API compatible con HubSpot y «Conectar con Claude» también
+  (antes solo `/api`). Se rechaza en `verComo` (`src/worker/auth.ts`).
+- **Con Claude, `resumen_reunion` solo en reuniones propias** (como `update_activity`): con el id de cualquier reunión se
+  pisaba su resumen y se leían el asunto y la fecha.
+- **Login**: «volver» solo a una página del Hub (`/\otro.com` el navegador lo toma como otro sitio).
+- **Formulario público** (`/hooks/form/<nombre>`): el visitante carga solo datos de contacto (no el propietario, el tipo de
+  relación ni el estado del lead) y la vuelta es solo a sitios de Formas o a los del formulario (README).
+
+Queda para después (no entró en esta tanda): que los tokens de Claude no sirvan en `/hooks`, sacar los tokens de las
+direcciones web, y que Ventas no edite ni borre notas ajenas.
 
 ## Barra lateral y pantalla de inicio (pedido de Rodrigo del 16/11/2026)
 

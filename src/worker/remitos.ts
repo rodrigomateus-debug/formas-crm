@@ -926,9 +926,10 @@ async function avisarLogistica(db: D1Database, orderId: number, ctx: Ctx | null)
   if (stmts.length) await db.batch(stmts);
 }
 
-// Logística (o un administrador) finaliza la entrega aceptando lo que falta, con el motivo; o la vuelve a abrir.
+// Logística (o un administrador) finaliza la entrega aceptando lo que falta, con el motivo; o la vuelve a abrir. También
+// maneja los links de los choferes y el tipo de cada remito. Con permiso «Solo mira», no (auditoría del 19/11/2026).
 export function puedeFinalizar(ctx: Ctx) {
-  return ctx.user.role === 'admin' || ctx.user.profile === 'logistica';
+  return ctx.user.role === 'admin' || (ctx.user.profile === 'logistica' && ctx.user.role !== 'viewer');
 }
 export async function finalizarEntrega(env: Env, ctx: Ctx, orderId: number, motivo: string | null) {
   if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador pueden finalizar una entrega con faltante.');

@@ -633,7 +633,7 @@ hooks.post('/form/:slug', async (c) => {
   if (body._gotcha) return new Response(null, { status: 204, headers: cors() });
   const cfgRow = await c.env.DB.prepare('SELECT value FROM settings WHERE key = ?').bind(`form:${slug}`).first<{ value: string }>();
   if (!cfgRow) return Response.json({ ok: false, error: 'Formulario desconocido.' }, { status: 404, headers: cors() });
-  const cfg = JSON.parse(cfgRow.value) as { name: string; owner_id?: number; user_id: number; contact_defaults?: Record<string, unknown>; deal?: Record<string, unknown> };
+  const cfg = JSON.parse(cfgRow.value) as FormConfig;
   const user = await c.env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(cfg.user_id).first<Ctx['user']>();
   if (!user) return Response.json({ ok: false, error: 'El formulario no tiene usuario configurado.' }, { status: 500, headers: cors() });
   const ctx: Ctx = { user, source: 'form', sourceDetail: cfg.name };
@@ -643,18 +643,52 @@ hooks.post('/form/:slug', async (c) => {
     const text = message ?? mensaje;
     const result = await applyBundle(c.env.DB, ctx, {
       owner_id: cfg.owner_id,
-      contact: { ...cfg.contact_defaults, ...fields },
+      contact: { ...cfg.contact_defaults, ...camposDelFormulario(fields, cfg) },
       deal: cfg.deal ? { ...cfg.deal, description: text } : undefined,
       activity: { type: 'note', subject: `Envió el formulario «${cfg.name}»`, body: text ?? '', meta: { form: slug, fields } },
     });
     await log(c.env, `form:${slug}`, body, result, true);
-    if (redirect) return c.redirect(String(redirect), 303);
+    const destino = destinoDelFormulario(redirect, cfg);
+    if (destino) return c.redirect(destino, 303);
     return Response.json({ ok: true }, { headers: cors() });
   } catch (e) {
     await log(c.env, `form:${slug}`, body, { error: (e as Error).message }, false);
     return Response.json({ ok: false, error: (e as Error).message }, { status: e instanceof HttpError ? e.status : 500, headers: cors() });
   }
 });
+
+// Configuración de cada formulario (settings, clave `form:<slug>`). `campos`: propiedades del contacto que el formulario
+// puede cargar además de las de siempre (CAMPOS_FORMULARIO); `redirects`: sitios (origen, «https://formas.ar») a los
+// que puede volver después de enviar, además de los de Formas.
+type FormConfig = { name: string; owner_id?: number; user_id: number; contact_defaults?: Record<string, unknown>; deal?: Record<string, unknown>;
+  campos?: string[]; redirects?: string[] };
+
+// El formulario es público: lo que manda el visitante solo puede cargar datos de contacto. Antes cualquier campo llegaba
+// tal cual al contacto (también el propietario o el tipo de relación) y completaba lo vacío de un contacto que ya existía
+// con ese mail o teléfono (auditoría del 19/11/2026). Lo que se fija por formulario va en `contact_defaults`.
+const CAMPOS_FORMULARIO = new Set(['firstname', 'lastname', 'email', 'phone', 'mobilephone', 'jobtitle', 'company', 'website', 'city', 'state', 'country',
+  'address', 'zip', 'linkedin_url', 'industry', 'tipo_de_cliente', 'tamano___empresa', 'volumen_de_compra_estimado', 'prospect_source', 'campaign_name',
+  'plataforma_de_pauta', 'evento', 'event_name']);
+const NUNCA_DEL_VISITANTE = new Set(['owner_id', 'hubspot_owner_id']);
+function camposDelFormulario(fields: Record<string, unknown>, cfg: FormConfig) {
+  const extra = new Set(cfg.campos ?? []);
+  return Object.fromEntries(Object.entries(fields).filter(([k]) => !NUNCA_DEL_VISITANTE.has(k) && (CAMPOS_FORMULARIO.has(k) || extra.has(k))));
+}
+// Después de enviar, de vuelta solo a una página de Formas (formas.ar, formaspublicitarias.com, formas.shop y sus
+// subdominios) o a un sitio de `redirects`; si no, se contesta { ok: true } y listo (no se usa el CRM para mandar a otro sitio).
+const SITIOS_FORMAS = ['formas.ar', 'formaspublicitarias.com', 'formas.shop'];
+function destinoDelFormulario(redirect: unknown, cfg: FormConfig) {
+  if (!redirect) return null;
+  try {
+    const url = new URL(String(redirect));
+    if (url.protocol !== 'https:') return null;
+    const host = url.hostname.toLowerCase();
+    if (SITIOS_FORMAS.some((s) => host === s || host.endsWith(`.${s}`))) return url.toString();
+    return (cfg.redirects ?? []).some((r) => { try { return new URL(r).origin === url.origin; } catch { return false; } }) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 function cors() {
   return { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'POST, OPTIONS', 'access-control-allow-headers': 'content-type' };

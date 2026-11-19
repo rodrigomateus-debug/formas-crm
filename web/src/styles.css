@@ -2844,27 +2844,33 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
    Con más onda (pedido de Rodrigo del 19/11/2026): cartón kraft con canaleta y sombra, el sticker del moño, los productos
    rebotan al caer, la caja pega un saltito cuando la sellan y le saltan brillitos. Solo se animan transform y opacity. */
 .chispin-embalar { position: fixed; left: 50%; top: 50%; z-index: 305; width: min(92vw, 440px); display: flex; flex-direction: column; align-items: center; gap: 18px; transform: translate(-50%, -50%); pointer-events: none; }
-.emb-escena { position: relative; width: 190px; height: 128px; }
+.emb-escena { position: relative; width: 224px; height: 142px; }
 /* Un resplandor del color del fondo detrás de la caja, para que se lea arriba de cualquier pantalla (tablas, tableros…). */
 .emb-halo { position: absolute; inset: -70px -40px -46px; border-radius: 50%; background: radial-gradient(closest-side, var(--ui-surface, #fff) 58%, transparent); z-index: -1; opacity: 0; animation: emb-halo .4s ease forwards; }
 .emb-sombra { position: absolute; left: 8px; right: 8px; bottom: -9px; height: 18px; border-radius: 50%; background: radial-gradient(closest-side, rgba(18, 20, 58, .38), transparent); animation: emb-halo .4s ease both; }
 .emb-caja { position: absolute; inset: 0; transform-origin: 50% 100%; animation: emb-aparece .45s cubic-bezier(.3, 1.5, .5, 1); }
 .emb-fondo { position: absolute; left: 6px; right: 6px; top: 26px; height: 24px; border-radius: 5px 5px 0 0; background: linear-gradient(#6f4519, #8a5a26); z-index: 1; transition: opacity .2s; }
-.emb-frente { position: absolute; left: 0; right: 0; bottom: 0; height: 88px; z-index: 3; border: 2px solid #8f5f27; border-radius: 4px 4px 9px 9px; transform-origin: 50% 100%;
-  /* El cartón: la canaleta (rayitas finas), la luz de arriba a abajo y los costados un toque más oscuros. */
-  background: repeating-linear-gradient(90deg, rgba(120, 72, 22, .07) 0 2px, transparent 2px 6px), linear-gradient(90deg, rgba(110, 66, 22, .22), transparent 14%, transparent 86%, rgba(110, 66, 22, .22)), linear-gradient(#ecc588, #d3a05c);
-  box-shadow: inset 0 3px 0 rgba(255, 240, 210, .5), inset 0 -5px 0 rgba(110, 66, 22, .14), 0 12px 22px -10px rgba(18, 20, 58, .5); }
+.emb-frente { position: absolute; left: 0; right: 0; bottom: 0; height: 102px; z-index: 3; overflow: hidden; border: 2px solid #9a7748; border-radius: 4px 4px 8px 8px; transform-origin: 50% 100%;
+  /* El cartón kraft de la caja real (más claro y parejo): la canaleta apenas marcada y los costados un toque más oscuros. */
+  background: repeating-linear-gradient(90deg, rgba(120, 85, 40, .05) 0 2px, transparent 2px 6px), linear-gradient(90deg, rgba(120, 85, 40, .16), transparent 12%, transparent 88%, rgba(120, 85, 40, .16)), linear-gradient(#d9bb8f, #c8a476);
+  box-shadow: inset 0 3px 0 rgba(255, 244, 222, .45), inset 0 -5px 0 rgba(120, 85, 40, .12), 0 12px 22px -10px rgba(18, 20, 58, .5); }
 .emb-caja.pum .emb-frente { animation: emb-pum .24s ease-out; }
 /* El sticker del moño (pegado medio torcido, con su borde blanco) y las flechitas de «este lado arriba / frágil» en tinta. */
-.emb-sticker { position: absolute; left: 14px; bottom: 13px; width: 40px; height: 40px; display: grid; place-items: center; border: 2.5px solid #fff; border-radius: 50%; background: #000085;
-  box-shadow: 0 2px 4px rgba(70, 40, 10, .35); transform: rotate(-9deg); }
-.emb-estampa { position: absolute; right: 13px; bottom: 12px; fill: none; stroke: rgba(110, 66, 22, .55); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+/* Como la caja real de Formas: una oreja del moño, enorme y verde, que se sale por el borde izquierdo, y el logo abajo a la derecha. */
+.emb-oreja { position: absolute; left: 0; top: 4px; width: 89px; height: 76px; opacity: .96; }
+.emb-logo { position: absolute; right: 12px; bottom: 8px; width: 120px; height: auto; }
+/* Las solapas, estampadas con íconos de productos en círculos verdes, y «Your brand loved» en el borde. */
+.emb-tapa-iconos { position: absolute; left: 0; right: 0; top: 50%; display: flex; justify-content: space-evenly; transform: translateY(-50%); }
+.emb-tapa-iconos svg { fill: none; stroke: #7ab547; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.emb-solapa em { position: absolute; left: 0; right: 0; bottom: 1px; font: 400 5.5px/1 Poppins, system-ui, sans-serif; font-style: normal; color: #262b5e; text-align: center; opacity: .85; }
+.emb-solapa em strong { font-weight: 700; }
+.emb-solapa.izq .emb-tapa-iconos, .emb-solapa.der .emb-tapa-iconos { top: 42%; }
 .emb-solapa { position: absolute; top: 8px; width: 50%; height: 32px; z-index: 4; border: 2px solid #8f5f27; border-radius: 3px; transition: transform .38s cubic-bezier(.3, 1.3, .5, 1);
-  background: linear-gradient(#f0cc92, #dcab68); box-shadow: inset 0 2px 0 rgba(255, 240, 210, .55); }
+  background: linear-gradient(#ddc195, #cdab7e); box-shadow: inset 0 2px 0 rgba(255, 244, 222, .5); }
 .emb-solapa.izq { left: 0; transform-origin: 0 100%; transform: rotate(-128deg); }
 .emb-solapa.der { right: 0; transform-origin: 100% 100%; transform: rotate(128deg); }
 /* La solapa de atrás: se ve por adentro (más clarita) mientras la caja está abierta. */
-.emb-solapa.atras { left: 9px; right: 9px; top: 2px; width: auto; height: 30px; z-index: 0; transform-origin: 50% 100%; background: linear-gradient(#e0b473, #c9975a); border-radius: 5px 5px 0 0;
+.emb-solapa.atras { left: 9px; right: 9px; top: 2px; width: auto; height: 30px; z-index: 0; transform-origin: 50% 100%; background: linear-gradient(#d4b588, #c09c6c); border-radius: 5px 5px 0 0;
   clip-path: polygon(7% 0, 93% 0, 100% 100%, 0 100%); border: 0; box-shadow: none; }
 .emb-caja.cerrada .emb-solapa.izq, .emb-caja.cerrada .emb-solapa.der { transform: scaleY(.44); }
 .emb-caja.cerrada .emb-solapa.atras { transform: scaleY(0); transition: transform .2s ease-in; }
@@ -2879,10 +2885,11 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 .emb-item.cae { animation: emb-cae .62s forwards; }
 /* La cinta: baja por el frente y cruza la tapa; las rayitas más claras le dan el brillo del plástico. */
 .emb-cinta { position: absolute; left: 50%; top: 26px; width: 28px; height: 54px; margin-left: -14px; z-index: 5; border-radius: 0 0 2px 2px; transform-origin: 50% 0; transform: scaleY(0); transition: transform .32s ease-out;
-  background: linear-gradient(90deg, rgba(255, 255, 255, .3) 0 18%, transparent 18% 82%, rgba(0, 0, 0, .08) 82%), #8ee021; opacity: .95;
+  /* Cinta de embalar transparente, como la de la caja real: apenas más oscura que el cartón, con brillo y arruguitas. */
+  background: repeating-linear-gradient(180deg, transparent 0 9px, rgba(255, 255, 255, .22) 9px 10px, transparent 10px 17px), linear-gradient(90deg, rgba(255, 255, 255, .35) 0 14%, rgba(255, 250, 235, .12) 14% 80%, rgba(90, 60, 25, .12) 80%), rgba(170, 130, 80, .38);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 83% 94%, 67% 100%, 50% 94%, 33% 100%, 17% 94%, 0 100%); }
 .emb-caja.cinta .emb-cinta { transform: scaleY(1); }
-.emb-sello { position: absolute; left: 56%; top: 66%; z-index: 6; padding: 5px 10px; border: 3px solid #2f8a1f; border-radius: 8px; background: rgba(255, 255, 255, .88); color: #2f8a1f;
+.emb-sello { position: absolute; left: 33%; top: 44%; z-index: 6; padding: 5px 10px; border: 3px solid #2f8a1f; border-radius: 8px; background: rgba(255, 255, 255, .88); color: #2f8a1f;
   font: 900 17px/1 Poppins, system-ui, sans-serif; letter-spacing: 1px; white-space: nowrap; opacity: 0; transform: translate(-50%, -50%) rotate(-10deg) scale(2.6); box-shadow: 0 0 0 2px rgba(255, 255, 255, .6) inset; }
 .emb-caja.sellada .emb-sello { animation: emb-sello .3s cubic-bezier(.5, 0, .7, 1.4) forwards; }
 /* Los brillitos del sellado: estrellitas de cuatro puntas con los colores de los papelitos, alrededor de la caja. */

@@ -179,6 +179,28 @@ const esperar = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const monio = (color: string, ancho: number) =>
   `<svg viewBox="78 221 544 258" width="${ancho}" height="${Math.round(ancho * 258 / 544 * 10) / 10}" aria-hidden="true"><path d="${CINTA}" fill="${color}"/></svg>`;
 
+// El diseño de la caja real de Formas (foto de Rodrigo, 19/11/2026): cartón kraft, una de las orejas del moño en verde,
+// enorme, que se sale por el borde izquierdo; «formas» en azul con el moño verde sobre la «a» y «Your brand loved» abajo a
+// la derecha (el logo original, el mismo del login); en las solapas, íconos de productos de línea dentro de círculos verdes, y cinta de embalar transparente.
+const VERDE_CAJA = '#7ab547';
+const ICONOS_TAPA = [
+  'M10 2.5h4V5l1.5 2v13a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 8.5 20V7L10 5zM8.5 11h7',
+  'M3.5 15.5a8.5 8.5 0 0 1 17 0zM20.5 15.5c1.5 0 2.5.5 2.5 1.2S21 18 19 18H5M12 7V6',
+  'M8 3.5 3 6.5l2 4 2.5-1v11h9v-11l2.5 1 2-4-5-3c-.5 1.5-2 2.5-4 2.5S8.5 5 8 3.5z',
+  'M9 5V4a3 3 0 0 1 6 0v1M6 9a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v11.5H6zM9 13.5h6v4H9z',
+  'M5 7.5h11V17a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3zM16 10h1.5a2.5 2.5 0 0 1 0 5H16M8.5 3.5c0 1 1 1 1 2M12 3.5c0 1 1 1 1 2',
+  'M18.5 3.5a2.1 2.1 0 0 1 3 3L9 19l-5 1.5L5.5 15.5zM16 6l3 3',
+  'M4 15v-3a8 8 0 0 1 16 0v3M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z',
+  'M2.5 12a9.5 9.5 0 0 1 19 0zM12 2.5V2M12 12v6.5a2 2 0 0 1-4 0',
+];
+// Una fila de íconos en círculos (la tapa estampada), empezando por el ícono `desde`.
+const estampadoTapa = (desde: number, n: number) => `<span class="emb-tapa-iconos">${Array.from({ length: n }, (_, k) =>
+  `<svg viewBox="-4 -4 32 32" width="15" height="15" aria-hidden="true"><circle cx="12" cy="12" r="14.5"/><path d="${ICONOS_TAPA[(desde + k) % ICONOS_TAPA.length]}"/></svg>`).join('')}</span>`;
+// La oreja del moño como en la caja: el moño del logo (CINTA) en grande, cortado un poco antes de la mitad (desde x 320 de
+// 78–622): queda la oreja derecha con un pedacito del nudo, y el corte va pegado al borde izquierdo de la caja.
+const frenteCaja = () => `<span class="emb-frente"><svg class="emb-oreja" viewBox="320 221 302 258" aria-hidden="true"><path d="${CINTA}" fill="${VERDE_CAJA}"/></svg>`
+  + '<img class="emb-logo" src="/login/formas-logo.png" alt="" draggable="false"></span>';   // el logo original, sin cambios
+
 // La caja: aparece abierta, caen los productos uno por uno, se cierran las solapas, la cinta, el sello «LISTO ✓» y vuela a Chispín.
 // Con más onda («ponele un poco más de onda al camioncito, cajita e iconitos», Rodrigo, 19/11/2026): cartón kraft con el sticker
 // del moño y las flechitas de «este lado arriba», los productos rebotan al caer (y la caja acusa el golpe), pega un saltito
@@ -189,10 +211,9 @@ async function embalar(grupos: Grupo[], hacia?: HTMLElement | null) {
   const capa = document.createElement('div');
   capa.className = 'chispin-embalar';
   capa.innerHTML = '<span class="emb-halo"></span><div class="emb-escena"><span class="emb-sombra"></span><div class="emb-caja">'
-    + '<span class="emb-solapa atras"></span><span class="emb-fondo"></span>'
-    + `<span class="emb-frente"><span class="emb-sticker">${monio('#fff', 24)}</span>`
-    + '<svg class="emb-estampa" viewBox="0 0 40 24" width="40" height="24" aria-hidden="true"><path d="M8 20V6M3.5 10.5 8 6l4.5 4.5M21 20V6M16.5 10.5 21 6l4.5 4.5M30 8h8l-1 5a3 3 0 0 1-6 0zM34 16v4M31.5 20h5"/></svg></span>'
-    + '<span class="emb-solapa izq"></span><span class="emb-solapa der"></span><span class="emb-cinta"></span><span class="emb-sello">LISTO ✓</span>'
+    + `<span class="emb-solapa atras">${estampadoTapa(0, 5)}</span><span class="emb-fondo"></span>${frenteCaja()}`
+    + `<span class="emb-solapa izq">${estampadoTapa(2, 3)}<em>Your brand <strong>loved</strong></em></span><span class="emb-solapa der">${estampadoTapa(5, 3)}<em>Your brand <strong>loved</strong></em></span>`
+    + '<span class="emb-cinta"></span><span class="emb-sello">LISTO ✓</span>'
     + '<span class="emb-brillos"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="emb-lista"></div>';
   const caja = capa.querySelector('.emb-caja') as HTMLElement;
   const lista = capa.querySelector('.emb-lista') as HTMLElement;

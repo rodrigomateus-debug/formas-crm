@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, userOf } from './lib';
+import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, userOf, CINTA } from './lib';
 import { UserAvatar } from './components';
 
 // Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
@@ -78,9 +78,19 @@ export function festejar(desde?: HTMLElement | null) {
 }
 
 // ---------- El personaje ----------
-function Personaje({ animo, lampara, ojosRef }: { animo: string; lampara: boolean; ojosRef: React.RefObject<HTMLSpanElement> }) {
+// Los anteojos de sol (pedido de Rodrigo del 19/11/2026): el moño del logo de Formas dado vuelta (el puente arriba, como unos
+// anteojos de verdad), con vidrios oscuros, un reflejo y un destello que pasa cada tanto. Se los pone con el buzón abierto y,
+// de vez en cuando, solo; la mano sube a acomodarlos al ponérselos y al sacárselos.
+// Los dos huecos del moño (los vidrios) son el segundo y el tercer tramo de la cinta del isotipo.
+const VIDRIOS = CINTA.split('Z').filter((t) => t.trim()).slice(1).map((t) => `${t}Z`).join('');
+// Los reflejos, en las coordenadas del isotipo (el moño se da vuelta entero, así que se dibujan «\» para que se vean «/»).
+const REFLEJO = 'M150 330 L230 410 M196 318 L262 384 M418 330 L498 410 M464 318 L530 384';
+function Personaje({ animo, lampara, ojosRef, anteojos = false, acomoda = false }: {
+  animo: string; lampara: boolean; ojosRef: React.RefObject<HTMLSpanElement>; anteojos?: boolean; acomoda?: boolean;
+}) {
+  const id = useId().replace(/:/g, '');
   return (
-    <span className={`chispin-bicho ${animo}`} aria-hidden="true">
+    <span className={`chispin-bicho ${animo}${anteojos ? ' anteojos' : ''}${acomoda ? ' acomoda' : ''}`} aria-hidden="true">
       <span className={`chispin-antena${lampara ? ' prendida' : ''}`}><span className="chispin-lampara" /></span>
       <span className="chispin-cuerpo">
         <span className="chispin-ojos" ref={ojosRef}>
@@ -89,6 +99,20 @@ function Personaje({ animo, lampara, ojosRef }: { animo: string; lampara: boolea
         </span>
         <span className="chispin-cachetes"><span /><span /></span>
         <span className="chispin-boca" />
+        <svg className="chispin-anteojos" viewBox="78 221 544 258">
+          <defs>
+            <linearGradient id={`${id}-sol`} x1="0" y1="1" x2="0" y2="0">
+              <stop offset="0" stopColor="#05051c" /><stop offset=".55" stopColor="#141466" /><stop offset="1" stopColor="#3d2a8f" />
+            </linearGradient>
+            <clipPath id={`${id}-vidrios`}><path d={VIDRIOS} /></clipPath>
+          </defs>
+          <path className="chispin-vidrio" d={VIDRIOS} fill={`url(#${id}-sol)`} />
+          <g clipPath={`url(#${id}-vidrios)`}>
+            <path className="chispin-reflejo" d={REFLEJO} />
+            <path className="chispin-destello" d="M100 300 L220 420" />
+          </g>
+          <path className="chispin-marco" d={CINTA} />
+        </svg>
       </span>
       <span className="chispin-mano izq" /><span className="chispin-mano der" />
       <span className="chispin-zzz"><i>z</i><i>z</i><i>z</i></span>
@@ -112,6 +136,18 @@ export default function Chispin() {
   const [visto, setVisto] = useState(() => Number(leer('visto') ?? 0));
   const botonRef = useRef<HTMLButtonElement>(null);
   const ojosRef = useRef<HTMLSpanElement>(null);
+
+  // ---------- Los anteojos: la mano sube, se los pone (o se los saca) y baja ----------
+  const [anteojos, setAnteojos] = useState(false);
+  const [acomoda, setAcomoda] = useState(false);
+  const anteojosRef = useRef(false);
+  const ponerAnteojos = useCallback((v: boolean) => {
+    if (anteojosRef.current === v) return;
+    anteojosRef.current = v;
+    setAcomoda(true);
+    setTimeout(() => setAnteojos(v), 200);
+    setTimeout(() => setAcomoda(false), 800);
+  }, []);
 
   const cargar = useCallback(() => http<{ ideas: Idea[]; admin: boolean }>('GET', '/ideas')
     .then((r) => { setIdeas(r.ideas); setAdmin(r.admin); return r.ideas; }, () => null), []);
@@ -176,6 +212,32 @@ export default function Chispin() {
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [ideas]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Con el buzón abierto se los pone para leer; al cerrarlo, se los saca al rato. Dormido, sin anteojos.
+  useEffect(() => {
+    if (abierto) { ponerAnteojos(true); return; }
+    const t = setTimeout(() => ponerAnteojos(false), 1400);
+    return () => clearTimeout(t);
+  }, [abierto, ponerAnteojos]);
+  useEffect(() => { if (animo === 'duerme') ponerAnteojos(false); }, [animo, ponerAnteojos]);
+  // Solo, de vez en cuando: la primera a los 15-25 segundos de entrar (para que se vea) y después cada 1 o 2 minutos, unos segundos.
+  const ocupado = useRef({ abierto, animo });
+  ocupado.current = { abierto, animo };
+  useEffect(() => {
+    if (reducido()) return;
+    let t: ReturnType<typeof setTimeout>;
+    const ciclo = (espera: number) => {
+      t = setTimeout(() => {
+        const o = ocupado.current;
+        if (document.visibilityState === 'visible' && !o.abierto && o.animo !== 'duerme' && !anteojosRef.current) {
+          ponerAnteojos(true);
+          t = setTimeout(() => { if (!ocupado.current.abierto) ponerAnteojos(false); ciclo(50_000 + Math.random() * 60_000); }, 7000 + Math.random() * 5000);
+        } else ciclo(20_000);
+      }, espera);
+    };
+    ciclo(15_000 + Math.random() * 10_000);
+    return () => clearTimeout(t);
+  }, [ponerAnteojos]);
+
   // ---------- Los ojos siguen al mouse; sin moverse un buen rato, se duerme ----------
   useEffect(() => {
     if (reducido()) return;
@@ -231,7 +293,7 @@ export default function Chispin() {
           onPointerEnter={() => setAnimo((a) => (a === '' || a === 'duerme' ? 'mira' : a))} onPointerLeave={() => setAnimo((a) => (a === 'mira' ? '' : a))}
           aria-expanded={abierto} aria-label={escondido ? 'Mostrar a Chispín (buzón de ideas)' : nuevas ? `Buzón de ideas: ${nuevas} nuevas` : 'Buzón de ideas para mejorar el Hub'}
           title={escondido ? 'Volver a mostrar a Chispín' : 'Ideas para mejorar el Hub'}>
-          <Personaje animo={animo} lampara={lampara} ojosRef={ojosRef} />
+          <Personaje animo={animo} lampara={lampara} ojosRef={ojosRef} anteojos={anteojos} acomoda={acomoda} />
           {nuevas > 0 && !abierto && <span className="chispin-n">{nuevas > 9 ? '9+' : nuevas}</span>}
         </button>
         {!escondido && !estorba && !abierto && (

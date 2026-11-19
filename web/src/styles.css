@@ -2608,6 +2608,25 @@ body.movil .chispin-zona .chispin-lugar { transform: scale(.8); transform-origin
 .chispin-mano.izq { left: 0; } .chispin-mano.der { right: 0; transform-origin: 0 100%; }
 .chispin-zzz { position: absolute; right: -4px; top: 2px; font-size: 11px; font-weight: 700; color: var(--ui-ink-3); opacity: 0; transition: opacity var(--dur-slow); pointer-events: none; }
 .chispin-zzz i { position: absolute; font-style: normal; opacity: 0; }
+/* Los anteojos de sol: el moño del logo dado vuelta (el puente arriba), con vidrios oscuros, un reflejo y un destello que pasa
+   cada tanto. Guardados arriba de la cabeza (invisibles); bajan con un rebote y la mano derecha sube a acomodarlos («acomoda»).
+   Puestos, sonríe de costado. */
+.chispin-anteojos { position: absolute; left: 50%; top: 9px; width: 48px; height: 23px; margin-left: -24px; overflow: visible; pointer-events: none;
+  filter: drop-shadow(0 1.5px 0 rgba(0, 0, 0, .35)); opacity: 0; transform: translateY(-30px) rotate(-14deg) scale(.85, -.85);
+  transition: transform 480ms cubic-bezier(.3, 1.45, .5, 1), opacity 200ms ease; }
+.chispin-bicho.anteojos .chispin-anteojos { opacity: 1; transform: scaleY(-1); }
+.chispin-marco { fill: var(--chispin-lampara); }
+.chispin-reflejo { fill: none; stroke: rgba(255, 255, 255, .55); stroke-width: 16; stroke-linecap: round; }
+.chispin-destello { fill: none; stroke: rgba(255, 255, 255, .9); stroke-width: 26; stroke-linecap: round; transform: translateX(-160px); }
+.chispin-bicho.anteojos .chispin-destello { animation: chispin-destello 4.5s ease-in-out .5s infinite; }
+.chispin-bicho.anteojos .chispin-ojo { width: 9px; height: 9px; margin-top: 3px; }
+.chispin-bicho.anteojos .chispin-pupila { left: 2.25px; top: 2.25px; width: 4.5px; height: 4.5px; }
+.chispin-bicho.anteojos .chispin-ojos { gap: 18px; }
+.chispin-bicho.anteojos:not(.feliz):not(.mira):not(.traga) .chispin-boca { width: 9px; height: 5px; transform: translateX(-30%) rotate(-12deg); border-radius: 0 0 10px 4px; }
+@keyframes chispin-destello { 0%, 62% { transform: translateX(-160px); } 85%, 100% { transform: translateX(560px); } }
+/* La mano que los acomoda, más clara para que se vea sobre el cuerpo. */
+.chispin-bicho.acomoda .chispin-mano.der { animation: none; z-index: 1; background: var(--chispin-brillo); box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .35);
+  transform: translate(-3px, -19px) rotate(-25deg); }
 /* Al pasar el mouse: abre la boca («o») y saluda. */
 .chispin-bicho.mira .chispin-boca { width: 8px; height: 8px; border: 2px solid var(--chispin-tinta); border-radius: 50%; }
 .chispin-bicho.mira .chispin-mano.der { animation: chispin-saluda .7s ease-in-out 2; }
@@ -2774,6 +2793,8 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 @keyframes chispin-resalta { 0%, 40% { box-shadow: 0 0 0 3px var(--formas-lime); border-color: var(--formas-green); } 100% { box-shadow: 0 0 0 0 transparent; } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {
+  .chispin-anteojos, .chispin-mano { transition: none !important; }
+  .chispin-destello { animation: none !important; }
   .chispin::before, .chispin-bicho, .chispin-cuerpo, .chispin-ojo, .chispin-antena, .chispin-lampara, .chispin-zzz i, .chispin-n, .chispin-globo, .chispin-panel, .chispin-idea, .chispin-mano { animation: none !important; }
 }
 

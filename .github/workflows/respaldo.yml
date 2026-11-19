@@ -22,8 +22,22 @@ jobs:
       - run: npm ci
       - run: node scripts/ensure-d1.mjs
       - run: npx wrangler d1 export formas-crm --remote --output formas-crm.sql && gzip formas-crm.sql
+      # Con el secreto RESPALDO_CLAVE (Settings → Secrets and variables → Actions), el respaldo se sube cifrado: el artefacto
+      # lo puede bajar cualquiera con acceso al repo y tiene todos los datos de clientes y los links de los choferes
+      # (auditoría del 19/11/2026, docs/AUDITORIA.md). Sin el secreto se sube como antes, con un aviso. Para abrirlo:
+      #   openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in formas-crm.sql.gz.enc -out formas-crm.sql.gz -pass pass:<la clave>
+      - name: Cifrar el respaldo
+        env:
+          RESPALDO_CLAVE: ${{ secrets.RESPALDO_CLAVE }}
+        run: |
+          if [ -n "$RESPALDO_CLAVE" ]; then
+            openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -in formas-crm.sql.gz -out formas-crm.sql.gz.enc -pass env:RESPALDO_CLAVE
+            rm formas-crm.sql.gz
+          else
+            echo "::warning::Falta el secreto RESPALDO_CLAVE: el respaldo se sube sin cifrar."
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: formas-crm-${{ github.run_id }}
-          path: formas-crm.sql.gz
+          path: formas-crm.sql.gz*
           retention-days: 90

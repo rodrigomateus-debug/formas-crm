@@ -453,7 +453,7 @@ export default function CronogramaPage() {
         </Modal>
       )}
       {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); }} />}
-      {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => { setPreview(null); setPreviewT(null); }} onChange={cargar}
+      {preview && <RecordPreview key={preview} type="order" id={preview} ot onClose={() => { setPreview(null); setPreviewT(null); }} onChange={cargar}
         arriba={previewT && previewT.record_id === preview ? <PanelDespacho t={previewT} dir={dirDe(previewT)} hoy={v?.hoy ?? hoyIso()} feriados={v?.feriados} /> : undefined} />}
       {nuevoPara && (
         <Modal title="Agregar chofer o expreso" onClose={() => setNuevoPara(null)}>

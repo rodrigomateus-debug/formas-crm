@@ -46,7 +46,7 @@ import { inicioProduccion } from './inicioprod';
 import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
-import { pedidoDeOT } from './ordenes';
+import { otDePedido, pedidoDeOT } from './ordenes';
 import { festejosDePedidos } from './festejos';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
@@ -73,7 +73,7 @@ const SIN_VENTAS: Array<[RegExp, string]> = [
   [/\/produccion(\/|$)/, 'Producción'], [/\/(remitos|entrega|choferes)(\/|$)/, 'Entregas'], [/\/(import|export)\//, 'Importar y exportar listas'],
   [/\/cronograma(\/|$)/, 'Cronograma'],
 ];
-const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order)\/(\d+)(?:\/|$)/;
+const RUTA_REGISTRO = /\/records\/(?:contact|company|deal|order|work_order)\/(\d+)(?:\/|$)/;
 const REMITOS_VENTAS = [/\/records\/order\/\d+\/remitos$/, /\/remitos\/\d+\/archivo$/];
 api.use('*', async (c, next) => {
   const ctx = c.get('ctx');
@@ -304,11 +304,18 @@ api.get('/records/:type/:id', async (c) => {
   // previa (lo mismo que la tarjeta del tablero de pedidos). También para Ventas, para saber a quién preguntar (pedido
   // de Rodrigo del 17/11/2026).
   // La orden de trabajo, lo mismo que su pedido: los productos, la conversación y la producción cuelgan del pedido (ordenes.ts).
+  // El pedido trae el id de su OT (para el botón y para que Producción y Logística abran la OT); la OT, su pedido entero
+  // (los remitos y la entrega se muestran con él).
   const pedidoId = type === 'work_order' ? await pedidoDeOT(c.env.DB, row.id) : type === 'order' ? row.id : null;
-  const prod = pedidoId ? await produccionDePedido(c.env.DB, pedidoId) : null;
+  const [prod, otId, pedidoRow] = await Promise.all([
+    pedidoId ? produccionDePedido(c.env.DB, pedidoId) : null,
+    type === 'order' ? otDePedido(c.env.DB, row.id) : null,
+    type === 'work_order' && pedidoId ? c.env.DB.prepare('SELECT * FROM records WHERE id = ?').bind(pedidoId).first<RecordRow>() : null,
+  ]);
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
   return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user),
-    ...(produccion ? { produccion } : {}), ...(type === 'work_order' ? { pedido_id: pedidoId } : {}) });
+    ...(produccion ? { produccion } : {}), ...(type === 'order' ? { ot_id: otId } : {}),
+    ...(type === 'work_order' ? { pedido_id: pedidoId, pedido: pedidoRow ? rowToRecord(pedidoRow) : null } : {}) });
 });
 
 api.patch('/records/:type/:id', async (c) => {
@@ -471,12 +478,12 @@ api.get('/records/:type/:id/timeline', async (c) => {
 // ---------- Conversación del pedido o negocio (conversacion.ts): chat con @menciones y la actividad entremezclada ----------
 
 api.get('/records/:type/:id/conversacion', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   return c.json(await conversacion(c.env.DB, c.get('ctx'), rec.id, { desde: c.req.query('desde'), limite: num(c.req.query('limite')) }));
 });
 api.post('/records/:type/:id/conversacion', async (c) => {
   canWrite(c.get('ctx'));
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   const b = await c.req.json<{ body?: string; responde_a?: number | null; adjuntos?: number[] }>();
   return c.json(await escribir(c.env.DB, c.get('ctx'), rec.id, { body: b.body, responde_a: b.responde_a, adjuntos: b.adjuntos }), 201);
 });
@@ -485,7 +492,7 @@ api.post('/records/:type/:id/conversacion', async (c) => {
 for (const ruta of ['/records/:type/:id/conversacion/adjuntos', '/records/:type/:id/conversacion/imagenes']) {
   api.post(ruta, async (c) => {
     canWrite(c.get('ctx'));
-    const rec = await registroVisible(c, Number(c.req.param('id')));
+    const rec = await registroOPedido(c, Number(c.req.param('id')));
     const form = await c.req.formData();
     const archivo = form.get('archivo');
     if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo.');
@@ -504,11 +511,11 @@ api.get('/mensaje-adjuntos/:id', async (c) => {
     'cache-control': 'private, max-age=86400', 'x-content-type-options': 'nosniff' } });
 });
 api.post('/records/:type/:id/conversacion/leido', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   return c.json(await marcarLeido(c.env.DB, c.get('ctx'), rec.id, Number((await c.req.json<{ hasta?: number }>()).hasta)));
 });
 api.put('/records/:type/:id/conversacion/seguir', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   return c.json(await seguir(c.env.DB, c.get('ctx'), rec.id, !!(await c.req.json<{ siguiendo?: boolean }>()).siguiendo));
 });
 api.patch('/mensajes/:id', async (c) => {
@@ -526,7 +533,7 @@ api.post('/mensajes/:id/reacciones', async (c) => {
 api.delete('/mensajes/:id', async (c) => c.json(await borrarMensaje(c.env.DB, c.get('ctx'), Number(c.req.param('id')))));
 // «Marcar como no leída» desde la bandeja.
 api.post('/records/:type/:id/conversacion/no-leido', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   return c.json(await marcarNoLeido(c.env.DB, c.get('ctx'), rec.id));
 });
 // La campanita (notificaciones.ts): lo último que le pasó a cada uno; marcarlas leídas o no leídas.
@@ -794,14 +801,16 @@ api.get('/board', async (c) => {
 
 // Tarjetas de pedidos: hasta 3 fotos de sus productos y cuántos productos tiene (miniaturas del tablero), y lo adjunto
 // (factura, remito y bocetos) para los iconitos de abajo.
+// Las órdenes de trabajo, las de su pedido (props.pedido_id, ordenes.ts).
+const pedidoDe = (r: CrmRecord) => (r.type === 'work_order' ? Number(r.props.pedido_id) : r.id);
 function sumarExtras(r: CrmRecord, fotos: Map<number, { fotos: string[]; productos: number }> | null, adjuntos: Map<number, Adjuntos> | null) {
-  const f = fotos?.get(r.id);
-  const a = adjuntos?.get(r.id);
+  const f = fotos?.get(pedidoDe(r));
+  const a = adjuntos?.get(pedidoDe(r));
   return { ...r, ...(f?.fotos.length ? { fotos: f.fotos, productos: f.productos } : {}), ...(a ? { adjuntos: a } : {}) };
 }
 async function conFotos(db: D1Database, type: ObjectType, records: CrmRecord[]) {
-  if (type !== 'order' || !records.length) return records;
-  const { fotos, adjuntos } = await extrasDePedidos(db, records.map((r) => r.id));
+  if ((type !== 'order' && type !== 'work_order') || !records.length) return records;
+  const { fotos, adjuntos } = await extrasDePedidos(db, records.map(pedidoDe).filter((n) => Number.isInteger(n)));
   return records.map((r) => sumarExtras(r, fotos, adjuntos));
 }
 
@@ -834,23 +843,26 @@ api.get('/board-prop/:type', async (c) => {
     return c.json({ records: await conFotos(db, type, (results as unknown as RecordRow[]).map(rowToRecord)) });
   }
   // Pedidos: cuántos siguen activos (ni entregados ni anulados) y cuánto suman sin IVA, agrupe por lo que agrupe el tablero.
-  const activosSql = type === 'order'
+  const pedidos = type === 'order' || type === 'work_order';
+  const activosSql = pedidos
     ? db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount FROM records r WHERE ${whereSql} AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?)`).bind(...binds, ...ORDER_CLOSED)
     : db.prepare('SELECT NULL AS n, NULL AS amount');
   // Todo en un solo viaje a la base: las tarjetas, los totales por columna, los activos, las miniaturas de los pedidos y,
   // si se agrupa por propietario, los usuarios.
   const cardsSql = `SELECT * FROM (SELECT r.*, CAST(${expr} AS TEXT) AS board_value, ROW_NUMBER() OVER (PARTITION BY ${expr} ORDER BY ${order}) AS rn
       FROM records r WHERE ${whereSql}) WHERE rn <= ${perColumn}`;
+  // Las fotos y lo adjunto son del pedido: en las órdenes de trabajo, los de su pedido.
+  const idsCartas = type === 'work_order' ? `SELECT CAST(json_extract(props, '$.pedido_id') AS INTEGER) AS id FROM (${cardsSql})` : `SELECT id FROM (${cardsSql})`;
   const [cards, totals, activos, ...resto] = await db.batch([
     db.prepare(cardsSql).bind(...binds),
     db.prepare(`SELECT CAST(${expr} AS TEXT) AS v, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS amount, SUM(CASE WHEN r.amount IS NULL THEN 1 ELSE 0 END) AS sin_monto
       FROM records r WHERE ${whereSql} GROUP BY v`).bind(...binds),
     activosSql,
-    ...(type === 'order' ? [...fotosSql(db, `SELECT id FROM (${cardsSql})`, binds), adjuntosSql(db, `SELECT id FROM (${cardsSql})`, binds)] : []),
+    ...(pedidos ? [...fotosSql(db, idsCartas, binds), adjuntosSql(db, idsCartas, binds)] : []),
     ...(prop.type === 'owner' ? [db.prepare('SELECT id, name FROM users WHERE active = 1 ORDER BY name')] : []),
   ]);
-  const fotos = type === 'order' ? armarFotos(resto[0].results, resto[1].results) : null;
-  const adjuntos = type === 'order' ? armarAdjuntos(resto[2].results) : null;
+  const fotos = pedidos ? armarFotos(resto[0].results, resto[1].results) : null;
+  const adjuntos = pedidos ? armarAdjuntos(resto[2].results) : null;
   const usuarios = prop.type === 'owner' ? resto[resto.length - 1].results as Array<{ id: number; name: string }> : [];
   const options = prop.type === 'owner'
     ? usuarios.map((u) => ({ value: String(u.id), label: u.name }))
@@ -861,7 +873,7 @@ api.get('/board-prop/:type', async (c) => {
   const known = new Set(options.map((o) => o.value));
   const others = [...counts.keys()].filter((v) => v && !known.has(v)).map((v) => ({ value: v, label: v }));
   const rows = cards.results as unknown as Array<RecordRow & { board_value: string | null }>;
-  const recs = rows.map(rowToRecord).map((r) => (type === 'order' ? sumarExtras(r, fotos, adjuntos) : r));
+  const recs = rows.map(rowToRecord).map((r) => (pedidos ? sumarExtras(r, fotos, adjuntos) : r));
   const valueOf = new Map(rows.map((r) => [r.id, r.board_value ?? '']));
   const columns = [...options, ...others, { value: '', label: 'Sin dato' }]
     // Monto de la columna (pedidos: el total sin IVA) y cuántas tarjetas no lo tienen, para el pie de la columna.
@@ -1036,7 +1048,8 @@ api.get('/export/:type', async (c) => {
   const users = new Map((await db.prepare('SELECT id, name FROM users').all<{ id: number; name: string }>()).results.map((u) => [String(u.id), u.name]));
   const stages = new Map(pipelines.flatMap((p) => p.stages.map((st) => [st.id, st.label] as const)));
   const pipeNames = new Map(pipelines.map((p) => [p.id, p.label]));
-  const columns = cols.length ? cols : props.filter((p) => !p.read_only).map((p) => p.name);
+  // La orden de trabajo tiene todo de solo lectura (lo copia del pedido): se exporta todo.
+  const columns = cols.length ? cols : props.filter((p) => !p.read_only || type === 'work_order').map((p) => p.name);
   const label = (n: string) => (n === '__company' ? 'Empresa' : props.find((p) => p.name === n)?.label ?? n);
   const show = (n: string, v: unknown) => {
     if (v == null || v === '') return '';
@@ -1077,8 +1090,9 @@ api.get('/export/:type', async (c) => {
 api.get('/records/deal/:id/facturar', async (c) => c.json(await datosParaFacturar(c.env.DB, Number(c.req.param('id')))));
 
 api.get('/records/:type/:id/files', async (c) => {
-  const id = Number(c.req.param('id'));
-  if (c.req.param('type') === 'order') {
+  // La orden de trabajo, los de su pedido.
+  const id = c.req.param('type') === 'work_order' ? (await pedidoDeOT(c.env.DB, Number(c.req.param('id')))) ?? 0 : Number(c.req.param('id'));
+  if (c.req.param('type') === 'order' || c.req.param('type') === 'work_order') {
     const rec = await getRow(c.env.DB, id);
     await clickupRemitos(c.env, id, JSON.parse(rec.props)).catch((e) => console.error((e as Error).message));
   }
@@ -1111,7 +1125,7 @@ api.get('/pedidos/festejos', async (c) => c.json({ pedidos: await festejosDePedi
 
 // La razón social con que se factura un pedido (razones.ts): la del pedido o la del pedido de un negocio, y las de una empresa.
 api.get('/records/:type/:id/razon-social', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   return c.json(await razonSocialDe(c.env.DB, rec.object_type, rec.id));
 });
 // Resolver la razón social de un pedido sin empresa: {accion: 'crear' | 'asignar' | 'crear_con_nombre', company_id?, name?}.
@@ -1243,14 +1257,19 @@ api.post('/records/order/:id/entrega/asignar', async (c) => {
   canWrite(ctx);
   const b = await c.req.json<{ clave?: string; lineas?: Array<{ i: number; cantidad: number }> }>();
   if (!b.clave) throw new HttpError(400, 'Falta qué renglón del remito.');
+  await getRow(c.env.DB, Number(c.req.param('id')), 'order');   // con el id de una orden de trabajo, un 404 claro
   return c.json(await asignarRenglon(c.env, ctx, Number(c.req.param('id')), b.clave, Array.isArray(b.lineas) ? b.lineas : []));
 });
 // Finalizar la entrega con faltante (Logística o un administrador), con el motivo; DELETE la vuelve a abrir.
 api.post('/records/order/:id/entrega/finalizar', async (c) => {
   const { motivo } = await c.req.json<{ motivo?: string }>();
+  await getRow(c.env.DB, Number(c.req.param('id')), 'order');
   return c.json(await finalizarEntrega(c.env, c.get('ctx'), Number(c.req.param('id')), String(motivo ?? '')));
 });
-api.delete('/records/order/:id/entrega/finalizar', async (c) => c.json(await finalizarEntrega(c.env, c.get('ctx'), Number(c.req.param('id')), null)));
+api.delete('/records/order/:id/entrega/finalizar', async (c) => {
+  await getRow(c.env.DB, Number(c.req.param('id')), 'order');
+  return c.json(await finalizarEntrega(c.env, c.get('ctx'), Number(c.req.param('id')), null));
+});
 
 // Links de los choferes (tokens tipo «chofer», que solo sirven para la app de remitos). Los manejan Logística y los
 // administradores, que los pueden volver a copiar mientras estén activos. Cada link tiene además su código de 8 números
@@ -1395,10 +1414,19 @@ async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: numb
   await assertVisible(c.env.DB, new Meta(c.env.DB), c.get('ctx').user, rec);
   return rec;
 }
+// Lo que cuelga del pedido (la conversación, los bocetos, los logos, los archivos, la razón social): pedido desde la orden de
+// trabajo, se hace en su pedido. Así el chat es uno solo y nada queda guardado a nombre de la OT (ordenes.ts).
+async function registroOPedido(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
+  const rec = await registroVisible(c, id);
+  if (rec.object_type !== 'work_order') return rec;
+  const pedido = await pedidoDeOT(c.env.DB, rec.id);
+  if (!pedido) throw new HttpError(404, 'Esta orden de trabajo no tiene su pedido.');
+  return registroVisible(c, pedido);
+}
 
 // Los bocetos de un pedido o negocio; en un pedido, también los de los negocios de su empresa que todavía no se usaron.
 api.get('/records/:type/:id/bocetos', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   const cfg = await driveConfig(c.env);
   return c.json({
     bocetos: await bocetosDe(c.env.DB, rec.id),
@@ -1409,7 +1437,7 @@ api.get('/records/:type/:id/bocetos', async (c) => {
 // Subir uno (formulario con «archivo», «producto», «producto_nombre» y «tipo»).
 api.post('/records/:type/:id/bocetos', async (c) => {
   canWrite(c.get('ctx'));
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   const form = await c.req.formData();
   const archivo = form.get('archivo');
   if (!(archivo instanceof File)) throw new HttpError(400, 'Falta el archivo del boceto.');
@@ -1454,7 +1482,7 @@ api.get('/bocetos/:id/archivo', async (c) => {
 
 // Los logos de la empresa (en un pedido o negocio, los de su empresa, con el elegido en cada producto).
 api.get('/records/:type/:id/logos', async (c) => {
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   const db = c.env.DB;
   const company = await empresaDe(db, rec);
   const cfg = await driveConfig(c.env);
@@ -1471,7 +1499,7 @@ api.get('/records/:type/:id/logos', async (c) => {
 api.post('/records/:type/:id/logos', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   const company = await empresaDe(c.env.DB, rec);
   if (!company) throw new HttpError(400, 'Este registro no tiene empresa: asociale una para guardar el logo.');
   const form = await c.req.formData();
@@ -1490,7 +1518,7 @@ api.post('/records/:type/:id/logos', async (c) => {
 api.put('/records/:type/:id/logos/producto', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
-  const rec = await registroVisible(c, Number(c.req.param('id')));
+  const rec = await registroOPedido(c, Number(c.req.param('id')));
   const body = await c.req.json<{ producto?: string; logo_id?: number | null }>();
   const logo = await elegirLogo(c.env.DB, ctx, rec, String(body.producto ?? ''), body.logo_id == null ? null : Number(body.logo_id));
   if (rec.object_type === 'order') c.executionCtx.waitUntil(procesarSalidaClickup(c.env).catch(() => undefined));
@@ -2096,7 +2124,8 @@ api.patch('/users/:id', async (c) => {
 // y links de choferes que creó.
 async function usoDe(db: D1Database, id: number) {
   const [regs, tareas, tokens, choferes] = await db.batch([
-    db.prepare('SELECT object_type, COUNT(*) AS n FROM records WHERE owner_id = ? AND archived = 0 GROUP BY object_type').bind(id),
+    // Sin las órdenes de trabajo: siguen a su pedido (ya se cuenta el pedido).
+    db.prepare("SELECT object_type, COUNT(*) AS n FROM records WHERE owner_id = ? AND archived = 0 AND object_type != 'work_order' GROUP BY object_type").bind(id),
     db.prepare("SELECT COUNT(*) AS n FROM activities WHERE owner_id = ? AND type = 'task' AND COALESCE(status, '') != 'COMPLETED' AND archived = 0").bind(id),
     db.prepare("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ? AND revoked = 0 AND source != 'chofer'").bind(id),
     db.prepare("SELECT COUNT(*) AS n FROM api_tokens WHERE user_id = ? AND revoked = 0 AND source = 'chofer'").bind(id),

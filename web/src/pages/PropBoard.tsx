@@ -107,7 +107,7 @@ export function Adjuntos({ r }: { r: CrmRecord }) {
       <span className={`adj${a.facturas ? ' ok' : ''}`} title={factura}><Icon name="receipt" size={14} /></span>
       <span className={`adj${a.remitos ? ' ok' : ''}`} title={remito}><Icon name="truck" size={14} /></span>
       <span className={`adj${bClase}`} title={bocetos}><Icon name="boceto" size={14} />{bTexto && <span className="n">{bTexto}</span>}</span>
-      <ChatChip recordId={r.id} mensajes={a.mensajes ?? 0} />
+      <ChatChip recordId={pedidoDe(r)} mensajes={a.mensajes ?? 0} />
     </span>
   );
 }
@@ -127,7 +127,7 @@ type Acciones = CardActions & { productos?: (id: number) => void };
 // de `acciones`, que el tablero actualiza en cada vuelta.
 const subtitleDe = (type: ObjectType, r: CrmRecord, conProductos = false) => (type === 'company' ? [r.props.domain, r.props.city].filter(Boolean).join(' · ')
     // El PDV solo si el nombre no lo dice ya; mientras se produce, cómo vienen los artículos («2 en el impresor · 1 listo…»).
-    : type === 'order' ? [r.props.hs_total_price != null && r.props.hs_total_price !== '' && fmtMoney(r.props.hs_total_price, r.props.hs_currency_code),
+    : type === 'order' || type === 'work_order' ? [r.props.hs_total_price != null && r.props.hs_total_price !== '' && fmtMoney(r.props.hs_total_price, r.props.hs_currency_code),
       r.props.pdv_finnegans && !r.name.includes(String(r.props.pdv_finnegans)) && `PDV ${r.props.pdv_finnegans}`,
       // Con los productos a la vista (cada uno con su estado), el resumen de ClickUp sobra.
       !conProductos && ![ENTREGADO, ANULADO].includes(r.props.hs_pipeline_stage) && r.props.detalle_produccion].filter(Boolean).join(' · ')
@@ -145,7 +145,8 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
   const conProductos = abierto && !!prod?.articulos.length;
   const subtitle = subtitleDe(type, r, conProductos);
   return (
-    <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable
+    // La orden de trabajo no se arrastra: su etapa es la del pedido (la mueven los productos en ClickUp, ordenes.ts).
+    <div className={`card${dragging ? ' dragging' : ''}${on ? ' on' : ''}${sel ? ' sel' : ''}`} draggable={type !== 'work_order'}
       onClick={(e) => (canSelect && (e.metaKey || e.ctrlKey || e.shiftKey || selecting) ? acciones.current.onSelect?.(r.id) : onOpen(r.id))}
       onDragStart={(e) => { acciones.current.setDragId?.(r.id); e.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => acciones.current.setDragId?.(null)}>
       {canSelect && <input type="checkbox" className="card-check" checked={sel} aria-label={`Seleccionar ${r.name}`} onClick={(e) => e.stopPropagation()} onChange={() => acciones.current.onSelect?.(r.id)} />}
@@ -155,17 +156,17 @@ const PropCard = memo(function PropCard({ r, type, cardProps, dragging, on, sel,
         : subtitle && <div className="meta"><span className="ellipsis">{subtitle}</span></div>}
       {type === 'order' && !cardProps?.length && <OrderLine r={r} />}
       {type === 'order' && <Saldo r={r} />}
-      {type === 'order' && !conProductos && <Fotos r={r} onOpen={() => onOpen(r.id)} />}
+      {esPedidoOT(type) && !conProductos && <Fotos r={r} onOpen={() => onOpen(r.id)} />}
       <div className="meta">
         <UserAvatar id={r.props.owner_id} />
         <span className="ellipsis grow" title="Propietario">{userName(meta, r.props.owner_id) || 'Sin propietario'}</span>
       </div>
-      {type === 'order' && <Produccion r={r} prod={prod} />}
-      {type === 'order' && <ProductosTarjeta p={prod} r={r} abierto={abierto} onToggle={() => acciones.current.productos?.(r.id)} />}
+      {esPedidoOT(type) && <Produccion r={r} prod={prod} />}
+      {esPedidoOT(type) && <ProductosTarjeta p={prod} r={r} abierto={abierto} onToggle={() => acciones.current.productos?.(r.id)} />}
       <div className="card-actions">
         <button className="btn ghost sm icon" title="Registrar una nota" aria-label={`Nota en ${r.name}`} onClick={(e) => act(e, 'note')}><Icon name="note" size={14} /></button>
         <button className="btn ghost sm icon" title="Crear una tarea" aria-label={`Tarea en ${r.name}`} onClick={(e) => act(e, 'task')}><Icon name="task" size={14} /></button>
-        {type === 'order' && <Adjuntos r={r} />}
+        {esPedidoOT(type) && <Adjuntos r={r} />}
         <span className={`grow small${stale ? ' stale' : ' muted'}`} style={{ textAlign: 'right' }} title={`Última actividad${ultima ? `: ${fmtRelative(ultima)}` : ''}`}>
           {ultima ? fmtRelative(ultima, true) : ''}
         </span>
@@ -181,6 +182,10 @@ export function urlTableroProp(meta: Meta, type: ObjectType, propIn: string | un
     : groupable.some((p) => p.name === DEFAULT_BOARD_PROP[type]) ? DEFAULT_BOARD_PROP[type] : groupable[0]?.name ?? 'owner_id';
   return { prop, groupable, url: `/board-prop/${type}${qs({ prop, q, groups: groups?.length ? groups : undefined, sort, dir })}` };
 }
+
+// Pedidos y órdenes de trabajo: la OT muestra lo de su pedido (fotos, productos, chat; props.pedido_id, ordenes.ts).
+const esPedidoOT = (t: ObjectType) => t === 'order' || t === 'work_order';
+const pedidoDe = (r: CrmRecord) => (r.type === 'work_order' ? Number(r.props.pedido_id) : r.id);
 
 // Por qué propiedad se agrupa cada tablero si la vista no dice otra cosa: los pedidos por su etapa, el resto por ciclo de vida.
 export const DEFAULT_BOARD_PROP: Record<ObjectType, string> = { contact: 'lifecyclestage', company: 'lifecyclestage', deal: 'dealstage', order: 'hs_pipeline_stage', work_order: 'hs_pipeline_stage' };
@@ -208,8 +213,8 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   const [dragId, setDragId] = useState<number | null>(null);
   const acciones = useRef<Acciones>({});
   // Pedidos: los productos de cada tarjeta (una consulta para todo el tablero) y si se ven, como en el tablero de Producción.
-  const esPedidos = type === 'order';
-  const prodsRes = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map((r) => r.id)) : [], esPedidos, board.data);
+  const esPedidos = esPedidoOT(type);
+  const prodsRes = useProduccionPedidos(esPedidos ? cols.flatMap((c) => c.records.map(pedidoDe)) : [], esPedidos, board.data);
   const prods = prodsRes.pedidos;
   // La primera vez, las tarjetas de Pedidos aparecen junto con sus productos (si no, se estiran un instante después), salvo
   // que tarden demasiado. Lo que se mueve o se carga de más después ya no espera: sigue lo que se veía.
@@ -229,7 +234,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
   // Pedidos: el total sin IVA abajo de cada columna y arriba, el del tablero (como el monto en el tablero de negocios).
   const conMonto = type === 'order';
   // Pedidos agrupados por etapa: cada columna con el ícono y el color suave de su etapa.
-  const etapa = (v: string) => (type === 'order' && prop === 'hs_pipeline_stage' ? etapaPedidoSlug(v) : undefined);
+  const etapa = (v: string) => (esPedidoOT(type) && prop === 'hs_pipeline_stage' ? etapaPedidoSlug(v) : undefined);
   const activo = (stage: string) => ![ENTREGADO, ANULADO].includes(stage);
   const montoDe = (r: CrmRecord) => { const v = r.props.hs_total_price; return v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null; };
   useEffect(() => { if (board.data) onTotal?.(total); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [total, board.data]);
@@ -238,6 +243,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
     const from = cols.find((c) => c.records.some((r) => r.id === id));
     const rec = from?.records.find((r) => r.id === id);
     if (!from || !rec || from.value === to.value) return;
+    if (type === 'work_order') { toast('La orden de trabajo no se mueve a mano: sigue la etapa de su pedido (antes de producción, la vendedora; después, el estado de sus productos).', true); return; }
     const m = montoDe(rec);
     // Al mover entre etapas, un pedido puede dejar de estar activo (entregado, anulado) o volver a estarlo.
     if (type === 'order' && prop === 'hs_pipeline_stage') {
@@ -297,7 +303,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
       <div className="col-body">
         {c.records.map((r) => <PropCard key={r.id} r={r} type={type} cardProps={cardProps} dragging={dragId === r.id} on={openId === r.id}
           sel={!!selected?.has(r.id)} selecting={!!selected?.size} canSelect={!!onSelect} acciones={acciones}
-          {...(esPedidos ? { prod: prods[r.id], abierto: productos.abierto(r) } : {})} />)}
+          {...(esPedidos ? { prod: prods[pedidoDe(r)], abierto: productos.abierto(r) } : {})} />)}
         {c.total > c.records.length && (
           <button className="btn sm ghost more" disabled={loadingMore === c.value} onClick={() => loadMore(c)}>
             {loadingMore === c.value ? 'Cargando…' : `Cargar más (quedan ${(c.total - c.records.length).toLocaleString('es-AR')})`}
@@ -316,7 +322,7 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
 
   // Pedidos por etapa: las columnas se agrupan en un recuadro por quién las mueve (Ventas, Producción, Logística), en el
   // orden de las etapas; las que no son de nadie (Anulado, Sin dato) quedan sueltas.
-  const porArea = type === 'order' && prop === 'hs_pipeline_stage';
+  const porArea = esPedidoOT(type) && prop === 'hs_pipeline_stage';
   const segmentos = porArea ? cols.reduce<Array<{ area: AreaPedido | null; cols: Column[] }>>((acc, c) => {
     const area = areaPedido(c.value);
     const last = acc[acc.length - 1];

@@ -39,7 +39,7 @@ export default function InicioProduccion({ tareas = true }: { tareas?: boolean }
   const fila = (o: Pedido, derecha: React.ReactNode) => (
     <div key={o.id} className="assoc-item">
       <div className="grow" style={{ minWidth: 0 }}>
-        <Link to={recordUrl('order', o.id)} className="ellipsis" style={{ display: 'block' }}>{o.name}</Link>
+        <Link to={`${recordUrl('order', o.id)}?ot=1`} className="ellipsis" style={{ display: 'block' }}>{o.name}</Link>
         <div className="small muted row" style={{ gap: 6, flexWrap: 'wrap' }}>{o.unidad && <UnidadBadge k={o.unidad as never} compact />}{etapa(o.etapa)}{o.evento ? ' · Evento' : ''} · <UserChip id={o.owner_id} size="xs" /></div>
       </div>
       {derecha}

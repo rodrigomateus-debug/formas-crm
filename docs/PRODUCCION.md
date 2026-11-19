@@ -5,6 +5,8 @@ lista PEC: cada PDV con sus artículos abiertos abajo. Cada artículo tiene su e
 proveedor, impresor y las fechas de ingreso y retiro. La pestaña **Producción** del CRM (`/produccion`) es esa vista, y
 se edita desde ahí.
 
+Cada PDV es la **orden de trabajo** de su pedido ([ORDENES.md](ORDENES.md)): un clic en un renglón o en el número abre la OT, con los productos, la entrega y la conversación de su pedido.
+
 ## Cómo se trabaja: de a poco, con ClickUp como fuente de verdad
 
 - **Arranca con Formas Shop.** Ceci trabaja los PDV del Shop desde el CRM; si anda bien, se suma Corporate. Las

@@ -87,9 +87,9 @@ export function visibleSql(al: string, user: User) {
   if (!esVentas(user)) return '1';
   const mios = propios(user);
   const unidad = gerenciaDe(user) == null ? '' : ` OR ${deLaUnidad(al, user)} OR ${al}.id IN (SELECT ua.to_id FROM associations ua
-    WHERE ua.to_type != 'deal' AND (ua.to_type != 'order' OR ua.from_type = 'deal') AND ua.from_id IN (SELECT uo.id FROM records uo WHERE ${deLaUnidad('uo', user)}))`;
+    WHERE ua.to_type != 'deal' AND (ua.to_type NOT IN ('order', 'work_order') OR ua.from_type = 'deal') AND ua.from_id IN (SELECT uo.id FROM records uo WHERE ${deLaUnidad('uo', user)}))`;
   return `(${al}.owner_id IN ${mios} OR ${al}.owner_id IS NULL${unidad} OR ${al}.id IN (SELECT va.to_id FROM associations va
-    WHERE va.to_type != 'deal' AND (va.to_type != 'order' OR va.from_type = 'deal')
+    WHERE va.to_type != 'deal' AND (va.to_type NOT IN ('order', 'work_order') OR va.from_type = 'deal')
       AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order', 'work_order') AND vo.owner_id IN ${mios})))`;
 }
 

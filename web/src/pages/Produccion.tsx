@@ -371,7 +371,7 @@ export default function ProduccionPage() {
             onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onTodos={(abrir) => cambiarColapsado(!abrir)} />
         : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} vacias={vacias} />)}
-      {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
+      {preview && <RecordPreview key={preview} type="order" id={preview} ot onClose={() => setPreview(null)} onChange={cargar} />}
     </div>
   );
 }
@@ -682,7 +682,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
             <Icon name="order" size={15} />
             <div className="prod-pdv-t">
               <div className="ellipsis">
-                {p.record_id ? <Link to={recordUrl('order', p.record_id)}><b>PDV {p.npdv}</b></Link> : <b>PDV {p.npdv}</b>}
+                {p.record_id ? <Link to={`${recordUrl('order', p.record_id)}?ot=1`}><b>PDV {p.npdv}</b></Link> : <b>PDV {p.npdv}</b>}
                 <span className="muted"> · {p.cliente ?? 'Sin cliente'}</span>
               </div>
               <div className="small muted ellipsis">
@@ -883,7 +883,7 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
       onClick={(e) => { if (p.record_id && !clicAdentro(e)) onAbrir(p); }} title={p.record_id ? `Ver el pedido del PDV ${p.npdv}` : undefined}>
       <div className="prod-pdv-card-head">
         <div className="row" style={{ gap: 6, minWidth: 0 }}>
-          {p.record_id ? <Link to={recordUrl('order', p.record_id)} className="prod-npdv">PDV {p.npdv}</Link> : <span className="prod-npdv">PDV {p.npdv}</span>}
+          {p.record_id ? <Link to={`${recordUrl('order', p.record_id)}?ot=1`} className="prod-npdv">PDV {p.npdv}</Link> : <span className="prod-npdv">PDV {p.npdv}</span>}
           <span className="grow" />
           {p.total > 0 && <span className={`prod-avance${listo ? ' ok' : ''}`} title={`${p.listos} de ${p.total} artículos listos`}>{p.listos}/{p.total}</span>}
         </div>

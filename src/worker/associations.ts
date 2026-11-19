@@ -14,7 +14,7 @@ function sinOT(a: Pick<RecordRow, 'object_type'>, b: Pick<RecordRow, 'object_typ
 // Cambió una relación del pedido con una empresa, un contacto o un negocio: su orden de trabajo también.
 async function alPedido(db: D1Database, ctx: Ctx, a: Pick<RecordRow, 'id' | 'object_type'>, b: Pick<RecordRow, 'id' | 'object_type'>) {
   const pedido = a.object_type === 'order' && OT_RELACIONES.includes(b.object_type) ? a : b.object_type === 'order' && OT_RELACIONES.includes(a.object_type) ? b : null;
-  if (pedido) await sincronizarOT(db, ctx, pedido.id).catch((e) => console.error('orden de trabajo', pedido.id, (e as Error).message));
+  if (pedido) await sincronizarOT(db, ctx, pedido.id, { relaciones: true }).catch((e) => console.error('orden de trabajo', pedido.id, (e as Error).message));
 }
 
 // Cada asociación se guarda en los dos sentidos (A→B y B→A) para leer rápido desde cualquier lado.
@@ -89,7 +89,8 @@ export async function associationsOf(db: D1Database, id: number, hiddenPipelines
   const out: Record<ObjectType, Array<ReturnType<typeof rowToRecord> & { label: string | null; primary: boolean }>> = {
     contact: [], company: [], deal: [], order: [], work_order: [],
   };
-  for (const r of results) out[r.object_type].push({ ...rowToRecord(r), label: r.assoc_label, primary: !!r.assoc_primary });
+  // `??=`: un tipo que este código no conoce (por ejemplo, durante una publicación) no rompe la ficha.
+  for (const r of results) (out[r.object_type] ??= []).push({ ...rowToRecord(r), label: r.assoc_label, primary: !!r.assoc_primary });
   return out;
 }
 

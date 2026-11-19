@@ -226,7 +226,8 @@ export function NombreEditable({ type, record, onSaved, as: H = 'h1', link, edit
   const { meta } = useMeta();
   const toast = useToast();
   const [editInt, setEditInt] = useState(false);
-  const puede = meta.me.role !== 'viewer';
+  // La orden de trabajo toma el nombre de su pedido (ordenes.ts): no se cambia a mano.
+  const puede = meta.me.role !== 'viewer' && type !== 'work_order';
   const edit = puede && (editExt ?? editInt);
   const setEdit = (v: boolean) => { setEditInt(v); onEdit?.(v); };
   const campos = CAMPOS_NOMBRE[type];

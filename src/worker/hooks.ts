@@ -8,7 +8,8 @@ import { authenticate } from './auth';
 import { applyBundle, findCompany, type Bundle } from './upsert';
 import { cargarReferido, usuarioPorMail } from './referidos';
 import { emailDomain, normDomain, normLinkedin, normPhone, splitName } from './records';
-import { clickupStatus, limpiarRemitos, remitosPendientes, syncClickup } from './clickup';
+import { clickupStatus, limpiarRemitos, remitosPendientes, syncClickup, systemCtx } from './clickup';
+import { conciliarOTs } from './ordenes';
 import { finnegansState } from './finnegans';
 import { gmailConfig, syncAll } from './gmail';
 import { avisosConfig, correrAvisos } from './avisos';
@@ -281,6 +282,14 @@ hooks.post('/pedidos/revisar', async (c) => {
   // no esperar al cron (scripts/revisar-clickup.mjs). Sin modo, la lectura completa de siempre.
   const modo = ((await c.req.json<{ modo?: string }>().catch(() => ({}))) as { modo?: string }).modo;
   return c.json(await syncClickup(c.env, modo === 'abiertos' ? { abiertos: true } : modo === 'seguir' ? {} : { full: true }));
+});
+// Órdenes de trabajo (ordenes.ts): poner al día ahora las que quedaron distintas de su pedido y crear las que falten, sin
+// esperar al cron de cada hora (con token de administrador). `limite`: cuántas por vez (hasta 200).
+hooks.post('/ordenes/conciliar', async (c) => {
+  await adminToken(c.env, c.req.raw);
+  const { limite } = await c.req.json<{ limite?: number }>().catch(() => ({} as { limite?: number }));
+  const ctx = { ...(await systemCtx(c.env)), source: 'crm', sourceDetail: 'orden de trabajo' };
+  return c.json(await conciliarOTs(c.env.DB, ctx, Math.min(Math.max(Number(limite) || 50, 1), 200)));
 });
 // Gmail con token de administrador (lo mismo que Configuración → Integraciones → «Mails (Gmail)»): ver el estado,
 // cambiar la configuración (prender, qué bandejas) y leer ahora.

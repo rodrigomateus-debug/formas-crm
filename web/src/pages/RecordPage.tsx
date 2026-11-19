@@ -17,14 +17,21 @@ import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasPro
 import { siFestejaPedido, siGano } from '../Chispin';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
-interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
+// ot_id: en un pedido, su orden de trabajo. pedido_id y pedido: en una orden de trabajo, su pedido (src/worker/ordenes.ts).
+interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number };
+  ot_id?: number | null; pedido_id?: number | null; pedido?: CrmRecord | null }
 
 const RELATED: Record<ObjectType, ObjectType[]> = {
-  contact: ['company', 'deal', 'order'],
-  company: ['contact', 'deal', 'order', 'company'],
-  deal: ['contact', 'company', 'order'],
-  order: ['contact', 'deal', 'company'],
+  contact: ['company', 'deal', 'order', 'work_order'],
+  company: ['contact', 'deal', 'order', 'work_order', 'company'],
+  deal: ['contact', 'company', 'order', 'work_order'],
+  order: ['work_order', 'contact', 'deal', 'company'],
+  work_order: ['order', 'company', 'contact', 'deal'],
 };
+// Producción y Logística trabajan con la orden de trabajo: el link de un pedido (de un mail, una notificación, Producción, el
+// Cronograma…) les abre su OT. «?ot=1» hace lo mismo para cualquiera (los links de las pantallas de operaciones) y
+// «?pedido=1» abre el pedido igual (el botón «Ver pedido» de la OT).
+const abreLaOT = (me: Parameters<typeof esOperaciones>[0]) => esOperaciones(me);
 
 export default function RecordPage() {
   const { objectPath = 'contacts', id = '0' } = useParams();
@@ -33,22 +40,33 @@ export default function RecordPage() {
   const data = useAsync(() => http<Loaded>('GET', `/records/${type}/${id}`), [type, id]);
   const [tlKey, setTlKey] = useState(0);
   // Perfil Ventas: sin Producción (los remitos de sus pedidos sí, solo para ver y bajar).
-  const ventas = esVentas(useMeta().meta.me);
+  const { me } = useMeta().meta;
+  const ventas = esVentas(me);
   const [peek, setPeek] = useState<{ type: ObjectType; id: number } | null>(null);
+  const loc = useLocation();
   useEffect(() => { if (data.data?.redirect) navigate(recordUrl(type, data.data.redirect), { replace: true }); }, [data.data, navigate, type]);
+  useEffect(() => {
+    const p = new URLSearchParams(loc.search);
+    if (type !== 'order' || !data.data?.ot_id || p.has('pedido') || !(abreLaOT(me) || p.has('ot'))) return;
+    p.delete('ot');
+    navigate(`${recordUrl('work_order', data.data.ot_id)}${p.size ? `?${p}` : ''}`, { replace: true });
+  }, [data.data, type]); // eslint-disable-line react-hooks/exhaustive-deps
   if (data.error) return <div className="content"><div className="empty plain">{data.error} <Link to={`/${objectPath}`}>Volver</Link></div></div>;
   if (!data.data?.record) return <div className="content"><Cargando /></div>;
   const { record, associations } = data.data;
   const refresh = () => { data.reload(); setTlKey((k) => k + 1); };
+  // La orden de trabajo muestra y edita lo de su pedido: productos, bocetos, remitos, archivos y la conversación (una sola).
+  const ot = type === 'work_order';
+  const pedido = ot ? data.data.pedido ?? null : type === 'order' ? record : null;
   return (
     <div className="content flush record-wrap">
       <div className="record">
-        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} /></aside>
+        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} pedidoId={ot ? pedido?.id : undefined} otId={data.data.ot_id ?? undefined} /></aside>
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
-          {type === 'order' || type === 'deal'
-            ? <CentroConConversacion type={type} record={record}>
+          {type === 'order' || type === 'deal' || (ot && pedido)
+            ? <CentroConConversacion type={type} record={record} chat={ot && pedido ? pedido : undefined}>
               <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />
             </CentroConConversacion>
             : <Timeline key={tlKey} type={type} record={record} associations={associations} onChange={refresh} />}
@@ -62,9 +80,9 @@ export default function RecordPage() {
           {type === 'deal' && <FacturarCard record={record} />}
           {type === 'deal' && <BocetosNegocioCard dealId={record.id} empresas={claveEmpresas(associations)} />}
           {(type === 'order' || type === 'deal' || type === 'company') && <RazonSocialCard type={type} recordId={record.id} clave={claveEmpresas(associations)} onCambio={refresh} />}
-          {type === 'order' && <ProductsCard recordId={record.id} max={5} empresas={claveEmpresas(associations)} />}
-          {type === 'order' && <RemitosCard record={record} onChange={refresh} />}
-          {type === 'order' && <FilesCard recordId={record.id} />}
+          {pedido && <ProductsCard recordId={pedido.id} max={5} empresas={claveEmpresas(associations)} />}
+          {pedido && <RemitosCard record={pedido} onChange={refresh} />}
+          {pedido && <FilesCard recordId={pedido.id} />}
           {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={refresh} onPeek={(pt, pid) => setPeek({ type: pt, id: pid })} />)}
         </aside>
         {peek && <RecordPreview type={peek.type} id={peek.id} onClose={() => setPeek(null)} onChange={refresh} />}
@@ -76,12 +94,13 @@ export default function RecordPage() {
 // En pedidos y negocios, el centro de la ficha tiene dos pestañas: la conversación del equipo (con la actividad
 // entremezclada, como en ClickUp) y la actividad de siempre (como en HubSpot). Cada uno queda en la que eligió; el link del
 // mail de una mención (?conversacion=1) abre la conversación.
-function CentroConConversacion({ type, record, children }: { type: ObjectType; record: CrmRecord; children: ReactNode }) {
+// `chat`: en la orden de trabajo, el pedido (la conversación es la suya).
+function CentroConConversacion({ type, record, chat, children }: { type: ObjectType; record: CrmRecord; chat?: CrmRecord; children: ReactNode }) {
   const clave = `crm:centro-${type}`;
   const [tab, setTabState] = useState<'conversacion' | 'actividad'>(() => {
     if (new URLSearchParams(window.location.search).has('conversacion')) return 'conversacion';
     try { const v = localStorage.getItem(clave); if (v === 'conversacion' || v === 'actividad') return v; } catch { /* sin memoria */ }
-    return type === 'order' ? 'conversacion' : 'actividad';
+    return type === 'order' || type === 'work_order' ? 'conversacion' : 'actividad';
   });
   const setTab = (t: 'conversacion' | 'actividad') => { setTabState(t); try { localStorage.setItem(clave, t); } catch { /* sin memoria */ } };
   // Desde una notificación o un mail (?conversacion=1&mensaje=…): la conversación, en ese mensaje (también si ya estaba en la ficha).
@@ -89,7 +108,8 @@ function CentroConConversacion({ type, record, children }: { type: ObjectType; r
   const params = new URLSearchParams(loc.search);
   const mensaje = Number(params.get('mensaje')) || undefined;
   useEffect(() => { if (params.has('conversacion')) setTabState('conversacion'); }, [loc.search]); // eslint-disable-line react-hooks/exhaustive-deps
-  const sinLeer = useNoLeidosDe(record.id);
+  const del = chat ?? record;
+  const sinLeer = useNoLeidosDe(del.id);
   return (
     <>
       <div className="tabs centro-tabs">
@@ -97,7 +117,7 @@ function CentroConConversacion({ type, record, children }: { type: ObjectType; r
           {sinLeer ? <span className={`count nuevo${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</button>
         <button className={`tab ${tab === 'actividad' ? 'on' : ''}`} onClick={() => setTab('actividad')}><Icon name="history" size={14} />Actividad</button>
       </div>
-      {tab === 'conversacion' ? <ConversacionPanel type={type} recordId={record.id} className="en-ficha" mensaje={mensaje} /> : children}
+      {tab === 'conversacion' ? <ConversacionPanel type={del.type} recordId={del.id} className="en-ficha" mensaje={mensaje} /> : children}
     </>
   );
 }
@@ -163,10 +183,11 @@ function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r:
   if (type === 'contact') return [r.props.jobtitle, r.props.company].filter(Boolean).join(' · ') || r.props.email;
   if (type === 'company') return r.props.domain;
   if (type === 'deal') return [fmtMoney(r.props.amount, r.props.deal_currency_code), stageOf(meta, r.props.dealstage)?.stage.label].filter(Boolean).join(' · ');
+  if (type === 'work_order') return '';   // el número ya está en el nombre («OT 31167 · Cliente»)
   return r.props.pdv_finnegans ? `PDV ${r.props.pdv_finnegans}` : '';
 }
 
-function LeftPanel({ type, record, associations, onChange, produccion }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion'] }) {
+function LeftPanel({ type, record, associations, onChange, produccion, pedidoId, otId }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion']; pedidoId?: number; otId?: number }) {
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
@@ -205,15 +226,16 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
             {type === 'deal'
               ? <div className="muted small rec-valor"><ValorEditable record={record} onSaved={onChange} />{stageOf(meta, record.props.dealstage) ? <span className="rec-etapa">{` · ${stageOf(meta, record.props.dealstage)!.stage.label}`}</span> : ''}</div>
               : <div className="muted small">{subtitle(meta, type, record)}</div>}
-            {/* Pedidos: la etapa y quién lo tiene en producción, igual que en la vista previa y en la tarjeta del tablero. */}
-            {type === 'order' && (record.props.hs_pipeline_stage || produccion) && (
+            {/* Pedidos y órdenes de trabajo: la etapa y quién lo tiene en producción, igual que en la vista previa y en la tarjeta del tablero. */}
+            {(type === 'order' || type === 'work_order') && (record.props.hs_pipeline_stage || produccion) && (
               <div className="rec-prod">
                 {record.props.hs_pipeline_stage && <EtapaPedido value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} />}
                 {produccion && <QuienProduce {...produccion} />}
               </div>
             )}
             <TagChips meta={meta} ids={record.tags} /></div>
-          <RecordMenu items={[
+          {/* La orden de trabajo no se renombra, combina ni borra a mano: sigue a su pedido (ordenes.ts). */}
+          {type !== 'work_order' && <RecordMenu items={[
             ...(meta.me.role !== 'viewer' ? [{ label: 'Cambiar nombre', icon: 'edit', onClick: () => setEditNombre(true) }] : []),
             { label: 'Combinar con otro…', icon: 'merge', onClick: () => setMerge(true) },
             ...(type === 'deal' && meta.me.role !== 'viewer' ? [{
@@ -228,13 +250,15 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
                 await http('DELETE', `/records/${type}/${record.id}`); toast('Borrado'); navigate(`/${OBJECTS[type].path}`);
               },
             }] : []),
-          ]} /></div>
+          ]} />}</div>
         <div className="row wrap">
           {type === 'contact' && whatsappUrl(record.props.mobilephone || record.props.phone) && <a className="btn sm wa-link" href={whatsappUrl(record.props.mobilephone || record.props.phone)} target="_blank" rel="noreferrer"><Icon name="whatsapp" size={14} />Abrir WhatsApp</a>}
           {type === 'contact' && record.props.email && <a className="btn sm" href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(record.props.email)}`} target="_blank" rel="noreferrer">Escribir mail</a>}
           {type === 'deal' && <><ChatDarwin url={record.props.link_a_darwin} /><WhatsAppDelNegocio record={record} associations={associations} /></>}
-          {type === 'order' && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
-          {type !== 'order' && (
+          {type === 'work_order' && pedidoId && <Link className="btn sm" to={`${recordUrl('order', pedidoId)}?pedido=1`}><Icon name="order" size={14} />Ver pedido</Link>}
+          {type === 'order' && otId && <Link className="btn sm" to={recordUrl('work_order', otId)}><Icon name="work_order" size={14} />Orden de trabajo</Link>}
+          {(type === 'order' || type === 'work_order') && safeUrl(record.props.url_clickup) && <a className="btn sm" href={safeUrl(record.props.url_clickup)} target="_blank" rel="noreferrer">PDV en ClickUp</a>}
+          {type !== 'order' && type !== 'work_order' && (
             <a className="btn sm" title="Abre Claude con el pedido listo: usa el conector Formas Hub para juntar compras, deuda, pedidos y mails, y arma el resumen y un mail de seguimiento"
               href={`https://claude.ai/new?q=${encodeURIComponent(`Prepará mi reunión con ${record.name} (${OBJECTS[type].single.toLowerCase()} ${record.id} de Formas Hub). Usá la herramienta preparar_reunion del conector Formas Hub y armame: un resumen corto de la relación, qué compró y cuándo, los temas abiertos, los riesgos (deuda vencida, si está en riesgo o perdido, pedidos atrasados), los próximos pasos y un borrador de mail de seguimiento en castellano rioplatense.`)}`}
               target="_blank" rel="noreferrer">Preparar reunión con Claude</a>
@@ -242,7 +266,7 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
         </div>
       </div>
       <details className="prop-group" open>
-        <summary>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}
+        <summary>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : type === 'work_order' ? 'esta orden de trabajo' : 'este contacto'}
           {meta.me.role === 'admin' && type !== 'deal' && <button className="btn ghost sm" style={{ marginLeft: 'auto' }} title="Elegir qué datos se ven acá y en la vista previa" onClick={(e) => { e.preventDefault(); setCfgKeys(true); }}>Elegir datos</button>}
         </summary>
         <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
@@ -1183,7 +1207,9 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
   const title = toType === type ? 'Empresas relacionadas' : OBJECTS[toType].plural;
   // Un pedido va en un solo negocio (el servidor tampoco deja un segundo): con uno ya no se ofrece «Agregar».
   const pedidoNegocio = type === 'order' && toType === 'deal';
-  const lleno = pedidoNegocio && items.length >= 1;
+  // La orden de trabajo tiene las relaciones de su pedido y se acomoda sola: no se agrega ni se quita nada a mano.
+  const sola = type === 'work_order' || toType === 'work_order';
+  const lleno = sola || (pedidoNegocio && items.length >= 1);
   const add = async (r: CrmRecord) => {
     try { await http('POST', '/associations', { from_id: record.id, to_id: r.id }); toast('Asociado'); setMode(''); onChange(); }
     catch (e) { toast((e as Error).message, true); }
@@ -1207,24 +1233,26 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
             <div className="small muted ellipsis">
               {toType === 'deal' ? [fmtMoney(r.props.amount, r.props.deal_currency_code), stageOf(meta, r.props.dealstage)?.stage.label].filter(Boolean).join(' · ')
                 : toType === 'contact' ? [r.props.jobtitle, r.props.email || r.props.mobilephone || r.props.phone].filter(Boolean).join(' · ')
-                  : toType === 'company' ? r.props.domain : r.props.pdv_finnegans}
+                  : toType === 'company' ? r.props.domain
+                    : toType === 'order' || toType === 'work_order' ? (r.props.hs_pipeline_stage ? formatValue(meta, toType, 'hs_pipeline_stage', r.props.hs_pipeline_stage) : r.props.pdv_finnegans) : r.props.pdv_finnegans}
             </div>
             {r.primary && toType === 'company' && <span className="tag info">Principal</span>}
           </div>
           <div className="x row">
             {onPeek && <button className="btn ghost sm" title="Vista previa" aria-label={`Vista previa de ${r.name}`} onClick={() => onPeek(toType, r.id)}>Ver</button>}
-            {toType === 'company' && !r.primary && type !== 'company' && (
+            {toType === 'company' && !r.primary && type !== 'company' && !sola && (
               <button className="btn ghost sm" title="Marcar como principal" onClick={async () => { await http('POST', '/associations', { from_id: record.id, to_id: r.id, primary: true }); onChange(); }}>★</button>
             )}
-            <button className="btn ghost sm" aria-label="Quitar asociación" onClick={async () => {
+            {!sola && <button className="btn ghost sm" aria-label="Quitar asociación" onClick={async () => {
               if (!confirm(`¿Quitar la asociación con «${r.name}»?`)) return;
               await http('DELETE', '/associations', { from_id: record.id, to_id: r.id }); onChange();
-            }}>×</button>
+            }}>×</button>}
           </div>
         </div>
       ))}
       {!items.length && mode === '' && (pedidoNegocio
         ? <div className="panel-body small warn-text">Sin negocio asociado: asocialo para que el monto del negocio siga al total de este pedido.</div>
+        : toType === 'work_order' ? <div className="panel-body muted small">{type === 'order' ? 'La orden de trabajo se crea sola con el pedido.' : 'Ninguna todavía: se crean solas con cada pedido.'}</div>
         : <div className="panel-body muted small">Nada asociado todavía.</div>)}
       {items.length > 5 && <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)}>{all ? 'Ver menos' : `Ver los ${items.length}`}</button></div>}
     </div>
@@ -1234,18 +1262,27 @@ function AssocCard({ type, record, toType, items, onChange, onPeek }: {
 // Vista previa en un panel lateral, como al hacer clic en una tarjeta del tablero de HubSpot: lo principal del
 // registro, las acciones rápidas, «Acerca de» editable, con quién está asociado y la última actividad.
 // `arriba`: lo que la pantalla que abre la vista previa quiere mostrar primero (el cronograma: el despacho de la tarjeta).
-export function RecordPreview({ type, id, compose, onClose, onChange, arriba }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; arriba?: ReactNode }) {
+// `ot`: si es un pedido, mostrar su orden de trabajo (si tiene). Por defecto, para Producción y Logística; las pantallas de
+// operaciones (Producción, Cronograma, Inicio de Producción) lo piden también para los administradores.
+export function RecordPreview({ type, id, compose, onClose, onChange, arriba, ot }: { type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; arriba?: ReactNode; ot?: boolean }) {
+  const { meta } = useMeta();
   // Desde la vista previa se puede abrir la de un asociado (contacto, empresa…) y volver, como en HubSpot.
   const [stack, setStack] = useState<Array<{ type: ObjectType; id: number }>>([]);
-  const cur = stack[stack.length - 1] ?? { type, id };
+  const [raiz, setRaiz] = useState<{ type: ObjectType; id: number } | null>(null);
+  useEffect(() => setRaiz(null), [type, id]);
+  const base = raiz ?? { type, id };
+  const cur = stack[stack.length - 1] ?? base;
+  const aLaOT = (ot ?? abreLaOT(meta.me)) && !stack.length && !raiz && type === 'order';
   return (
     <PreviewBody key={`${cur.type}-${cur.id}`} type={cur.type} id={cur.id} compose={stack.length ? undefined : compose} onClose={onClose} onChange={onChange} arriba={stack.length ? undefined : arriba}
-      onBack={stack.length ? () => setStack((s) => s.slice(0, -1)) : undefined} onPeek={(t, i) => setStack((s) => [...s, { type: t, id: i }])} />
+      onBack={stack.length ? () => setStack((s) => s.slice(0, -1)) : undefined} onPeek={(t, i) => setStack((s) => [...s, { type: t, id: i }])}
+      onOT={aLaOT ? (otId) => setRaiz({ type: 'work_order', id: otId }) : undefined} />
   );
 }
 
-function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, onPeek, arriba }: {
+function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, onPeek, arriba, onOT }: {
   type: ObjectType; id: number; compose?: Activity['type']; onClose: () => void; onChange?: () => void; onBack?: () => void; onPeek: (t: ObjectType, id: number) => void; arriba?: ReactNode;
+  onOT?: (otId: number) => void;
 }) {
   const { meta } = useMeta();
   const navigate = useNavigate();
@@ -1257,12 +1294,17 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   const [hist, setHist] = useState<string | null>(null);
   // La conversación del pedido (o negocio), a la izquierda de la vista previa. Queda abierta o cerrada como la dejó cada uno;
   // en pantallas angostas arranca cerrada y se abre encima.
-  const conChat = type === 'order' || type === 'deal';
+  // La orden de trabajo, con la conversación y lo de su pedido (una sola conversación, ordenes.ts).
+  const ot = type === 'work_order';
+  const pedido = ot ? data.data?.pedido ?? null : type === 'order' ? data.data?.record ?? null : null;
+  useEffect(() => { if (onOT && data.data?.ot_id) onOT(data.data.ot_id); }, [data.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chatDe = ot ? pedido : null;
+  const conChat = type === 'order' || type === 'deal' || (ot && !!pedido);
   const [chat, setChatState] = useState(() => {
     try { const v = localStorage.getItem('crm:preview-chat'); return v ? v === '1' : window.innerWidth >= 1100; } catch { return true; }
   });
   const setChat = (v: boolean) => { setChatState(v); try { localStorage.setItem('crm:preview-chat', v ? '1' : '0'); } catch { /* sin memoria */ } };
-  const sinLeer = useNoLeidosDe(id);
+  const sinLeer = useNoLeidosDe(chatDe?.id ?? id);
   const record = data.data?.record;
   const associations = data.data?.associations;
   const changed = () => { data.reload(); tl.reload(); onChange?.(); };
@@ -1276,7 +1318,9 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
   const keyProps = ((pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])
-    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage', 'link_a_darwin'].includes(p.name)) && !(type === 'order' && ['hs_total_price', 'pdv_finnegans', 'hs_pipeline_stage'].includes(p.name)));
+    .filter((p) => !(type === 'deal' && ['amount', 'closedate', 'pipeline', 'dealstage', 'link_a_darwin'].includes(p.name))
+      && !(type === 'order' && ['hs_total_price', 'pdv_finnegans', 'hs_pipeline_stage'].includes(p.name))
+      && !(ot && ['pdv_finnegans', 'hs_pipeline_stage', 'fecha_de_entrega', 'tipo_de_pedido'].includes(p.name)));
   // Cambiar la etapa desde la vista previa; si la etapa pide datos (motivo de pérdida…), se piden antes.
   const moveTo = async (stageId: string, extra: Record<string, unknown> = {}) => {
     const st = stageOf(meta, stageId)?.stage;
@@ -1315,6 +1359,12 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
     ['Email', record.props.email || '—'],
     ['Celular', record.props.mobilephone || record.props.phone ? <WhatsAppLink key="cel" phone={record.props.mobilephone || record.props.phone} /> : '—'],
     ['Propietario', <UserChip key="owner" id={record.props.owner_id} empty="—" />],
+  ] : ot ? [
+    ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'work_order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],
+    ...(data.data?.produccion ? [['Producción', <QuienProduce key="prod" {...data.data.produccion} />] as [string, ReactNode]] : []),
+    ['Tipo', record.props.tipo_de_pedido || '—'],
+    ['Entrega pactada', record.props.fecha_de_entrega ? fmtDate(record.props.fecha_de_entrega) : '—'],
+    ['Pedido', pedido ? <Link key="ped" to={`${recordUrl('order', pedido.id)}?pedido=1`}>{pedido.name}</Link> : '—'],
   ] : [
     ['Total sin IVA', fmtMoney(record.props.hs_total_price, record.props.hs_currency_code) || '—'],
     ['Etapa', record.props.hs_pipeline_stage ? <EtapaPedido key="etapa" value={record.props.hs_pipeline_stage} label={formatValue(meta, 'order', 'hs_pipeline_stage', record.props.hs_pipeline_stage)} /> : '—'],
@@ -1329,7 +1379,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
   ];
   return (
     <Drawer clear title={`Vista previa · ${OBJECTS[type].single}`} onClose={onClose}
-      aside={conChat && chat ? <ConversacionPanel type={type} recordId={id} onClose={() => setChat(false)} /> : undefined}
+      aside={conChat && chat ? <ConversacionPanel type={chatDe?.type ?? type} recordId={chatDe?.id ?? id} onClose={() => setChat(false)} /> : undefined}
       actions={conChat && !chat ? <button className="btn sm conv-abrir" onClick={() => setChat(true)} title="Abrir la conversación del equipo sobre este registro">
         <Icon name="chat" size={14} />Conversación{sinLeer ? <span className={`count${sinLeer.menciones ? ' mencion' : ''}`}>{sinLeer.no_leidos}</span> : null}</button> : undefined}
       footer={<>
@@ -1357,7 +1407,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         </div>
         {compose && <Composer type={compose} record={record} associations={associations!} onClose={() => setCompose(null)} onSaved={() => { setCompose(null); changed(); }} />}
         <div className="panel">
-          <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : 'este contacto'}</h3></div>
+          <div className="panel-head"><h3>Acerca de {type === 'deal' ? 'este negocio' : type === 'company' ? 'esta empresa' : type === 'order' ? 'este pedido' : type === 'work_order' ? 'esta orden de trabajo' : 'este contacto'}</h3></div>
           <div className="prop-list">{keyProps.map((p) => <PropRow key={p.name} type={type} prop={p} record={record} onSave={save} onHistory={setHist} />)}</div>
         </div>
         {type === 'company' && <ComprasCard record={record} />}
@@ -1365,10 +1415,10 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
         {!esVentas(meta.me) && type === 'company' && record.props.tipo_de_relacion === 'proveedor' && <ProduccionProveedorCard companyId={record.id} />}
         {type === 'deal' && <FacturarCard record={record} />}
         {(type === 'order' || type === 'deal' || type === 'company') && <RazonSocialCard type={type} recordId={id} clave={claveEmpresas(associations)} onCambio={changed} />}
-        {type === 'order' && <ProductsCard recordId={id} max={3} onCambio={onChange} empresas={claveEmpresas(associations)} />}
+        {pedido && <ProductsCard recordId={pedido.id} max={3} onCambio={onChange} empresas={claveEmpresas(associations)} />}
         {/* Los remitos y qué falta entregar, igual que en la ficha (el camioncito de la tarjeta del tablero los cuenta). */}
-        {type === 'order' && <RemitosCard record={record} onChange={changed} />}
-        {type === 'order' && <FilesCard recordId={id} />}
+        {pedido && <RemitosCard record={pedido} onChange={changed} />}
+        {pedido && <FilesCard recordId={pedido.id} />}
         {/* Las mismas tarjetas de la ficha: buscar y asociar, crear uno nuevo ya asociado, quitar, marcar principal. */}
         {RELATED[type].map((t) => <AssocCard key={t} type={type} record={record} toType={t} items={associations?.[t] ?? []} onChange={changed} onPeek={onPeek} />)}
         <div className="panel">

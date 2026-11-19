@@ -15,6 +15,8 @@ administrador, `GET /hooks/clickup/salida` muestra lo último que se mandó y si
 quedan a nombre del dueño del token `CLICKUP_TOKEN`. La segunda (pedido de Rodrigo del 6/11/2026): el boceto aprobado de un producto se adjunta a la subtarea de ese
 artículo en el PDV (ver «Bocetos de producción»); solo se adjunta, no se cambia ningún estado.
 
+Cada pedido tiene su **orden de trabajo** (lo que trabaja Producción), que nace con él y copia su etapa y sus relaciones: ver [ORDENES.md](ORDENES.md).
+
 ## De dónde sale cada cosa
 
 | Qué | Fuente | Cada cuánto | Código |

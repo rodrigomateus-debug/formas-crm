@@ -57,12 +57,18 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
       propietarios++;
       stmts.push(
         db.prepare("UPDATE records SET owner_id = ?, props = json_set(props, '$.owner_id', ?) WHERE id = ? AND owner_id IS NULL").bind(uid, uid, r.id),
+        // Su orden de trabajo, igual (copia la vendedora del pedido; ordenes.ts). En la misma tanda, sin consultas de más.
+        db.prepare("UPDATE records SET owner_id = ?, props = json_set(props, '$.owner_id', ?) WHERE id = (SELECT ot_id FROM ot_pedido WHERE pedido_id = ?) AND owner_id IS NULL").bind(uid, uid, r.id),
         db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, ?, NULL, ?, ?, ?, ?)')
           .bind(r.id, 'owner_id', String(uid), ts, sys?.id ?? null, 'finnegans'),
       );
     }
     const f = k ? porFecha.get(k) : undefined;
-    if (f && f !== r.fecha) { fechas++; stmts.push(db.prepare("UPDATE records SET props = json_set(props, '$.fecha_pedido', ?) WHERE id = ?").bind(f, r.id)); }
+    if (f && f !== r.fecha) {
+      fechas++;
+      stmts.push(db.prepare("UPDATE records SET props = json_set(props, '$.fecha_pedido', ?) WHERE id = ?").bind(f, r.id),
+        db.prepare("UPDATE records SET props = json_set(props, '$.fecha_pedido', ?) WHERE id = (SELECT ot_id FROM ot_pedido WHERE pedido_id = ?)").bind(f, r.id));
+    }
     if (!k || !porPedido.has(k)) continue;
     cruzados++;
     const v = porPedido.get(k)!;

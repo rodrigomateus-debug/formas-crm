@@ -18,7 +18,7 @@ export const DEFAULT_AVISOS = (): AvisosConfig => ({ enabled: true, resumen: tru
 const SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
 const APP_URL = (env: Env) => (env.APP_URL ?? 'https://formas-crm.rodrigo-mateus.workers.dev').replace(/\/$/, '');
 const ART = -3 * 3600_000;   // Buenos Aires
-const PATHS: Record<string, string> = { contact: 'contacts', company: 'companies', deal: 'deals', order: 'orders' };
+const PATHS: Record<string, string> = { contact: 'contacts', company: 'companies', deal: 'deals', order: 'orders', work_order: 'work-orders' };
 
 export async function avisosConfig(env: Env): Promise<AvisosConfig> {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'avisos'").first<{ value: string }>();

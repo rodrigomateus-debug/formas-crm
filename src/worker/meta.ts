@@ -87,6 +87,10 @@ export class Meta {
     if (!this.props) {
       const { results } = await this.db.prepare('SELECT * FROM properties WHERE archived = 0 ORDER BY object_type, display_order, label').all<Property & { options: string }>();
       this.props = results.map((p) => ({ ...p, options: JSON.parse(p.options as unknown as string) }));
+      // La orden de trabajo usa las opciones de su pedido (etapa, unidad, tipo): una etapa nueva o renombrada en
+      // Configuración vale para las dos (ordenes.ts).
+      const delPedido = new Map(this.props.filter((p) => p.object_type === 'order').map((p) => [p.name, p]));
+      for (const p of this.props) if (p.object_type === 'work_order' && p.type === 'enum' && delPedido.get(p.name)?.type === 'enum') p.options = delPedido.get(p.name)!.options;
     }
     return type ? this.props.filter((p) => p.object_type === type) : this.props;
   }

@@ -11,6 +11,7 @@ import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 import { buscarConsultas, cargarConversacion, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
 import { cambiarEstadoIdea, listarIdeas } from './ideas';
+import { pedidoDeOT } from './ordenes';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
@@ -79,7 +80,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'get_record',
-    description: 'Trae un registro por id con todas sus propiedades, sus asociaciones (contactos, empresas, negocios, pedidos) y la actividad reciente (notas, mails, llamadas, reuniones, WhatsApp, tareas). En los pedidos, también sus productos (de Finnegans o, si no tiene renglones, los artículos del PDV de ClickUp).',
+    description: 'Trae un registro por id con todas sus propiedades, sus asociaciones (contactos, empresas, negocios, pedidos) y la actividad reciente (notas, mails, llamadas, reuniones, WhatsApp, tareas). En los pedidos y órdenes de trabajo, también sus productos (de Finnegans o, si no tiene renglones, los artículos del PDV de ClickUp).',
     readOnly: true,
     inputSchema: {
       type: 'object',
@@ -95,6 +96,9 @@ const TOOLS: Tool[] = [
       const assoc = await associationsOf(env.DB, row.id, hidden, ctx.user);
       const lim = a.activity_limit ?? 15;
       const tl = lim ? await timeline(env.DB, row.id, { limit: lim, hiddenPipelines: hidden, user: ctx.user }) : null;
+      // Los productos: los del pedido o, en una orden de trabajo, los de su pedido.
+      const pedidoOT = row.object_type === 'work_order' ? await pedidoDeOT(env.DB, row.id) : null;
+      const pedidoProductos = row.object_type === 'order' ? row : pedidoOT ? await getRow(env.DB, pedidoOT) : null;
       return {
         ...slim(base, rowToRecord(row)),
         archived: !!row.archived,
@@ -104,7 +108,7 @@ const TOOLS: Tool[] = [
           direction: x.direction, status: x.status, owner_id: x.owner_id,
         })),
         activity_counts: tl?.counts,
-        ...(row.object_type === 'order' ? { productos: await orderProducts(env, row.id, rowToRecord(row).props).then((r) => ({ origen: r.source, error: r.error,
+        ...(pedidoProductos ? { productos: await orderProducts(env, pedidoProductos.id, rowToRecord(pedidoProductos).props).then((r) => ({ origen: r.source, error: r.error,
           items: r.items.map((i) => ({ nombre: i.name, codigo: i.code, cantidad: i.quantity, precio: i.unit_price, subtotal: i.subtotal, estado: i.status, foto: i.image_url })) })).catch((e) => ({ error: (e as Error).message })) } : {}),
       };
     },
@@ -584,6 +588,8 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   }
   for (const id of EDITA[tool]?.(a) ?? []) {
     const row = await getRow(env.DB, Number(id));
+    // Producción y Logística cargan notas y tareas en los pedidos y órdenes de trabajo que trabajan (son de la vendedora).
+    if ((tool === 'log_activity' || tool === 'create_task') && esOperaciones(ctx.user) && (row.object_type === 'order' || row.object_type === 'work_order')) continue;
     // Asociar algo tuyo con una empresa o un contacto ajeno se puede (solo se toca lo tuyo); el resto, solo si es tuyo.
     if (row.owner_id != null && Number(row.owner_id) !== me && !(await esSuyo(env.DB, ctx.user, row))) {
       const de = (await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(row.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
@@ -609,7 +615,9 @@ async function handleOne(msg: RpcReq, ctx: Ctx, env: Env, base: string) {
         // El ícono del Hub, para que el conector se distinga en claude.ai (MCP: serverInfo.icons).
         serverInfo: { name: 'formas-crm', title: 'Formas Hub', version: '1.0.0', websiteUrl: base,
           icons: [{ src: `${base}/hub-192.png`, mimeType: 'image/png', sizes: ['192x192'] }, { src: `${base}/hub-512.png`, mimeType: 'image/png', sizes: ['512x512'] }] },
-        instructions: 'CRM propio de Formas Publicitarias (reemplazo de HubSpot). Objetos: contact, company, deal, order. '
+        instructions: 'CRM propio de Formas Publicitarias (reemplazo de HubSpot). Objetos: contact, company, deal, order, work_order. '
+          + 'work_order es la orden de trabajo de cada pedido (lo que trabaja Producción): nace sola con el pedido, copia su etapa y sus datos y no se crea ni se edita a mano. '
+          + 'Para contar o sumar pedidos usá order (cada pedido activo tiene además su work_order). '
           + 'Antes de crear, buscá (search_records) para no duplicar, o usá upsert_bundle. Usá list_properties para nombres internos y opciones válidas, '
           + 'list_pipelines para etapas y list_users para propietarios. Todo lo que hagas queda en el historial con origen "mcp". '
           + 'Salvo los administradores, cada usuario puede cambiar desde acá solo lo suyo (lo que tiene de propietario o sin propietario, y sus tareas).',

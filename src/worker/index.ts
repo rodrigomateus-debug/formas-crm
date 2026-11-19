@@ -15,7 +15,7 @@ import { correrAvisos } from './avisos';
 import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup, systemCtx } from './clickup';
-import { asegurarOTs } from './ordenes';
+import { conciliarOTs } from './ordenes';
 import { revisarRemitos, syncFacturas } from './finnegans';
 import { revisarColgados } from './cronograma';
 import { sincronizarOrdenesCompra } from './ordenescompra';
@@ -161,8 +161,9 @@ export default {
         }
         else await safe(() => (turno === 0 ? syncFacturas(env, { barrido }) : syncClickup(env)));
         if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día
-        // Los pedidos activos que quedaron sin su orden de trabajo (ordenes.ts; solo la base), una vez por hora.
-        if (turno === 5) await safe(async () => asegurarOTs(env.DB, { ...(await systemCtx(env)), source: 'crm', sourceDetail: 'orden de trabajo' }));
+        // Órdenes de trabajo que quedaron distintas de su pedido o pedidos activos sin la suya (ordenes.ts; solo la base), una
+        // vez por hora, en el turno de las facturas (no en el de ClickUp, que ya usa muchas consultas a la base).
+        if (turno === 0) await safe(async () => conciliarOTs(env.DB, { ...(await systemCtx(env)), source: 'crm', sourceDetail: 'orden de trabajo' }));
       }
     })());
   },

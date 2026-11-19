@@ -20,13 +20,16 @@ import { BarraVista, PestanaNombre, ViewMenu, type CrearVista } from '../vistas'
 import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useEsperaCorta, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
+// Pedidos y órdenes de trabajo muestran sus productos y su producción; la OT, los de su pedido (props.pedido_id, ordenes.ts).
+const conProductos = (t: ObjectType) => t === 'order' || t === 'work_order';
+const pedidoDe = (r: CrmRecord) => (r.type === 'work_order' ? Number(r.props.pedido_id) : r.id);
 
 const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   contact: ['email', 'phone', '__company', 'owner_id', '__unidad', 'lifecyclestage', 'notes_last_updated', 'createdate'],
   company: ['domain', 'owner_id', '__unidad', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
   order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__responsable', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
-  work_order: ['pdv_finnegans', 'hs_pipeline_stage', 'unidad_de_negocio', 'fecha_de_entrega', 'owner_id', 'createdate'],
+  work_order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__responsable', '__oc', 'unidad_de_negocio', 'fecha_de_entrega', 'owner_id', 'createdate'],
 };
 // Pedidos para el perfil Ventas (pedido de Rodrigo del 17/11/2026): su pantallazo. Sin «PDV Finnegans» (el número ya está
 // en el nombre), «Unidad de negocio» ni «Propietario» (vende en su unidad y ve lo suyo); con «Cobro y papeles».
@@ -337,7 +340,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const productos = useProductosAbiertos(PREF_PRODUCTOS.table, { cerrados: cfg.productos ? cfg.productos === 'cerrados' : prodAca[mode], todos: todosProductos });
   const columns = useMemo(() => {
     const base = type === 'deal' && pipelineSel === 'all' && !cfg.columns.includes('pipeline') ? ['pipeline', ...cfg.columns] : cfg.columns;
-    if (type !== 'order' || mode !== 'table' || productos.cerrados) return base;
+    if ((type !== 'order' && type !== 'work_order') || mode !== 'table' || productos.cerrados) return base;
     const cols = [...base];
     const poner = (col: string, despuesDe: string[]) => {
       if (cols.includes(col)) return;
@@ -386,7 +389,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     ...(cfg.boardProp ? { boardProp: cfg.boardProp } : {}), ...(cfg.cardProps?.length ? { cardProps: cfg.cardProps } : {}), ...(cfg.vacias ? { vacias: true } : {}), ...(type === 'deal' ? { pipeline: pipelineSel } : {}),
     ...(cfg.widths && Object.keys(cfg.widths).length ? { widths: cfg.widths } : {}),
     // Pedidos: se guarda lo que se ve (así una vista nueva armada desde «Todos» también lo recuerda).
-    ...(type === 'order' ? { productos: productos.cerrados ? 'cerrados' as const : 'abiertos' as const } : {}),
+    ...(conProductos(type) ? { productos: productos.cerrados ? 'cerrados' as const : 'abiertos' as const } : {}),
   };
   const activeSaved = views.data?.find((v) => String(v.id) === activeView);
   // Lo recién guardado vale enseguida (la barra se va al guardar, sin esperar a que se recarguen las vistas).
@@ -396,7 +399,7 @@ function IndexFor({ type }: { type: ObjectType }) {
     c.boardProp ?? base.boardProp ?? '', c.cardProps ?? [], type === 'deal' ? c.pipeline ?? base.pipeline : '', c.widths ?? {},
     [...relacionDe(type, c.relacion)].sort(), !!c.vacias,
     // Pedidos: los productos a la vista o no. La vista que no lo tiene guardado sigue a este navegador.
-    type === 'order' ? c.productos ?? (prodAca[(c.mode ?? base.mode) === 'board' ? 'board' : 'table'] ? 'cerrados' : 'abiertos') : '',
+    conProductos(type) ? c.productos ?? (prodAca[(c.mode ?? base.mode) === 'board' ? 'board' : 'table'] ? 'cerrados' : 'abiertos') : '',
   ]);
   const dirty = !!activeSaved && cfgDe === activeView && norm(current, current) !== norm(withOwners(justSaved[activeSaved.id] ?? activeSaved.config), current);
   // En «Todos» y «Míos» no hay qué guardar salvo los filtros: si se cambiaron, se ofrece guardarlos como vista nueva.
@@ -444,7 +447,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         const g = gruposDeVista(c, type);
         const d = await precargar<{ results?: CrmRecord[] }>(m === 'board' ? urlTableroProp(meta, type, c.boardProp, c.q ?? '', g, c.sort, c.dir).url : urlLista(type, c.q ?? '', g, c, pageSize, 0));
         // La tabla de Pedidos espera a sus productos para mostrarse: se traen también, así la pestaña aparece al instante.
-        if (vivo && type === 'order' && m === 'table' && d?.results?.length) await precargar(urlArticulos(d.results.map((r) => r.id), c.columns.includes('__cobro')));
+        if (vivo && conProductos(type) && m === 'table' && d?.results?.length) await precargar(urlArticulos(d.results.map(pedidoDe), c.columns.includes('__cobro')));
       }
     }, 1200);
     return () => { vivo = false; window.clearTimeout(t); };
@@ -463,8 +466,9 @@ function IndexFor({ type }: { type: ObjectType }) {
   const [patched, setPatched] = useState<Record<number, CrmRecord>>({});
   useEffect(() => { setPatched({}); }, [list.data]);
   // Pedidos: sus productos abajo y quién los tiene en Producción (PedidosProductos.tsx).
-  const esPedidos = type === 'order' && mode === 'table';
-  const prodRes = useProduccionPedidos(esPedidos ? (list.data?.results ?? []).map((r) => r.id) : [], esPedidos, list.data, columns.includes('__cobro'));
+  // Las órdenes de trabajo, igual: con los de su pedido (props.pedido_id).
+  const esPedidos = conProductos(type) && mode === 'table';
+  const prodRes = useProduccionPedidos(esPedidos ? (list.data?.results ?? []).map(pedidoDe) : [], esPedidos, list.data, columns.includes('__cobro'));
   // La página de Pedidos se muestra junto con sus productos: si no, aparecía sin ellos y un instante después se estiraba
   // (la pantalla «titilaba» al entrar, al cambiar de página o de pestaña). Mientras llegan, queda lo de antes, atenuado;
   // si tardan demasiado, se muestra sin ellos.
@@ -565,7 +569,7 @@ function IndexFor({ type }: { type: ObjectType }) {
           </div>
         )}
         {/* Perfil Ventas: no importa ni exporta listas (cuida la base de clientes). Exportar está en la barra de abajo. */}
-        {!esVentas(meta.me) && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
+        {!esVentas(meta.me) && type !== 'work_order' && <button className="btn" onClick={() => setShow('import')}><Icon name="upload" size={16} />Importar</button>}
         <button className="btn primary" onClick={() => setShow('create')}><Icon name="plus" size={16} />{OBJECTS[type].create}</button>
       </div>
 
@@ -608,7 +612,7 @@ function IndexFor({ type }: { type: ObjectType }) {
       )}
       {sinVista ? <Cargando /> : mode === 'board' && type === 'deal' ? <Board vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
-        : mode === 'board' ? <PropBoard productos={type === 'order' ? productos : undefined} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
+        : mode === 'board' ? <PropBoard productos={conProductos(type) ? productos : undefined} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
           cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
           tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>
@@ -651,7 +655,7 @@ function IndexFor({ type }: { type: ObjectType }) {
             </thead>
             <tbody>
               {rows.map((r) => {
-                const p = esPedidos ? prod[r.id] : undefined;
+                const p = esPedidos ? prod[pedidoDe(r)] : undefined;
                 const abierto = !!p?.articulos.length && productos.abierto(r);
                 return (
                 <Fragment key={r.id}>
@@ -684,7 +688,7 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
       </>}
 
-      {preview && <RecordPreview key={`${preview.id}-${preview.compose ?? ''}`} type={type} id={preview.id} compose={preview.compose} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
+      {preview && <RecordPreview key={`${preview.id}-${preview.compose ?? ''}`} ot={false} type={type} id={preview.id} compose={preview.compose} onClose={() => setPreview(null)} onChange={() => { setBoardKey((k) => k + 1); list.reload(); }} />}
       {show === 'create' && <CreateRecord type={type} onClose={() => { setShow(''); setCreateDefaults(undefined); }} onCreated={() => { list.reload(); setBoardKey((k) => k + 1); }} defaults={createDefaults ?? (type === 'deal' ? { pipeline: boardPipeline } : undefined)} />}
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} addProp={filterProp} onClose={() => { setShow(''); setFilterProp(undefined); }} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); setFilterProp(undefined); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
@@ -723,7 +727,7 @@ function EditCell({ type, record, col, onSaved, display, tip }: { type: ObjectTy
   const [at, setAt] = useState<DOMRect | null>(null);
   const [val, setVal] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
-  const shown = display !== undefined ? display : type === 'order' && col === 'hs_pipeline_stage' && record.props[col] ? <EtapaPedido value={record.props[col]} label={formatValue(meta, type, col, record.props[col])} />
+  const shown = display !== undefined ? display : conProductos(type) && col === 'hs_pipeline_stage' && record.props[col] ? <EtapaPedido value={record.props[col]} label={formatValue(meta, type, col, record.props[col])} />
     : col === 'unidad_de_negocio' && unidadesDe(meta, 'order', record.props).length ? <Unidades keys={unidadesDe(meta, 'order', record.props)} />
     : prop?.type === 'owner' && record.props[col] ? <UserChip id={record.props[col]} />
     : prop?.type === 'phone' && record.props[col] ? <WhatsAppLink phone={record.props[col]} />
@@ -848,7 +852,8 @@ function ColumnsModal({ type, columns, onClose, onApply }: { type: ObjectType; c
     ...(type === 'contact' || type === 'deal' ? [{ name: '__company', label: 'Empresa asociada' }] : []),
     ...(meta.tags?.some((t) => t.object_type === type) ? [{ name: '__tags', label: 'Etiquetas' }] : []),
     ...(type !== 'order' ? [{ name: '__unidad', label: 'Unidad de negocio' }] : []),
-    ...(type === 'order' ? [{ name: '__produccion', label: 'Producción (lo que te toca, listos y la entrega)' }, { name: '__responsable', label: 'Responsable (quién lo tiene en Producción)' }, { name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }, { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
+    ...(conProductos(type) ? [{ name: '__produccion', label: 'Producción (lo que te toca, listos y la entrega)' }, { name: '__responsable', label: 'Responsable (quién lo tiene en Producción)' },
+      ...(type === 'order' ? [{ name: '__cobro', label: 'Cobro y papeles (saldo, factura, remito, bocetos)' }] : []), { name: '__oc', label: 'OC (órdenes de compra de Finnegans)' }] : []),
     ...propsOf(meta, type).filter((p) => !['name', 'dealname', 'hs_order_name'].includes(p.name)),
   ];
   const move = (i: number, d: number) => { const n = [...sel]; const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setSel(n); };

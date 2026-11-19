@@ -8,7 +8,7 @@ import { emitDealEvent } from './events';
 import { esVentas, restringido, visibleSql } from './alcance';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 import { RELACIONES, propagarRelacion, relacionSola } from './relacion';
-import { OT_COPIA, sincronizarOT } from './ordenes';
+import { OT_COPIA, combinarOTs, sincronizarOT } from './ordenes';
 
 // Los registros nuevos arrancan en este id para no chocar con los ids de HubSpot que trae la migración
 // (los migrados conservan su id de HubSpot, así los links y los tableros siguen andando).
@@ -387,7 +387,7 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   if (type !== 'work_order') await avisarAsignacion(db, ctx, c.owner_id, { recordId: row!.id });
   if (type === 'deal') await stageAutomation(db, ctx, row!.id, (await meta.stage(c.stage_id!))!, c.owner_id, c.name);
   // El pedido nace con su orden de trabajo (ordenes.ts).
-  if (type === 'order') await sincronizarOT(db, ctx, row!.id, { crear: true }).catch((e) => console.error('orden de trabajo', row!.id, (e as Error).message));
+  if (type === 'order') await sincronizarOT(db, ctx, row!, { crear: true }).catch((e) => console.error('orden de trabajo', row!.id, (e as Error).message));
   return row!;
 }
 
@@ -447,10 +447,8 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   if (stageMoved || changed.includes('hs_pipeline_stage')) stmts.push(tocarActividad(db, id, ts));
   await db.batch(stmts);
   if (changed.includes('owner_id') && type !== 'work_order') await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
-  // Su orden de trabajo copia el nombre, la etapa y los datos de producción del pedido (ordenes.ts).
-  if (type === 'order' && changed.some((k) => k === 'hs_order_name' || OT_COPIA.includes(k))) {
-    await sincronizarOT(db, ctx, id).catch((e) => console.error('orden de trabajo', id, (e as Error).message));
-  }
+  // Su orden de trabajo copia el nombre, el propietario, la etapa y los datos de producción del pedido (ordenes.ts).
+  const otAlDia = type === 'order' && changed.some((k) => k === 'hs_order_name' || k === 'owner_id' || OT_COPIA.includes(k));
   // La empresa cambió de tipo de relación: sus contactos lo siguen (relacion.ts).
   if (type === 'company' && changed.includes('tipo_de_relacion')) await propagarRelacion(db, ctx, id, current.tipo_de_relacion, next.tipo_de_relacion);
   // La vendedora pasó el pedido a «Listo para producción» (desde «Pedido confirmado», «$ Pendiente de Anticipo» o
@@ -467,7 +465,9 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     // El negocio era de un referido: la vendedora le agradece al cliente que lo recomendó (referidos.ts).
     if (st.is_won) await agradecerReferido(db, ctx, id, c.owner_id).catch((e) => console.error('agradecer referido', id, (e as Error).message));
   }
-  return getRow(db, id);
+  const fresh = await getRow(db, id);
+  if (otAlDia) await sincronizarOT(db, ctx, fresh).catch((e) => console.error('orden de trabajo', id, (e as Error).message));
+  return fresh;
 }
 
 export async function archiveRecords(db: D1Database, ctx: Ctx, ids: number[]) {
@@ -555,8 +555,8 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     if (Object.keys(known).length) await updateRecord(db, ctx, type, primaryId, known, { strict: false, system: true });
   }
   await refreshActivityDates(db, [primaryId]);
-  // Dos pedidos combinados: queda una sola orden de trabajo, la del que queda (o la más vieja).
-  if (type === 'order') await sincronizarOT(db, ctx, primaryId).catch((e) => console.error('orden de trabajo', primaryId, (e as Error).message));
+  // Dos pedidos combinados: queda una sola orden de trabajo, la del pedido que queda (ordenes.ts).
+  if (type === 'order') await combinarOTs(db, ctx, primaryId, loserId).catch((e) => console.error('orden de trabajo', primaryId, (e as Error).message));
   return getRow(db, primaryId);
 }
 
@@ -646,7 +646,7 @@ function unidadSql(type: ObjectType, keys: string[], binds: unknown[]) {
     binds.push(...teams);
     return `r.pipeline_id IN (SELECT id FROM pipelines WHERE team_id IN (${teams.map(() => '?').join(', ')}))`;
   }
-  if (type === 'order') {
+  if (type === 'order' || type === 'work_order') {
     const vals = keys.flatMap((k) => UNIDADES[k].pedido);
     binds.push(...vals);
     return `UPPER(COALESCE(json_extract(r.props, '$.unidad_de_negocio'), '')) IN (${vals.map(() => '?').join(', ')})`;
@@ -822,7 +822,7 @@ export async function buildWhere(meta: Meta, ctx: Ctx, type: ObjectType, params:
     if (/^\d+$/.test(q)) { parts.push('r.id = ?'); binds.push(Number(q)); }
     // Pedidos: también por el número de PDV («31644» o «PDV 31644»), aunque no esté en el nombre (los que vienen de
     // HubSpot se llaman como el negocio).
-    const pdv = type === 'order' ? q.match(/^(?:pdv\s*)?(\d{3,})$/i)?.[1] : null;
+    const pdv = type === 'order' || type === 'work_order' ? q.match(/^(?:pdv\s*)?(\d{3,})$/i)?.[1] : null;
     if (pdv) { parts.push("CAST(json_extract(r.props, '$.pdv_finnegans') AS TEXT) LIKE ?"); binds.push(`%${pdv}%`); }
     where.push(`(${parts.join(' OR ')})`);
   }

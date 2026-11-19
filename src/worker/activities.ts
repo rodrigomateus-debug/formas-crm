@@ -182,11 +182,15 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
   const rec = await db.prepare('SELECT object_type FROM records WHERE id = ?').bind(recordId).first<{ object_type: string }>();
   if (!rec) throw new HttpError(404, `No existe el registro ${recordId}.`);
   const rollup = opts.rollup !== false && rec.object_type !== 'contact';
+  // Pedido y orden de trabajo comparten la actividad: lo cargado en uno se ve en el otro (ordenes.ts). La OT no tiene
+  // historial propio de etapa (la copia del pedido): muestra los cambios de su pedido.
+  const gemelo = rec.object_type === 'order' ? ' OR l.record_id IN (SELECT ot_id FROM ot_pedido WHERE pedido_id = ?1)'
+    : rec.object_type === 'work_order' ? ' OR l.record_id IN (SELECT pedido_id FROM ot_pedido WHERE ot_id = ?1)' : '';
   const scope = rollup
     ? `l.record_id = ?1 OR l.record_id IN (SELECT a.to_id FROM associations a JOIN records x ON x.id = a.to_id WHERE a.from_id = ?1
         AND a.to_type IN (${rec.object_type === 'company' ? "'contact', 'deal'" : "'contact'"}) AND (x.pipeline_id IS NULL OR x.pipeline_id NOT IN (SELECT value FROM json_each(?3)))
-        AND ${opts.user ? visibleSql('x', opts.user) : '1'})`
-    : '(l.record_id = ?1 AND ?3 IS NOT NULL)';
+        AND ${opts.user ? visibleSql('x', opts.user) : '1'})${gemelo}`
+    : `((l.record_id = ?1${gemelo}) AND ?3 IS NOT NULL)`;
   const types = (opts.types ?? []).filter((t) => ACTIVITY_TYPES.includes(t as ActivityType));
   const typeSql = types.length ? `AND a.type IN (${types.map((t) => `'${t}'`).join(', ')})` : '';
   const before = opts.before ?? '9999';
@@ -201,7 +205,8 @@ export async function timeline(db: D1Database, recordId: number, opts: { types?:
   ).bind(recordId, before, JSON.stringify(opts.hiddenPipelines ?? []), opts.q?.trim() ? `%${opts.q.trim()}%` : null, opts.owner ?? null).all<ActivityRow & { links: string | null }>();
   const changes = await db.prepare(
     `SELECT c.*, COALESCE(c.actor, u.name) AS user_name FROM changes c LEFT JOIN users u ON u.id = c.user_id
-     WHERE c.record_id = ? AND c.prop IN ('dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'archived', 'merged', 'amount', 'hs_pipeline_stage', 'factura_numero', 'direccion_entrega')
+     WHERE (c.record_id = ?1 OR c.record_id = (SELECT pedido_id FROM ot_pedido WHERE ot_id = ?1))
+       AND c.prop IN ('dealstage', 'pipeline', 'owner_id', 'lifecyclestage', 'archived', 'merged', 'amount', 'hs_pipeline_stage', 'factura_numero', 'direccion_entrega')
      ORDER BY c.changed_at DESC LIMIT 100`,
   ).bind(recordId).all();
   const counts = await db.prepare(
@@ -223,7 +228,7 @@ export interface TaskQuery {
   // 'board': las abiertas y las completadas en los últimos 14 días (la columna «Hecha» del tablero).
   status?: 'open' | 'done' | 'all' | 'board';
   // Relacionadas con algún registro de ese tipo, o 'none' (sin relacionar).
-  objeto?: 'contact' | 'company' | 'deal' | 'order' | 'none';
+  objeto?: 'contact' | 'company' | 'deal' | 'order' | 'work_order' | 'none';
   due?: 'overdue' | 'today' | 'week' | 'upcoming' | 'all';
   q?: string;
   record?: number;
@@ -248,8 +253,10 @@ export async function listTasks(db: D1Database, ctx: Ctx, q: TaskQuery) {
   if (q.status === 'done') where.push("a.status = 'COMPLETED'");
   if (q.status === 'board') { where.push("(a.status != 'COMPLETED' OR a.completed_at >= ?)"); binds.push(new Date(Date.now() - 14 * 86_400_000).toISOString()); }
   if (q.objeto === 'none') where.push('NOT EXISTS (SELECT 1 FROM activity_links ol WHERE ol.activity_id = a.id)');
-  else if (q.objeto && ['contact', 'company', 'deal', 'order'].includes(q.objeto)) {
-    where.push('EXISTS (SELECT 1 FROM activity_links ol WHERE ol.activity_id = a.id AND ol.object_type = ?)'); binds.push(q.objeto);
+  else if (q.objeto && ['contact', 'company', 'deal', 'order', 'work_order'].includes(q.objeto)) {
+    // «Con pedidos» incluye las de sus órdenes de trabajo.
+    where.push(`EXISTS (SELECT 1 FROM activity_links ol WHERE ol.activity_id = a.id AND ol.object_type ${q.objeto === 'order' ? "IN ('order', 'work_order')" : '= ?'})`);
+    if (q.objeto !== 'order') binds.push(q.objeto);
   }
   const start = new Date(); start.setUTCHours(3, 0, 0, 0); // medianoche en Argentina (UTC-3)
   if (start.getTime() > Date.now()) start.setUTCDate(start.getUTCDate() - 1);

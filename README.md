@@ -1,6 +1,6 @@
 # Formas Hub
 
-**Formas Hub** (antes «Formas CRM»; en `hub.formas.ar`, ver [docs/DOMINIO.md](docs/DOMINIO.md)): el sistema propio de Formas Publicitarias, nacido como CRM para reemplazar HubSpot: contactos, empresas, negocios y pedidos, con su
+**Formas Hub** (antes «Formas CRM»; en `hub.formas.ar`, ver [docs/DOMINIO.md](docs/DOMINIO.md)): el sistema propio de Formas Publicitarias, nacido como CRM para reemplazar HubSpot: contactos, empresas, negocios, pedidos y órdenes de trabajo, con su
 actividad (notas, mails, llamadas, reuniones, WhatsApp y tareas), pipelines, tablero de negocios, integración con
 Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan andando.
 
@@ -9,6 +9,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Por qué Cloudflare, cuánto aguanta (prueba con el volumen de 5 años) y cuándo revisarlo: [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 - Remitos (ClickUp, ficha del pedido y app del chofer), lectura con Claude y qué falta entregar: [docs/REMITOS.md](docs/REMITOS.md).
 - Producción (la vista de ClickUp de Ceci y Sole en el CRM, editable; arranca con Formas Shop): [docs/PRODUCCION.md](docs/PRODUCCION.md).
+- Órdenes de trabajo (lo que Producción trabaja de cada pedido, como objeto propio: nace con el pedido, copia su etapa y sus relaciones, una sola conversación): [docs/ORDENES.md](docs/ORDENES.md).
 - Servicios (envío, setup de logo, «Artículos varios»: renglones que se cobran pero no se producen): [docs/PRODUCCION.md](docs/PRODUCCION.md#servicios-los-renglones-que-no-se-producen).
 - Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
 - Cronograma (reemplaza la planilla semanal de Logística: entregas, ingresos, retiros y egresos por día, la ruta del día en el mapa por chofer y el recorrido en la app del chofer): [docs/CRONOGRAMA.md](docs/CRONOGRAMA.md).

@@ -100,6 +100,8 @@ export default function AppMovil({ perfil }: { perfil: PerfilMovil }) {
           {!operaciones && <Route path="/deals/:id" element={<ConKey><FichaNegocio /></ConKey>} />}
           <Route path="/orders" element={<PedidosLista />} />
           <Route path="/orders/:id" element={<ConKey><FichaPedido /></ConKey>} />
+          {/* La orden de trabajo, en el celular: la ficha de su pedido, que tiene todo (productos, chat, remitos). */}
+          <Route path="/work-orders/:id" element={<OTAlPedido />} />
           <Route path="*" element={<EnLaCompleta />} />
         </Routes>
       </main>
@@ -328,4 +330,17 @@ export function useParametro(nombre: string) {
   const valor = sp.get(nombre);
   const sacar = () => setSp((p) => { const n = new URLSearchParams(p); n.delete(nombre); return n; }, { replace: true });
   return [valor, sacar] as const;
+}
+
+// Un link a una orden de trabajo (mail, notificación, buscador) abre en el celular la ficha de su pedido (src/worker/ordenes.ts).
+function OTAlPedido() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    http<{ pedido_id?: number | null }>('GET', `/records/work_order/${id}`)
+      .then((d) => (d.pedido_id ? navigate(`/orders/${d.pedido_id}`, { replace: true }) : setError('Esta orden de trabajo no tiene su pedido.')))
+      .catch((e) => setError((e as Error).message));
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <div className="m-vacio">{error ?? 'Abriendo…'}</div>;
 }

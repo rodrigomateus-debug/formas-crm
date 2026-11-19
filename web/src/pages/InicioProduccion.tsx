@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
-import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, propOf, type Activity } from '../lib';
+import { http, qs, useMeta, useAsync, fmtMoney, fmtDate, recordUrl, propOf, UNIDADES, type Activity } from '../lib';
 import { EstadoEntrega, UnidadBadge, UserChip } from '../components';
 import { usePeriodo, corto, pct, plural } from './Periodo';
 
@@ -17,7 +17,7 @@ interface Datos {
   desde: string; hasta: string; hoy: string;
   kpis: { ingresados: number; ingresados_monto: number; sin_fecha_pedido: number; entregados: number; entregados_monto: number; parciales: number; abiertos: number;
     atrasados: number; proximos7: number; con_pactada: number; a_tiempo: number; tarde: number; dias_tarde: Resumen };
-  tiempos: Tiempos; por_unidad: Unidad[]; etapas: Array<{ etapa: string; n: number; monto: number }>;
+  tiempos: Tiempos; por_unidad: Unidad[]; etapas: Array<{ etapa: string; n: number; monto: number; unidades: Record<string, { n: number; monto: number }> }>;
   atrasados: Pedido[]; proximas: Pedido[]; remitos: Array<{ estado: string; n: number }>;
 }
 
@@ -68,6 +68,25 @@ export default function InicioProduccion({ tareas = true }: { tareas?: boolean }
       </div>
 
       <div className="panel">
+        <div className="panel-head"><h2>Pedidos en curso hoy</h2><span className="small muted">No entregados (o entregados en parte), por etapa y unidad de negocio</span></div>
+        <div className="panel-body" style={{ overflowX: 'auto' }}>
+          {d?.etapas.length ? (() => {
+            const cols = [...UNIDADES.filter((x) => !unidades.length || unidades.includes(x.key)).map((x) => ({ k: x.key as string })), ...(d.etapas.some((e) => e.unidades.otra) ? [{ k: 'otra' }] : [])];
+            const filas = [...d.etapas].sort((a, b) => orden(a.etapa) - orden(b.etapa));
+            const tot = (k: string) => filas.reduce((s, e) => ({ n: s.n + (e.unidades[k]?.n ?? 0), monto: s.monto + (e.unidades[k]?.monto ?? 0) }), { n: 0, monto: 0 });
+            const celda = (x?: { n: number; monto: number }) => x?.n ? <><b>{x.n}</b> <span className="small muted">{fmtMoney(x.monto) || '$ 0'}</span></> : <span className="muted">—</span>;
+            return <table className="dir-tabla">
+              <thead><tr><th>Etapa</th>{cols.map((c) => <th key={c.k} className="num">{c.k === 'otra' ? 'Sin unidad' : <UnidadBadge k={c.k as never} />}</th>)}<th className="num">Total</th></tr></thead>
+              <tbody>
+                {filas.map((e) => <tr key={e.etapa}><td>{etapa(e.etapa)}</td>{cols.map((c) => <td key={c.k} className="num">{celda(e.unidades[c.k])}</td>)}<td className="num">{celda(e)}</td></tr>)}
+                <tr className="dir-total"><td>Total</td>{cols.map((c) => <td key={c.k} className="num">{celda(tot(c.k))}</td>)}<td className="num">{celda({ n: k?.abiertos ?? 0, monto: filas.reduce((s, e) => s + e.monto, 0) })}</td></tr>
+              </tbody>
+            </table>;
+          })() : <div className="muted">{res.loading ? 'Cargando…' : 'No hay pedidos en curso.'}</div>}
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginTop: 16 }}>
         <div className="panel-head"><h2>Tiempos de entrega</h2><span className="small muted">Pedidos entregados en el período · días corridos</span></div>
         <div className="panel-body" style={{ overflowX: 'auto' }}>
           <table className="dir-tabla">
@@ -115,18 +134,6 @@ export default function InicioProduccion({ tareas = true }: { tareas?: boolean }
           <div className="panel-head"><h2>Entregas pactadas en los próximos 7 días</h2><span className="small muted">{k?.proximos7 ?? ''}</span></div>
           {d?.proximas.length ? d.proximas.map((o) => fila(o, <span className="small num">{corto(o.pactada!)}</span>))
             : <div className="empty plain">{res.loading ? 'Cargando…' : 'No hay entregas pactadas para esta semana.'}</div>}
-        </div>
-        <div className="panel">
-          <div className="panel-head"><h2>En curso hoy, por etapa</h2><span className="small muted">{k ? plural(k.abiertos, 'pedido', 'pedidos') : ''}</span></div>
-          <div className="panel-body">
-            {d?.etapas.length ? <table className="dir-tabla"><tbody>
-              {[...d.etapas].sort((a, b) => orden(a.etapa) - orden(b.etapa)).map((e) => (
-                <tr key={e.etapa}><td>{etapa(e.etapa)}</td>
-                  <td style={{ width: '35%' }}><span className="dir-barra"><i style={{ width: `${k?.abiertos ? (e.n / k.abiertos) * 100 : 0}%` }} /></span></td>
-                  <td className="num">{e.n}</td><td className="num muted">{fmtMoney(e.monto) || '$ 0'}</td></tr>
-              ))}
-            </tbody></table> : <div className="muted">{res.loading ? 'Cargando…' : 'No hay pedidos en curso.'}</div>}
-          </div>
         </div>
         <div className="panel">
           <div className="panel-head"><h2>Remitos de lo entregado</h2><span className="small muted">Entregados en el período</span></div>

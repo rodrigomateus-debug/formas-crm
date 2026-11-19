@@ -499,6 +499,13 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     db.prepare('INSERT OR IGNORE INTO activity_links (activity_id, record_id, object_type) SELECT activity_id, ?, object_type FROM activity_links WHERE record_id = ?').bind(primaryId, loserId),
     db.prepare('DELETE FROM activity_links WHERE record_id = ?').bind(loserId),
     db.prepare('UPDATE OR IGNORE files SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
+    // La conversación (mensajes, sus archivos, quiénes la siguen y los avisos de menciones) pasa al que queda: si no, el
+    // mail de una mención llevaba a un pedido sin mensajes.
+    db.prepare('UPDATE mensajes SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
+    db.prepare('UPDATE mensaje_adjuntos SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
+    db.prepare('UPDATE OR IGNORE conversacion_participantes SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
+    db.prepare('DELETE FROM conversacion_participantes WHERE record_id = ?').bind(loserId),
+    db.prepare('UPDATE avisos SET record_id = ? WHERE record_id = ?').bind(primaryId, loserId),
     // Los productos (de Finnegans) se vuelven a leer en el registro que queda.
     db.prepare('DELETE FROM line_items WHERE record_id = ?').bind(loserId),
     db.prepare('DELETE FROM line_item_sync WHERE record_id IN (?, ?)').bind(loserId, primaryId),

@@ -160,3 +160,23 @@ test('conversación del pedido: mensajes, menciones, no leídos y actividad', as
   const tarjeta = lista.columns?.flatMap((c) => c.records).find((r) => r.id === pedido.id);
   if (tarjeta) assert.equal(tarjeta.adjuntos.mensajes, 4);
 });
+
+// Al combinar dos pedidos, la conversación del que se archiva pasa al que queda (antes se quedaba en el archivado y el
+// mail de la mención llevaba a un pedido sin mensajes).
+test('combinar dos pedidos lleva la conversación al que queda', async () => {
+  const yo = (await call('GET', '/meta')).data.me;
+  const ceci = (await call('POST', '/users', { email: `ceci.m.${RUN}@formas.ar`, name: `Ceci M ${RUN}`, profile: 'produccion', role: 'member' })).data;
+  const tok = (await call('POST', '/tokens', { name: `Ceci M ${RUN}`, source: 'api', user_id: ceci.id })).data.token;
+  const C = { authorization: `Bearer ${tok}` };
+  const queda = (await call('POST', '/records/order', { props: { hs_order_name: `PDV ${RUN}A · Tubbs`, owner_id: yo.id } })).data;
+  const otro = (await call('POST', '/records/order', { props: { hs_order_name: `PDV ${RUN}B · Tubbs`, owner_id: yo.id } })).data;
+  const m = await call('POST', `/records/order/${otro.id}/conversacion`, { body: `@[${ceci.name}](${ceci.id}) listo para producción` });
+  assert.equal(m.status, 201, JSON.stringify(m.data));
+  const merged = await call('POST', `/records/order/${queda.id}/merge`, { other_id: otro.id });
+  assert.equal(merged.status, 200, JSON.stringify(merged.data));
+  const conv = (await call('GET', `/records/order/${queda.id}/conversacion`)).data;
+  assert.deepEqual(conv.items.filter((i) => i.kind === 'mensaje').map((i) => i.id), [m.data.id]);
+  assert.ok(conv.participantes.some((p) => p.user_id === ceci.id), 'la mencionada la sigue en el que queda');
+  const deCeci = (await call('GET', '/conversaciones?no_leidas=1', undefined, C)).data.conversaciones.find((c) => c.record_id === queda.id);
+  assert.equal(deCeci?.menciones, 1);
+});

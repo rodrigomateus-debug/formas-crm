@@ -21,6 +21,7 @@ import { BotonConectarClaude } from './ConectarClaude';
 import { Campanita } from './Notificaciones';
 import { GlobalSearch } from './Buscador';
 import { usarVersionCompleta } from './movil/modo';
+import Formi from './Formi';
 
 // Pantalla con la que abre cada perfil (pedido de Rodrigo del 16/11/2026); el resto, Inicio.
 const PANTALLA_INICIAL: Record<string, string> = { produccion: '/produccion', logistica: '/cronograma' };
@@ -130,6 +131,8 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
         {/* Al pie: la barra de las vistas (BarraVista en vistas.tsx) se dibuja acá cuando la pantalla tiene vistas. */}
         <div id="barra-vista" />
       </div>
+      {/* Formi, abajo a la derecha: el buzón de ideas para mejorar el Hub (Formi.tsx). */}
+      <Formi />
     </div>
   );
 }

@@ -20,6 +20,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Unidad de negocio de empresas (a mano, por sus compras o por el propietario) y contactos (la de su empresa): [docs/UNIDADES.md](docs/UNIDADES.md).
 - Consultas por WhatsApp (Darwin → CRM: resumen del día de cada conversación en el contacto; en Analíticas, lo que consultó cada cliente con datos fijos, para buscar «quién consultó por botellas», y en Inicio quién espera respuesta): [docs/DARWIN.md](docs/DARWIN.md#4-actividad-diaria-resumen-del-día-y-consultas-darwin--crm).
 - Referidos (quién nos recomendó a quién: desde el Workspace de Formas Shop o la ficha del cliente, con negocio en Lead, nota, tarea y el agradecimiento al ganar): [docs/REFERIDOS.md](docs/REFERIDOS.md).
+- Buzón de ideas (Formi, el personaje de abajo a la derecha: todos proponen mejoras para el Hub y votan las de los demás, quedan rankeadas por votos y los administradores las marcan en marcha, hechas o «no va», con avisos en la campanita y desde Claude): [docs/IDEAS.md](docs/IDEAS.md).
 
 ## Cómo está hecho
 

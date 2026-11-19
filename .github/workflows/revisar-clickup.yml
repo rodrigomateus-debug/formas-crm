@@ -1,0 +1,32 @@
+# Repaso de los pedidos en curso contra ClickUp (scripts/revisar-clickup.mjs): relee los PDV abiertos, los pedidos del CRM
+# sin entregar y los combinados hace poco, y deja la etapa del pedido y el estado de cada artículo como están en ClickUp.
+# Se corre a mano. Necesita la variable CRM_URL y el secreto CRM_TOKEN (de un administrador). Solo imprime cantidades.
+name: Revisar pedidos contra ClickUp
+
+on:
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'abiertos = lo que está en curso (rápido). todo = también los PDV cerrados en los últimos 45 días.'
+        required: false
+        default: abiertos
+
+concurrency:
+  group: revisar-clickup
+  cancel-in-progress: false
+
+jobs:
+  revisar:
+    runs-on: ubuntu-latest
+    if: vars.CRM_URL != ''
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/revisar-clickup.mjs
+        env:
+          MODO: ${{ inputs.modo }}
+          CRM_URL: ${{ vars.CRM_URL }}
+          CRM_TOKEN: ${{ secrets.CRM_TOKEN }}

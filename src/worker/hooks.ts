@@ -277,7 +277,10 @@ hooks.get('/pedidos/estado', async (c) => {
 // alta vendedoras, para que los pedidos que ya entraron queden con la suya).
 hooks.post('/pedidos/revisar', async (c) => {
   await adminToken(c.env, c.req.raw);
-  return c.json(await syncClickup(c.env, { full: true }));
+  // `modo`: «abiertos» repasa solo lo que está en curso (clickup.ts) y «seguir» continúa con lo que quedó anotado, para
+  // no esperar al cron (scripts/revisar-clickup.mjs). Sin modo, la lectura completa de siempre.
+  const modo = ((await c.req.json<{ modo?: string }>().catch(() => ({}))) as { modo?: string }).modo;
+  return c.json(await syncClickup(c.env, modo === 'abiertos' ? { abiertos: true } : modo === 'seguir' ? {} : { full: true }));
 });
 // Gmail con token de administrador (lo mismo que Configuración → Integraciones → «Mails (Gmail)»): ver el estado,
 // cambiar la configuración (prender, qué bandejas) y leer ahora.

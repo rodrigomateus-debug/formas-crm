@@ -91,6 +91,23 @@ parada del mismo lugar en la ruta del día.
   que se entrega, se anula o se queda sin fecha en ClickUp sale solo. Los encargos no se cuelgan (se pasan de día o se
   cancelan). Tabla `cronograma_colgados` (migración `0095`), `colgados` y `colgarMovimiento` en `cronograma.ts`,
   `POST /api/cronograma/colgar` con `{ ids, tipo, motivo }`.
+- **Horario desde la tarjeta, también como rango** (pedido de Producción, Rodrigo del 19/11/2026): el reloj de cada
+  tarjeta que es parada abre «Horario»: **Entre las… y las…**, A las, Antes de las o Desde las. Es la misma hora fijada de
+  la Ruta del día (`cronograma_horas`, con `hasta` para el rango; migración `0097`): vale para toda la parada de ese día,
+  el recorrido se ordena solo para cumplirla y el chofer la ve en su app.
+- **Anotaciones de logística, con quién las escribió** (`logistica.ts`, `web/src/NotasLogistica.tsx`, tabla
+  `logistica_notas`): el ícono de la nota en la tarjeta. Dos alcances: **Solo esta vez** (de este pedido y este movimiento:
+  esta entrega, este retiro, este egreso) y **Siempre** (queda en la empresa: el cliente en las entregas, el proveedor o el
+  impresor en lo demás, y aparece en todo lo que se le entregue o se le retire de acá en más). Se ven en la tarjeta (en
+  ámbar las de esta vez, en azul las de siempre, con el nombre y el día), en la parada de la Ruta del día, en la app del
+  chofer y en la ficha del pedido. Las escriben Logística y Producción desde la tarjeta y **la vendedora desde su pedido**
+  (panel Entrega → «Anotaciones de logística»), que elige si es solo para esta entrega o para todas las entregas a ese
+  cliente (hace falta que el pedido tenga su empresa). La borra quien la escribió, Logística, Producción o un
+  administrador. No reemplazan las observaciones de la dirección («tocar timbre»), que son de esa dirección.
+- **Cantidad enviada (demasía)**: en ingresos, retiros y egresos (no en las entregas al cliente), la cantidad de cada
+  producto se toca para anotar la que realmente va o llega («110», con «+10 de más» al lado) y por qué. La cantidad del PDV
+  no cambia. El remito de traslado del egreso y la app del chofer salen con esa cantidad. Tabla `cronograma_enviados`,
+  `POST /api/cronograma/enviado` con `{ id, tipo, cantidad, motivo }`; la misma cantidad del pedido (o vacío) lo saca.
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque

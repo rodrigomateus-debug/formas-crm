@@ -238,6 +238,8 @@ export type ParadaChofer = {
   pactada?: string | null;
   /** Piso, depto, puerta o unidad, y las observaciones de entrega que cargó Logística. */
   detalle?: string | null; observaciones?: string | null;
+  /** Las anotaciones de logística de lo que se hace en la parada (de Producción, Logística o la vendedora). */
+  notas?: Array<{ texto: string; por: string | null; siempre: boolean }>;
   visita: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null } | null;
   /** La entrega no va directo: se deja en este expreso, para ese cliente. */
   expreso?: { guia: string | null; cliente: string } | null;

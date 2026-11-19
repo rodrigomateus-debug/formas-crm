@@ -4,6 +4,7 @@ import { achicarImagen, fmtDate, http, qs, recordUrl, useAsync, useMeta, esVenta
 import { EstadoEntrega, Modal, alEsc } from '../components';
 import { BotonArchivos } from './Bocetos';
 import { DireccionesEntrega } from './Direcciones';
+import { NotasLogistica } from '../NotasLogistica';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { ChoferesPanel } from './Choferes';
@@ -120,6 +121,8 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       </div>
       {/* La dirección (o las direcciones) de entrega, con qué va a cada una (Direcciones.tsx). */}
       <DireccionesEntrega orderId={record.id} onChange={onChange} />
+      {/* Lo que Logística tiene que saber de la entrega: lo anota la vendedora (o Logística), para esta o para todas. */}
+      <div className="panel-body"><NotasLogistica recordId={record.id} titulo="Anotaciones de logística" /></div>
       {e?.alerta && <div className="panel-body"><div className="aviso warn" role="status">{e.alerta}</div></div>}
       {mostrarLineas && (
         <div className="entrega-lineas">

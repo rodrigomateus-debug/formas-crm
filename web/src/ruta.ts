@@ -133,13 +133,14 @@ export function dondeEntra(salida: Punto | null, fin: Destino, actual: ParadaRut
   return mejor;
 }
 
-// Una hora fijada a mano: el horario en el que hay que llegar. «A las 12:00» es de 11:45 a 12:15.
-export type ModoHora = 'a_las' | 'antes' | 'desde';
-export interface Pactada { modo: ModoHora; min: number }
+// Una hora fijada a mano: el horario en el que hay que llegar. «A las 12:00» es de 11:45 a 12:15; «entre las 10 y las 13»
+// es ese rango (`hasta`).
+export type ModoHora = 'a_las' | 'antes' | 'desde' | 'entre';
+export interface Pactada { modo: ModoHora; min: number; hasta?: number | null }
 export const TOLERANCIA = 15;
 export const ventanaPactada = (p: Pactada): [number, number] =>
-  p.modo === 'antes' ? [0, p.min] : p.modo === 'desde' ? [p.min, 24 * 60 - 1] : [Math.max(0, p.min - TOLERANCIA), Math.min(24 * 60 - 1, p.min + TOLERANCIA)];
-export const textoPactada = (p: Pactada) => `${p.modo === 'antes' ? 'Antes de las' : p.modo === 'desde' ? 'Desde las' : 'A las'} ${hhmm(p.min)}`;
+  p.modo === 'entre' ? [p.min, Math.max(p.min, p.hasta ?? p.min)] : p.modo === 'antes' ? [0, p.min] : p.modo === 'desde' ? [p.min, 24 * 60 - 1] : [Math.max(0, p.min - TOLERANCIA), Math.min(24 * 60 - 1, p.min + TOLERANCIA)];
+export const textoPactada = (p: Pactada) => p.modo === 'entre' ? `Entre las ${hhmm(p.min)} y las ${hhmm(p.hasta ?? p.min)}` : `${p.modo === 'antes' ? 'Antes de las' : p.modo === 'desde' ? 'Desde las' : 'A las'} ${hhmm(p.min)}`;
 
 export const hhmm = (m: number) => { const x = Math.round(m); return `${Math.floor(x / 60)}:${String(x % 60).padStart(2, '0')}`; };
 export const duracion = (m: number) => { const x = Math.round(m); return x < 60 ? `${x} min` : `${Math.floor(x / 60)} h ${String(x % 60).padStart(2, '0')}`; };

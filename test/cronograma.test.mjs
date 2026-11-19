@@ -746,3 +746,61 @@ test('cronograma: lo que no se pudo hacer queda en Colgados con el motivo y avis
   assert.ok(v.movimientos.some((x) => x.id === m.id), 'volvió a su día');
   assert.ok(!v.colgados.some((x) => x.id === m.id), 'y ya no está en Colgados');
 });
+
+// Pedidos de Producción (Rodrigo, 19/11/2026): el horario como rango desde la tarjeta, las anotaciones de logística con
+// quién las escribió (para esta vez o para siempre) y la cantidad que realmente se manda (demasía).
+test('cronograma: rango horario, anotaciones de logística con autor y cantidad enviada', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const rango = '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20';
+  const semana = async () => (await api('GET', rango)).data;
+  let v = await semana();
+  const ent = v.movimientos.find((x) => x.npdv === PDV && x.tipo === 'entrega' && x.record_id && x.parada);
+  const otro = v.movimientos.find((x) => x.npdv === PDV && x.tipo !== 'entrega' && x.company_id && x.cantidad);
+  assert.ok(ent && otro, 'hay una entrega y un movimiento con proveedor o impresor');
+
+  // 1. El horario: un rango, que se ve en la tarjeta.
+  const hora = (b) => api('PUT', '/cronograma/hora', { fecha: ent.fecha, clave: ent.parada, ...b });
+  assert.equal((await hora({ modo: 'entre', hora: '13:00', hasta: '10:00' })).status, 400, 'la segunda hora tiene que ser más tarde');
+  assert.equal((await hora({ modo: 'entre', hora: '10:00', hasta: '13:00' })).status, 200);
+  assert.equal((await semana()).movimientos.find((x) => x.id === ent.id).hora, 'Entre las 10:00 y las 13:00');
+  assert.equal((await hora({ modo: null })).status, 200);
+
+  // 2. Anotaciones. La vendedora, desde su pedido: solo de la entrega, y queda con su nombre.
+  const vende = (await api('POST', '/users', { email: `nota.${RUN}@formas.ar`, name: `Nota ${RUN}`, role: 'member' })).data;
+  assert.equal((await api('PATCH', `/records/order/${ent.record_id}`, { props: { owner_id: vende.id } })).status, 200);
+  asUser = `nota.${RUN}@formas.ar`;
+  const n1 = await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'puntual', texto: 'Preguntar por Marta en recepción' });
+  assert.equal(n1.status, 201, JSON.stringify(n1.data));
+  assert.equal(n1.data.por, `Nota ${RUN}`);
+  assert.equal((await api('POST', '/logistica/notas', { record_id: ent.record_id, alcance: 'puntual', texto: ' ' })).status, 400);
+  asUser = null;
+  // Producción, en la tarjeta de un proveedor o impresor: para siempre en ese lugar.
+  const n2 = await api('POST', '/logistica/notas', { record_id: otro.record_id, tipo: otro.tipo, alcance: 'siempre', company_id: otro.company_id, texto: 'Reciben solo por el portón lateral' });
+  assert.equal(n2.status, 201, JSON.stringify(n2.data));
+  v = await semana();
+  const notasDe = (id) => (v.movimientos.find((x) => x.id === id)?.notas ?? []).map((n) => [n.alcance, n.texto, n.por]);
+  assert.deepEqual(notasDe(ent.id), [['puntual', 'Preguntar por Marta en recepción', `Nota ${RUN}`]]);
+  assert.ok(notasDe(otro.id).some((n) => n[0] === 'siempre' && n[1] === 'Reciben solo por el portón lateral'), 'la de siempre, en la tarjeta de ese lugar');
+  // La de siempre aparece en todo lo de esa empresa; la puntual, solo en la entrega de ese pedido.
+  const delLugar = v.movimientos.filter((x) => x.tipo !== 'entrega' && x.company_id === otro.company_id);
+  assert.ok(delLugar.every((x) => (x.notas ?? []).some((n) => n.id === n2.data.id)));
+  assert.ok(!v.movimientos.some((x) => x.id !== ent.id && x.tipo !== 'entrega' && (x.notas ?? []).some((n) => n.id === n1.data.id)));
+  // En la ficha del pedido se leen; la vendedora borra la suya, no la de Producción.
+  asUser = `nota.${RUN}@formas.ar`;
+  assert.deepEqual((await api('GET', `/logistica/notas?record_id=${ent.record_id}`)).data.notas.filter((n) => n.alcance === 'puntual').map((n) => n.texto), ['Preguntar por Marta en recepción']);
+  assert.equal((await api('DELETE', `/logistica/notas/${n2.data.id}`)).status, 403);
+  assert.equal((await api('DELETE', `/logistica/notas/${n1.data.id}`)).status, 200);
+  asUser = null;
+  assert.equal((await api('DELETE', `/logistica/notas/${n2.data.id}`)).status, 200);
+
+  // 3. La demasía: lo que realmente va, sin tocar la cantidad del PDV. No en las entregas.
+  assert.equal((await api('POST', '/cronograma/enviado', { id: ent.task_id, tipo: 'entrega', cantidad: 5 })).status, 400);
+  const env = await api('POST', '/cronograma/enviado', { id: otro.task_id, tipo: otro.tipo, cantidad: otro.cantidad + 10, motivo: 'Por si sale alguno fallado' });
+  assert.equal(env.status, 200, JSON.stringify(env.data));
+  const con = (await semana()).movimientos.find((x) => x.id === otro.id);
+  assert.deepEqual([con.cantidad, con.enviado.cantidad, con.enviado.motivo], [otro.cantidad, otro.cantidad + 10, 'Por si sale alguno fallado']);
+  // La misma cantidad del pedido lo saca.
+  assert.equal((await api('POST', '/cronograma/enviado', { id: otro.task_id, tipo: otro.tipo, cantidad: otro.cantidad })).data.enviado, null);
+  assert.ok(!(await semana()).movimientos.find((x) => x.id === otro.id).enviado);
+});

@@ -9,6 +9,7 @@ import { updateRecord } from './records';
 import { direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
 import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
+import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
@@ -84,6 +85,8 @@ export interface Movimiento {
   parada?: string;           // en la semana: la clave de su parada en la ruta del día (para el remito de traslado de un egreso)
   retira_en?: string | null; // en la semana: lo retira el cliente en Formas (tarjeta «Entrega»), así que no es parada de nadie
   colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»: por qué, desde cuándo y quién
+  notas?: NotaLogistica[];   // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar (logistica.ts)
+  enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó, si no es la cantidad del pedido (demasía)
 }
 // La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
 // esa empresa (tres retiros en el mismo impresor son una parada). No depende de la dirección. Un pedido que va a varias
@@ -162,7 +165,49 @@ export async function movimientos(db: D1Database, desde: string, hasta: string) 
   // Lo colgado no está en su día ni en la ruta: va en su columna (colgados).
   const colg = new Set((await db.prepare('SELECT task_id, tipo FROM cronograma_colgados').all<{ task_id: string; tipo: string }>()).results.map((c) => `${c.task_id}:${c.tipo}`));
   const movs = armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta);
-  return { movs: colg.size ? movs.filter((m) => !colg.has(m.id)) : movs, feriados: fer };
+  const vistos = colg.size ? movs.filter((m) => !colg.has(m.id)) : movs;
+  await ponerExtras(db, vistos);
+  return { movs: vistos, feriados: fer };
+}
+
+// Lo que cada movimiento tiene anotado: las anotaciones de logística (logistica.ts) y la cantidad que realmente se mandó o
+// llegó cuando no es la del pedido (la demasía).
+async function ponerExtras(db: D1Database, movs: Movimiento[]) {
+  if (!movs.length) return;
+  const deEntregas = await empresaDePedidos(db, [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))]);
+  const empresa = (m: Movimiento) => (m.tipo === 'entrega' ? deEntregas.get(m.record_id ?? -1)?.id ?? null : m.company_id);
+  const [{ puntuales, siempre }, env] = await Promise.all([
+    notasPara(db, movs.map((m) => ({ record_id: m.record_id, tipo: m.tipo, empresa: empresa(m) }))),
+    db.prepare(`SELECT e.task_id, e.tipo, e.cantidad, e.motivo, u.name AS por FROM cronograma_enviados e LEFT JOIN users u ON u.id = e.user_id`)
+      .all<{ task_id: string; tipo: string; cantidad: number; motivo: string | null; por: string | null }>(),
+  ]);
+  const enviados = new Map(env.results.map((e) => [`${e.task_id}:${e.tipo}`, e]));
+  for (const m of movs) {
+    const ns = [...(siempre.get(empresa(m) ?? -1) ?? []), ...(puntuales.get(`${m.record_id}|${m.tipo}`) ?? [])];
+    if (ns.length) m.notas = ns;
+    const e = enviados.get(m.id);
+    if (e) m.enviado = { cantidad: e.cantidad, motivo: e.motivo, por: e.por };
+  }
+}
+
+// La cantidad que realmente se mandó (o llegó) en un egreso, un ingreso o un retiro (pedido de Producción del 19/11/2026):
+// a veces van unos de más por si alguno sale fallado o para pruebas. Queda anotado con quién y por qué; la cantidad del
+// PDV no cambia. Sin cantidad (o la misma del pedido), se saca.
+export async function guardarEnviado(env: Env, ctx: Ctx, b: { id?: unknown; tipo?: unknown; cantidad?: unknown; motivo?: unknown }) {
+  exigir(ctx);
+  if (!esTipo(b.tipo) || b.tipo === 'entrega') throw new HttpError(400, 'La cantidad enviada se anota en ingresos, retiros y egresos (no en las entregas al cliente).');
+  const db = env.DB;
+  const [f] = await filasDe(db, [b.id]);
+  const vacio = b.cantidad == null || b.cantidad === '';
+  const cantidad = Number(b.cantidad);
+  if (!vacio && (!Number.isFinite(cantidad) || cantidad < 0 || cantidad > 10_000_000)) throw new HttpError(400, 'La cantidad no es un número.');
+  if (vacio || cantidad === f.cantidad) {
+    await db.prepare('DELETE FROM cronograma_enviados WHERE task_id = ? AND tipo = ?').bind(f.task_id, b.tipo).run();
+    return { enviado: null };
+  }
+  const motivo = String(b.motivo ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) || null;
+  await db.prepare('INSERT OR REPLACE INTO cronograma_enviados (task_id, tipo, cantidad, motivo, user_id, at) VALUES (?, ?, ?, ?, ?, ?)').bind(f.task_id, b.tipo, cantidad, motivo, ctx.user.id, now()).run();
+  return { enviado: { cantidad, motivo, por: ctx.user.name } };
 }
 
 // ---------- Colgados (pedido de Rodrigo del 19/11/2026) ----------
@@ -186,6 +231,7 @@ export async function colgados(db: D1Database): Promise<Movimiento[]> {
   const viejos = filasC.filter((c) => !vivos.has(`${c.task_id}:${c.tipo}`));
   if (viejos.length) await db.batch(viejos.slice(0, 50).map((c) => db.prepare('DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = ?').bind(c.task_id, c.tipo)));
   for (const m of movs) { const c = porId.get(m.id)!; m.colgado = { motivo: c.motivo, at: c.at, por: c.por, fecha: c.fecha }; m.avisos = []; }
+  await ponerExtras(db, movs);
   return movs;
 }
 
@@ -665,15 +711,15 @@ export async function guardarDireccion(env: Env, ctx: Ctx, b: { record_id?: unkn
 
 // ---------- Horas fijadas a mano ----------
 
-const MODOS: ModoHora[] = ['a_las', 'antes', 'desde'];
+const MODOS: ModoHora[] = ['a_las', 'antes', 'desde', 'entre'];
 export async function horasDelDia(db: D1Database, desde: string, hasta: string) {
-  const { results } = await db.prepare('SELECT fecha, clave, modo, minutos FROM cronograma_horas WHERE fecha BETWEEN ? AND ?').bind(desde, hasta)
-    .all<{ fecha: string; clave: string; modo: ModoHora; minutos: number }>();
-  return new Map(results.map((h) => [`${h.fecha}|${h.clave}`, { modo: h.modo, min: h.minutos } as Pactada]));
+  const { results } = await db.prepare('SELECT fecha, clave, modo, minutos, hasta FROM cronograma_horas WHERE fecha BETWEEN ? AND ?').bind(desde, hasta)
+    .all<{ fecha: string; clave: string; modo: ModoHora; minutos: number; hasta: number | null }>();
+  return new Map(results.map((h) => [`${h.fecha}|${h.clave}`, { modo: h.modo, min: h.minutos, hasta: h.hasta } as Pactada]));
 }
 // Fijar (o sacar, sin `modo`) la hora de una parada ese día. El recorrido que la tiene vuelve a ordenarse solo, para
 // cumplirla junto con las demás horas fijadas: deja de estar «ordenado a mano».
-export async function guardarHora(db: D1Database, ctx: Ctx, b: { fecha?: unknown; clave?: unknown; modo?: unknown; hora?: unknown }) {
+export async function guardarHora(db: D1Database, ctx: Ctx, b: { fecha?: unknown; clave?: unknown; modo?: unknown; hora?: unknown; hasta?: unknown }) {
   exigir(ctx);
   if (!esDia(b.fecha)) throw new HttpError(400, 'Falta el día.');
   const clave = String(b.clave ?? '');
@@ -681,11 +727,14 @@ export async function guardarHora(db: D1Database, ctx: Ctx, b: { fecha?: unknown
   if (b.modo == null || b.modo === '') {
     await db.prepare('DELETE FROM cronograma_horas WHERE fecha = ? AND clave = ?').bind(b.fecha, clave).run();
   } else {
-    if (!MODOS.includes(b.modo as ModoHora)) throw new HttpError(400, 'La hora es «a las», «antes de las» o «desde las».');
-    const m = String(b.hora ?? '').match(/^(\d{1,2})(?::(\d{2}))?$/);
-    const min = m ? Number(m[1]) * 60 + Number(m[2] ?? 0) : NaN;
-    if (!m || Number(m[1]) > 23 || Number(m[2] ?? 0) > 59) throw new HttpError(400, 'La hora va como 12:00.');
-    await db.prepare('INSERT OR REPLACE INTO cronograma_horas (fecha, clave, modo, minutos, user_id, at) VALUES (?, ?, ?, ?, ?, ?)').bind(b.fecha, clave, b.modo, min, ctx.user.id, now()).run();
+    if (!MODOS.includes(b.modo as ModoHora)) throw new HttpError(400, 'La hora es «a las», «antes de las», «desde las» o «entre las… y las…».');
+    const minutos = (x: unknown) => { const m = String(x ?? '').match(/^(\d{1,2})(?::(\d{2}))?$/); return m && Number(m[1]) <= 23 && Number(m[2] ?? 0) <= 59 ? Number(m[1]) * 60 + Number(m[2] ?? 0) : null; };
+    const min = minutos(b.hora);
+    if (min == null) throw new HttpError(400, 'La hora va como 12:00.');
+    // Un rango («entre las 10 y las 13», pedido de Producción del 19/11/2026): las dos horas, la segunda después.
+    const hasta = b.modo === 'entre' ? minutos(b.hasta) : null;
+    if (b.modo === 'entre' && (hasta == null || hasta <= min)) throw new HttpError(400, 'El rango va de una hora a otra más tarde, por ejemplo de 10:00 a 13:00.');
+    await db.prepare('INSERT OR REPLACE INTO cronograma_horas (fecha, clave, modo, minutos, hasta, user_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(b.fecha, clave, b.modo, min, hasta, ctx.user.id, now()).run();
   }
   // El recorrido que tiene esa parada (o, si no está en ninguno, el primero, que es donde cae) se ordena solo otra vez.
   const r = await db.prepare(`UPDATE cronograma_rutas SET a_mano = 0, updated_by = ?, updated_at = ? WHERE fecha = ? AND EXISTS (SELECT 1 FROM json_each(orden) WHERE value = ?)`)
@@ -1153,7 +1202,10 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
-          movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.cantidad, hecho: m.hecho })),
+          // Las anotaciones de logística de lo que se hace en la parada (logistica.ts), sin repetir, y la cantidad que
+          // realmente va si se anotó una demasía.
+          notas: [...new Map(p.movimientos.flatMap((m) => m.notas ?? []).map((n) => [n.id, { texto: n.texto, por: n.por, siempre: n.alcance === 'siempre' }])).values()],
+          movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.enviado?.cantidad ?? m.cantidad, hecho: m.hecho })),
           encargos: p.encargos.map((e) => ({ id: e.id, llevar: e.llevar, retirar: e.retirar, desde: nombreBase(e.desde, r.bases), hacia: nombreBase(e.hacia, r.bases),
             horario: e.horario, contacto: e.contacto, notas: e.notas, urgente: e.urgente, quien: e.quien, quien_foto: e.quien_foto ?? null, estado: e.estado })),
         })),

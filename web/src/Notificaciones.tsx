@@ -61,6 +61,8 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
     case 'idea_hecha': return { titulo: <>¡Se hizo tu idea! 🎉</>, detalle: n.texto, icono: 'check', destino: `chispin:${n.idea_id ?? ''}` };
     case 'idea_votada_hecha': return { titulo: <>Se hizo una idea que votaste 🎉</>, detalle: n.texto, icono: 'check', destino: `chispin:${n.idea_id ?? ''}` };
     case 'idea_descartada': return { titulo: <>Tu idea quedó en <b>no va</b> (por ahora)</>, detalle: n.texto, icono: 'spark', destino: `chispin:${n.idea_id ?? ''}` };
+    // Cronograma: no se pudo hacer y quedó en «Colgados»; el texto dice qué era y por qué (cronograma.ts).
+    case 'colgado': return { titulo: <><b>{quien}</b> dejó pendiente en el cronograma {reg}</>, detalle: n.texto, icono: 'alert', destino: aReg };
     case 'entrega': return { titulo: <>Faltan entregas en {reg}</>, detalle: 'Según los remitos, todavía falta entregar algo.', icono: 'truck', destino: aReg };
     default: return { titulo: <><b>{quien}</b> te asignó {reg}</>, detalle: null, icono: n.object_type ?? 'note', destino: aReg };
   }

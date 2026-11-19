@@ -81,6 +81,16 @@ parada del mismo lugar en la ruta del día.
   (`POST /api/cronograma/remito-traslado` con `{ fecha, clave }`, tabla `remitos_traslado`).
 - **La foto del remito** es obligatoria en todas las paradas: la Ruta del día dice cuáles ya la tienen y cuáles no (ver
   [REMITOS.md](REMITOS.md#remitos-internos-y-foto-obligatoria-en-todas-las-paradas-pedido-de-rodrigo-del-16112026)).
+- **Colgados** (pedido de Rodrigo del 19/11/2026): una columna al final de la semana, punteada y rayada en ámbar, que
+  es **la misma en todas las semanas**. Ahí va lo que no se pudo hacer y queda pendiente (el cliente no abonó el total,
+  fueron y nadie recibió, falta un documento). Se arrastra la tarjeta a la columna (o el ícono de aviso de la tarjeta, para
+  el celular) y se elige o se escribe **el motivo**, que es obligatorio. El movimiento sale de su día y de la ruta de ese
+  día, y queda en Colgados con el motivo, el día que tenía y quién lo dejó; la fecha de ClickUp no se toca. **Al
+  responsable del pedido** (su propietario) le llega el aviso en la campanita y por mail, con qué era y por qué. Para
+  resolverlo se arrastra a un día (o el calendario de la tarjeta), que escribe la fecha en ClickUp, o se marca hecho. Lo
+  que se entrega, se anula o se queda sin fecha en ClickUp sale solo. Los encargos no se cuelgan (se pasan de día o se
+  cancelan). Tabla `cronograma_colgados` (migración `0095`), `colgados` y `colgarMovimiento` en `cronograma.ts`,
+  `POST /api/cronograma/colgar` con `{ ids, tipo, motivo }`.
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque

@@ -174,6 +174,8 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
       ? { titulo: r.act_subject || 'Tarea', detalle: `${r.by_name ?? 'Alguien'}: «${recorte(textoPlano(r.com_body ?? ''))}»`, url: `${APP_URL(env)}/tasks?tarea=${r.activity_id}` }
       : r.kind === 'mencion'
       ? { titulo: r.rec_name || 'Conversación', detalle: `${r.by_name ?? 'Alguien'}: «${recorte(textoPlano(r.msg_body ?? ''))}»`, url: r.record_id && r.rec_type ? `${APP_URL(env)}/${PATHS[r.rec_type]}/${r.record_id}?conversacion=1` : APP_URL(env) }
+      : r.kind === 'colgado'
+      ? { titulo: r.rec_name || 'Pedido', detalle: `quedó pendiente en el cronograma · ${recorte(r.detalle ?? '')}${r.by_name ? ` · lo dejó ${r.by_name}` : ''}`, url: `${APP_URL(env)}/orders/${r.record_id}` }
       : r.kind === 'entrega'
       ? { titulo: r.rec_name || 'Pedido', detalle: r.entrega === 'diferencias' ? `con diferencias${r.falta ? ` · falta ${r.falta}` : ''}` : `falta ${r.falta ?? 'entregar'}`, url: `${APP_URL(env)}/orders/${r.record_id}` }
       : r.kind === 'tarea'
@@ -183,7 +185,11 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     const quien = [...new Set(rows.map((r) => r.by_name).filter(Boolean))];
     const entregas = rows.filter((r) => r.kind === 'entrega');
     const menciones = rows.filter((r) => esMencion(r.kind));
-    const subject = menciones.length === rows.length
+    const colgados = rows.filter((r) => r.kind === 'colgado');
+    const subject = colgados.length === rows.length
+      ? (rows.length === 1 ? `Quedó pendiente en el cronograma: ${rows[0].rec_name ?? 'un pedido'}` : `${rows.length} movimientos quedaron pendientes en el cronograma`)
+      : colgados.length ? `Tenés ${rows.length} novedades en Formas Hub`
+      : menciones.length === rows.length
       ? (rows.length === 1 ? `${quien[0] ?? 'Alguien'} te mencionó en «${(rows[0].kind === 'tarea_mencion' ? rows[0].act_subject : rows[0].rec_name) ?? 'una conversación'}»` : `Te mencionaron ${rows.length} veces en Formas Hub`)
       : entregas.length === rows.length
       ? (rows.length === 1 ? `Faltan entregas: ${rows[0].rec_name ?? 'un pedido'}` : `${rows.length} pedidos con faltantes de entrega`)
@@ -193,9 +199,12 @@ async function asignaciones(env: Env, cfg: AvisosConfig, b: Budget) {
     const grupos: Array<[string, Linea[]]> = [
       ['Te mencionaron', lineas.filter((_, i) => esMencion(rows[i].kind))],
       ['Pedidos con faltantes de entrega (según los remitos)', lineas.filter((_, i) => rows[i].kind === 'entrega')],
-      ['Asignado a vos', lineas.filter((_, i) => rows[i].kind !== 'entrega' && !esMencion(rows[i].kind))],
+      ['Quedó pendiente en el cronograma (no se pudo hacer)', lineas.filter((_, i) => rows[i].kind === 'colgado')],
+      ['Asignado a vos', lineas.filter((_, i) => rows[i].kind !== 'entrega' && rows[i].kind !== 'colgado' && !esMencion(rows[i].kind))],
     ].filter(([, ls]) => ls.length) as Array<[string, Linea[]]>;
-    const { text, html } = cuerpo(env, menciones.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, te mencionaron en:`
+    const { text, html } = cuerpo(env, colgados.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, esto no se pudo hacer y quedó pendiente en el cronograma:`
+      : colgados.length ? `Hola ${u.user_name.split(' ')[0]}, tenés estas novedades en Formas Hub:`
+      : menciones.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, te mencionaron en:`
       : entregas.length === rows.length ? `Hola ${u.user_name.split(' ')[0]}, a estos pedidos les falta entregar algo según sus remitos:`
       : `Hola ${u.user_name.split(' ')[0]}, te asignaron esto en Formas Hub:`, grupos);
     try {

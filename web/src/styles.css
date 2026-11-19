@@ -2772,6 +2772,14 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 @keyframes chispin-subir { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes chispin-idea-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes chispin-resalta { 0%, 40% { box-shadow: 0 0 0 3px var(--formas-lime); border-color: var(--formas-green); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* Negocio ganado (festejarGanado en Chispin.tsx): lluvia de papelitos por toda la pantalla y Chispín sale aunque esté escondido. */
+.chispin-lluvia { position: fixed; inset: 0; z-index: 300; overflow: hidden; pointer-events: none; }
+.chispin-lluvia i { position: absolute; top: -16px; width: 8px; height: 13px; border-radius: 2px; opacity: 0; animation: chispin-cae var(--t) cubic-bezier(.3, .1, .6, 1) var(--d) forwards; }
+.chispin-lluvia i[data-c="0"] { background: #000085; } .chispin-lluvia i[data-c="1"] { background: #8ee021; } .chispin-lluvia i[data-c="2"] { background: #65a7dd; }
+.chispin-lluvia i[data-c="3"] { background: #f0b45a; } .chispin-lluvia i[data-c="4"] { background: #ff7d74; border-radius: 50%; width: 9px; height: 9px; }
+.chispin-zona.festejando .chispin-globo { max-width: 300px; font-size: 14px; font-weight: 600; }
+.chispin-zona.festejando .chispin-lampara { background: var(--chispin-lampara); box-shadow: 0 0 0 4px rgba(142, 224, 33, .3), 0 0 22px 8px rgba(142, 224, 33, .7); }
+@keyframes chispin-cae { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), 105vh) rotate(var(--r)); } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {
   .chispin::before, .chispin-bicho, .chispin-cuerpo, .chispin-ojo, .chispin-antena, .chispin-lampara, .chispin-zzz i, .chispin-n, .chispin-globo, .chispin-panel, .chispin-idea, .chispin-mano { animation: none !important; }

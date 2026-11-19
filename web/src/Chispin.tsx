@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, userOf } from './lib';
+import { http, useMeta, useToast, Icon, fmtDate, fmtRelative, fmtMoney, userOf, type Stage } from './lib';
 import { UserAvatar } from './components';
 
 // Chispín (pedido de Rodrigo del 19/11/2026; src/worker/ideas.ts, docs/IDEAS.md): el personaje de abajo a la derecha del Hub,
@@ -77,6 +77,49 @@ export function festejar(desde?: HTMLElement | null) {
   setTimeout(() => capa.remove(), 1600);
 }
 
+// ---------- Negocio ganado (pedido de Rodrigo del 19/11/2026) ----------
+// Cuando un negocio pasa a una etapa ganada (tablero, ficha, vista previa o celular), llueven papelitos por toda la
+// pantalla y Chispín salta y te felicita por tu nombre. Si el negocio es de otra persona (una gerente que lo mueve),
+// felicita a esa persona.
+export interface NegocioGanado { nombre: string; monto?: unknown; moneda?: string; duenio?: unknown }
+let ganadoDesdeAfuera: ((n: NegocioGanado) => void) | null = null;
+// Solo «Cierre ganado» (no otras etapas que cuentan como ganadas, como «Lead calificado» o «Pedido completo»).
+export const esGanada = (s?: Stage | null) => !!s?.is_closed && !!s?.is_won && /ganad/i.test(s.label);
+// Para llamar después de guardar el cambio de etapa: festeja solo si entra a ganada desde una que no lo era.
+export function siGano(antes: Stage | null | undefined, despues: Stage | null | undefined, n: NegocioGanado) {
+  if (esGanada(despues) && !esGanada(antes)) festejarGanado(n);
+}
+export function festejarGanado(n: NegocioGanado) {
+  lluvia();
+  ganadoDesdeAfuera?.(n);
+}
+function lluvia() {
+  if (reducido()) return;
+  const capa = document.createElement('div');
+  capa.className = 'chispin-lluvia';
+  const cuantos = Math.max(50, Math.min(150, Math.round(innerWidth / 9)));
+  for (let k = 0; k < cuantos; k++) {
+    const p = document.createElement('i');
+    p.style.left = `${Math.random() * 100}%`;
+    p.style.setProperty('--x', `${Math.random() * 160 - 80}px`);
+    p.style.setProperty('--r', `${Math.random() * 1080 - 540}deg`);
+    p.style.setProperty('--d', `${Math.random() * 900}ms`);
+    p.style.setProperty('--t', `${2 + Math.random() * 1.6}s`);
+    p.dataset.c = String(k % 5);
+    capa.appendChild(p);
+  }
+  document.body.appendChild(capa);
+  setTimeout(() => capa.remove(), 4800);
+}
+const primerNombre = (s?: string | null) => (s ?? '').trim().split(/\s+/)[0] || '';
+const FELICITACIONES: Array<(n: string, negocio: string) => string> = [
+  (n, x) => `¡Vamos, ${n}! 🏆 Cerraste ${x}.`,
+  (n, x) => `¡Golazo, ${n}! ⚽ ${x} ya es ganado.`,
+  (n, x) => `¡Eso, ${n}! 🎉 Un cierre más: ${x}.`,
+  (n, x) => `¡Qué crack, ${n}! 💪 ${x} pasó a ganado.`,
+  (n, x) => `¡Aplausos para ${n}! 👏 Ganaste ${x}.`,
+];
+
 // ---------- El personaje ----------
 function Personaje({ animo, lampara, ojosRef }: { animo: string; lampara: boolean; ojosRef: React.RefObject<HTMLSpanElement> }) {
   return (
@@ -110,6 +153,9 @@ export default function Chispin() {
   const [animo, setAnimo] = useState('');   // '', 'mira', 'feliz', 'duerme', 'traga'
   const [resaltar, setResaltar] = useState<number | null>(null);
   const [visto, setVisto] = useState(() => Number(leer('visto') ?? 0));
+  const [festejando, setFestejando] = useState(false);   // un negocio ganado: se muestra aunque esté escondido
+  const festejandoRef = useRef(false);
+  festejandoRef.current = festejando;
   const botonRef = useRef<HTMLButtonElement>(null);
   const ojosRef = useRef<HTMLSpanElement>(null);
 
@@ -127,6 +173,30 @@ export default function Chispin() {
     cargar();
   }, [cargar]);
   useEffect(() => { abrirDesdeAfuera = abrir; return () => { abrirDesdeAfuera = null; }; }, [abrir]);
+
+  // Un negocio ganado: sale (aunque esté escondido), salta, tira papelitos y felicita por el nombre.
+  const festejoT = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => {
+    ganadoDesdeAfuera = (n) => {
+      festejoT.current.forEach(clearTimeout);
+      const duenio = userOf(meta, n.duenio);
+      const ajeno = duenio && duenio.id !== yo ? duenio : null;
+      const negocio = `«${n.nombre.length > 60 ? `${n.nombre.slice(0, 58)}…` : n.nombre}»${n.monto ? ` por ${fmtMoney(n.monto, n.moneda)}` : ''}`;
+      const texto = ajeno
+        ? `¡Ganó ${primerNombre(ajeno.name)}! 🏆 ${negocio}. ¡Mandale un aplauso!`
+        : FELICITACIONES[Math.floor(Math.random() * FELICITACIONES.length)](primerNombre(meta.me.name) || 'campeón/a', negocio);
+      setAbierto(false); setFestejando(true); setAnimo('feliz');
+      setGlobo({ tipo: 'festejo', texto });
+      festejoT.current = [
+        setTimeout(() => festejar(botonRef.current), 250),
+        setTimeout(() => festejar(botonRef.current), 1100),
+        setTimeout(() => setAnimo(''), 2600),
+        setTimeout(() => { setFestejando(false); setGlobo((g) => (g?.texto === texto ? null : g)); }, 9000),
+      ];
+    };
+    return () => { ganadoDesdeAfuera = null; };
+  }, [meta, yo]);
+  useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
   // El link de una idea (…?idea=12, el que da Claude): abre el buzón en esa idea y se saca de la dirección.
   useEffect(() => {
     const sp = new URLSearchParams(loc.search);
@@ -169,6 +239,7 @@ export default function Chispin() {
     }
     if (!g || (escondido && g.tipo === 'charla')) return;
     const t1 = setTimeout(() => {
+      if (festejandoRef.current) return;   // no pisar la felicitación de un negocio ganado
       setGlobo(g);
       if (g!.tipo === 'festejo') { setAnimo('feliz'); festejar(botonRef.current); setTimeout(() => setAnimo(''), 2400); }
     }, 3500);
@@ -204,12 +275,12 @@ export default function Chispin() {
 
   // Donde se escribe un mensaje (Conversaciones, o la conversación abierta en una ficha) se corre al borde solo, para no tapar
   // el botón de mandar; sin guardar nada.
-  const estorba = /^\/conversaciones/.test(loc.pathname) || new URLSearchParams(loc.search).has('conversacion');
+  const estorba = !festejando && (/^\/conversaciones/.test(loc.pathname) || new URLSearchParams(loc.search).has('conversacion'));
   const esconder = (v: boolean) => { setEscondido(v); guardar('escondido', v ? '1' : '0'); setGlobo(null); };
   const lampara = abierto || nuevas > 0 || globo?.tipo === 'festejo';
 
   return createPortal(
-    <div className={`chispin-zona${(escondido || estorba) && !abierto ? ' escondido' : ''}${abierto ? ' abierto' : ''}`}>
+    <div className={`chispin-zona${(escondido || estorba) && !abierto && !festejando ? ' escondido' : ''}${abierto ? ' abierto' : ''}${festejando ? ' festejando' : ''}`}>
       {abierto && <div className="chispin-velo" onClick={() => setAbierto(false)} aria-hidden="true" />}
       {abierto && ideas && (
         <Buzon ideas={ideas} admin={admin} yo={yo} resaltar={resaltar} onResaltado={() => setResaltar(null)} cerrar={() => setAbierto(false)}
@@ -222,7 +293,7 @@ export default function Chispin() {
       {abierto && !ideas && <div className="chispin-panel cargando" role="dialog" aria-label="Buzón de ideas"><div className="muted small">Buscando las ideas…</div></div>}
       {globo && !abierto && !estorba && (
         <div className={`chispin-globo ${globo.tipo}`} role="status">
-          <button type="button" className="chispin-globo-texto" onClick={() => abrir()}>{globo.texto}</button>
+          <button type="button" className="chispin-globo-texto" onClick={() => (festejando ? setGlobo(null) : abrir())}>{globo.texto}</button>
           <button type="button" className="chispin-globo-x" onClick={() => setGlobo(null)} aria-label="Cerrar"><Icon name="x" size={12} /></button>
         </div>
       )}

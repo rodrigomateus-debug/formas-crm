@@ -14,6 +14,7 @@ import { ConsultasCard } from './Consultas';
 import { ConversacionPanel, useNoLeidosDe } from './Conversacion';
 import { TareaPanel } from '../TareaPanel';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
+import { siGano } from '../Chispin';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
 interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
@@ -383,7 +384,10 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
   const go = async (stage: Stage, extra: Record<string, unknown> = {}) => {
     const missing = missingFor(stage, { ...record.props, ...extra }, extra);
     if (missing.length) { setAsk({ stage, missing }); return; }
-    try { await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stage.id, ...extra } }); toast('Etapa actualizada'); onChange(); }
+    try {
+      await http('PATCH', `/records/deal/${record.id}`, { props: { dealstage: stage.id, ...extra } }); toast('Etapa actualizada'); onChange();
+      siGano(cur, stage, { nombre: record.name, monto: record.props.amount, moneda: record.props.deal_currency_code, duenio: record.props.owner_id });
+    }
     catch (e) {
       const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       if (m?.length) setAsk({ stage, missing: m }); else toast((e as Error).message, true);
@@ -1278,6 +1282,7 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
       await http('PATCH', `/records/deal/${id}`, { props: { dealstage: stageId, ...extra } });
       toast(`Pasó a ${st.label}`);
       changed();
+      siGano(stageOf(meta, record.props.dealstage)?.stage, st, { nombre: record.name, monto: record.props.amount, moneda: record.props.deal_currency_code, duenio: record.props.owner_id });
     } catch (e) {
       const m = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       if (m?.length) setAsk({ stage: st, missing: m }); else toast((e as Error).message, true);

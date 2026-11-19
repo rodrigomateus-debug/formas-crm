@@ -121,7 +121,18 @@ parada del mismo lugar en la ruta del día.
   del lugar, **la cantidad que va ahí** (el reparto llega por el artículo de ClickUp atado al renglón del pedido,
   `clavesDeTareas`; un artículo que no va a un lugar no es parada ahí; sin reparto, o si el artículo no se pudo atar, va
   la cantidad entera) y la anotación de ese lugar. La tarjeta de la semana muestra cada lugar con lo que va («Central: 250»).
-  Por ahora todos los lugares van el mismo día: la fecha, el hecho y los Colgados por lugar son la etapa que sigue.
+  **La logística se bifurca; la producción no** (etapa 2, migración `0099`). En Producción sigue siendo un artículo con un
+  estado. En el cronograma, la entrega de cada artículo se abre en **una por lugar** (`repartirEntregas`, movimiento
+  `tarea:entrega@dirección`), cada una con su día (`entrega_direcciones.fecha`; sin día propio, el del artículo), su
+  «hecho» (`hecho_at`) y sus Colgados (`cronograma_colgados.dir`). Las que caen el mismo día se ven en una tarjeta, con el
+  lugar al lado de cada cantidad; arrastrar la tarjeta mueve solo los lugares que tiene, y la primera vez que se separa
+  uno los demás quedan fijos en el día que tenían. Los ids de las direcciones se conservan al guardar el reparto, así no
+  se pierde lo que hizo Logística con cada lugar.
+  **En ClickUp**, que tiene una fecha y un estado por artículo: la fecha es la de la última entrega que falta
+  (`fechaEnClickup`) y el estado, «parcial entregado» mientras falte algún lugar y «entregados» cuando se hicieron todos
+  (`hechoPorLugar`). Si ClickUp no acepta la fecha, el lugar vuelve a donde estaba. En la ficha del pedido, cada lugar
+  dice qué día va o si ya se entregó. Mover la entrega entera (por ejemplo desde «listos sin fecha») pasa a ese día todos
+  los lugares que faltan. Lo que cambien a mano en ClickUp no mueve los lugares que ya tienen día propio.
 - **Cantidad enviada (demasía)**: en ingresos, retiros y egresos (no en las entregas al cliente), la cantidad de cada
   producto se toca para anotar la que realmente va o llega («110», con «+10 de más» al lado) y por qué. La cantidad del PDV
   no cambia. El remito de traslado del egreso y la app del chofer salen con esa cantidad. Tabla `cronograma_enviados`,

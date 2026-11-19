@@ -1519,7 +1519,8 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-k-N { --k: var(--text-3); --kb: var(--ui-surface-sunken); }
 .cr-k-X { --k: var(--k-x); --kb: var(--k-x-bg); }
 /* Estados de despacho (despacho.ts): los siete de Logística, en tonos bien separados y siempre con ícono y palabra. «No pagó»
-   lleva el amarillo flúor de la planilla en la franja; el texto, un tono legible. */
+   lleva el amarillo flúor de la planilla en la barrita del día; el texto, un tono legible. El color va en la etiqueta del
+   estado, no en el borde de la tarjeta. */
 :root {
   --d-hecho: #2b7a39; --d-hecho-bg: #e3f3e6; --d-remitido: #c2570c; --d-remitido-bg: #fdeadb; --d-cola: #6d3fd1; --d-cola-bg: #efe8fd;
   --d-listo: #1d5fd1; --d-listo-bg: #e2ecfd; --d-info: #c42b2b; --d-info-bg: #fbe3e3; --d-nopago: #6b5d00; --d-nopago-bg: #f6ee8a; --d-nopago-flu: #e6dc00;
@@ -1537,9 +1538,6 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-d-cola { --d: var(--d-cola); --db: var(--d-cola-bg); } .cr-d-listo { --d: var(--d-listo); --db: var(--d-listo-bg); }
 .cr-d-info { --d: var(--d-info); --db: var(--d-info-bg); } .cr-d-nopago { --d: var(--d-nopago); --db: var(--d-nopago-bg); }
 .cr-d-nollego { --d: var(--d-nollego); --db: var(--d-nollego-bg); } .cr-d-prog { --d: var(--d-prog); --db: var(--d-prog-bg); }
-.cr-tarjeta.cr-d { box-shadow: inset 4px 0 0 var(--d); padding-left: 12px; }
-.cr-tarjeta.cr-d-nopago { box-shadow: inset 4px 0 0 var(--d-nopago-flu); }
-.cr-tarjeta.cr-d-prog { box-shadow: inset 2px 0 0 var(--d); }
 .cr-t-desp { display: flex; flex-direction: column; gap: 4px; margin: 5px 0 3px; min-width: 0; }
 .cr-t-desp-l1 { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; min-width: 0; }
 .cr-desp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; line-height: 1.5; padding: 0 7px 0 5px; border-radius: var(--r-pill); color: var(--d); background: var(--db); max-width: 100%; }
@@ -1556,7 +1554,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-desp-reloj { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--ui-warning-ink); }
 .cr-desp-reloj.atrasado { color: var(--d-info); }
 /* Lo hecho, en una línea. */
-.cr-tarjeta.compacta { display: flex; align-items: center; gap: 6px; padding: 4px 6px; opacity: .7; background: transparent; border: 1px dashed var(--ui-line-strong); }
+.cr-tarjeta.compacta { display: flex; align-items: center; gap: 6px; padding: 4px 6px; opacity: .7; }
 .cr-tarjeta.compacta .cr-check { position: static; flex: none; }
 .cr-compacta-tit { flex: 1; min-width: 0; font-size: 12px; color: var(--ui-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-compacta-pdv { font-size: 11px; color: var(--text-3); flex: none; }
@@ -1644,6 +1642,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .lg-form { display: flex; flex-direction: column; gap: 6px; } .lg-form textarea { resize: vertical; }
 .lg-form-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .lg-horario { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ui-ink); } .lg-horario b { font-weight: 600; }
+.cr-t-lugar { font-style: normal; font-weight: 600; margin-left: 6px; color: var(--accent-ink); white-space: nowrap; }
 .cr-t-sitios { display: flex; flex-wrap: wrap; gap: 3px 5px; width: 100%; margin-top: 2px; }
 .cr-t-sitios span { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: var(--r-pill); background: var(--ui-surface); color: var(--ui-ink-2); white-space: nowrap; }
 .cr-p-sitio { font-weight: 600; color: var(--accent-ink); }

@@ -16,7 +16,7 @@ import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
 import { siFestejaPedido } from '../Chispin';
-import { BarraVista, ViewMenu, type CrearVista } from '../vistas';
+import { BarraVista, PestanaNombre, ViewMenu, type CrearVista } from '../vistas';
 import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useEsperaCorta, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
 
 const PIPE_KEY = 'crm.deals.pipeline';
@@ -525,6 +525,8 @@ function IndexFor({ type }: { type: ObjectType }) {
 
   // La barra de abajo (BarraVista): cuántos hay, el paginado de la tabla, y el nombre de la vista nueva o duplicada.
   const [crear, setCrear] = useState<CrearVista>('');
+  const nombrar = { tipo: type, abierta: activeSaved, actual: current, onCerrar: () => setCrear(''),
+    onCreada: (id: number) => { views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }, onRenombrada: () => views.reload() };
   const nTotal = mode === 'board' ? boardTotal ?? null : list.data?.total ?? null;
   const pager = (
     <div className="pager">
@@ -576,6 +578,8 @@ function IndexFor({ type }: { type: ObjectType }) {
               <button className={`tab ${activeView === k ? 'on' : ''}`} onClick={() => applyView(k)} title={AYUDA_ORDEN}>{k === 'all' ? 'Todos' : 'Míos'}</button>
             </div>
           );
+          // Renombrar o compartir: el nombre se cambia en la pestaña misma.
+          if (activeView === k && crear === 'renombrar') return <PestanaNombre key={k} {...nombrar} crear="renombrar" />;
           // Con quién se comparte, al pasar el mouse.
           return (
             <div key={k} className={`tab-wrap${activeView === k ? ' on' : ''}${claseArrastre(k)}`} {...arrastre(k)}>
@@ -590,7 +594,9 @@ function IndexFor({ type }: { type: ObjectType }) {
           );
         })}
         {/* Sin las vistas todavía: el renglón queda (no salta lo de abajo), vacío hasta que llegan. */}
-        {sinVista ? <span className="tab" aria-hidden="true">&nbsp;</span> : <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>}
+        {sinVista ? <span className="tab" aria-hidden="true">&nbsp;</span>
+          : crear === 'nueva' || crear === 'duplicar' ? <PestanaNombre key={crear} {...nombrar} crear={crear} />
+          : <button className="tab add" onClick={() => setCrear('nueva')}>+ Agregar vista</button>}
       </div>
 
       {selected.size > 0 && (
@@ -682,13 +688,12 @@ function IndexFor({ type }: { type: ObjectType }) {
       {show === 'filters' && <FiltersDrawer type={type} groups={cfg.groups} addProp={filterProp} onClose={() => { setShow(''); setFilterProp(undefined); }} onApply={(g) => { setCfg((c) => ({ ...c, groups: g })); setShow(''); setFilterProp(undefined); }} />}
       {show === 'columns' && <ColumnsModal type={type} columns={cfg.columns} onClose={() => setShow('')} onApply={(columns) => { setCfg((c) => ({ ...c, columns })); setShow(''); }} />}
       {show === 'import' && <ImportModal type={type} onClose={() => { setShow(''); list.reload(); }} />}
-      <BarraVista tipo={type} abierta={activeSaved} cambiada={dirty} filtrosCambiados={filtersChanged} puedeGuardar={canSaveView}
+      <BarraVista abierta={activeSaved} cambiada={dirty} filtrosCambiados={filtersChanged} puedeGuardar={canSaveView}
         total={nTotal == null ? null : `${nTotal.toLocaleString('es-AR')} ${nTotal === 1 ? OBJECTS[type].single.toLowerCase() : OBJECTS[type].plural.toLowerCase()}`}
         centro={mode === 'table' ? pager : undefined}
-        onDescartar={() => applyView(activeView)} onGuardar={saveView} actual={current}
-        onCreada={(id) => { views.reload(); setActiveView(String(id)); setCfgDe(String(id)); }}
+        onDescartar={() => applyView(activeView)} onGuardar={saveView}
         crear={crear} setCrear={setCrear} onRecargar={() => { list.reload(); setBoardKey((k) => k + 1); }}
-        onExportar={esVentas(meta.me) ? undefined : exportCsv} onRenombrada={() => views.reload()} />
+        onExportar={esVentas(meta.me) ? undefined : exportCsv} />
     </div>
   );
 }

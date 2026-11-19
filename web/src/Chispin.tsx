@@ -161,8 +161,12 @@ function tirarPlata(desde?: HTMLElement | null) {
 export interface FestejoPedido {
   id: number; name: string; etapa: 'listo' | 'entregado'; at: string; monto: number | null; moneda: string | null;
   articulos: Array<{ nombre: string; cantidad: number | null }>; hizo: Array<{ nombre: string; user_id: number | null }>;
+  duenio_id: number | null;
 }
 let revisarDesdeAfuera: (() => void) | null = null;
+// Después de mover un pedido desde una pantalla que no pasa por siFestejaPedido (Producción): que Chispín se fije enseguida
+// (y otra vez al rato, por si ClickUp tarda en devolver la etapa).
+export function revisarFestejos() { setTimeout(() => revisarDesdeAfuera?.(), 1200); setTimeout(() => revisarDesdeAfuera?.(), 6000); }
 type Grupo = { sub: Subcategoria; cantidad: number };
 const MAX_EN_CAJA = 6;
 const POR_TANDA = 3, EN_TANDA = 150, ENTRE_TANDAS = 470;
@@ -491,7 +495,13 @@ export default function Chispin() {
     const productos = resumenProductos(grupos);
     const quien = primerNombre(meta.me.name);
     const hizo = [...new Set(p.hizo.filter((h) => h.user_id !== yo).map((h) => primerNombre(h.nombre)).filter(Boolean))];
-    const texto = p.etapa === 'listo'
+    // Si no es suyo (lo movió ella, pero es de otra vendedora), se nombra a la dueña.
+    const otra = p.duenio_id != null && p.duenio_id !== yo ? primerNombre(userOf(meta, p.duenio_id)?.name) : '';
+    const texto = otra
+      ? (p.etapa === 'listo'
+        ? `📦 ¡Está listo ${pedido}, de ${otra}!${productos ? ` Ya están embalados: ${productos}.` : ''}${hizo.length ? ` Lo terminó ${hizo.join(' y ')} 💪` : ''}`
+        : `🚚 ¡Entregado! ${pedido}, de ${otra}, ya llegó al cliente.${productos ? ` Iban ${productos}.` : ''} 🙌`)
+      : p.etapa === 'listo'
       ? `📦 ${quien ? `${quien}, ¡` : '¡'}está listo ${pedido}!${productos ? ` Ya están embalados: ${productos}.` : ''}${hizo.length ? ` Lo terminó ${hizo.join(' y ')} 💪` : ''} A coordinar la entrega.`
       : `🚚 ¡Entregado! ${pedido} ya llegó al cliente${quien ? `, ${quien}` : ''}.${productos ? ` Iban ${productos}.` : ''} ¡Otro más! 🙌`;
     setAbierto(false); setFestejando(true); setAnimo(p.etapa === 'listo' ? '' : 'mira');

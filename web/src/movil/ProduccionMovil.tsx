@@ -9,6 +9,7 @@ import { Hoja, TareaRapida } from './Movil';
 import { FilaTarea, PanelTarea, useCambiosTarea } from './TareasChatMovil';
 import { BotonConversacion } from './VentasMovil';
 import { Fallo, useCarga, usePuedeEscribir } from './base';
+import { revisarFestejos } from '../Chispin';
 
 // Producción en el celular (versión celular, docs/MOVIL.md): lo que hacen Ceci y Sole con el producto en la mano, en el
 // depósito o en un proveedor. Hoy: sus PDV atrasados y los de la semana, lo que entra y sale hoy, tareas y mensajes.
@@ -80,6 +81,7 @@ function useProduccion() {
     carga.setDatos((v) => v && { ...v, pdvs: v.pdvs.map((p) => (p.task_id === pdv.task_id ? aplicar(p, taskId, campo, valor) : p)) });
     try {
       const r = await http<{ pdv: Pdv | null }>('PATCH', `/produccion/${encodeURIComponent(taskId)}`, { campo, valor });
+      revisarFestejos();   // si el pedido pasó a listo para entregar o entregado, Chispín lo festeja (Chispin.tsx)
       if (r.pdv) carga.setDatos((v) => v && { ...v, pdvs: v.pdvs.map((p) => (p.task_id === r.pdv!.task_id ? r.pdv! : p)) });
       toast(aviso);
     } catch (e) {

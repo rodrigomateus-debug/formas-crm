@@ -25,6 +25,9 @@ const guardar = (k: string, v: string) => { try { localStorage.setItem(`chispin.
 // ---------- Abrir el buzón desde otro lado (la campanita) ----------
 let abrirDesdeAfuera: ((id?: number) => void) | null = null;
 export function abrirChispin(id?: number) { abrirDesdeAfuera?.(id); }
+// Los anteojos de sol (al proponer o votar): lo llaman el buzón y los botones de votar.
+let fachaDesdeAfuera: (() => void) | null = null;
+const conFacha = () => fachaDesdeAfuera?.();
 
 const FRASES = [
   '¿Algo del Hub te hace renegar? Contámelo y lo arreglamos.',
@@ -212,31 +215,17 @@ export default function Chispin() {
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [ideas]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Con el buzón abierto se los pone para leer; al cerrarlo, se los saca al rato. Dormido, sin anteojos.
-  useEffect(() => {
-    if (abierto) { ponerAnteojos(true); return; }
-    const t = setTimeout(() => ponerAnteojos(false), 1400);
-    return () => clearTimeout(t);
-  }, [abierto, ponerAnteojos]);
-  useEffect(() => { if (animo === 'duerme') ponerAnteojos(false); }, [animo, ponerAnteojos]);
-  // Solo, de vez en cuando: la primera a los 15-25 segundos de entrar (para que se vea) y después cada 1 o 2 minutos, unos segundos.
-  const ocupado = useRef({ abierto, animo });
-  ocupado.current = { abierto, animo };
-  useEffect(() => {
-    if (reducido()) return;
-    let t: ReturnType<typeof setTimeout>;
-    const ciclo = (espera: number) => {
-      t = setTimeout(() => {
-        const o = ocupado.current;
-        if (document.visibilityState === 'visible' && !o.abierto && o.animo !== 'duerme' && !anteojosRef.current) {
-          ponerAnteojos(true);
-          t = setTimeout(() => { if (!ocupado.current.abierto) ponerAnteojos(false); ciclo(50_000 + Math.random() * 60_000); }, 7000 + Math.random() * 5000);
-        } else ciclo(20_000);
-      }, espera);
-    };
-    ciclo(15_000 + Math.random() * 10_000);
-    return () => clearTimeout(t);
+  // Se los pone «con facha» solo cuando alguien propone una idea o vota una (pedido de Rodrigo del 19/11/2026): unos segundos,
+  // inclinado y sonriendo de costado. Otro voto mientras los tiene puestos los deja un rato más. Dormido, sin anteojos.
+  const fachaHasta = useRef<ReturnType<typeof setTimeout>>();
+  const facha = useCallback(() => {
+    setAnimo((a) => (a === 'duerme' ? '' : a));
+    ponerAnteojos(true);
+    clearTimeout(fachaHasta.current);
+    fachaHasta.current = setTimeout(() => ponerAnteojos(false), 4200);
   }, [ponerAnteojos]);
+  useEffect(() => { fachaDesdeAfuera = facha; return () => { fachaDesdeAfuera = null; clearTimeout(fachaHasta.current); }; }, [facha]);
+  useEffect(() => { if (animo === 'duerme') ponerAnteojos(false); }, [animo, ponerAnteojos]);
 
   // ---------- Los ojos siguen al mouse; sin moverse un buen rato, se duerme ----------
   useEffect(() => {
@@ -276,7 +265,8 @@ export default function Chispin() {
       {abierto && ideas && (
         <Buzon ideas={ideas} admin={admin} yo={yo} resaltar={resaltar} onResaltado={() => setResaltar(null)} cerrar={() => setAbierto(false)}
           cambiar={(i) => setIdeas((l) => (l ?? []).map((x) => (x.id === i.id ? i : x)))}
-          agregar={(i) => { setIdeas((l) => [i, ...(l ?? [])]); setAnimo('traga'); setTimeout(() => setAnimo(''), 900); }}
+          agregar={(i) => { setIdeas((l) => [i, ...(l ?? [])]); setAnimo('traga'); setTimeout(() => { setAnimo(''); facha(); }, 700); }}
+          anteojos={anteojos} acomoda={acomoda}
           quitar={(id) => setIdeas((l) => (l ?? []).filter((x) => x.id !== id))}
           festejo={() => { setAnimo('feliz'); festejar(botonRef.current); setTimeout(() => setAnimo(''), 2000); }}
           toast={toast} />
@@ -308,11 +298,12 @@ export default function Chispin() {
 }
 
 // ---------- El buzón ----------
-function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agregar, quitar, festejo, toast }: {
+function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agregar, quitar, festejo, toast, anteojos, acomoda }: {
   ideas: Idea[]; admin: boolean; yo: number; resaltar: number | null; onResaltado: () => void; cerrar: () => void;
   cambiar: (i: Idea) => void; agregar: (i: Idea) => void; quitar: (id: number) => void; festejo: () => void;
-  toast: (msg: string, err?: boolean) => void;
+  toast: (msg: string, err?: boolean) => void; anteojos: boolean; acomoda: boolean;
 }) {
+  const ojosCab = useRef<HTMLSpanElement>(null);
   const { meta } = useMeta();
   const [pestana, setPestana] = useState<Pestana>('ranking');
   const [texto, setTexto] = useState(() => leer('borrador') ?? '');
@@ -380,6 +371,8 @@ function Buzon({ ideas, admin, yo, resaltar, onResaltado, cerrar, cambiar, agreg
   return (
     <div className="chispin-panel" role="dialog" aria-label="Buzón de ideas">
       <div className="chispin-cab">
+        {/* En pantallas angostas el buzón tapa la esquina: Chispín se asoma acá arriba (con sus anteojos al votar o proponer). */}
+        <span className="chispin-cab-bicho"><Personaje animo="" lampara anteojos={anteojos} acomoda={acomoda} ojosRef={ojosCab} /></span>
         <div className="chispin-cab-txt">
           <b>Buzón de ideas</b>
           <span>Proponé mejoras para el Hub y votá las de los demás: las más votadas se hacen primero.</span>
@@ -473,6 +466,7 @@ function BotonVoto({ idea, cambiar, toast, chico }: { idea: Idea; cambiar: (i: I
     const v = !idea.votada;
     // Al toque en pantalla; después lo confirma el servidor.
     cambiar({ ...idea, votada: v, votos: idea.votos + (v ? 1 : -1) });
+    if (v) conFacha();
     if (v && !reducido()) { setPop(true); setTimeout(() => setPop(false), 450); }
     try { cambiar(await http<Idea>(v ? 'PUT' : 'DELETE', `/ideas/${idea.id}/voto`)); }
     catch (e) { cambiar(idea); toast((e as Error).message, true); }

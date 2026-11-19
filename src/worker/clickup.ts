@@ -65,7 +65,7 @@ export function generalStage(statuses: string[]): string | null {
 }
 
 export interface CuTask {
-  id: string; name: string; parent?: string | null; url: string; date_updated?: string; text_content?: string; description?: string;
+  id: string; name: string; parent?: string | null; url: string; date_updated?: string; date_created?: string; text_content?: string; description?: string;
   status?: { status: string; type?: string };
   due_date?: string | null; orderindex?: string | number; tags?: Array<{ name: string }>;
   assignees?: Array<{ id?: number; username?: string | null; email?: string | null; profilePicture?: string | null; initials?: string | null; color?: string | null }>;

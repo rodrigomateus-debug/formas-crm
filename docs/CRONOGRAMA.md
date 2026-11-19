@@ -112,6 +112,16 @@ parada del mismo lugar en la ruta del día.
   dirección del pedido y de la ficha de la empresa: las que ya estaban cargadas pasaron a ser anotaciones (migración
   `0097`; las del pedido, de esa entrega; las de una empresa, de siempre) y el campo ya no está en «Corregir dirección»,
   donde queda el piso, depto, puerta o unidad.
+- **Un pedido que se reparte entre varios lugares** (Rodrigo, 19/11/2026: 1.000 kits, 250 a la central, 500 a una
+  sucursal y 250 a un depósito). Lo carga la vendedora en el pedido, panel Entrega → **Varias direcciones** (el botón está
+  desde que el pedido no tiene dirección): cada lugar con su **nombre** («Central», «Sucursal Santa Fe»), su dirección,
+  cuánto de cada producto va ahí (nunca más que el total del pedido) y su **anotación propia**, que queda con quién la
+  escribió (`entrega_direcciones.nombre`, `observaciones`, `obs_user_id`; migración `0098`). Las generales del cliente
+  van en las anotaciones de logística. En la Ruta del día y en la app del chofer hay **una parada por lugar**, con el nombre
+  del lugar, **la cantidad que va ahí** (el reparto llega por el artículo de ClickUp atado al renglón del pedido,
+  `clavesDeTareas`; un artículo que no va a un lugar no es parada ahí; sin reparto, o si el artículo no se pudo atar, va
+  la cantidad entera) y la anotación de ese lugar. La tarjeta de la semana muestra cada lugar con lo que va («Central: 250»).
+  Por ahora todos los lugares van el mismo día: la fecha, el hecho y los Colgados por lugar son la etapa que sigue.
 - **Cantidad enviada (demasía)**: en ingresos, retiros y egresos (no en las entregas al cliente), la cantidad de cada
   producto se toca para anotar la que realmente va o llega («110», con «+10 de más» al lado) y por qué. La cantidad del PDV
   no cambia. El remito de traslado del egreso y la app del chofer salen con esa cantidad. Tabla `cronograma_enviados`,

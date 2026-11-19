@@ -1589,6 +1589,10 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .lg-form { display: flex; flex-direction: column; gap: 6px; } .lg-form textarea { resize: vertical; }
 .lg-form-pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .lg-horario { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ui-ink); } .lg-horario b { font-weight: 600; }
+.cr-t-sitios { display: flex; flex-wrap: wrap; gap: 3px 5px; width: 100%; margin-top: 2px; }
+.cr-t-sitios span { font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: var(--r-pill); background: var(--ui-surface); color: var(--ui-ink-2); white-space: nowrap; }
+.cr-p-sitio { font-weight: 600; color: var(--accent-ink); }
+.direccion-nombre { font-weight: 600; }
 .cr-t-notas { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .cr-p-quien .lg-nota { margin-top: 4px; }
 /* La cantidad de un producto en un ingreso, retiro o egreso: se toca para anotar la que realmente va (demasía). */

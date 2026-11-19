@@ -6,7 +6,7 @@ import { norm } from './clickup';
 import { CERRADOS, claveProveedor, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
 import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
-import { direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
+import { clavesDeTareas, direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle, type DireccionPedido } from './direcciones';
 import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
 import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
@@ -846,7 +846,10 @@ export interface Parada {
   estricto?: boolean;
   espera_hasta?: number | null;   // con una hora fijada «a las 12:00», se espera hasta esa hora (ruta.ts)
   detalle?: string | null;         // piso, depto, puerta, unidad (de la dirección del pedido o de la ficha de la empresa)
-  observaciones?: string | null;   // observaciones de entrega: lo que tiene que saber el chofer al llegar
+  observaciones?: string | null;   // la anotación de ese lugar (de esa dirección del pedido): lo que tiene que saber el chofer al llegar
+  observaciones_por?: string | null;   // quién la escribió
+  sitio?: string | null;           // en un pedido que va a varias direcciones, cómo se llama este lugar («Central», «Sucursal Santa Fe»)
+  repartida?: boolean;             // sus cantidades son las de esta dirección (el reparto del pedido), no las del pedido entero
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
@@ -891,7 +894,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   const dirEmpresa = (id: number | null) => { const e = id ? empresas.get(id) : null; return e?.address ? [e.address, e.city].filter(Boolean).join(', ') : null; };
 
   // Las direcciones cargadas en la tarjeta «Entrega» de cada pedido (direcciones.ts): con varias, una parada por dirección.
-  const cargadas = await direccionesDePedidos(db, pedidosIds);
+  const [cargadas, claves] = await Promise.all([direccionesDePedidos(db, pedidosIds), clavesDeTareas(db, pedidosIds)]);
   const fin = await direccionesFinnegans(env, pedidos.filter((p) => !p.manual && !cargadas.has(p.id)), b, buscar);
   const historial = await ultimasEntregas(db, [...new Set(viajes.filter((m) => m.tipo === 'entrega' && m.cliente).map((m) => m.cliente!))]);
   let consultas = 0;
@@ -912,7 +915,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     // Un pedido que va a varias direcciones: una parada por cada una (con el mismo movimiento).
     let otras: string[] = [];
     // El piso, depto, puerta o unidad y las observaciones de entrega de cada dirección (en el orden de `[direccion, ...otras]`).
-    let extras: Array<{ detalle: string | null; observaciones: string | null }> = [];
+    let extras: Array<Pick<DireccionPedido, 'detalle' | 'observaciones'> & Partial<DireccionPedido>> = [];
     if (m.tipo === 'entrega') {
       const p = m.record_id ? pedidoDe.get(m.record_id) : undefined;
       nombre = m.cliente ?? `PDV ${m.npdv ?? ''}`; companyId = p?.company_id ?? null; recordId = m.record_id;
@@ -951,12 +954,22 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     // (tarjeta «Entrega») tiene una parada por dirección: la primera con la clave del PDV y las otras con su número (:2, :3…).
     const base = claveParada(m);
     const horarioTexto = companyId ? empresas.get(companyId)?.horario ?? null : null;
+    // Con varias direcciones y el reparto cargado, a cada una va lo suyo: la cantidad de ese artículo para esa dirección
+    // (y si a esa no va nada de este artículo, no es parada de este movimiento). Sin reparto, o si el artículo no se pudo
+    // atar a su renglón, va el movimiento entero a todas.
+    const suClave = claves.get(m.task_id);
+    const repartido = otras.length > 0 && !!suClave && extras.some((d) => (d.cantidades?.get(suClave) ?? 0) > 0);
     for (const [i, dir] of [direccion, ...otras].entries()) {
       const clave = i ? `${base}:${i + 1}` : base;
+      const aEsta = repartido ? extras[i]?.cantidades?.get(suClave!) ?? 0 : null;
+      if (aEsta !== null && aEsta <= 0) continue;
       const par = paradas.get(clave) ?? { clave, nombre, direccion: dir, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
         company_id: companyId, record_id: recordId, movimientos: [], encargos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null,
-        detalle: extras[i]?.detalle || null, observaciones: extras[i]?.observaciones || null };
-      par.movimientos.push(m);
+        detalle: extras[i]?.detalle || null, observaciones: extras[i]?.observaciones || null,
+        // Un pedido que va a varias direcciones: cómo se llama este lugar y de quién es su anotación.
+        sitio: otras.length ? extras[i]?.nombre || null : null, observaciones_por: extras[i]?.observaciones ? extras[i]?.observaciones_por ?? null : null };
+      par.movimientos.push(aEsta !== null ? { ...m, cantidad: aEsta, enviado: null } : m);
+      if (aEsta !== null) par.repartida = true;
       if (sugerencia && !par.sugerencia) par.sugerencia = sugerencia;
       if (!par.horario && horarioDe(horarioTexto)) { par.horario = horarioDe(horarioTexto); par.horario_texto = horarioTexto; }
       paradas.set(clave, par);
@@ -1086,7 +1099,9 @@ export interface DireccionParada {
   direccion: string | null; origen: Parada['origen']; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
   detalle: string | null; observaciones: string | null;
+  sitios: string[];   // un pedido que va a varias direcciones: cada lugar con lo que va ahí («Central: 250»)
 }
+const cantTexto = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 export async function direccionesSemana(env: Env, user: User, q: { desde?: string; hasta?: string }, buscar: boolean) {
   if (!esDia(q.desde) || !esDia(q.hasta) || q.hasta < q.desde) throw new HttpError(400, 'Faltan las fechas (desde y hasta, AAAA-MM-DD).');
   if (Date.parse(q.hasta) - Date.parse(q.desde) > 14 * 86_400_000) throw new HttpError(400, 'El rango es demasiado largo.');
@@ -1106,8 +1121,11 @@ export async function direccionesSemana(env: Env, user: User, q: { desde?: strin
     const estado: DireccionParada['estado'] = !p.direccion ? 'sin_direccion' : p.lat != null || g ? 'ok' : geo.has(clave) ? 'no_encontrada' : 'buscando';
     // Un pedido que va a varias direcciones («p:…:2»): la tarjeta muestra la primera y cuántas más hay.
     const otra = /^(.*):\d+$/.exec(k);
-    if (otra && out[otra[1]]) { out[otra[1]].otras++; continue; }
+    // Cada lugar con lo que va ahí («Central: 250»), para verlo en la tarjeta.
+    const sitio = p.clave.startsWith('p:') && (p.sitio || otra) ? `${p.sitio ?? limpiarDireccion(p.direccion ?? '').split(',')[0]}${p.repartida ? `: ${cantTexto(p.movimientos.reduce((s, m) => s + (m.cantidad ?? 0), 0))}` : ''}` : null;
+    if (otra && out[otra[1]]) { out[otra[1]].otras++; if (sitio) out[otra[1]].sitios.push(sitio); continue; }
     out[k] = {
+      sitios: sitio ? [sitio] : [],
       direccion: p.direccion, origen: p.origen, estado, nombre: p.nombre, company_id: p.company_id, horario: p.horario_texto, expreso: !!p.expreso, otras: 0,
       detalle: p.detalle ?? null, observaciones: p.observaciones ?? null,
       record_ids: [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],
@@ -1206,7 +1224,8 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
         fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
-          clave: p.clave, nombre: p.nombre, direccion: p.direccion, detalle: p.detalle ?? null, observaciones: p.observaciones ?? null, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
+          clave: p.clave, nombre: p.sitio ? `${p.nombre} · ${p.sitio}` : p.nombre, direccion: p.direccion, detalle: p.detalle ?? null,
+          observaciones: p.observaciones ? `${p.observaciones}${p.observaciones_por ? ` · ${p.observaciones_por.split(' ')[0]}` : ''}` : null, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,

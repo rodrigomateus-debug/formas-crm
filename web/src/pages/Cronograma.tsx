@@ -55,6 +55,7 @@ export interface DirParada {
   direccion: string | null; origen: string | null; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
   detalle: string | null; observaciones: string | null;   // piso, depto, puerta, unidad y las observaciones de entrega
+  sitios?: string[];   // un pedido que va a varias direcciones: cada lugar con lo que va ahí («Central: 250»)
 }
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
@@ -787,6 +788,8 @@ function LineaDireccion({ d: d0, buscando, puede, onCorregir }: { d: DirParada; 
           : <span className="cr-t-dir-falta" aria-label={ESTADO_DIR[d0.estado]}><Icon name="alert" size={11} /></span>}
       </span>
       {(d.detalle || d.observaciones) && <span className="cr-t-dir-obs">{d.detalle && <b>{d.detalle}</b>}{d.detalle && d.observaciones ? ' · ' : ''}{d.observaciones && <i>{d.observaciones}</i>}</span>}
+      {/* Un pedido que se reparte entre varios lugares: cuánto va a cada uno. */}
+      {(d.sitios?.length ?? 0) > 1 && <span className="cr-t-sitios">{d.sitios!.map((x) => <span key={x}>{x}</span>)}</span>}
     </>
   );
   const cls = `cr-t-dir ${falta ? 'falta' : d.estado}`;

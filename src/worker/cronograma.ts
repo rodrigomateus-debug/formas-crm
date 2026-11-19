@@ -6,7 +6,7 @@ import { norm } from './clickup';
 import { CERRADOS, claveProveedor, editarProduccion, estadosPec, lista, refrescarPdv, type FilaDb } from './produccion';
 import { finnegansPedidoVenta, finnegansToken } from './finnegans';
 import { updateRecord } from './records';
-import { direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
+import { clavesDeTareas, direccionDesdeRuta, direccionesDePedidos, lugar as lugarGoogle, type DireccionPedido } from './direcciones';
 import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
 import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
@@ -89,14 +89,18 @@ export interface Movimiento {
   parada?: string;           // en la semana: la clave de su parada en la ruta del día (para el remito de traslado de un egreso)
   retira_en?: string | null; // en la semana: lo retira el cliente en Formas (tarjeta «Entrega»), así que no es parada de nadie
   colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»: por qué, desde cuándo y quién
+  // Un pedido que se entrega en varios lugares (direcciones.ts): la entrega de cada artículo es una por lugar, cada una con
+  // su fecha, su cantidad y su «hecho». `dir`: la dirección del pedido; `dir_n`: su posición (la parada «p:…:2»); `sitio`:
+  // cómo se llama el lugar; `repartida`: la cantidad es la de ese lugar, no la del artículo entero.
+  dir?: number | null; dir_n?: number; sitio?: string | null; repartida?: boolean;
   notas?: NotaLogistica[];   // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar (logistica.ts)
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó, si no es la cantidad del pedido (demasía)
 }
 // La parada de la ruta del día en la que cae un movimiento: la entrega, en la de su PDV; un retiro o un egreso, en la de
 // esa empresa (tres retiros en el mismo impresor son una parada). No depende de la dirección. Un pedido que va a varias
 // direcciones tiene además las paradas «:2», «:3»… (rutaDelDia).
-export const claveParada = (m: Pick<Movimiento, 'tipo' | 'pdv_task' | 'company_id' | 'lugar'>) =>
-  m.tipo === 'entrega' ? `p:${m.pdv_task}` : m.company_id ? `e:${m.company_id}` : `o:${norm(m.lugar ?? 'Sin proveedor')}`;
+export const claveParada = (m: Pick<Movimiento, 'tipo' | 'pdv_task' | 'company_id' | 'lugar' | 'dir_n'>) =>
+  m.tipo === 'entrega' ? `p:${m.pdv_task}${m.dir_n ? `:${m.dir_n + 1}` : ''}` : m.company_id ? `e:${m.company_id}` : `o:${norm(m.lugar ?? 'Sin proveedor')}`;
 export const esDeLaParada = (clave: string, base: string) => clave === base || clave.startsWith(`${base}:`);
 type FilaMov = FilaDb & { pdv_npdv: string | null; pdv_cliente: string | null; pdv_unidad: string | null; pdv_record: number | null; pdv_entrega: string | null; evento: string | null; pactada: string | null };
 interface Opcion { campo: string; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
@@ -161,9 +165,12 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
 }
 
 export async function movimientos(db: D1Database, desde: string, hasta: string) {
+  // También los artículos de un pedido que tiene algún lugar de entrega con fecha propia en esos días (aunque la fecha del
+  // artículo en ClickUp sea otra).
   const filas = (await db.prepare(`${SELECT_MOV} AND (COALESCE(a.entrega_real, p.entrega_real) BETWEEN ?1 AND ?2 OR a.ingreso_proveedor BETWEEN ?1 AND ?2
       OR a.retiro_proveedor BETWEEN ?1 AND ?2 OR a.egreso_impresor BETWEEN ?1 AND ?2 OR a.retiro_impresor BETWEEN ?1 AND ?2
-      OR a.ingreso_impresor BETWEEN ?1 AND ?2)`).bind(desde, hasta).all<FilaMov>()).results;
+      OR a.ingreso_impresor BETWEEN ?1 AND ?2
+      OR (COALESCE(a.entrega_real, p.entrega_real) IS NOT NULL AND p.record_id IN (SELECT d.record_id FROM entrega_direcciones d WHERE d.fecha BETWEEN ?1 AND ?2)))`).bind(desde, hasta).all<FilaMov>()).results;
   const [ops, hechos, feriados] = await Promise.all([
     opciones(db),
     db.prepare(`SELECT h.task_id, h.tipo, h.user_id FROM cronograma_hechos h JOIN produccion a ON a.task_id = h.task_id`).all<{ task_id: string; tipo: string; user_id: number | null }>(),
@@ -171,11 +178,48 @@ export async function movimientos(db: D1Database, desde: string, hasta: string) 
   ]);
   const fer = new Map(feriados.results.map((x) => [x.fecha, x.nombre]));
   // Lo colgado no está en su día ni en la ruta: va en su columna (colgados).
-  const colg = new Set((await db.prepare('SELECT task_id, tipo FROM cronograma_colgados').all<{ task_id: string; tipo: string }>()).results.map((c) => `${c.task_id}:${c.tipo}`));
-  const movs = armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, desde, hasta);
-  const vistos = colg.size ? movs.filter((m) => !colg.has(m.id)) : movs;
+  const colg = new Set((await db.prepare('SELECT task_id, tipo, dir FROM cronograma_colgados').all<{ task_id: string; tipo: string; dir: number }>()).results.map(claveColgado));
+  // Se arman sin mirar el día (las entregas por lugar pueden caer en otro) y después se dejan las de esos días.
+  const todos = await repartirEntregas(db, armar(filas, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), fer, '0000-00-00', '9999-12-31'), fer);
+  const movs = todos.filter((m) => m.fecha >= desde && m.fecha <= hasta);
+  const vistos = colg.size ? movs.filter((m) => !estaColgado(colg, m)) : movs;
   await ponerExtras(db, vistos);
   return { movs: vistos, feriados: fer };
+}
+
+// Lo colgado: el movimiento entero («tarea:tipo») o, en un pedido que va a varios lugares, la entrega en uno («tarea:tipo@dir»).
+const claveColgado = (c: { task_id: string; tipo: string; dir?: number | null }) => `${c.task_id}:${c.tipo}${c.dir ? `@${c.dir}` : ''}`;
+const estaColgado = (colg: Set<string>, m: Movimiento) => colg.has(m.id) || (m.dir != null && colg.has(`${m.task_id}:${m.tipo}`));
+
+// Un pedido que se entrega en varios lugares (dos o más direcciones que no son «retira en Formas»): la entrega de cada
+// artículo se abre en una por lugar. Cada una va el día de ese lugar (si no tiene, el del artículo), con lo que va ahí
+// según el reparto (si a ese lugar no va nada de ese artículo, no hay entrega) y con su propio «hecho». La producción no
+// cambia: sigue siendo un artículo, con un estado.
+async function repartirEntregas(db: D1Database, movs: Movimiento[], feriados: Map<string, string>): Promise<Movimiento[]> {
+  const pedidos = [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
+  if (!pedidos.length) return movs;
+  const lugares = new Map([...(await direccionesDePedidos(db, pedidos))].map(([id, ds]) => [id, ds.filter((d) => !d.retira)] as const).filter(([, ds]) => ds.length > 1));
+  if (!lugares.size) return movs;
+  const claves = await clavesDeTareas(db, [...lugares.keys()]);
+  const out: Movimiento[] = [];
+  for (const m of movs) {
+    const ds = m.tipo === 'entrega' ? lugares.get(m.record_id ?? -1) : undefined;
+    if (!ds) { out.push(m); continue; }
+    const k = claves.get(m.task_id);
+    const repartido = !!k && ds.some((d) => (d.cantidades.get(k) ?? 0) > 0);
+    ds.forEach((d, i) => {
+      const q = repartido ? d.cantidades.get(k!) ?? 0 : null;
+      if (q !== null && q <= 0) return;
+      const fecha = d.fecha ?? m.fecha;
+      const avisos = fecha === m.fecha ? m.avisos : [
+        ...(feriados.has(fecha) ? [`Cae en feriado (${feriados.get(fecha)})`] : [0, 6].includes(diaSemana(fecha)) ? ['Cae en fin de semana'] : []),
+        ...m.avisos.filter((a) => !a.startsWith('Cae en ') && !a.startsWith('Pactada ') && !a.includes('retir')),
+      ];
+      out.push({ ...m, id: `${m.id}@${d.id}`, dir: d.id, dir_n: i, sitio: d.nombre ?? null, fecha, cantidad: q ?? m.cantidad, repartida: q !== null,
+        hecho: m.hecho || !!d.hecho_at, hecho_por: d.hecho_at && !m.hecho ? d.hecho_por : m.hecho_por, avisos });
+    });
+  }
+  return out;
 }
 
 // Lo que cada movimiento tiene anotado: las anotaciones de logística (logistica.ts) y la cantidad que realmente se mandó o
@@ -223,28 +267,37 @@ export async function guardarEnviado(env: Env, ctx: Ctx, b: { id?: unknown; tipo
 // colgado sale de su día (y de la ruta de ese día) hasta que se pasa a un día (moverMovimiento) o se marca hecho. La fecha
 // de ClickUp no se toca al colgarlo. Al responsable del pedido le llega el aviso (campanita y mail) con el motivo.
 export async function colgados(db: D1Database): Promise<Movimiento[]> {
-  const { results: filasC } = await db.prepare(`SELECT c.task_id, c.tipo, c.motivo, c.fecha, c.at, u.name AS por FROM cronograma_colgados c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.at`)
-    .all<{ task_id: string; tipo: string; motivo: string; fecha: string; at: string; por: string | null }>();
+  const { results: filasC } = await db.prepare(`SELECT c.task_id, c.tipo, c.dir, c.motivo, c.fecha, c.at, u.name AS por FROM cronograma_colgados c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.at`)
+    .all<{ task_id: string; tipo: string; dir: number; motivo: string; fecha: string; at: string; por: string | null }>();
   if (!filasC.length) return [];
-  const porId = new Map(filasC.map((c) => [`${c.task_id}:${c.tipo}`, c]));
+  const porId = new Map(filasC.map((c) => [claveColgado(c), c]));
+  // El que cuelga a cada movimiento: el suyo o, en una entrega por lugar, el del artículo entero.
+  const deMov = (m: Movimiento) => porId.get(m.id) ?? (m.dir != null ? porId.get(`${m.task_id}:${m.tipo}`) : undefined);
   const [filas, ops, hechos] = await Promise.all([
     db.prepare(`${SELECT_MOV} AND a.task_id IN (SELECT task_id FROM cronograma_colgados)`).all<FilaMov>(),
     opciones(db),
     db.prepare('SELECT h.task_id, h.tipo, h.user_id FROM cronograma_hechos h WHERE h.task_id IN (SELECT task_id FROM cronograma_colgados)').all<{ task_id: string; tipo: string; user_id: number | null }>(),
   ]);
-  const movs = armar(filas.results, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), new Map(), '0000-00-00', '9999-12-31')
-    .filter((m) => porId.has(m.id) && !m.hecho);
+  const movs = (await repartirEntregas(db, armar(filas.results, ops, new Map(hechos.results.map((h) => [`${h.task_id}:${h.tipo}`, h])), new Map(), '0000-00-00', '9999-12-31'), new Map()))
+    .filter((m) => deMov(m) && !m.hecho);
   // Lo que ya se hizo, se anuló o se quedó sin fecha en ClickUp deja de estar colgado.
-  const vivos = new Set(movs.map((m) => m.id));
-  const viejos = filasC.filter((c) => !vivos.has(`${c.task_id}:${c.tipo}`));
-  if (viejos.length) await db.batch(viejos.slice(0, 50).map((c) => db.prepare('DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = ?').bind(c.task_id, c.tipo)));
-  for (const m of movs) { const c = porId.get(m.id)!; m.colgado = { motivo: c.motivo, at: c.at, por: c.por, fecha: c.fecha }; m.avisos = []; }
+  const vivos = new Set(movs.map((m) => claveColgado(deMov(m)!)));
+  const viejos = filasC.filter((c) => !vivos.has(claveColgado(c)));
+  if (viejos.length) await db.batch(viejos.slice(0, 50).map((c) => db.prepare('DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = ? AND dir = ?').bind(c.task_id, c.tipo, c.dir)));
+  for (const m of movs) { const c = deMov(m)!; m.colgado = { motivo: c.motivo, at: c.at, por: c.por, fecha: c.fecha }; m.avisos = []; }
   await ponerExtras(db, movs);
   return movs;
 }
 
 const diaMes = (d: string) => `${Number(d.slice(8))}/${Number(d.slice(5, 7))}`;
-export async function colgarMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; motivo?: unknown }) {
+// `dirs` (en paralelo con `ids`): en un pedido que va a varios lugares, de cuál es cada entrega (la dirección del pedido).
+const dirsDe = (b: { ids?: unknown; dirs?: unknown }) => {
+  const ids = Array.isArray(b.ids) ? b.ids.map(String) : [], ds = Array.isArray(b.dirs) ? b.dirs : [];
+  const m = new Map<string, number[]>();
+  ids.forEach((id, i) => { const d = Number(ds[i]) || 0; if (d > 0) m.set(id, [...(m.get(id) ?? []), d]); });
+  return m;
+};
+export async function colgarMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; dirs?: unknown; tipo?: unknown; motivo?: unknown }) {
   exigir(ctx);
   if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
   const tipo = b.tipo;
@@ -255,12 +308,19 @@ export async function colgarMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; t
   const pdvs = new Map((await db.prepare('SELECT task_id, npdv, record_id, entrega_real FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))')
     .bind(JSON.stringify([...new Set(filas.map((f) => f.pdv_task))])).all<{ task_id: string; npdv: string | null; record_id: number | null; entrega_real: string | null }>()).results.map((p) => [p.task_id, p]));
   const col = TIPOS[tipo].col;
-  const conFecha = filas.map((f) => ({ f, fecha: ((f as unknown as Record<string, string | null>)[col] ?? (tipo === 'entrega' ? pdvs.get(f.pdv_task)?.entrega_real : null)) ?? null }))
-    .filter((x): x is { f: FilaDb; fecha: string } => !!x.fecha);
+  // En un pedido que va a varios lugares se cuelga la entrega de cada lugar (con el día que tenía ese lugar).
+  const porLugar = tipo === 'entrega' ? dirsDe(b) : new Map<string, number[]>();
+  const fechasLugar = new Map(porLugar.size ? (await db.prepare('SELECT id, fecha FROM entrega_direcciones WHERE id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify([...porLugar.values()].flat())).all<{ id: number; fecha: string | null }>()).results.map((d) => [d.id, d.fecha]) : []);
+  const conFecha = filas.flatMap((f) => {
+    const fecha = ((f as unknown as Record<string, string | null>)[col] ?? (tipo === 'entrega' ? pdvs.get(f.pdv_task)?.entrega_real : null)) ?? null;
+    const ds = porLugar.get(f.task_id);
+    return ds?.length ? ds.map((dir) => ({ f, dir, fecha: fechasLugar.get(dir) ?? fecha })) : [{ f, dir: 0, fecha }];
+  }).filter((x): x is { f: FilaDb; dir: number; fecha: string } => !!x.fecha);
   if (!conFecha.length) throw new HttpError(400, 'Eso no tiene fecha en el cronograma: no hay qué dejar pendiente.');
   const ts = now();
-  await db.batch(conFecha.map(({ f, fecha }) => db.prepare('INSERT OR REPLACE INTO cronograma_colgados (task_id, tipo, motivo, fecha, user_id, at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(f.task_id, tipo, motivo, fecha, ctx.user.id, ts)));
+  await db.batch(conFecha.map(({ f, dir, fecha }) => db.prepare('INSERT OR REPLACE INTO cronograma_colgados (task_id, tipo, dir, motivo, fecha, user_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(f.task_id, tipo, dir, motivo, fecha, ctx.user.id, ts)));
   // El aviso al responsable de cada pedido: en la campanita y por mail (avisos.ts), con el motivo.
   const pedidos = [...new Set(conFecha.map(({ f }) => f.record_id ?? pdvs.get(f.pdv_task)?.record_id).filter((x): x is number => !!x))];
   const avisados: string[] = [];
@@ -436,12 +496,49 @@ async function refrescar(env: Env, ctx: Ctx, pdvs: Iterable<string>) {
 
 // Pasa un movimiento a otro día (o le saca la fecha, con `fecha` vacía): la fecha de cada artículo en ClickUp. En las
 // entregas, también la del PDV si era la misma (los artículos sin fecha propia usan la del PDV).
-export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; fecha?: unknown }) {
-  exigir(ctx);
+// `dirs` (en paralelo con `ids`): la entrega de un lugar de un pedido que va a varios. Ese lugar pasa a ese día; los demás
+// quedan donde estaban. En ClickUp, que tiene una sola fecha por artículo, queda la de la última entrega que falta.
+// `interno`: es la fecha que el propio CRM le pone al artículo por esa regla (no mueve los lugares).
+export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; dirs?: unknown; tipo?: unknown; fecha?: unknown }, interno = false): Promise<{ escritos: number }> {
+  if (!interno) exigir(ctx);
   if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
   const fecha = b.fecha == null || b.fecha === '' ? null : b.fecha;
   if (fecha !== null && !esDia(fecha)) throw new HttpError(400, 'La fecha tiene que ser AAAA-MM-DD.');
   const filas = await filasDe(env.DB, b.ids);
+  const porLugar = b.tipo === 'entrega' && !interno ? dirsDe(b) : new Map<string, number[]>();
+  if (porLugar.size) {
+    if (!fecha) throw new HttpError(400, 'Falta el día al que pasa esa entrega.');
+    const db = env.DB;
+    const pdvs = new Map((await db.prepare('SELECT task_id, record_id, entrega_real FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify([...new Set(filas.map((f) => f.pdv_task))])).all<{ task_id: string; record_id: number | null; entrega_real: string | null }>()).results.map((p) => [p.task_id, p]));
+    const pedidos = new Map<number, string>();   // el pedido y el día que tenía (el del artículo), para los lugares que todavía no tenían el suyo
+    const stmts: D1PreparedStatement[] = [];
+    for (const f of filas) {
+      const ds = porLugar.get(f.task_id);
+      const p = pdvs.get(f.pdv_task);
+      if (!ds?.length || !p?.record_id) continue;
+      const actual = f.entrega_real ?? p.entrega_real;
+      if (actual && !pedidos.has(p.record_id)) pedidos.set(p.record_id, actual);
+      for (const dir of ds) {
+        // Cambió de día: lo que estaba marcado hecho o colgado en ese lugar vuelve a pendiente.
+        stmts.push(db.prepare('UPDATE entrega_direcciones SET fecha = ?, hecho_at = NULL, hecho_por = NULL, hecho_chofer = NULL WHERE id = ? AND record_id = ?').bind(fecha, dir, p.record_id));
+        stmts.push(db.prepare("DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = 'entrega' AND dir IN (0, ?)").bind(f.task_id, dir));
+      }
+    }
+    // Antes, cada lugar que no tenía día propio queda con el que tenía el artículo: así mover uno no arrastra a los demás.
+    const antes = [...pedidos].map(([id, dia]) => db.prepare('UPDATE entrega_direcciones SET fecha = ? WHERE record_id = ? AND fecha IS NULL AND retira IS NULL').bind(dia, id));
+    if (!antes.length && !stmts.length) return { escritos: 0 };
+    // Cómo estaban los lugares de esos pedidos: si ClickUp no acepta la fecha, vuelven a como estaban (no queda a medias).
+    const foto = (await db.prepare('SELECT id, fecha, hecho_at, hecho_por, hecho_chofer FROM entrega_direcciones WHERE record_id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify([...pedidos.keys()])).all<{ id: number; fecha: string | null; hecho_at: string | null; hecho_por: number | null; hecho_chofer: string | null }>()).results;
+    await db.batch([...antes, ...stmts]);
+    try {
+      return { escritos: stmts.length / 2 + await fechaEnClickup(env, ctx, [...pedidos.keys()]) };
+    } catch (e) {
+      await db.batch(foto.map((d) => db.prepare('UPDATE entrega_direcciones SET fecha = ?, hecho_at = ?, hecho_por = ?, hecho_chofer = ? WHERE id = ?').bind(d.fecha, d.hecho_at, d.hecho_por, d.hecho_chofer, d.id)));
+      throw e;
+    }
+  }
   const col = TIPOS[b.tipo].col;
   let escritos = 0;
   const pdvsTocados: string[] = [];
@@ -462,10 +559,18 @@ export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; ti
   } else {
     for (const f of filas) if ((f as unknown as Record<string, string | null>)[col] !== fecha) { await editarProduccion(env, ctx, f.task_id, col, fecha, { libre: true, sinRefrescar: true }); escritos++; }
   }
-  // Lo que estaba marcado hecho deja de estarlo: cambió de día, hay que hacerlo de nuevo.
-  await env.DB.prepare('DELETE FROM cronograma_hechos WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
-  // Y lo que estaba colgado vuelve al cronograma, en ese día (aunque sea el mismo que tenía).
-  await env.DB.prepare('DELETE FROM cronograma_colgados WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
+  if (!interno) {
+    // Lo que estaba marcado hecho deja de estarlo: cambió de día, hay que hacerlo de nuevo.
+    await env.DB.prepare('DELETE FROM cronograma_hechos WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
+    // Y lo que estaba colgado vuelve al cronograma, en ese día (aunque sea el mismo que tenía).
+    await env.DB.prepare('DELETE FROM cronograma_colgados WHERE tipo = ? AND task_id IN (SELECT value FROM json_each(?))').bind(b.tipo, JSON.stringify(filas.map((f) => f.task_id))).run();
+    // Se movió la entrega entera de un pedido que va a varios lugares (por ejemplo desde «listos sin fecha»): los lugares
+    // que tenían día propio y todavía no se entregaron pasan todos a ese día.
+    if (b.tipo === 'entrega' && fecha) {
+      await env.DB.prepare(`UPDATE entrega_direcciones SET fecha = ? WHERE fecha IS NOT NULL AND hecho_at IS NULL
+        AND record_id IN (SELECT p.record_id FROM produccion p WHERE p.task_id IN (SELECT value FROM json_each(?)))`).bind(fecha, JSON.stringify([...new Set(filas.map((f) => f.pdv_task))])).run();
+    }
+  }
   await refrescar(env, ctx, pdvsTocados);
   return { escritos };
 }
@@ -473,11 +578,15 @@ export async function moverMovimiento(env: Env, ctx: Ctx, b: { ids?: unknown; ti
 // Marca (o desmarca) como hecho: queda quién y cuándo, y el artículo cambia de estado en ClickUp. Si el artículo ya está
 // más adelante, el estado no se toca. Al desmarcar vuelve al estado que tenía, si nadie lo cambió después.
 // `enFondo`: dónde dejar lo que puede terminar después de contestar (releer los PDV de ClickUp); sin él, se espera.
-export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string; enFondo?: (p: Promise<unknown>) => void } = {}) {
+// `dirs` (en paralelo con `ids`): la entrega en un lugar de un pedido que va a varios. Queda hecha en ese lugar; el artículo
+// pasa a «parcial entregado» mientras falte algún lugar y a «entregados» (lo de siempre) cuando se hicieron todos.
+export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; dirs?: unknown; tipo?: unknown; hecho?: unknown }, opts: { chofer?: string; enFondo?: (p: Promise<unknown>) => void } = {}): Promise<{ cambiados: number; estado: string | null; marcados: string[] }> {
   if (!opts.chofer) exigir(ctx);
   if (!esTipo(b.tipo)) throw new HttpError(400, 'Falta el tipo de movimiento.');
   const tipo = b.tipo, hecho = b.hecho !== false;
   const db = env.DB;
+  const porLugar = tipo === 'entrega' ? dirsDe(b) : new Map<string, number[]>();
+  if (porLugar.size) return hechoPorLugar(env, ctx, porLugar, hecho, opts);
   // Lo que marca el chofer queda a su nombre (en la conversación del pedido y en el historial), no al de quien creó su link.
   const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null } } : ctx;
   const filas = await filasDe(db, b.ids);
@@ -513,6 +622,94 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; tipo?:
   if (opts.enFondo) opts.enFondo(refrescar(env, c2, pdvs)); else await refrescar(env, c2, pdvs);
   return { cambiados, estado: existe ? destino : null, marcados };
 }
+// Los lugares de entrega de cada pedido de esos PDV (los que no son «retira en Formas»), y qué artículo va a cuál.
+async function lugaresDe(db: D1Database, pdvTasks: string[]) {
+  const pdvs = (await db.prepare('SELECT task_id, record_id FROM produccion WHERE es_pdv = 1 AND record_id IS NOT NULL AND task_id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(pdvTasks)).all<{ task_id: string; record_id: number }>()).results;
+  const ids = [...new Set(pdvs.map((p) => p.record_id))];
+  const [dirs, claves] = await Promise.all([direccionesDePedidos(db, ids), clavesDeTareas(db, ids)]);
+  const pedidoDe = new Map(pdvs.map((p) => [p.task_id, p.record_id]));
+  // A qué lugares va un artículo: con reparto, a los que tienen algo de ese producto; si no, a todos.
+  const lugares = (f: { task_id: string; pdv_task: string }) => {
+    const ds = (dirs.get(pedidoDe.get(f.pdv_task) ?? -1) ?? []).filter((d) => !d.retira);
+    const k = claves.get(f.task_id);
+    return k && ds.some((d) => (d.cantidades.get(k) ?? 0) > 0) ? ds.filter((d) => (d.cantidades.get(k) ?? 0) > 0) : ds;
+  };
+  return { pedidoDe, lugares };
+}
+
+// La fecha de entrega en ClickUp de los artículos de un pedido que va a varios lugares: una sola por artículo, la de la
+// última entrega que falta (así no figura como terminado antes de tiempo); si ya se hicieron todas, la de la última.
+async function fechaEnClickup(env: Env, ctx: Ctx, pedidos: number[]) {
+  if (!pedidos.length) return 0;
+  const db = env.DB;
+  const arts = (await db.prepare(`SELECT a.* FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task WHERE p.record_id IN (SELECT value FROM json_each(?))
+    AND a.es_pdv = 0 AND a.estado NOT IN ('anulado', 'anulada', 'cancelado')`).bind(JSON.stringify(pedidos)).all<FilaDb>()).results;
+  if (!arts.length) return 0;
+  const { lugares } = await lugaresDe(db, [...new Set(arts.map((a) => a.pdv_task))]);
+  const porDia = new Map<string, string[]>();
+  for (const a of arts) {
+    const ds = lugares(a).filter((d) => d.fecha);
+    if (!ds.length) continue;
+    const faltan = ds.filter((d) => !d.hecho_at);
+    const dia = (faltan.length ? faltan : ds).map((d) => d.fecha!).sort().pop()!;
+    if (a.entrega_real !== dia) porDia.set(dia, [...(porDia.get(dia) ?? []), a.task_id]);
+  }
+  let n = 0;
+  for (const [dia, ids] of porDia) for (let i = 0; i < ids.length; i += MAX_POR_VEZ) n += (await moverMovimiento(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo: 'entrega', fecha: dia }, true)).escritos;
+  return n;
+}
+
+// Marca (o desmarca) la entrega en un lugar de un pedido que va a varios.
+async function hechoPorLugar(env: Env, ctx: Ctx, porLugar: Map<string, number[]>, hecho: boolean, opts: { chofer?: string; enFondo?: (p: Promise<unknown>) => void }) {
+  const db = env.DB;
+  const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null } } : ctx;
+  const filas = await filasDe(db, [...porLugar.keys()]);
+  const ts = now();
+  const dirs = [...new Set([...porLugar.values()].flat())];
+  await db.batch([
+    hecho ? db.prepare('UPDATE entrega_direcciones SET hecho_at = COALESCE(hecho_at, ?), hecho_por = ?, hecho_chofer = ? WHERE id IN (SELECT value FROM json_each(?)) AND hecho_at IS NULL')
+        .bind(ts, opts.chofer ? null : ctx.user.id, opts.chofer ?? null, JSON.stringify(dirs))
+      : db.prepare('UPDATE entrega_direcciones SET hecho_at = NULL, hecho_por = NULL, hecho_chofer = NULL WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(dirs)),
+    ...(hecho ? filas.flatMap((f) => (porLugar.get(f.task_id) ?? []).map((d) => db.prepare("DELETE FROM cronograma_colgados WHERE task_id = ? AND tipo = 'entrega' AND dir = ?").bind(f.task_id, d))) : []),
+  ]);
+  // Cómo queda cada artículo: entregado en todos sus lugares, en algunos o en ninguno.
+  const { pedidoDe, lugares } = await lugaresDe(db, [...new Set(filas.map((f) => f.pdv_task))]);
+  const orden = (await estadosPec(db)).map((e) => e.status);
+  const PARCIAL = 'parcial entregado';
+  const completos: string[] = [], parciales: string[] = [], vacios: string[] = [];
+  for (const f of filas) {
+    const ds = lugares(f);
+    const hechos = ds.filter((d) => d.hecho_at).length;
+    (ds.length && hechos === ds.length ? completos : hechos ? parciales : vacios).push(f.task_id);
+  }
+  let cambiados = 0, estado: string | null = null;
+  const pdvs: string[] = [];
+  const base = { tipo: 'entrega' as const };
+  // Todos los lugares: el artículo se marca entregado, como siempre.
+  if (completos.length) { const r = await marcarHecho(env, ctx, { ...base, ids: completos, hecho: true }, opts); cambiados += r.cambiados; estado = r.estado; }
+  // Faltan lugares: si estaba marcado entregado, se desmarca; y queda «parcial entregado» (o, sin ninguno, como estaba antes).
+  const noCompletos = [...parciales, ...vacios];
+  if (noCompletos.length) {
+    const marcados = new Set((await db.prepare("SELECT task_id FROM cronograma_hechos WHERE tipo = 'entrega' AND task_id IN (SELECT value FROM json_each(?))").bind(JSON.stringify(noCompletos)).all<{ task_id: string }>()).results.map((x) => x.task_id));
+    if (marcados.size) cambiados += (await marcarHecho(env, ctx, { ...base, ids: [...marcados], hecho: false }, opts)).cambiados;
+  }
+  if (parciales.length && orden.includes(PARCIAL)) {
+    const actuales = await filasDe(db, parciales);
+    await deAVarios(actuales, async (f) => {
+      if (f.estado === PARCIAL || CERRADOS.includes(f.estado)) return;
+      await editarProduccion(env, c2, f.task_id, 'estado', PARCIAL, { libre: true, sinRefrescar: true });
+      cambiados++; pdvs.push(f.pdv_task); estado = PARCIAL;
+    });
+  }
+  if (opts.enFondo) opts.enFondo(refrescar(env, c2, pdvs)); else await refrescar(env, c2, pdvs);
+  // La fecha del artículo en ClickUp sigue a la última entrega que falta.
+  const pedidos = [...new Set(filas.map((f) => pedidoDe.get(f.pdv_task)).filter((x): x is number => !!x))];
+  const mover = fechaEnClickup(env, { ...ctx, user: ctx.user }, pedidos).catch((e) => { console.error('cronograma: fecha por lugar', (e as Error).message); return 0; });
+  if (opts.enFondo) opts.enFondo(mover); else await mover;
+  return { cambiados, estado, marcados: filas.map((f) => f.task_id) };
+}
+
 // Hace `fn` con todos, de a `n` a la vez. Si alguno falla, espera a que terminen los demás (lo hecho queda hecho) y avisa
 // el primer error.
 async function deAVarios<T>(items: T[], fn: (x: T) => Promise<void>, n = 4) {
@@ -846,7 +1043,10 @@ export interface Parada {
   estricto?: boolean;
   espera_hasta?: number | null;   // con una hora fijada «a las 12:00», se espera hasta esa hora (ruta.ts)
   detalle?: string | null;         // piso, depto, puerta, unidad (de la dirección del pedido o de la ficha de la empresa)
-  observaciones?: string | null;   // observaciones de entrega: lo que tiene que saber el chofer al llegar
+  observaciones?: string | null;   // la anotación de ese lugar (de esa dirección del pedido): lo que tiene que saber el chofer al llegar
+  observaciones_por?: string | null;   // quién la escribió
+  sitio?: string | null;           // en un pedido que va a varias direcciones, cómo se llama este lugar («Central», «Sucursal Santa Fe»)
+  repartida?: boolean;             // sus cantidades son las de esta dirección (el reparto del pedido), no las del pedido entero
 }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
@@ -912,7 +1112,7 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     // Un pedido que va a varias direcciones: una parada por cada una (con el mismo movimiento).
     let otras: string[] = [];
     // El piso, depto, puerta o unidad y las observaciones de entrega de cada dirección (en el orden de `[direccion, ...otras]`).
-    let extras: Array<{ detalle: string | null; observaciones: string | null }> = [];
+    let extras: Array<Pick<DireccionPedido, 'detalle' | 'observaciones'> & Partial<DireccionPedido>> = [];
     if (m.tipo === 'entrega') {
       const p = m.record_id ? pedidoDe.get(m.record_id) : undefined;
       nombre = m.cliente ?? `PDV ${m.npdv ?? ''}`; companyId = p?.company_id ?? null; recordId = m.record_id;
@@ -923,7 +1123,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
       const enTarjeta = todas.filter((d) => !d.retira);
       if (retiros.length) {
         const donde = [...new Set(retiros.map((d) => cfg.bases.find((x) => x.id === d.retira)?.nombre ?? d.direccion))].join(' y ');
-        retiran.push({ ...m, retira_en: donde, parcial: enTarjeta.length > 0 });
+        // Una vez por artículo (con varios lugares, la entrega viene abierta en una por lugar).
+        if (!retiran.some((x) => x.task_id === m.task_id && x.tipo === m.tipo)) retiran.push({ ...m, retira_en: donde, parcial: enTarjeta.length > 0 });
         // Solo lo retira el cliente: no hay viaje (ni hay que buscarle otra dirección).
         if (!enTarjeta.length) continue;
       }
@@ -949,14 +1150,24 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     // La clave no depende de la dirección: corregirla no saca la parada del recorrido guardado ni pierde lo que marcó el
     // chofer. Una entrega es la de su PDV; un retiro o un egreso, el de esa empresa. Un pedido que va a varias direcciones
     // (tarjeta «Entrega») tiene una parada por dirección: la primera con la clave del PDV y las otras con su número (:2, :3…).
-    const base = claveParada(m);
+    const base = m.tipo === 'entrega' ? `p:${m.pdv_task}` : claveParada(m);
     const horarioTexto = companyId ? empresas.get(companyId)?.horario ?? null : null;
+    // Con varias direcciones y el reparto cargado, a cada una va lo suyo: la cantidad de ese artículo para esa dirección
+    // (y si a esa no va nada de este artículo, no es parada de este movimiento). Sin reparto, o si el artículo no se pudo
+    // atar a su renglón, va el movimiento entero a todas.
+    // La entrega de un pedido que va a varios lugares ya viene abierta en una por lugar (repartirEntregas), con su cantidad:
+    // va solo a la parada de su lugar.
+    const suLugar = m.dir != null ? extras.findIndex((d) => d.id === m.dir) : -1;
     for (const [i, dir] of [direccion, ...otras].entries()) {
       const clave = i ? `${base}:${i + 1}` : base;
+      if (suLugar >= 0 && i !== suLugar) continue;
       const par = paradas.get(clave) ?? { clave, nombre, direccion: dir, origen, lat: null, lng: null, punto_manual: false, horario: horarioDe(horarioTexto), horario_texto: horarioTexto,
         company_id: companyId, record_id: recordId, movimientos: [], encargos: [], sugerencia: null, lugar: delLugar ? infoLugar(delLugar) : null,
-        detalle: extras[i]?.detalle || null, observaciones: extras[i]?.observaciones || null };
+        detalle: extras[i]?.detalle || null, observaciones: extras[i]?.observaciones || null,
+        // Un pedido que va a varias direcciones: cómo se llama este lugar y de quién es su anotación.
+        sitio: otras.length ? extras[i]?.nombre || null : null, observaciones_por: extras[i]?.observaciones ? extras[i]?.observaciones_por ?? null : null };
       par.movimientos.push(m);
+      if (m.repartida) par.repartida = true;
       if (sugerencia && !par.sugerencia) par.sugerencia = sugerencia;
       if (!par.horario && horarioDe(horarioTexto)) { par.horario = horarioDe(horarioTexto); par.horario_texto = horarioTexto; }
       paradas.set(clave, par);
@@ -1086,7 +1297,9 @@ export interface DireccionParada {
   direccion: string | null; origen: Parada['origen']; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
   detalle: string | null; observaciones: string | null;
+  sitios?: string[];   // solo en un pedido que va a varias direcciones: cada lugar con lo que va ahí («Central: 250»)
 }
+const cantTexto = (n: number) => n.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 export async function direccionesSemana(env: Env, user: User, q: { desde?: string; hasta?: string }, buscar: boolean) {
   if (!esDia(q.desde) || !esDia(q.hasta) || q.hasta < q.desde) throw new HttpError(400, 'Faltan las fechas (desde y hasta, AAAA-MM-DD).');
   if (Date.parse(q.hasta) - Date.parse(q.desde) > 14 * 86_400_000) throw new HttpError(400, 'El rango es demasiado largo.');
@@ -1106,8 +1319,11 @@ export async function direccionesSemana(env: Env, user: User, q: { desde?: strin
     const estado: DireccionParada['estado'] = !p.direccion ? 'sin_direccion' : p.lat != null || g ? 'ok' : geo.has(clave) ? 'no_encontrada' : 'buscando';
     // Un pedido que va a varias direcciones («p:…:2»): la tarjeta muestra la primera y cuántas más hay.
     const otra = /^(.*):\d+$/.exec(k);
-    if (otra && out[otra[1]]) { out[otra[1]].otras++; continue; }
+    // Cada lugar con lo que va ahí («Central: 250»), para verlo en la tarjeta.
+    const sitio = p.clave.startsWith('p:') && (p.sitio || otra) ? `${p.sitio ?? limpiarDireccion(p.direccion ?? '').split(',')[0]}${p.repartida ? `: ${cantTexto(p.movimientos.reduce((s, m) => s + (m.cantidad ?? 0), 0))}` : ''}` : null;
+    if (otra && out[otra[1]]) { out[otra[1]].otras++; if (sitio) (out[otra[1]].sitios ??= []).push(sitio); continue; }
     out[k] = {
+      ...(sitio ? { sitios: [sitio] } : {}),
       direccion: p.direccion, origen: p.origen, estado, nombre: p.nombre, company_id: p.company_id, horario: p.horario_texto, expreso: !!p.expreso, otras: 0,
       detalle: p.detalle ?? null, observaciones: p.observaciones ?? null,
       record_ids: [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))],
@@ -1206,7 +1422,8 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
         // Dónde termina: null si termina en la última parada; `vuelve`: es el mismo lugar de donde sale.
         fin: fin ? { nombre: fin.nombre, direccion: fin.direccion, lat: fin.lat, lng: fin.lng } : null, vuelve: !!fin && fin.direccion === base.direccion,
         paradas: x.orden.map((c) => porClave.get(c)).filter((p): p is Parada => !!p).map((p) => ({
-          clave: p.clave, nombre: p.nombre, direccion: p.direccion, detalle: p.detalle ?? null, observaciones: p.observaciones ?? null, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
+          clave: p.clave, nombre: p.sitio ? `${p.nombre} · ${p.sitio}` : p.nombre, direccion: p.direccion, detalle: p.detalle ?? null,
+          observaciones: p.observaciones ? `${p.observaciones}${p.observaciones_por ? ` · ${p.observaciones_por.split(' ')[0]}` : ''}` : null, lat: p.lat, lng: p.lng, horario: p.horario, pactada: p.pactada?.texto ?? null, espera_hasta: p.espera_hasta ?? null, fotos: p.fotos ?? 0,
           expreso: p.expreso ? { guia: p.expreso.guia, cliente: p.expreso.cliente } : null,
           visita: p.visita ? { resultado: p.visita.resultado, motivo: p.visita.motivo, nota: p.visita.nota } : null,
           lugar: p.lugar ? { horario: p.lugar.horario, telefono: p.lugar.telefono, contacto: p.lugar.contacto, observaciones: p.lugar.observaciones } : null,
@@ -1263,22 +1480,28 @@ export async function marcarParada(env: Env, ctx: Ctx, chofer: string, b: { clav
   const antes = await db.prepare('SELECT resultado, motivo, nota, marcados FROM cronograma_visitas WHERE fecha = ? AND clave = ?').bind(fecha, clave)
     .first<{ resultado: string; motivo: string | null; nota: string | null; marcados: string }>();
   if ((antes?.resultado ?? null) === resultado && (antes?.motivo ?? null) === motivo && (antes?.nota ?? null) === (resultado ? nota : null)) return { ok: true, entrega };
-  let marcados = (lista(antes?.marcados) as Array<{ id: string; tipo: Tipo }>).filter((x) => x && esTipo(x.tipo));
+  let marcados = (lista(antes?.marcados) as Array<{ id: string; tipo: Tipo; dir?: number | null }>).filter((x) => x && esTipo(x.tipo));
   const encPrevios = (lista(antes?.marcados) as Array<{ id: string; tipo: string; antes?: string }>).filter((x) => x && x.tipo === 'encargo');
-  const porTipo = (xs: Array<{ id: string; tipo: Tipo }>) => { const m = new Map<Tipo, string[]>(); for (const x of xs) m.set(x.tipo, [...(m.get(x.tipo) ?? []), x.id]); return m; };
-  const deATandas = async (ids: string[], tipo: Tipo, hecho: boolean) => {
-    const hechos: string[] = [];
-    for (let i = 0; i < ids.length; i += MAX_POR_VEZ) hechos.push(...(await marcarHecho(env, ctx, { ids: ids.slice(i, i + MAX_POR_VEZ), tipo, hecho }, { chofer, enFondo })).marcados);
+  // Con su lugar (`dir`), si la entrega es la de un lugar de un pedido que va a varios.
+  type Marca = { id: string; tipo: Tipo; dir?: number | null };
+  const porTipo = (xs: Marca[]) => { const m = new Map<Tipo, Marca[]>(); for (const x of xs) m.set(x.tipo, [...(m.get(x.tipo) ?? []), x]); return m; };
+  const deATandas = async (xs: Marca[], tipo: Tipo, hecho: boolean) => {
+    const hechos: Marca[] = [];
+    for (let i = 0; i < xs.length; i += MAX_POR_VEZ) {
+      const t = xs.slice(i, i + MAX_POR_VEZ);
+      const ok = new Set((await marcarHecho(env, ctx, { ids: t.map((x) => x.id), dirs: t.map((x) => x.dir ?? null), tipo, hecho }, { chofer, enFondo })).marcados);
+      hechos.push(...t.filter((x) => ok.has(x.id)));
+    }
     return hechos;
   };
   if (resultado === 'hecho' && antes?.resultado !== 'hecho') {
     // Primero los artículos (si ClickUp falla, la parada no queda como hecha) y después la visita.
     marcados = [];
-    for (const [tipo, ids] of porTipo(parada.movimientos.filter((m) => !m.hecho).map((m) => ({ id: m.task_id, tipo: m.tipo })))) {
-      for (const id of await deATandas(ids, tipo, true)) marcados.push({ id, tipo });
+    for (const [tipo, xs] of porTipo(parada.movimientos.filter((m) => !m.hecho).map((m) => ({ id: m.task_id, tipo: m.tipo, dir: m.dir ?? null })))) {
+      marcados.push(...(await deATandas(xs, tipo, true)));
     }
   } else if (resultado !== 'hecho' && antes?.resultado === 'hecho') {
-    for (const [tipo, ids] of [...porTipo(marcados)].reverse()) await deATandas(ids, tipo, false);
+    for (const [tipo, xs] of [...porTipo(marcados)].reverse()) await deATandas(xs, tipo, false);
     marcados = [];
   }
   // Los encargos de la parada quedan como los dejó el chofer (hecho o no se pudo, y se le avisa a quien lo pidió); al

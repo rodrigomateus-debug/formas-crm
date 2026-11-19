@@ -105,10 +105,34 @@ parada del mismo lugar en la ruta del día.
   la ficha del pedido. Las escriben Logística y Producción desde la tarjeta y **la vendedora desde su pedido** (ficha o
   vista previa, panel Entrega → «Anotaciones de logística»: Ventas no ve el cronograma), que elige si es solo para esta
   entrega o para todas las entregas a ese cliente. Ahí también ve **el horario fijado** para su entrega en el cronograma.
+  **Desde la tarjeta de un encargo** de Recorridos también se anota (el ícono de la nota): ahí no hay pedido, así que es
+  siempre del destino (lo de esa vez va en las notas del encargo); es la forma de dejar algo para un lugar al que solo se
+  va por encargos.
   La borra quien la escribió, Logística, Producción o un administrador. **Reemplazan las observaciones de entrega** de la
   dirección del pedido y de la ficha de la empresa: las que ya estaban cargadas pasaron a ser anotaciones (migración
   `0097`; las del pedido, de esa entrega; las de una empresa, de siempre) y el campo ya no está en «Corregir dirección»,
   donde queda el piso, depto, puerta o unidad.
+- **Un pedido que se reparte entre varios lugares** (Rodrigo, 19/11/2026: 1.000 kits, 250 a la central, 500 a una
+  sucursal y 250 a un depósito). Lo carga la vendedora en el pedido, panel Entrega → **Varias direcciones** (el botón está
+  desde que el pedido no tiene dirección): cada lugar con su **nombre** («Central», «Sucursal Santa Fe»), su dirección,
+  cuánto de cada producto va ahí (nunca más que el total del pedido) y su **anotación propia**, que queda con quién la
+  escribió (`entrega_direcciones.nombre`, `observaciones`, `obs_user_id`; migración `0098`). Las generales del cliente
+  van en las anotaciones de logística. En la Ruta del día y en la app del chofer hay **una parada por lugar**, con el nombre
+  del lugar, **la cantidad que va ahí** (el reparto llega por el artículo de ClickUp atado al renglón del pedido,
+  `clavesDeTareas`; un artículo que no va a un lugar no es parada ahí; sin reparto, o si el artículo no se pudo atar, va
+  la cantidad entera) y la anotación de ese lugar. La tarjeta de la semana muestra cada lugar con lo que va («Central: 250»).
+  **La logística se bifurca; la producción no** (etapa 2, migración `0099`). En Producción sigue siendo un artículo con un
+  estado. En el cronograma, la entrega de cada artículo se abre en **una por lugar** (`repartirEntregas`, movimiento
+  `tarea:entrega@dirección`), cada una con su día (`entrega_direcciones.fecha`; sin día propio, el del artículo), su
+  «hecho» (`hecho_at`) y sus Colgados (`cronograma_colgados.dir`). Las que caen el mismo día se ven en una tarjeta, con el
+  lugar al lado de cada cantidad; arrastrar la tarjeta mueve solo los lugares que tiene, y la primera vez que se separa
+  uno los demás quedan fijos en el día que tenían. Los ids de las direcciones se conservan al guardar el reparto, así no
+  se pierde lo que hizo Logística con cada lugar.
+  **En ClickUp**, que tiene una fecha y un estado por artículo: la fecha es la de la última entrega que falta
+  (`fechaEnClickup`) y el estado, «parcial entregado» mientras falte algún lugar y «entregados» cuando se hicieron todos
+  (`hechoPorLugar`). Si ClickUp no acepta la fecha, el lugar vuelve a donde estaba. En la ficha del pedido, cada lugar
+  dice qué día va o si ya se entregó. Mover la entrega entera (por ejemplo desde «listos sin fecha») pasa a ese día todos
+  los lugares que faltan. Lo que cambien a mano en ClickUp no mueve los lugares que ya tienen día propio.
 - **Cantidad enviada (demasía)**: en ingresos, retiros y egresos (no en las entregas al cliente), la cantidad de cada
   producto se toca para anotar la que realmente va o llega («110», con «+10 de más» al lado) y por qué. La cantidad del PDV
   no cambia. El remito de traslado del egreso y la app del chofer salen con esa cantidad. Tabla `cronograma_enviados`,

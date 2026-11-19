@@ -29,14 +29,18 @@ export function LineaNota({ n, onBorrar }: { n: NotaLogistica; onBorrar?: () => 
 // `tipo`: entrega (por defecto) o el movimiento de la tarjeta; `destino`: en un retiro, egreso o ingreso, a dónde se va (el
 // proveedor o el impresor), para las de siempre; en una entrega es el cliente del pedido. `titulo`: «Anotaciones de
 // logística», en la ficha del pedido (ahí también se ve el horario fijado en el cronograma).
+// Sin `recordId` (la tarjeta de un encargo de Recorridos): solo las de siempre de ese destino, que es lo que se anota ahí
+// (lo de esa vez va en las notas del encargo).
 export function NotasLogistica({ recordId, tipo = 'entrega', destino, titulo, onCambio }: {
-  recordId: number; tipo?: string; destino?: { company_id?: number | null; nombre?: string | null } | null; titulo?: string; onCambio?: () => void;
+  recordId: number | null; tipo?: string; destino?: { company_id?: number | null; lugar_id?: number | null; nombre?: string | null } | null; titulo?: string; onCambio?: () => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const res = useAsync(() => http<Datos>('GET', `/logistica/notas${qs({ record_id: recordId, tipo, company_id: destino?.company_id ?? undefined, nombre: destino?.nombre ?? undefined })}`), [recordId, tipo, destino?.company_id, destino?.nombre]);
+  const res = useAsync(() => http<Datos>('GET', `/logistica/notas${qs({ record_id: recordId ?? undefined, tipo, company_id: destino?.company_id ?? undefined, lugar_id: destino?.lugar_id ?? undefined, nombre: destino?.nombre ?? undefined })}`),
+    [recordId, tipo, destino?.company_id, destino?.lugar_id, destino?.nombre]);
   const [texto, setTexto] = useState('');
-  const [alcance, setAlcance] = useState<'puntual' | 'siempre'>('puntual');
+  const soloDestino = !recordId;
+  const [alcance, setAlcance] = useState<'puntual' | 'siempre'>(soloDestino ? 'siempre' : 'puntual');
   const [ocupado, setOcupado] = useState(false);
   const d = res.data;
   const puede = meta.me.role !== 'viewer';
@@ -63,16 +67,17 @@ export function NotasLogistica({ recordId, tipo = 'entrega', destino, titulo, on
       {d.notas.map((n) => <LineaNota key={n.id} n={n} onBorrar={puede && (d.edita || n.user_id === meta.me.id || meta.me.role === 'admin') ? () => borrar(n) : undefined} />)}
       {puede && (
         <form className="lg-form" onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
-          <textarea className="input sm" rows={2} maxLength={500} placeholder={esEntrega ? 'Anotación para Logística sobre la entrega…' : 'Anotación para Logística…'} value={texto} aria-label="Anotación de logística"
+          <textarea className="input sm" rows={2} maxLength={500} placeholder={soloDestino ? `Lo que hay que saber cada vez que se va a ${d.destino?.nombre ?? 'este lugar'}…` : esEntrega ? 'Anotación para Logística sobre la entrega…' : 'Anotación para Logística…'} value={texto} aria-label="Anotación de logística"
             onChange={(e) => setTexto(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void guardar(); }} />
           {texto.trim().length > 0 && (
             <div className="lg-form-pie">
+              {soloDestino ? <span className="small muted">Queda para siempre en {d.destino?.nombre ?? 'este lugar'}: aparece cada vez que se vaya (entregas, retiros y encargos). Lo de esta vez va en las notas del encargo.</span> : (
               <div className="row" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Para cuándo vale">
                 <button type="button" className={`chip${alcance === 'puntual' ? ' on' : ''}`} aria-pressed={alcance === 'puntual'} onClick={() => setAlcance('puntual')}>{esEntrega ? 'Solo esta entrega' : 'Solo esta vez'}</button>
                 <button type="button" className={`chip${alcance === 'siempre' ? ' on' : ''}`} aria-pressed={alcance === 'siempre'} disabled={!d.destino} onClick={() => setAlcance('siempre')}
                   title={d.destino ? `Aparece cada vez que se vaya a ${d.destino.nombre ?? 'ese lugar'}: entregas, retiros y encargos` : 'No se sabe a qué lugar es'}>
                   {esEntrega ? 'Todas las entregas a' : 'Siempre en'} {d.destino?.nombre ?? 'este lugar'}</button>
-              </div>
+              </div>)}
               <button type="submit" className="btn sm primary" disabled={ocupado || texto.trim().length < 2}>Guardar</button>
             </div>
           )}

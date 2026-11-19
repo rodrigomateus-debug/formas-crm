@@ -6,7 +6,7 @@ import { QuienPidio, alEsc, useEsc } from '../components';
 import { Select, useFloating } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
-import { lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
+import { idsYLugares, lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
 import { LineaNota } from '../NotasLogistica';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
@@ -24,6 +24,7 @@ export interface Parada {
   encargos?: Encargo[];   // lo que pidió alguien para ese día en ese lugar (Recorridos)
   lugar?: { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null } | null;
   detalle?: string | null; observaciones?: string | null;   // piso, depto, puerta, unidad y observaciones de entrega
+  sitio?: string | null; observaciones_por?: string | null;  // en un pedido repartido: cómo se llama este lugar, y de quién es su anotación
   // La hora fijada a mano (pedido de Rodrigo del 16/11/2026): `horario` ya es esa ventana y el orden más corto la cumple.
   pactada?: { modo: ModoHora; min: number; hasta?: number | null; texto: string } | null; estricto?: boolean;
   fotos?: number;   // las fotos del remito que mandó el chofer de esta parada (obligatoria en todas)
@@ -272,15 +273,15 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   async function marcar(p: Parada) {
     if (marcando) return;
     const hecho = !hechaParada(p);
-    const porTipo = new Map<Tipo, string[]>();
-    for (const m of p.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m.task_id]);
+    const porTipo = new Map<Tipo, Mov[]>();
+    for (const m of p.movimientos) if (m.hecho !== hecho) porTipo.set(m.tipo, [...(porTipo.get(m.tipo) ?? []), m]);
     const encs = (p.encargos ?? []).filter((e) => (e.estado === 'hecho') !== hecho), cambian = new Set(encs.map((e) => e.id));
     setMarcando(p.clave);
     setDatos((d) => d && { ...d, paradas: d.paradas.map((x) => (x.clave === p.clave ? { ...x, movimientos: x.movimientos.map((m) => ({ ...m, hecho })),
       encargos: (x.encargos ?? []).map((e) => (cambian.has(e.id) ? { ...e, estado: hecho ? 'hecho' : 'pendiente' } : e)) } : x)) });
     try {
       let cambiados = 0;
-      for (const [tipo, ids] of porTipo) for (let i = 0; i < ids.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + TANDA), tipo, hecho })).cambiados;
+      for (const [tipo, ms] of porTipo) for (let i = 0; i < ms.length; i += TANDA) cambiados += (await http<{ cambiados: number }>('POST', '/cronograma/hecho', { ...idsYLugares(ms.slice(i, i + TANDA)), tipo, hecho })).cambiados;
       for (const e of encs) await http('PATCH', `/recorridos/encargos/${e.id}`, { estado: hecho ? 'hecho' : 'pendiente' });
       const deshacer = { label: 'Deshacer', onClick: () => { const q = datosRef.current?.paradas.find((x) => x.clave === p.clave); if (q) void marcar(q); } };
       toast(!hecho ? `${lindo(p.nombre)}: quedó como pendiente.` : `${lindo(p.nombre)}: hecha.${cambiados ? ` ${cambiados} artículo${cambiados === 1 ? ' cambió' : 's cambiaron'} de estado en ClickUp.` : ''}`, false, deshacer);
@@ -440,13 +441,13 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                     {puede && !abierto && <span className="cr-asa" aria-hidden="true" />}
                   </div>
                   <div className="cr-p-quien">
-                    <div className="cr-p-nombre">{nombre}</div>
+                    <div className="cr-p-nombre">{nombre}{p.sitio ? <span className="cr-p-sitio"> · {p.sitio}</span> : null}</div>
                     {p.expreso && <div className="cr-p-expreso"><span className="cr-tag exp">Expreso</span>para {lindo(p.expreso.cliente)}{p.expreso.guia
                       ? <> · guía {seguimientoExpreso(p.expreso.nombre, p.expreso.guia) ? <a className="cr-link num" href={seguimientoExpreso(p.expreso.nombre, p.expreso.guia)!} target="_blank" rel="noreferrer" title="Ver el seguimiento del envío">{p.expreso.guia} ↗</a> : <b className="num">{p.expreso.guia}</b>}</>
                       : ' · sin guía todavía'}</div>}
                     <div className="cr-p-sub" title={p.origen ? ORIGEN[p.origen] : undefined}>{p.direccion ? lindaDireccion(p.direccion) : 'Sin dirección cargada'}{p.detalle ? ` · ${p.detalle}` : ''}
                       {p.direccion && p.origen && ORIGEN_DUDOSO[p.origen] && <span className="cr-origen"> · {ORIGEN_DUDOSO[p.origen]}</span>}</div>
-                    {p.observaciones && <div className="cr-p-sub cr-p-obs" title="Observaciones de entrega">{p.observaciones}</div>}
+                    {p.observaciones && <div className="lg-nota"><p>{p.observaciones}</p><span className="lg-nota-pie"><span className="lg-nota-tag">Solo este lugar</span>{p.observaciones_por ? p.observaciones_por.split(' ')[0] : ''}</span></div>}
                     {/* Las anotaciones de logística de lo que se hace en la parada, con quién las escribió. */}
                     {[...new Map([...p.movimientos.flatMap((m) => m.notas ?? []), ...(p.encargos ?? []).flatMap((e) => e.anotaciones ?? [])].map((n) => [n.id, n])).values()].map((n) => <LineaNota key={n.id} n={n} />)}
                   </div>

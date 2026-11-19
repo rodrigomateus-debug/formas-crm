@@ -863,3 +863,120 @@ test('cronograma: rango horario, anotaciones de logística con autor y cantidad 
   assert.equal((await api('POST', '/cronograma/enviado', { id: otro.task_id, tipo: otro.tipo, cantidad: otro.cantidad })).data.enviado, null);
   assert.ok(!(await semana()).movimientos.find((x) => x.id === otro.id).enviado);
 });
+
+// Desde la tarjeta de un encargo de Recorridos se anota lo de siempre de ese destino (sin pedido): aparece en los
+// encargos a ese lugar, aunque el nombre esté escrito distinto.
+test('cronograma: desde un encargo se anota lo de siempre de su destino', async () => {
+  asUser = null;
+  const hoy = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+  const lugar = `Estudio Contable ${RUN}`;
+  const enc = await api('POST', '/recorridos/encargos', { fecha: hoy, destino: { nombre: lugar, direccion: `Av. Santa Fe ${Math.floor(Math.random() * 3000) + 100}, CABA` }, llevar: [{ cant: 1, que: 'Carpeta' }] });
+  assert.equal(enc.status, 200, JSON.stringify(enc.data));
+  assert.equal((await api('POST', '/logistica/notas', { alcance: 'puntual', texto: 'Sin pedido no hay «solo esta vez»' })).status, 400);
+  const n = await api('POST', '/logistica/notas', { alcance: 'siempre', destino: { lugar_id: enc.data.lugar_id, company_id: enc.data.company_id, nombre: enc.data.destino }, texto: 'Dejar en mesa de entradas, 2° piso' });
+  assert.equal(n.status, 201, JSON.stringify(n.data));
+  assert.equal(n.data.destino, lugar);
+  // Se lee por el destino, también con el nombre en mayúsculas y con «S.A.».
+  const q = (nombre) => api('GET', `/logistica/notas?nombre=${encodeURIComponent(nombre)}`);
+  assert.deepEqual((await q(`${lugar.toUpperCase()} S.A.`)).data.notas.map((x) => x.texto), ['Dejar en mesa de entradas, 2° piso']);
+  assert.deepEqual((await q('Otro lugar cualquiera')).data.notas, []);
+  // Y la trae el encargo en la semana.
+  const lunes = (() => { const d = new Date(`${hoy}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
+  const dom = new Date(Date.parse(`${lunes}T12:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+  const e = (await api('GET', `/cronograma?desde=${lunes}&hasta=${dom}`)).data.encargos.find((x) => x.id === enc.data.id);
+  assert.deepEqual((e.anotaciones ?? []).map((x) => x.texto), ['Dejar en mesa de entradas, 2° piso']);
+  // Quien no edita el cronograma no ve las de un destino suelto.
+  await api('POST', '/users', { email: `enc.${RUN}@formas.ar`, name: `Enc ${RUN}`, role: 'member' });
+  asUser = `enc.${RUN}@formas.ar`;
+  assert.equal((await q(lugar)).status, 403);
+  asUser = null;
+  assert.equal((await api('DELETE', `/logistica/notas/${n.data.id}`)).status, 200);
+  await api('PATCH', `/recorridos/encargos/${enc.data.id}`, { estado: 'cancelado' });
+});
+
+// Un pedido que se reparte entre varios lugares (Rodrigo, 19/11/2026: 1.000 kits, 250 a la central, 500 a una sucursal y
+// 250 a un depósito): cada lugar con su nombre, su cantidad y su anotación; en la ruta, cada parada con lo suyo.
+test('cronograma: un pedido repartido en varias direcciones lleva a cada parada su lugar, su cantidad y su anotación', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const { execFileSync } = await import('node:child_process');
+  const sql = (command) => execFileSync('npx', ['wrangler', 'd1', 'execute', 'formas-crm', '--local', '--command', command], { stdio: 'pipe' });
+  const rango = '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20';
+  const m = (await api('GET', rango)).data.movimientos.find((x) => x.npdv === PDV && x.tipo === 'entrega' && x.record_id && !x.hecho && x.articulo);
+  assert.ok(m, 'hay una entrega pendiente del PDV');
+  // El renglón del pedido de ese artículo (como cuando los productos llegan de ClickUp): 1.000 kits.
+  const codigo = `KIT_${RUN}`.toUpperCase();
+  sql(`DELETE FROM line_items WHERE record_id = ${m.record_id}; INSERT INTO line_items (record_id, position, code, name, quantity, source, status, clickup_task) VALUES (${m.record_id}, 0, '${codigo}', 'Kit ${RUN}', 1000, 'clickup', 'pdv', '${m.task_id}');`);
+  const url = `/records/order/${m.record_id}/direcciones`;
+  const lugares = [{ nombre: 'Central', direccion: `Av. Corrientes ${1000 + Math.floor(Math.random() * 500)}, CABA` },
+    { nombre: 'Sucursal Santa Fe', direccion: `Bv. Pellegrini ${2000 + Math.floor(Math.random() * 500)}, Santa Fe`, observaciones: 'Entrar por el portón de atrás, preguntar por Ana' },
+    { nombre: 'Depósito de stock', direccion: `Gral. Roca ${4000 + Math.floor(Math.random() * 200)}, Florida Oeste` }];
+  const guardar = (cants) => api('PUT', url, { direcciones: lugares, cantidades: cants.map((cantidad, direccion) => ({ direccion, clave: codigo, cantidad })) });
+  // Nunca más que el total del pedido.
+  assert.equal((await guardar([250, 600, 250])).status, 400, 'no se reparte más de lo pedido');
+  // La vendedora del pedido lo carga.
+  const vende = (await api('POST', '/users', { email: `rep.${RUN}@formas.ar`, name: `Rep ${RUN}`, role: 'member' })).data;
+  assert.equal((await api('PATCH', `/records/order/${m.record_id}`, { props: { owner_id: vende.id } })).status, 200);
+  asUser = `rep.${RUN}@formas.ar`;
+  const g = await guardar([250, 500, 250]);
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  asUser = null;
+  const d = (await api('GET', url)).data;
+  assert.deepEqual(d.direcciones.map((x) => [x.nombre, x.observaciones, x.obs_por]), [['Central', null, null], ['Sucursal Santa Fe', lugares[1].observaciones, `Rep ${RUN}`], ['Depósito de stock', null, null]]);
+  assert.equal(d.sin_repartir, 0);
+  // En la ruta de ese día: una parada por lugar, con su nombre, la cantidad que va ahí y su anotación (con quién la escribió).
+  const ruta = (await api('GET', `/cronograma/ruta?fecha=${m.fecha}`)).data;
+  const paradas = [`p:${m.pdv_task}`, `p:${m.pdv_task}:2`, `p:${m.pdv_task}:3`].map((c) => ruta.paradas.find((p) => p.clave === c));
+  assert.ok(paradas.every(Boolean), 'las tres paradas');
+  assert.deepEqual(paradas.map((p) => [p.sitio, p.movimientos.find((x) => x.task_id === m.task_id)?.cantidad]), [['Central', 250], ['Sucursal Santa Fe', 500], ['Depósito de stock', 250]]);
+  assert.deepEqual(paradas.map((p) => [p.observaciones ?? null, p.observaciones_por ?? null]), [[null, null], [lugares[1].observaciones, `Rep ${RUN}`], [null, null]]);
+  // En la tarjeta de la semana, cada lugar con lo que va ahí.
+  const dirs = (await api('GET', `/cronograma/direcciones?desde=${m.fecha}&hasta=${m.fecha}`)).data.direcciones[`${m.fecha}|p:${m.pdv_task}`];
+  assert.deepEqual(dirs.sitios, ['Central: 250', 'Sucursal Santa Fe: 500', 'Depósito de stock: 250']);
+  // Cambiar el reparto sin tocar la anotación la deja con su autora.
+  const conId = d.direcciones.map((x, i) => ({ id: x.id, ...lugares[i] }));
+  const otra = await api('PUT', url, { direcciones: conId, cantidades: [300, 500, 200].map((cantidad, direccion) => ({ direccion, clave: codigo, cantidad })) });
+  assert.equal(otra.status, 200, JSON.stringify(otra.data));
+  assert.equal((await api('GET', url)).data.direcciones[1].obs_por, `Rep ${RUN}`, 'la anotación sigue a nombre de quien la escribió');
+  // ---- La logística se bifurca: cada lugar con su día, su «hecho» y sus Colgados. La producción sigue siendo una.
+  const [central, santaFe, deposito] = (await api('GET', url)).data.direcciones.map((x) => x.id);
+  const suyos = async () => (await api('GET', rango)).data.movimientos.filter((x) => x.task_id === m.task_id && x.tipo === 'entrega').sort((a, b) => a.dir - b.dir);
+  let ms = await suyos();
+  assert.deepEqual(ms.map((x) => [x.dir, x.sitio, x.cantidad, x.fecha]), [[central, 'Central', 300, m.fecha], [santaFe, 'Sucursal Santa Fe', 500, m.fecha], [deposito, 'Depósito de stock', 200, m.fecha]], 'una entrega por lugar, el mismo día');
+  // Santa Fe pasa a otro día: los otros dos quedan donde estaban.
+  const otroDia = m.fecha === '2026-11-20' ? '2026-11-19' : '2026-11-20';
+  assert.equal((await api('POST', '/cronograma/mover', { ids: [m.task_id], dirs: [santaFe], tipo: 'entrega', fecha: otroDia })).status, 200);
+  ms = await suyos();
+  assert.deepEqual(ms.map((x) => [x.sitio, x.fecha]), [['Central', m.fecha], ['Sucursal Santa Fe', otroDia], ['Depósito de stock', m.fecha]]);
+  const clavesDe = async (dia) => (await api('GET', `/cronograma/ruta?fecha=${dia}`)).data.paradas.filter((p) => p.clave.startsWith(`p:${m.pdv_task}`)).map((p) => p.clave).sort();
+  assert.deepEqual(await clavesDe(m.fecha), [`p:${m.pdv_task}`, `p:${m.pdv_task}:3`], 'en la ruta de ese día, los dos que quedaron');
+  assert.deepEqual(await clavesDe(otroDia), [`p:${m.pdv_task}:2`], 'y Santa Fe, en la del otro día');
+  // El depósito queda colgado: solo ese lugar. Pasarlo a un día lo devuelve.
+  const col = await api('POST', '/cronograma/colgar', { ids: [m.task_id], dirs: [deposito], tipo: 'entrega', motivo: 'El depósito estaba cerrado' });
+  assert.equal(col.status, 200, JSON.stringify(col.data));
+  let v2 = (await api('GET', rango)).data;
+  assert.deepEqual(v2.movimientos.filter((x) => x.task_id === m.task_id && x.tipo === 'entrega').map((x) => x.sitio).sort(), ['Central', 'Sucursal Santa Fe']);
+  assert.deepEqual(v2.colgados.filter((x) => x.task_id === m.task_id).map((x) => [x.sitio, x.colgado.motivo]), [['Depósito de stock', 'El depósito estaba cerrado']]);
+  assert.equal((await api('POST', '/cronograma/mover', { ids: [m.task_id], dirs: [deposito], tipo: 'entrega', fecha: m.fecha })).status, 200);
+  assert.equal((await suyos()).length, 3, 'volvió al cronograma');
+  // Hecho lugar por lugar: con uno, el artículo no está entregado todavía; con todos, sí.
+  const hecho = (dirs, h = true) => api('POST', '/cronograma/hecho', { ids: dirs.map(() => m.task_id), dirs, tipo: 'entrega', hecho: h });
+  assert.equal((await hecho([central])).status, 200);
+  ms = await suyos();
+  assert.deepEqual(ms.map((x) => [x.sitio, x.hecho]), [['Central', true], ['Sucursal Santa Fe', false], ['Depósito de stock', false]]);
+  assert.notEqual(ms[0].estado, 'entregados', 'el artículo sigue abierto: faltan lugares');
+  assert.equal((await hecho([santaFe, deposito])).status, 200);
+  ms = await suyos();
+  assert.ok(ms.every((x) => x.hecho), 'los tres hechos');
+  assert.equal(ms[0].estado, 'entregados', 'con todos los lugares, el artículo queda entregado en ClickUp');
+  // Desmarcar uno lo vuelve a abrir.
+  assert.equal((await hecho([santaFe], false)).status, 200);
+  ms = await suyos();
+  assert.deepEqual(ms.map((x) => x.hecho), [true, false, true]);
+  assert.notEqual(ms[0].estado, 'entregados');
+  await hecho([central, deposito], false);
+  // Vuelve a una sola dirección, para no cambiarles el día a las otras pruebas.
+  await api('PUT', url, { direcciones: [] });
+  await api('POST', '/cronograma/mover', { ids: [m.task_id], tipo: 'entrega', fecha: m.fecha });
+  sql(`DELETE FROM line_items WHERE record_id = ${m.record_id};`);
+});

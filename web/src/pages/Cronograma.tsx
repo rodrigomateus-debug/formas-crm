@@ -33,6 +33,8 @@ export interface Mov {
   hora?: string | null;       // la hora fijada a mano en su parada, en la ruta del día («A las 12:00»)
   parada?: string;            // la clave de su parada en la ruta del día
   colgado?: { motivo: string; at: string; por: string | null; fecha: string } | null;   // en la columna «Colgados»
+  // La entrega en un lugar de un pedido que va a varios: la dirección del pedido, cómo se llama y si la cantidad es la de ese lugar.
+  dir?: number | null; sitio?: string | null; repartida?: boolean;
   notas?: NotaLogistica[];    // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó (demasía)
 }
@@ -55,6 +57,7 @@ export interface DirParada {
   direccion: string | null; origen: string | null; estado: 'ok' | 'no_encontrada' | 'buscando' | 'sin_direccion';
   nombre: string; record_ids: number[]; company_id: number | null; horario: string | null; expreso: boolean; otras: number;
   detalle: string | null; observaciones: string | null;   // piso, depto, puerta, unidad y las observaciones de entrega
+  sitios?: string[];   // un pedido que va a varias direcciones: cada lugar con lo que va ahí («Central: 250»)
 }
 
 export const CARRILES: Array<{ k: 'E' | 'I' | 'R' | 'G'; nombre: string; uno: string; tipos: Tipo[]; ayuda: string }> = [
@@ -91,6 +94,9 @@ export function lindo(s: string | null | undefined): string {
   }).join(' ');
 }
 // Con la cantidad que realmente va, si se anotó una demasía.
+// Lo que se le manda al servidor para mover, marcar o colgar: los artículos y, en paralelo, de qué lugar es cada entrega
+// (en un pedido que va a varios lugares).
+export const idsYLugares = (movs: Array<Pick<Mov, 'task_id' | 'dir'>>) => ({ ids: movs.map((m) => m.task_id), dirs: movs.map((m) => m.dir ?? null) });
 export const cantidad = (m: { cantidad: number | null; articulo: string; enviado?: { cantidad: number } | null }) => { const c = m.enviado?.cantidad ?? m.cantidad; return [c != null ? num.format(c) : '', m.articulo].filter(Boolean).join(' '); };
 
 // Una tarjeta: los artículos de un PDV que tienen el mismo movimiento, el mismo día, en el mismo lugar.
@@ -139,11 +145,12 @@ export default function CronogramaPage() {
   const [nuevoPara, setNuevoPara] = useState<Tarjeta | Encargo | null>(null);   // agregar un chofer o expreso a la lista, desde una tarjeta
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo abierto
   const [sobre, setSobre] = useState<string | null>(null);   // el día sobre el que se está arrastrando
-  const [colgando, setColgando] = useState<{ ids: string[]; tipo: Tipo; pdv: string } | null>(null);   // lo que se soltó en «Colgados»: falta el motivo
+  const [colgando, setColgando] = useState<{ ids: string[]; dirs?: Array<number | null>; tipo: Tipo; pdv: string } | null>(null);   // lo que se soltó en «Colgados»: falta el motivo
   const [anotando, setAnotando] = useState<Tarjeta | null>(null);   // las anotaciones de logística de una tarjeta
+  const [anotandoEnc, setAnotandoEnc] = useState<Encargo | null>(null);   // las de siempre del destino de un encargo
   const [horaDe, setHoraDe] = useState<Tarjeta | null>(null);      // fijar la hora (o el rango) de la parada de una tarjeta
   const [enviando, setEnviando] = useState<Mov | null>(null);      // la cantidad que realmente se mandó o llegó
-  const arrastre = useRef<{ ids: string[]; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
+  const arrastre = useRef<{ ids: string[]; dirs?: Array<number | null>; tipo: Tipo | 'encargo'; de: string | null; pdv: string } | null>(null);
   const pedido = useRef(0);
   // Las direcciones de las paradas de la semana: llegan después de la semana (no la demoran) y, mientras el servidor
   // busca en el mapa las que faltan, se vuelven a pedir.
@@ -193,22 +200,24 @@ export default function CronogramaPage() {
   const puede = !!v?.puede_editar;
   const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad)), [v, q, unidad]);
 
-  async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string) {
-    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === tipo ? { ...m, fecha } : m)), sin_fecha: d.sin_fecha.filter((s) => !ids.includes(s.task_id)),
-      colgados: (d.colgados ?? []).filter((m) => !(ids.includes(m.task_id) && m.tipo === tipo)) });
+  async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string, dirs?: Array<number | null>) {
+    // Es este movimiento: el del artículo o, en un pedido que va a varios lugares, la entrega de ese lugar.
+    const es = (m: Mov) => m.tipo === tipo && ids.some((id, i) => id === m.task_id && (dirs?.[i] ?? null) === (m.dir ?? null));
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (es(m) ? { ...m, fecha } : m)), sin_fecha: d.sin_fecha.filter((s) => !ids.includes(s.task_id)),
+      colgados: (d.colgados ?? []).filter((m) => !es(m)) });
     try {
-      for (let i = 0; i < ids.length; i += 25) await http('POST', '/cronograma/mover', { ids: ids.slice(i, i + 25), tipo, fecha });
+      for (let i = 0; i < ids.length; i += 25) await http('POST', '/cronograma/mover', { ids: ids.slice(i, i + 25), dirs: dirs?.slice(i, i + 25), tipo, fecha });
       toast(`${pdv}: ${carrilDe(tipo).uno.toLowerCase()} pasó al ${diaCorto(fecha)}. Ya está en ClickUp.`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
   }
   // Deja un movimiento en «Colgados», con el motivo: sale de su día y al responsable del pedido le llega el aviso.
-  async function colgar(a: { ids: string[]; tipo: Tipo; pdv: string }, motivo: string) {
+  async function colgar(a: { ids: string[]; dirs?: Array<number | null>; tipo: Tipo; pdv: string }, motivo: string) {
     setColgando(null);
-    setDatos((d) => d && { ...d, movimientos: d.movimientos.filter((m) => !(a.ids.includes(m.task_id) && m.tipo === a.tipo)) });
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.filter((m) => !(m.tipo === a.tipo && a.ids.some((id, i) => id === m.task_id && (a.dirs?.[i] ?? null) === (m.dir ?? null)))) });
     try {
       const avisados = new Set<string>();
-      for (let i = 0; i < a.ids.length; i += 25) (await http<{ avisados: string[] }>('POST', '/cronograma/colgar', { ids: a.ids.slice(i, i + 25), tipo: a.tipo, motivo })).avisados.forEach((x) => avisados.add(x));
+      for (let i = 0; i < a.ids.length; i += 25) (await http<{ avisados: string[] }>('POST', '/cronograma/colgar', { ids: a.ids.slice(i, i + 25), dirs: a.dirs?.slice(i, i + 25), tipo: a.tipo, motivo })).avisados.forEach((x) => avisados.add(x));
       toast(`${a.pdv}: ${carrilDe(a.tipo).uno.toLowerCase()} quedó en Colgados.${avisados.size ? ` Se le avisó a ${[...avisados].join(' y ')}.` : ''}`);
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
@@ -219,15 +228,15 @@ export default function CronogramaPage() {
     if (!a || a.de === COLGADOS) return;
     if (a.tipo === 'encargo') { toast('Los encargos no se cuelgan acá: se pasan a otro día o se cancelan desde el encargo.', true); return; }
     if (!a.de) { toast('Eso todavía no tiene fecha: no hay qué dejar pendiente.', true); return; }
-    setColgando({ ids: a.ids, tipo: a.tipo, pdv: a.pdv });
+    setColgando({ ids: a.ids, dirs: a.dirs, tipo: a.tipo, pdv: a.pdv });
   };
   async function marcar(t: Tarjeta) {
-    const hecho = !t.hecho, ids = t.movs.map((m) => m.task_id);
-    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (ids.includes(m.task_id) && m.tipo === t.tipo ? { ...m, hecho } : m)),
-      colgados: (d.colgados ?? []).filter((m) => !(hecho && ids.includes(m.task_id) && m.tipo === t.tipo)) });
+    const hecho = !t.hecho, ids = t.movs.map((m) => m.task_id), dirs = t.movs.map((m) => m.dir ?? null), suyos = new Set(t.movs.map((m) => m.id));
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.map((m) => (suyos.has(m.id) ? { ...m, hecho } : m)),
+      colgados: (d.colgados ?? []).filter((m) => !(hecho && suyos.has(m.id))) });
     try {
       const r = { cambiados: 0, estado: null as string | null };
-      for (let i = 0; i < ids.length; i += 25) { const x = await http<{ cambiados: number; estado: string | null }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + 25), tipo: t.tipo, hecho }); r.cambiados += x.cambiados; r.estado = x.estado; }
+      for (let i = 0; i < ids.length; i += 25) { const x = await http<{ cambiados: number; estado: string | null }>('POST', '/cronograma/hecho', { ids: ids.slice(i, i + 25), dirs: dirs.slice(i, i + 25), tipo: t.tipo, hecho }); r.cambiados += x.cambiados; r.estado = x.estado; }
       toast(!hecho ? 'Quedó como pendiente.' : r.cambiados && r.estado ? `Hecho. ${r.cambiados === 1 ? 'El artículo pasó' : `${r.cambiados} artículos pasaron`} a «${r.estado}» en ClickUp.` : 'Marcado como hecho.');
     } catch (e) { toast((e as Error).message, true); }
     void cargar();
@@ -268,7 +277,7 @@ export default function CronogramaPage() {
     arrastre.current = null; setSobre(null);
     if (a && a.de !== fecha) {
       if (a.tipo === 'encargo') { const e = v?.encargos?.find((x) => String(x.id) === a.ids[0]); if (e) void encargoA(e, { fecha }); }
-      else void mover(a.ids, a.tipo, fecha, a.pdv);
+      else void mover(a.ids, a.tipo, fecha, a.pdv, a.dirs);
     }
   };
 
@@ -334,11 +343,11 @@ export default function CronogramaPage() {
                               {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []} onChofer={(c) => asignar(t, c)}
                                 dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
                                 onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
-                                onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
+                                onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
                                 onAnotar={t.record_id ? () => setAnotando(t) : undefined} onHora={t.parada && t.movs[0]?.parada && !t.hecho ? () => setHoraDe(t) : undefined}
                                 onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined}
-                                onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
-                                onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
+                                onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
+                                onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                             </div>
                           );
                         })}
@@ -347,7 +356,7 @@ export default function CronogramaPage() {
                             <h3>Encargos <span className="num">{encDia.length}</span></h3>
                             {encDia.map((e) => <TarjetaEncargo key={e.id} e={e} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []}
                               dir={e.parada ? dirs[`${e.fecha}|${e.parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
-                              onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })}
+                              onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })} onAnotar={() => setAnotandoEnc(e)}
                               onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
                               onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />)}
                           </div>
@@ -375,8 +384,8 @@ export default function CronogramaPage() {
                           <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
                           {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy="" puede={puede} choferes={[]} expresos={[]} onChofer={() => undefined} buscando={false} onDir={() => undefined}
                             onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => setPreview(t.record_id) : undefined}
-                            onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`)}
-                            onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), tipo: t.tipo, de: COLGADOS, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
+                            onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
+                            onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: COLGADOS, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                         </div>
                       );
                     })}
@@ -390,6 +399,11 @@ export default function CronogramaPage() {
           {anotando && anotando.record_id && (
             <Modal title={`Anotaciones de logística · ${anotando.titulo} (${anotando.pdv})`} onClose={() => setAnotando(null)}>
               <NotasLogistica recordId={anotando.record_id} tipo={anotando.tipo} destino={anotando.tipo === 'entrega' ? null : { company_id: anotando.movs[0]?.company_id, nombre: anotando.movs[0]?.lugar }} onCambio={cargar} />
+            </Modal>
+          )}
+          {anotandoEnc && (
+            <Modal title={`Anotaciones de logística · ${lindo(anotandoEnc.destino)}`} onClose={() => setAnotandoEnc(null)}>
+              <NotasLogistica recordId={null} destino={{ company_id: anotandoEnc.company_id, lugar_id: anotandoEnc.lugar_id, nombre: anotandoEnc.destino }} onCambio={cargar} />
             </Modal>
           )}
           {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
@@ -573,7 +587,7 @@ function TarjetaMov({ t, hoy, puede, choferes, expresos, dir, buscando, onDir, o
               <div key={m.id} className={m.hecho && !t.hecho ? 'ok' : ''}>
                 {puede && onEnviado ? <button type="button" className="cr-t-cant num" title={m.enviado ? `Se ${t.tipo === 'egreso' ? 'mandan' : 'reciben'} ${num.format(m.enviado.cantidad)} (el pedido es de ${m.cantidad != null ? num.format(m.cantidad) : '—'})${m.enviado.motivo ? `: ${m.enviado.motivo}` : ''}${m.enviado.por ? ` · ${m.enviado.por.split(' ')[0]}` : ''}. Clic para cambiarlo.` : 'Anotar la cantidad que realmente va (demasía)'}
                   onClick={() => onEnviado(m)}>{cant}</button> : <b className="num">{cant}</b>}
-                <span>{m.articulo}{m.enviado && dif !== 0 && <em className="cr-t-demasia">{dif > 0 ? `+${num.format(dif)} de más` : `${num.format(dif)}`}</em>}</span>
+                <span>{m.articulo}{m.dir != null && <em className="cr-t-lugar" title="Va a este lugar del pedido">{m.sitio ?? 'Otra dirección'}</em>}{m.enviado && dif !== 0 && <em className="cr-t-demasia">{dif > 0 ? `+${num.format(dif)} de más` : `${num.format(dif)}`}</em>}</span>
               </div>
             );
           })}
@@ -702,10 +716,11 @@ function ModalColgar({ a, onCerrar, onColgar }: { a: { ids: string[]; tipo: Tipo
 
 // Un encargo (Recorridos): a dónde, quién lo pidió y qué se deja o se retira. Se arrastra a otro día, se le elige el
 // chofer y se marca hecho como las demás tarjetas; un clic lo abre.
-function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar }: {
+function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar, onAnotar }: {
   e: Encargo; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onAbrir: () => void; onChofer: (c: string) => void; onMover: (f: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onArrastrar: (on: boolean) => void;
+  onAnotar?: () => void;   // las anotaciones de logística de siempre de ese destino
 }) {
   const hecho = e.estado === 'hecho', atrasado = !hecho && e.fecha < hoy;
   const lineas = [...e.llevar.map((i) => ['Deja', i] as const), ...e.retirar.map((i) => ['Retira', i] as const)];
@@ -743,6 +758,7 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDi
       ) : e.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{e.chofer}</div>}
       {puede && (
         <div className="cr-t-acc">
+          {onAnotar && <button type="button" className="cr-mini" aria-label="Anotaciones de logística del destino" title="Anotaciones de logística: lo que hay que saber cada vez que se va a este lugar" onClick={onAnotar}><Icon name="note" size={13} /></button>}
           <SelectorFecha valor={e.fecha} onElegir={(f) => f && onMover(f)} label="Pasar a otro día" className="cr-mini" title="Pasar a otro día"><Icon name="calendar" size={13} /></SelectorFecha>
           <button type="button" className={`cr-check${hecho ? ' on' : ''}`} aria-pressed={hecho} aria-label={hecho ? 'Volver a pendiente' : 'Marcar como hecho'} title={hecho ? 'Volver a pendiente' : 'Marcar como hecho'} onClick={onMarcar}><Icon name="check" size={12} /></button>
         </div>
@@ -779,6 +795,8 @@ function LineaDireccion({ d: d0, buscando, puede, onCorregir }: { d: DirParada; 
           : <span className="cr-t-dir-falta" aria-label={ESTADO_DIR[d0.estado]}><Icon name="alert" size={11} /></span>}
       </span>
       {(d.detalle || d.observaciones) && <span className="cr-t-dir-obs">{d.detalle && <b>{d.detalle}</b>}{d.detalle && d.observaciones ? ' · ' : ''}{d.observaciones && <i>{d.observaciones}</i>}</span>}
+      {/* Un pedido que se reparte entre varios lugares: cuánto va a cada uno. */}
+      {(d.sitios?.length ?? 0) > 1 && <span className="cr-t-sitios">{d.sitios!.map((x) => <span key={x}>{x}</span>)}</span>}
     </>
   );
   const cls = `cr-t-dir ${falta ? 'falta' : d.estado}`;

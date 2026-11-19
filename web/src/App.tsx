@@ -11,7 +11,7 @@ import Settings from './pages/Settings';
 import RemitosPage from './pages/Remitos';
 import ProduccionPage from './pages/Produccion';
 import CronogramaPage from './pages/Cronograma';
-import RecorridosPage from './pages/Recorridos';
+import RecorridosPage, { EncargoModal } from './pages/Recorridos';
 import AnaliticasPage, { analiticasDe } from './pages/Analiticas';
 import NotasProductosPage from './pages/NotasProductos';
 import ChoferesPage from './pages/Choferes';
@@ -143,10 +143,15 @@ function SoloPedidos() {
   return objectPath === 'orders' ? <ObjectIndex /> : <Navigate to="/orders" replace />;
 }
 
+// «Crear»: contacto, empresa, negocio y pedido (Producción y Logística, solo pedido) y, para todos los que cargan, un
+// encargo para el recorrido (pedido de Rodrigo del 19/11/2026; el mismo formulario de Recorridos).
 function CreateMenu() {
-  const produccion = esOperaciones(useMeta().meta.me);
+  const { meta } = useMeta();
+  const produccion = esOperaciones(meta.me);
+  const encargos = meta.me.role !== 'viewer';
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<ObjectType | null>(null);
+  const [encargo, setEncargo] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
@@ -161,9 +166,12 @@ function CreateMenu() {
           {(Object.keys(OBJECTS) as ObjectType[]).filter((t) => !produccion || t === 'order').map((t) => (
             <div key={t} className="opt" onClick={() => { setType(t); setOpen(false); }}><Icon name={t} size={16} />{OBJECTS[t].single}</div>
           ))}
+          {encargos && <div className="opt" onClick={() => { setEncargo(true); setOpen(false); }}><Icon name="route" size={16} />Encargo</div>}
         </div>
       )}
       {type && <CreateRecord type={type} onClose={() => setType(null)} />}
+      {/* Si está abierto Recorridos, se actualiza con el encargo nuevo. */}
+      {encargo && <EncargoModal onClose={() => setEncargo(false)} onListo={() => { setEncargo(false); window.dispatchEvent(new Event('encargos:cambio')); }} />}
     </div>
   );
 }

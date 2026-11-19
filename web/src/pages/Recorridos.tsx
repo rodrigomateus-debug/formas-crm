@@ -88,6 +88,8 @@ export default function RecorridosPage() {
   const [version, setVersion] = useState(0);
   const ir = (cambios: Record<string, string | null>) => setSp((p) => { const n = new URLSearchParams(p); for (const [k, v] of Object.entries(cambios)) { if (v == null) n.delete(k); else n.set(k, v); } return n; }, { replace: true });
   const cambio = useCallback(() => setVersion((v) => v + 1), []);
+  // Un encargo cargado desde «Crear» (arriba, App.tsx) también se ve acá.
+  useEffect(() => { window.addEventListener('encargos:cambio', cambio); return () => window.removeEventListener('encargos:cambio', cambio); }, [cambio]);
   const puede = meta.me.role !== 'viewer';
   // A la derecha de las pestañas: los botones de la pestaña Destinos (los pone DestinosTab con un portal).
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);

@@ -6,6 +6,7 @@ import {
 } from '../lib';
 import { ChatDarwin, ChatWhatsApp, Modal, PropertyInput, UserAvatar, telDeDarwin } from '../components';
 import { Select } from '../Select';
+import { siGano } from '../Chispin';
 
 // Lo que el servidor agrega a cada tarjeta: contacto y empresa asociados y la próxima actividad.
 export interface CardInfo { contact?: { id: number; name: string; phone?: string | null }; company?: { id: number; name: string; domain?: string | null }; next?: { type: string; subject: string; at: string } }
@@ -124,6 +125,7 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
       await http('PATCH', `/records/deal/${dealId}`, { props: { dealstage: stage.id, ...extra } });
       olvidarMemoria('/board');
       toast(`«${deal.name}» pasó a ${stage.label}`);
+      siGano(from.stage, stage, { nombre: deal.name, monto: deal.props.amount, moneda: deal.props.deal_currency_code, duenio: deal.props.owner_id });
     } catch (e) {
       const missing = (e as Error & { data?: { missing?: string[] } }).data?.missing;
       if (missing?.length) setAsk({ deal, stage, missing }); else toast((e as Error).message, true);

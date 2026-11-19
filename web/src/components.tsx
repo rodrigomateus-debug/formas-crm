@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, faltanObligatorias, UNIDADES, type UnidadKey,
@@ -204,6 +204,68 @@ export function ValorEditable({ record, onSaved }: { record: CrmRecord; onSaved:
           onClick={(e) => { e.stopPropagation(); setV(record.props.amount == null ? '' : String(record.props.amount)); setEdit(true); }}><Icon name="edit" size={14} /></button>
       )}
     </span>
+  );
+}
+
+// El nombre del registro, arriba de la ficha y de la vista previa, se cambia ahí mismo: con el lápiz que aparece al lado
+// (al pasar el mouse; en el celular queda siempre a la vista) o, en la ficha, tocando el nombre. Al contacto se le cambian
+// nombre y apellido por separado (con los dos vacíos se ve el mail, como hasta ahora). `link`: el nombre sigue llevando a
+// la ficha (vista previa) y se edita solo con el lápiz. `edit`/`onEdit`: para abrirlo desde afuera (los tres puntitos).
+const CAMPOS_NOMBRE: Record<ObjectType, Array<{ k: string; label: string }>> = {
+  contact: [{ k: 'firstname', label: 'Nombre' }, { k: 'lastname', label: 'Apellido' }],
+  company: [{ k: 'name', label: 'Nombre de la empresa' }],
+  deal: [{ k: 'dealname', label: 'Nombre del negocio' }],
+  order: [{ k: 'hs_order_name', label: 'Nombre del pedido' }],
+};
+export function NombreEditable({ type, record, onSaved, as: H = 'h1', link, edit: editExt, onEdit }: {
+  type: ObjectType; record: CrmRecord; onSaved: () => void; as?: 'h1' | 'h2'; link?: string; edit?: boolean; onEdit?: (v: boolean) => void;
+}) {
+  const { meta } = useMeta();
+  const toast = useToast();
+  const [editInt, setEditInt] = useState(false);
+  const edit = editExt ?? editInt;
+  const setEdit = (v: boolean) => { setEditInt(v); onEdit?.(v); };
+  const campos = CAMPOS_NOMBRE[type];
+  const antes = () => Object.fromEntries(campos.map((c) => [c.k, record.props[c.k] == null ? '' : String(record.props[c.k])]));
+  const [v, setV] = useState<Record<string, string>>(antes);
+  const [saving, setSaving] = useState(false);
+  // Al abrirlo (con el lápiz o desde los tres puntitos) arranca con lo que tiene guardado.
+  useEffect(() => { if (edit) setV(antes()); }, [edit]); // eslint-disable-line react-hooks/exhaustive-deps
+  const puede = meta.me.role !== 'viewer';
+  const sucio = campos.some((c) => (v[c.k] ?? '').trim() !== antes()[c.k].trim());
+  if (edit && puede) {
+    return (
+      <EditarEnLinea className={`nombre-edit ${H}`} guardando={saving} sucio={sucio} onCancelar={() => setEdit(false)} onGuardar={async () => {
+        if (!sucio) { setEdit(false); return; }
+        // Contacto: alcanza con uno de los dos (o ninguno, si tiene mail). Empresa, negocio y pedido necesitan nombre.
+        if (type !== 'contact' && !(v[campos[0].k] ?? '').trim()) { toast(`Poné el ${campos[0].label.toLowerCase()}`, true); return; }
+        setSaving(true);
+        try {
+          await http('PATCH', `/records/${type}/${record.id}`, { props: Object.fromEntries(campos.map((c) => [c.k, (v[c.k] ?? '').trim() || null])) });
+          toast('Nombre guardado');
+          setEdit(false);
+          onSaved();
+        } catch (err) { toast((err as Error).message, true); } finally { setSaving(false); }
+      }}>
+        <div className="nombre-campos">
+          {campos.map((c, i) => (
+            <input key={c.k} className="input" autoFocus={i === 0} value={v[c.k] ?? ''} placeholder={c.label} aria-label={c.label}
+              onFocus={(e) => e.target.select()} onChange={(e) => setV((x) => ({ ...x, [c.k]: e.target.value }))} />
+          ))}
+        </div>
+      </EditarEnLinea>
+    );
+  }
+  return (
+    <H className="nombre-rec">
+      {link ? <Link to={link}>{record.name}</Link>
+        : <span className={puede ? 'nombre-txt editable' : 'nombre-txt'} title={puede ? 'Tocá para cambiar el nombre' : undefined}
+          onClick={puede ? () => setEdit(true) : undefined}>{record.name}</span>}
+      {puede && (
+        <button type="button" className="nombre-lapiz" title="Cambiar el nombre" aria-label={`Cambiar el nombre de ${record.name}`}
+          onClick={(e) => { e.stopPropagation(); setEdit(true); }}><Icon name="edit" size={15} /></button>
+      )}
+    </H>
   );
 }
 

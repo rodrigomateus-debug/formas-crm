@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 
 // ---------- Tipos compartidos con el Worker ----------
 
-export type ObjectType = 'contact' | 'company' | 'deal' | 'order';
+// work_order: la orden de trabajo de cada pedido, lo que trabaja Producción (src/worker/ordenes.ts).
+export type ObjectType = 'contact' | 'company' | 'deal' | 'order' | 'work_order';
 export interface Option { value: string; label: string }
 export interface Property {
   object_type: ObjectType; name: string; label: string; type: string; options: Option[]; group_name: string; description: string;
@@ -57,7 +58,11 @@ export const OBJECTS: Record<ObjectType, { path: string; plural: string; single:
   company: { path: 'companies', plural: 'Empresas', single: 'Empresa', nameProp: 'name', create: 'Crear empresa' },
   deal: { path: 'deals', plural: 'Negocios', single: 'Negocio', nameProp: 'dealname', create: 'Crear negocio' },
   order: { path: 'orders', plural: 'Pedidos', single: 'Pedido', nameProp: 'hs_order_name', create: 'Crear pedido' },
+  // No se crea a mano: nace con su pedido.
+  work_order: { path: 'work-orders', plural: 'Órdenes de trabajo', single: 'Orden de trabajo', nameProp: 'nombre_ot', create: '' },
 };
+// Los que se crean a mano (la orden de trabajo nace sola con su pedido).
+export const CREABLES = (Object.keys(OBJECTS) as ObjectType[]).filter((t) => t !== 'work_order');
 export const typeFromPath = (p: string) => (Object.entries(OBJECTS).find(([, v]) => v.path === p)?.[0] ?? 'contact') as ObjectType;
 export const recordUrl = (type: ObjectType, id: number) => `/${OBJECTS[type].path}/${id}`;
 
@@ -427,6 +432,7 @@ const paths: Record<string, string> = {
   company: 'M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16M15 9h4a1 1 0 0 1 1 1v11M8 8h3M8 12h3M8 16h3M3 21h18',
   deal: 'M3 7h18v12H3zM8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18',
   order: 'M6 2l1.5 4h9L18 2M4 6h16l-1.5 14h-13zM9 11h6',
+  work_order: 'M9 3h6v3H9zM7 4.5H5v16.5h14V4.5h-2M8 11h8M8 15h5',
   task: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
   note: 'M4 4h12l4 4v12H4zM8 10h8M8 14h8M8 18h5',
   email: 'M3 5h18v14H3zM3 6l9 7 9-7',
@@ -567,7 +573,7 @@ export function origenUnidad(u: UnidadCalculada) {
 }
 export function unidadesDe(meta: Meta, type: ObjectType | 'task', props: Record<string, any>): UnidadKey[] {
   if (type === 'deal') { const k = unidadDeEquipo(meta.pipelines.find((p) => p.id === props.pipeline)?.team_id); return k ? [k] : []; }
-  if (type === 'order') { const k = PEDIDO_UNIDAD[String(props.unidad_de_negocio ?? '').toUpperCase()]; return k ? [k] : []; }
+  if (type === 'order' || type === 'work_order') { const k = PEDIDO_UNIDAD[String(props.unidad_de_negocio ?? '').toUpperCase()]; return k ? [k] : []; }
   if (type === 'company') return unidadDeEmpresa(meta, props).keys;
   return delPropietario(meta, props.owner_id);
 }
@@ -579,6 +585,7 @@ export const KEY_PROPS: Record<ObjectType, string[]> = {
   company: ['domain', 'phone', 'owner_id', 'industry', 'city', 'lifecyclestage', 'tipo_de_empresa_cotizacion', 'objetivo_economico_anual', 'cuit'],
   deal: ['amount', 'closedate', 'pipeline', 'dealstage', 'owner_id', 'producto', 'cantidad', 'tipo_de_producto', 'origen_del_negocio', 'hs_next_step'],
   order: ['pdv_finnegans', 'hs_pipeline_stage', 'hs_total_price', 'owner_id', 'hs_billing_address_email', 'hs_billing_address_phone'],
+  work_order: ['pdv_finnegans', 'hs_pipeline_stage', 'owner_id', 'unidad_de_negocio', 'fecha_de_entrega', 'tipo_de_pedido'],
 };
 
 // «Acerca de» de cada objeto: lo elegido en «Elegir datos» o, si nadie eligió, lo de siempre.

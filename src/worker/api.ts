@@ -46,6 +46,7 @@ import { inicioProduccion } from './inicioprod';
 import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
+import { pedidoDeOT } from './ordenes';
 import { festejosDePedidos } from './festejos';
 import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
@@ -223,10 +224,16 @@ api.post('/records/:type/search', async (c) => {
   return c.json(await searchRecords(c.env.DB, c.get('ctx'), type, await c.req.json<SearchParams>()));
 });
 
+// La orden de trabajo nace, se borra y vuelve con su pedido (ordenes.ts): a mano, no.
+function sinOTAMano(type: ObjectType) {
+  if (type === 'work_order') throw new HttpError(400, 'La orden de trabajo se crea, se borra y se restaura sola con su pedido: hacelo desde el pedido.');
+}
+
 api.post('/records/:type', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
+  sinOTAMano(type);
   const body = await c.req.json<{ props: Record<string, unknown>; associations?: number[] }>();
   const assoc = [...new Set((body.associations ?? []).map(Number))];
   // Se revisa todo antes de crear: si una asociación no se puede hacer, no queda creado un registro suelto.
@@ -296,9 +303,12 @@ api.get('/records/:type/:id', async (c) => {
   // Pedidos: quién lo tiene en producción y cuántos artículos están listos, para la cabecera de la ficha y de la vista
   // previa (lo mismo que la tarjeta del tablero de pedidos). También para Ventas, para saber a quién preguntar (pedido
   // de Rodrigo del 17/11/2026).
-  const prod = type === 'order' ? await produccionDePedido(c.env.DB, row.id) : null;
+  // La orden de trabajo, lo mismo que su pedido: los productos, la conversación y la producción cuelgan del pedido (ordenes.ts).
+  const pedidoId = type === 'work_order' ? await pedidoDeOT(c.env.DB, row.id) : type === 'order' ? row.id : null;
+  const prod = pedidoId ? await produccionDePedido(c.env.DB, pedidoId) : null;
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
-  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user),
+    ...(produccion ? { produccion } : {}), ...(type === 'work_order' ? { pedido_id: pedidoId } : {}) });
 });
 
 api.patch('/records/:type/:id', async (c) => {
@@ -335,7 +345,7 @@ api.patch('/records/:type/:id', async (c) => {
 api.delete('/records/:type/:id', async (c) => {
   const ctx = c.get('ctx');
   requireRole(ctx, 'admin', 'manager');
-  assertType(c.req.param('type'));
+  sinOTAMano(assertType(c.req.param('type')));
   await archiveRecords(c.env.DB, ctx, [Number(c.req.param('id'))]);
   return c.json({ ok: true });
 });
@@ -343,6 +353,7 @@ api.delete('/records/:type/:id', async (c) => {
 api.post('/records/:type/:id/restore', async (c) => {
   const ctx = c.get('ctx');
   requireRole(ctx, 'admin', 'manager');
+  sinOTAMano(assertType(c.req.param('type')));
   await restoreRecord(c.env.DB, ctx, Number(c.req.param('id')));
   return c.json({ ok: true });
 });
@@ -358,6 +369,7 @@ api.post('/records/:type/batch', async (c) => {
   if (ids.length > 200) throw new HttpError(400, 'Mandá hasta 200 registros por vez.');
   if (body.archive) {
     requireRole(ctx, 'admin', 'manager');
+    sinOTAMano(type);
     for (const id of ids) await registroVisible(c, id);
     return c.json({ archived: await archiveRecords(c.env.DB, ctx, ids), failed: [] });
   }
@@ -397,6 +409,7 @@ api.post('/records/:type/:id/clone', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
   const type = assertType(c.req.param('type'));
+  sinOTAMano(type);
   const src = rowToRecord(await getRow(c.env.DB, Number(c.req.param('id')), type));
   const meta = new Meta(c.env.DB);
   if (type === 'deal') await assertDealVisible(meta, ctx.user, String(src.props.pipeline));

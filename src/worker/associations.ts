@@ -3,12 +3,26 @@ import { visibleSql } from './alcance';
 import { HttpError, now } from './env';
 import { getRow, rowToRecord, refreshActivityDates, type RecordRow } from './records';
 import { heredarRelacion } from './relacion';
+import { OT_RELACIONES, sincronizarOT } from './ordenes';
+
+// La orden de trabajo tiene las relaciones de su pedido y las mantiene sola (ordenes.ts): a mano no se le agregan ni sacan.
+function sinOT(a: Pick<RecordRow, 'object_type'>, b: Pick<RecordRow, 'object_type'>) {
+  if (a.object_type === 'work_order' || b.object_type === 'work_order') {
+    throw new HttpError(400, 'La orden de trabajo tiene las mismas relaciones que su pedido y se acomoda sola: cambiá las del pedido.');
+  }
+}
+// Cambió una relación del pedido con una empresa, un contacto o un negocio: su orden de trabajo también.
+async function alPedido(db: D1Database, ctx: Ctx, a: Pick<RecordRow, 'id' | 'object_type'>, b: Pick<RecordRow, 'id' | 'object_type'>) {
+  const pedido = a.object_type === 'order' && OT_RELACIONES.includes(b.object_type) ? a : b.object_type === 'order' && OT_RELACIONES.includes(a.object_type) ? b : null;
+  if (pedido) await sincronizarOT(db, ctx, pedido.id).catch((e) => console.error('orden de trabajo', pedido.id, (e as Error).message));
+}
 
 // Cada asociación se guarda en los dos sentidos (A→B y B→A) para leer rápido desde cualquier lado.
 export async function associate(db: D1Database, ctx: Ctx, aId: number, bId: number, opts: { label?: string | null; primary?: boolean } = {}) {
   if (aId === bId) throw new HttpError(400, 'Un registro no se puede asociar consigo mismo.');
   const a = await getRow(db, aId);
   const b = await getRow(db, bId);
+  sinOT(a, b);
   if (a.object_type === b.object_type && a.object_type !== 'company') {
     throw new HttpError(400, `No se asocian dos registros de tipo ${a.object_type}.`);
   }
@@ -47,15 +61,20 @@ export async function associate(db: D1Database, ctx: Ctx, aId: number, bId: numb
   if (primary && (a.object_type === 'contact' || b.object_type === 'contact') && (a.object_type === 'company' || b.object_type === 'company')) {
     await heredarRelacion(db, ctx, a.object_type === 'contact' ? a : b, a.object_type === 'company' ? a : b);
   }
+  await alPedido(db, ctx, a, b);
 }
 
 export async function dissociate(db: D1Database, ctx: Ctx, aId: number, bId: number) {
+  const { results } = await db.prepare('SELECT id, object_type FROM records WHERE id IN (?, ?)').bind(aId, bId).all<Pick<RecordRow, 'id' | 'object_type'>>();
+  const a = results.find((r) => r.id === aId), b = results.find((r) => r.id === bId);
+  if (a && b) sinOT(a, b);
   const ts = now();
   await db.batch([
     db.prepare('DELETE FROM associations WHERE (from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)').bind(aId, bId, bId, aId),
     db.prepare("INSERT INTO changes (record_id, prop, old_value, changed_at, user_id, source) VALUES (?, 'association', ?, ?, ?, ?)")
       .bind(aId, String(bId), ts, ctx.user.id, ctx.source),
   ]);
+  if (a && b) await alPedido(db, ctx, a, b);
 }
 
 // `user`: quien mira; en el perfil Ventas, solo los asociados que ve (por ejemplo, en una empresa, sus negocios y no los
@@ -68,7 +87,7 @@ export async function associationsOf(db: D1Database, id: number, hiddenPipelines
      ORDER BY a.is_primary DESC, r.updated_at DESC LIMIT 500`,
   ).bind(id, JSON.stringify(hiddenPipelines)).all<RecordRow & { assoc_label: string | null; assoc_primary: number }>();
   const out: Record<ObjectType, Array<ReturnType<typeof rowToRecord> & { label: string | null; primary: boolean }>> = {
-    contact: [], company: [], deal: [], order: [],
+    contact: [], company: [], deal: [], order: [], work_order: [],
   };
   for (const r of results) out[r.object_type].push({ ...rowToRecord(r), label: r.assoc_label, primary: !!r.assoc_primary });
   return out;

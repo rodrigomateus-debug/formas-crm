@@ -218,6 +218,7 @@ const CAMPOS_NOMBRE: Record<ObjectType, Array<{ k: string; label: string }>> = {
   company: [{ k: 'name', label: 'Nombre de la empresa' }],
   deal: [{ k: 'dealname', label: 'Nombre del negocio' }],
   order: [{ k: 'hs_order_name', label: 'Nombre del pedido' }],
+  work_order: [{ k: 'nombre_ot', label: 'Nombre de la orden de trabajo' }],
 };
 export function NombreEditable({ type, record, onSaved, as: H = 'h1', link, edit: editExt, onEdit }: {
   type: ObjectType; record: CrmRecord; onSaved: () => void; as?: 'h1' | 'h2'; link?: string; edit?: boolean; onEdit?: (v: boolean) => void;
@@ -476,6 +477,8 @@ const ASOCIABLES: Record<ObjectType, ObjectType[]> = {
   contact: ['company', 'deal', 'order'],
   company: ['contact', 'deal', 'order'],
   order: ['company', 'contact', 'deal'],
+  // La orden de trabajo no se crea a mano (nace con su pedido) ni se asocia al crear otra cosa.
+  work_order: [],
 };
 
 // Alta de registro: propiedades del formulario de creación y asociaciones con lo que ya existe. `associateWith` es el
@@ -499,7 +502,7 @@ export function CreateRecord({ type, onClose, onCreated, associateWith, defaults
     }
     return init;
   });
-  const [picked, setPicked] = useState<Record<ObjectType, CrmRecord[]>>({ contact: [], company: [], deal: [], order: [] });
+  const [picked, setPicked] = useState<Record<ObjectType, CrmRecord[]>>({ contact: [], company: [], deal: [], order: [], work_order: [] });
   const [picking, setPicking] = useState<ObjectType | null>(null);
   const fijo = (t: ObjectType) => (associateWith?.type === t ? [associateWith] : []);
   const elegidos = (t: ObjectType) => [...fijo(t), ...picked[t]];

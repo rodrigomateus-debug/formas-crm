@@ -95,8 +95,9 @@ export interface Ctx {
   realUser?: User;
 }
 
-export type ObjectType = 'contact' | 'company' | 'deal' | 'order';
-export const OBJECT_TYPES: ObjectType[] = ['contact', 'company', 'deal', 'order'];
+// work_order: la orden de trabajo, lo que Producción trabaja de cada pedido (ordenes.ts).
+export type ObjectType = 'contact' | 'company' | 'deal' | 'order' | 'work_order';
+export const OBJECT_TYPES: ObjectType[] = ['contact', 'company', 'deal', 'order', 'work_order'];
 
 export class HttpError extends Error {
   // `extra`: datos que acompañan el error en la respuesta (por ejemplo, para que la pantalla sepa qué hacer).

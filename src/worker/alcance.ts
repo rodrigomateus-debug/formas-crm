@@ -58,7 +58,7 @@ function deLaUnidad(al: string, user: User) {
   if (t == null) return '0';
   const ped = (Object.values(UNIDADES).find((u) => u.team === t)?.pedido ?? []).map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
   return `((${al}.object_type = 'deal' AND ${al}.pipeline_id IN (SELECT id FROM pipelines WHERE team_id = ${t}))${ped
-    ? ` OR (${al}.object_type = 'order' AND UPPER(COALESCE(json_extract(${al}.props, '$.unidad_de_negocio'), '')) IN (${ped}))` : ''})`;
+    ? ` OR (${al}.object_type IN ('order', 'work_order') AND UPPER(COALESCE(json_extract(${al}.props, '$.unidad_de_negocio'), '')) IN (${ped}))` : ''})`;
 }
 // ¿Lo puede editar como suyo? (propietario ella o de su equipo, o de la unidad que gerencia). Sin propietario, también.
 export async function esSuyo(db: D1Database, user: User, row: { id?: number; owner_id: number | null }) {
@@ -81,7 +81,7 @@ export function visibleSql(al: string, user: User) {
   // Producción y Logística: los pedidos; de contactos y empresas, los proveedores y los que están en algún pedido (por el
   // índice de asociaciones de cada registro: es una búsqueda corta por fila).
   if (esOperaciones(user)) {
-    return `(${al}.object_type = 'order' OR (${al}.object_type IN ('company', 'contact') AND (json_extract(${al}.props, '$.tipo_de_relacion') = 'proveedor'
+    return `(${al}.object_type IN ('order', 'work_order') OR (${al}.object_type IN ('company', 'contact') AND (json_extract(${al}.props, '$.tipo_de_relacion') = 'proveedor'
       OR EXISTS (SELECT 1 FROM associations pa WHERE pa.to_id = ${al}.id AND pa.from_type = 'order'))))`;
   }
   if (!esVentas(user)) return '1';
@@ -90,7 +90,7 @@ export function visibleSql(al: string, user: User) {
     WHERE ua.to_type != 'deal' AND (ua.to_type != 'order' OR ua.from_type = 'deal') AND ua.from_id IN (SELECT uo.id FROM records uo WHERE ${deLaUnidad('uo', user)}))`;
   return `(${al}.owner_id IN ${mios} OR ${al}.owner_id IS NULL${unidad} OR ${al}.id IN (SELECT va.to_id FROM associations va
     WHERE va.to_type != 'deal' AND (va.to_type != 'order' OR va.from_type = 'deal')
-      AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order') AND vo.owner_id IN ${mios})))`;
+      AND va.from_id IN (SELECT vo.id FROM records vo WHERE vo.object_type IN ('contact', 'company', 'deal', 'order', 'work_order') AND vo.owner_id IN ${mios})))`;
 }
 
 // Lo mismo para una actividad (nota, mail, tarea…) `al`: la ve si es suya (la tiene asignada o la cargó ella) o si está en
@@ -108,11 +108,11 @@ async function duenio(db: D1Database, ownerId: number | null) {
   return (await db.prepare('SELECT name FROM users WHERE id = ?').bind(ownerId).first<{ name: string }>())?.name ?? null;
 }
 
-const NOMBRE: Record<string, string> = { contact: 'Este contacto', company: 'Esta empresa', deal: 'Este negocio', order: 'Este pedido' };
+const NOMBRE: Record<string, string> = { contact: 'Este contacto', company: 'Esta empresa', deal: 'Este negocio', order: 'Este pedido', work_order: 'Esta orden de trabajo' };
 
 export async function puedeVer(db: D1Database, user: User, row: Pick<RecordRow, 'id' | 'object_type' | 'owner_id'>) {
   if (esOperaciones(user)) {
-    if (row.object_type === 'order') return true;
+    if (row.object_type === 'order' || row.object_type === 'work_order') return true;
     if (row.object_type === 'deal') return false;
     return !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${visibleSql('r', user)}`).bind(row.id).first());
   }

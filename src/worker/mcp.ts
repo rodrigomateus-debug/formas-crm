@@ -30,7 +30,7 @@ const FILTER_SCHEMA = {
   },
 };
 
-const OBJ = { type: 'string', enum: OBJECT_TYPES, description: 'contact (contacto), company (empresa), deal (negocio), order (pedido)' };
+const OBJ = { type: 'string', enum: OBJECT_TYPES, description: 'contact (contacto), company (empresa), deal (negocio), order (pedido), work_order (orden de trabajo: la crea sola el pedido y copia sus datos; no se crea ni se edita a mano)' };
 const IDS = { type: 'array', items: { type: 'integer' } };
 
 interface Tool {
@@ -41,7 +41,7 @@ interface Tool {
   run: (args: Record<string, any>, ctx: Ctx, env: Env, base: string) => Promise<unknown>;
 }
 
-const link = (base: string, type: string, id: number) => `${base}/${type === 'company' ? 'companies' : `${type}s`}/${id}`;
+const link = (base: string, type: string, id: number) => `${base}/${type === 'company' ? 'companies' : type === 'work_order' ? 'work-orders' : `${type}s`}/${id}`;
 
 function slim(base: string, r: ReturnType<typeof rowToRecord>, props?: string[]) {
   const p = props?.length ? Object.fromEntries(props.map((k) => [k, r.props[k] ?? null])) : Object.fromEntries(Object.entries(r.props).filter(([, v]) => v != null && v !== ''));

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, Cargando, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
   type Activity, type CrmRecord, type Stage, type Pipeline, type Property, type Filter,
+  type ObjectType,
 } from '../lib';
 import { ChatDarwin, ChatWhatsApp, Modal, PropertyInput, UserAvatar, telDeDarwin } from '../components';
 import { Select } from '../Select';
@@ -61,7 +62,7 @@ export function BotonVacias({ value, onChange }: { value: boolean; onChange?: (v
   );
 }
 
-export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact' | 'company' | 'order'; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void }) {
+export function SortPick({ type, sort, dir, onSort }: { type: ObjectType; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void }) {
   const { meta } = useMeta();
   const opts = type === 'deal' ? BOARD_SORTS : BOARD_SORTS.filter(([k]) => ['hs_lastmodifieddate', 'createdate', 'notes_last_updated'].includes(k));
   const cur = sort ?? 'hs_lastmodifieddate';

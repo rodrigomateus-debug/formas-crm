@@ -26,6 +26,7 @@ const DEFAULT_COLUMNS: Record<ObjectType, string[]> = {
   company: ['domain', 'owner_id', '__unidad', 'estado_cliente', 'fecha_ultima_compra', 'compra_12m_usd', 'saldo_vencido', 'notes_last_updated'],
   deal: ['dealstage', 'amount', '__company', 'closedate', 'owner_id', '__unidad', 'notes_last_updated', 'createdate'],
   order: ['pdv_finnegans', 'hs_pipeline_stage', '__produccion', '__responsable', '__oc', 'unidad_de_negocio', 'hs_total_price', 'owner_id', 'createdate'],
+  work_order: ['pdv_finnegans', 'hs_pipeline_stage', 'unidad_de_negocio', 'fecha_de_entrega', 'owner_id', 'createdate'],
 };
 // Pedidos para el perfil Ventas (pedido de Rodrigo del 17/11/2026): su pantallazo. Sin «PDV Finnegans» (el número ya está
 // en el nombre), «Unidad de negocio» ni «Propietario» (vende en su unidad y ve lo suyo); con «Cobro y papeles».

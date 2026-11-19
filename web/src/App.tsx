@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, esOperaciones, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
+import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, CREABLES, Icon, verComo, esVentas, esOperaciones, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
 import { Avatar, CreateRecord, Modal, UserChip } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
@@ -72,6 +72,8 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
         {!produccion && <NavLink to="/companies" className="nav-link"><Icon name="company" />Empresas</NavLink>}
         {!produccion && <NavLink to="/deals" className="nav-link"><Icon name="deal" />Negocios</NavLink>}
         <NavLink to="/orders" className="nav-link"><Icon name="order" />Pedidos</NavLink>
+        {/* Órdenes de trabajo (pedido de Rodrigo del 19/11/2026): lo que trabaja Producción de cada pedido (src/worker/ordenes.ts). */}
+        <NavLink to="/work-orders" className="nav-link"><Icon name="work_order" />Órdenes de trabajo</NavLink>
         {/* Operaciones, en el orden del trabajo: Producción, Cronograma, Recorridos y Entregas (y Choferes en Logística), y las
             Notas de productos. Perfil Ventas: Recorridos y las Notas de productos. */}
         <div className="nav-group">Operaciones</div>
@@ -140,7 +142,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
 // Perfiles Producción y Logística: de las listas, solo Pedidos (las fichas de un cliente o proveedor se abren desde el pedido).
 function SoloPedidos() {
   const { objectPath } = useParams();
-  return objectPath === 'orders' ? <ObjectIndex /> : <Navigate to="/orders" replace />;
+  return objectPath === 'orders' || objectPath === 'work-orders' ? <ObjectIndex /> : <Navigate to="/orders" replace />;
 }
 
 // «Crear»: contacto, empresa, negocio y pedido (Producción y Logística, solo pedido) y, para todos los que cargan, un
@@ -163,7 +165,7 @@ function CreateMenu() {
       <button className="btn primary" onClick={() => setOpen(!open)}><Icon name="plus" size={16} />Crear</button>
       {open && (
         <div className="popover" style={{ right: 0, top: 42 }}>
-          {(Object.keys(OBJECTS) as ObjectType[]).filter((t) => !produccion || t === 'order').map((t) => (
+          {CREABLES.filter((t) => !produccion || t === 'order').map((t) => (
             <div key={t} className="opt" onClick={() => { setType(t); setOpen(false); }}><Icon name={t} size={16} />{OBJECTS[t].single}</div>
           ))}
           {encargos && <div className="opt" onClick={() => { setEncargo(true); setOpen(false); }}><Icon name="route" size={16} />Encargo</div>}

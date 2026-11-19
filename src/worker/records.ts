@@ -8,6 +8,7 @@ import { emitDealEvent } from './events';
 import { esVentas, restringido, visibleSql } from './alcance';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 import { RELACIONES, propagarRelacion, relacionSola } from './relacion';
+import { OT_COPIA, sincronizarOT } from './ordenes';
 
 // Los registros nuevos arrancan en este id para no chocar con los ids de HubSpot que trae la migración
 // (los migrados conservan su id de HubSpot, así los links y los tableros siguen andando).
@@ -108,6 +109,8 @@ export function displayName(type: ObjectType, p: Props): string {
       return s('dealname') || 'Negocio sin nombre';
     case 'order':
       return s('hs_order_name') || s('pdv_finnegans') || 'Pedido';
+    case 'work_order':
+      return s('nombre_ot') || (s('pdv_finnegans') ? `OT ${s('pdv_finnegans')}` : 'Orden de trabajo');
   }
 }
 
@@ -117,6 +120,7 @@ const COLUMNS: Record<string, string> = {
   name: 'r.name',
   dealname: 'r.name',
   hs_order_name: 'r.name',
+  nombre_ot: 'r.name',
   owner_id: 'r.owner_id',
   pipeline: 'r.pipeline_id',
   dealstage: 'r.stage_id',
@@ -331,6 +335,8 @@ function checkOrderStage(ctx: Ctx, opts: { system?: boolean }, from: unknown, to
 }
 
 export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, input: Props, opts: { strict?: boolean; system?: boolean; skipDedupe?: boolean; id?: number; createdAt?: string } = {}) {
+  // La orden de trabajo la crea sola su pedido (ordenes.ts).
+  if (type === 'work_order' && !opts.system) throw new HttpError(400, 'La orden de trabajo se crea sola con su pedido.');
   const meta = new Meta(db);
   const { props } = await validateProps(meta, type, input, opts);
   if (type === 'order' && props.hs_pipeline_stage != null) checkOrderStage(ctx, opts, ORDER_CONFIRMED, props.hs_pipeline_stage, props.unidad_de_negocio);
@@ -348,7 +354,8 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   if (type === 'company' && !props.domain && props.website) props.domain = normDomain(props.website);
   // Lo que crea una vendedora queda a su nombre también si lo crea con Claude: si no, quedaría sin propietario, a la vista de todas.
-  if (props.owner_id == null && (ctx.source === 'crm' || (ctx.source === 'mcp' && esVentas(ctx.user))) && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
+  // La orden de trabajo no: es de quien tenga el pedido (ordenes.ts).
+  if (type !== 'work_order' && props.owner_id == null && (ctx.source === 'crm' || (ctx.source === 'mcp' && esVentas(ctx.user))) && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
   if (type === 'contact' && props.email && !opts.skipDedupe) {
     const dup = await db.prepare("SELECT r.id, u.name AS duenio FROM records r LEFT JOIN users u ON u.id = r.owner_id WHERE r.object_type = 'contact' AND r.email = ? AND r.archived = 0").bind(props.email).first<{ id: number; duenio: string | null }>();
     if (dup) throw new HttpError(409, `Ya existe un contacto con ${props.email} (id ${dup.id}${dup.duenio ? `, de ${dup.duenio}` : ''}).`);
@@ -377,8 +384,10 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
     db.prepare('INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source, actor) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)')
       .bind(row!.id, k, String(props[k]), ts, quien(ctx), ctx.source, ctx.actor?.name ?? null));
   if (changes.length) await db.batch(changes);
-  await avisarAsignacion(db, ctx, c.owner_id, { recordId: row!.id });
+  if (type !== 'work_order') await avisarAsignacion(db, ctx, c.owner_id, { recordId: row!.id });
   if (type === 'deal') await stageAutomation(db, ctx, row!.id, (await meta.stage(c.stage_id!))!, c.owner_id, c.name);
+  // El pedido nace con su orden de trabajo (ordenes.ts).
+  if (type === 'order') await sincronizarOT(db, ctx, row!.id, { crear: true }).catch((e) => console.error('orden de trabajo', row!.id, (e as Error).message));
   return row!;
 }
 
@@ -437,7 +446,11 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   // Mover de etapa un negocio o un pedido cuenta como actividad.
   if (stageMoved || changed.includes('hs_pipeline_stage')) stmts.push(tocarActividad(db, id, ts));
   await db.batch(stmts);
-  if (changed.includes('owner_id')) await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
+  if (changed.includes('owner_id') && type !== 'work_order') await avisarAsignacion(db, ctx, c.owner_id, { recordId: id });
+  // Su orden de trabajo copia el nombre, la etapa y los datos de producción del pedido (ordenes.ts).
+  if (type === 'order' && changed.some((k) => k === 'hs_order_name' || OT_COPIA.includes(k))) {
+    await sincronizarOT(db, ctx, id).catch((e) => console.error('orden de trabajo', id, (e as Error).message));
+  }
   // La empresa cambió de tipo de relación: sus contactos lo siguen (relacion.ts).
   if (type === 'company' && changed.includes('tipo_de_relacion')) await propagarRelacion(db, ctx, id, current.tipo_de_relacion, next.tipo_de_relacion);
   // La vendedora pasó el pedido a «Listo para producción» (desde «Pedido confirmado», «$ Pendiente de Anticipo» o
@@ -465,6 +478,7 @@ export async function archiveRecords(db: D1Database, ctx: Ctx, ids: number[]) {
     db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, 'archived', 'false', 'true', ?, ?, ?)")
       .bind(id, ts, ctx.user.id, ctx.source),
   ]));
+  await conSuOT(db, ctx, ids);
   return ids.length;
 }
 
@@ -475,11 +489,20 @@ export async function restoreRecord(db: D1Database, ctx: Ctx, id: number) {
     db.prepare("INSERT INTO changes (record_id, prop, old_value, new_value, changed_at, user_id, source) VALUES (?, 'archived', 'true', 'false', ?, ?, ?)")
       .bind(id, ts, ctx.user.id, ctx.source),
   ]);
+  await conSuOT(db, ctx, [id]);
+}
+
+// Borrar o restaurar un pedido hace lo mismo con su orden de trabajo (ordenes.ts).
+async function conSuOT(db: D1Database, ctx: Ctx, ids: number[]) {
+  const { results } = await db.prepare("SELECT id FROM records WHERE object_type = 'order' AND id IN (SELECT value FROM json_each(?))")
+    .bind(JSON.stringify(ids)).all<{ id: number }>();
+  for (const { id } of results) await sincronizarOT(db, ctx, id).catch((e) => console.error('orden de trabajo', id, (e as Error).message));
 }
 
 // Combinar: el registro `loserId` se archiva y todo lo suyo (asociaciones, actividades, propiedades vacías) pasa al primario.
 export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, primaryId: number, loserId: number) {
   if (primaryId === loserId) throw new HttpError(400, 'No se puede combinar un registro consigo mismo.');
+  if (type === 'work_order') throw new HttpError(400, 'Las órdenes de trabajo no se combinan: combiná sus pedidos y queda una sola.');
   const primary = await getRow(db, primaryId, type);
   const loser = await getRow(db, loserId, type);
   const pp = JSON.parse(primary.props) as Props;
@@ -532,6 +555,8 @@ export async function mergeRecords(db: D1Database, ctx: Ctx, type: ObjectType, p
     if (Object.keys(known).length) await updateRecord(db, ctx, type, primaryId, known, { strict: false, system: true });
   }
   await refreshActivityDates(db, [primaryId]);
+  // Dos pedidos combinados: queda una sola orden de trabajo, la del que queda (o la más vieja).
+  if (type === 'order') await sincronizarOT(db, ctx, primaryId).catch((e) => console.error('orden de trabajo', primaryId, (e as Error).message));
   return getRow(db, primaryId);
 }
 

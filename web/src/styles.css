@@ -1667,6 +1667,25 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 /* La semana */
 .cr-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px 6px; }
 .cr-semana { display: grid; gap: 10px; align-items: start; }
+/* La semana, como los tableros (pedido de Rodrigo del 20/11/2026): la página no se desplaza para abajo. La grilla ocupa el
+   alto que queda en la ventana; cada día (y Colgados) se desplaza adentro con su encabezado fijo arriba, y la barra para
+   los costados queda siempre a la vista, al pie. En el celular la página se desplaza entera, como antes. */
+@media (min-width: 861px) {
+  .content.cr-page:has(> .cr-scroll) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
+  .content.cr-page:has(> .cr-scroll) > * { flex: none; }
+  .content.cr-page > .cr-scroll { flex: 1 1 0; min-height: 240px; overflow-y: hidden; display: flex; flex-direction: column; }
+  .cr-page > .cr-scroll > .cr-semana { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .cr-page > .cr-scroll .cr-dia { min-height: 0; overflow: hidden; }
+  .cr-page > .cr-scroll .cr-carriles { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* Las barras a la vista (en Mac se esconden si no se fuerzan): la de los costados, como la de las tablas; la de cada día, finita. */
+  .cr-page > .cr-scroll::-webkit-scrollbar { height: 12px; }
+  .cr-page > .cr-scroll::-webkit-scrollbar-track { background: var(--ui-surface-sunken); border-radius: 8px; }
+  .cr-page > .cr-scroll::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 3px solid var(--ui-surface-sunken); }
+  .cr-page > .cr-scroll::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+  .cr-page > .cr-scroll .cr-carriles::-webkit-scrollbar { width: 8px; }
+  .cr-page > .cr-scroll .cr-carriles::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 2px solid var(--ui-surface); }
+  .cr-page > .cr-scroll .cr-carriles::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+}
 .cr-dia { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); min-width: 0; display: flex; flex-direction: column; min-height: 220px; transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .cr-dia.sobre { border-color: var(--accent-ink); box-shadow: var(--ui-focus-ring); }
 .cr-dia.feriado { background: var(--ui-surface-sunken); }

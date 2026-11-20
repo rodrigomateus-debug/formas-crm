@@ -373,6 +373,9 @@ export default function CronogramaPage() {
     <div className="content cr-page">
       <div className="page-head">
         <h1>Cronograma {v && <span className="muted small">{total} movimientos · {hechos} hechos{encs.length ? ` · ${encs.length} encargo${encs.length === 1 ? '' : 's'}` : ''}</span>}</h1>
+        {/* La leyenda de colores, en la fila del título (en el lugar que sobra), no en un renglón propio: así la cabecera
+            ocupa menos (pedido de Rodrigo del 20/11/2026). */}
+        {vista !== 'ruta' && <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}<span className="cr-k-X" title="Lo que alguien pidió en Recorridos"><i />Encargos</span></div>}
         <div className="row" role="group" aria-label="Vista">
           <button type="button" className={`btn sm${vista === 'semana' ? ' primary' : ''}`} aria-pressed={vista === 'semana'} onClick={() => ir({ vista: null })}><Icon name="calendar" size={14} />Semana</button>
           <button type="button" className={`btn sm${vista === 'dia' ? ' primary' : ''}`} aria-pressed={vista === 'dia'} onClick={() => verDia(dia)} title="Un día expandido, con todo ordenado"><Icon name="board" size={14} />Día</button>
@@ -401,10 +404,6 @@ export default function CronogramaPage() {
               opciones={(Object.keys(NOMBRE_ROL) as Rol[]).map((r) => ({ k: r, nombre: NOMBRE_ROL[r], ayuda: `Lo que le toca a ${NOMBRE_ROL[r]}`, n: porRol[r] ?? 0 }))} />
             <button type="button" className={`btn qf-btn${pendientes ? ' on' : ''}`} aria-pressed={pendientes} onClick={() => setPendientes(!pendientes)}
               title="Oculta lo que ya está hecho">Solo lo pendiente</button>
-          </div>
-          {/* La leyenda de colores, en la fila de la vista. */}
-          <div className="toolbar vista">
-            <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}<span className="cr-k-X" title="Lo que alguien pidió en Recorridos"><i />Encargos</span></div>
           </div>
           {v && !puede && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves el cronograma para saber cuándo sale cada cosa. Lo editan Logística, Producción y los administradores.</div>}
           {!v && !error && <div className="empty plain">Cargando la semana…</div>}
@@ -652,10 +651,12 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
     } else if (elegida ?? delCentro) left = centrar((elegida ?? delCentro)!);
     if (left != null) c.scrollTo({ left, behavior: 'smooth' });
   }, [semana, centro, estaSemana]);
-  const meses: Array<{ mes: string; semanas: string[] }> = [];
+  const meses: Array<{ mes: string; corto: string; anio: string | null; semanas: string[] }> = [];
   for (const s of semanas) {
-    const jueves = D(sumar(s, 3)), mes = `${MESES[jueves.getMonth()]}${jueves.getFullYear() !== D(hoy).getFullYear() ? ` ${jueves.getFullYear()}` : ''}`;
-    if (meses[meses.length - 1]?.mes === mes) meses[meses.length - 1].semanas.push(s); else meses.push({ mes, semanas: [s] });
+    const jueves = D(sumar(s, 3)), otroAnio = jueves.getFullYear() !== D(hoy).getFullYear();
+    const mes = `${MESES[jueves.getMonth()]}${otroAnio ? ` ${jueves.getFullYear()}` : ''}`;
+    if (meses[meses.length - 1]?.mes === mes) meses[meses.length - 1].semanas.push(s);
+    else meses.push({ mes, corto: MESES[jueves.getMonth()].slice(0, 3), anio: otroAnio ? String(jueves.getFullYear()) : null, semanas: [s] });
   }
   return (
     <div className="cr-barra">
@@ -667,7 +668,8 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
         onPointerLeave={() => { tiro.current = null; caja.current?.classList.remove('tirando'); }}>
         {meses.map((m) => (
           <div key={m.mes} className="cr-mes">
-            <div className="cr-mes-nombre">{m.mes}</div>
+            {/* El mes, chico y a la izquierda de sus semanas (pedido de Rodrigo del 20/11/2026: que la barra ocupe menos). */}
+            <div className="cr-mes-nombre" title={m.mes}>{m.corto}{m.anio && <small>{m.anio}</small>}</div>
             <div className="cr-mes-semanas">
               {m.semanas.map((s) => {
                 const ds = [0, 1, 2, 3, 4, 5, 6].map((i) => dias[sumar(s, i)]);
@@ -677,8 +679,8 @@ function BarraSemanas({ semana, centro, dias, hoy, onElegir, onCentro, onHoy }: 
                   <button key={s} type="button" data-s={s} className={`cr-sem${s === semana ? ' on' : ''}${s === estaSemana ? ' actual' : ''}${s < estaSemana ? ' pasada' : ''}`} aria-current={s === semana}
                     title={`${s === estaSemana ? 'Esta semana. ' : ''}Semana del ${a.getDate()}/${a.getMonth() + 1} al ${b.getDate()}/${b.getMonth() + 1}: ${tot} movimientos, ${pend} pendientes${atr ? `, ${atr} atrasados` : ''}`}
                     onClick={(e) => { if (tiro.current?.movio) { e.preventDefault(); return; } onElegir(s); }}>
-                    {s === estaSemana && <span className="cr-sem-actual">Esta semana</span>}
-                    <span className="cr-sem-rango num">{a.getDate()}–{b.getDate()}{a.getMonth() !== b.getMonth() ? `/${b.getMonth() + 1}` : ''}</span>
+                    {/* La actual: el fondo verde y un puntito (el nombre está en el botón «Esta semana» de la derecha). */}
+                    <span className="cr-sem-rango num">{s === estaSemana && <i className="cr-sem-punto" aria-label="Esta semana" />}{a.getDate()}–{b.getDate()}{a.getMonth() !== b.getMonth() ? `/${b.getMonth() + 1}` : ''}</span>
                     <span className="cr-sem-barras" aria-hidden="true">
                       {ds.slice(0, 5).map((d, i) => <i key={i} className={d?.atrasados ? 'atr' : d?.pendientes ? 'pend' : d?.total ? 'ok' : ''} style={{ height: `${d?.total ? Math.max(18, (d.total / max) * 100) : 6}%` }} />)}
                     </span>

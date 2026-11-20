@@ -4,7 +4,7 @@ import { associate, primaryCompanyId } from './associations';
 import { createActivity } from './activities';
 import { createRecord, getRow, splitName, type RecordRow } from './records';
 import { findCompany, findContact, upsertCompany, upsertContact } from './upsert';
-import { esOperaciones, esVentas, visibleSql } from './alcance';
+import { duenosVistos, esOperaciones, esVentas, visibleSql } from './alcance';
 import { Meta } from './meta';
 import { visiblePipelineIds } from './pipelines';
 
@@ -262,7 +262,10 @@ export async function listarReferidos(db: D1Database, user: User, f: { owner?: n
   const binds: unknown[] = [];
   const where: string[] = [];
   // Ventas: los de sus negocios (o, si el negocio se borró, los que cargó a su nombre).
-  if (esVentas(user)) where.push(`((d.id IS NOT NULL AND ${visibleSql('d', user)}) OR (d.id IS NULL AND f.owner_id = ${Number(user.id)}))`);
+  if (esVentas(user)) {
+    const vistos = await duenosVistos(db, user);
+    where.push(`((d.id IS NOT NULL AND ${visibleSql('d', user)}) OR (d.id IS NULL${vistos ? ` AND f.owner_id IN (${[...vistos].map(Number).join(', ')})` : ''}))`);
+  }
   if (pipes) { where.push('(d.id IS NULL OR d.pipeline_id IN (SELECT value FROM json_each(?)))'); binds.push(JSON.stringify(pipes)); }
   if (f.owner) { where.push('COALESCE(d.owner_id, f.owner_id) = ?'); binds.push(f.owner); }
   if (f.de) { where.push('(f.contacto_id = ? OR f.negocio_id = ? OR f.empresa_id = ?)'); binds.push(f.de, f.de, f.de); }

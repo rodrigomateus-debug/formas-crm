@@ -1,6 +1,6 @@
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
-import { esVentas, visibleSql } from './alcance';
+import { duenosVistos, esVentas, visibleSql } from './alcance';
 import { norm } from './clickup';
 import { CERRADOS } from './produccion';
 import { serviceToken } from './google';
@@ -406,13 +406,15 @@ async function viajesEntre(db: D1Database, user: User, desde: string, hasta: str
       .then((r) => new Map(r.results.map((x) => [x.id, x]))) : Promise.resolve(new Map<number, { id: number; owner_id: number | null; company_id: number | null }>()),
   ]);
   const ventas = esVentas(user);
+  // De quiénes ve los pedidos (Qué ve, alcance.ts): lo suyo y lo de quienes tiene permiso para ver.
+  const vistos = await duenosVistos(db, user);
   for (const m of movs) {
     if (llega(m.tipo)) continue;
     if (m.tipo === 'entrega') {
       const p = m.record_id ? pedidoInfo.get(m.record_id) : undefined;
       const ds = m.record_id ? dirs.get(m.record_id) ?? [] : [];
       if (ds.length && ds.every((d) => d.retira)) continue;
-      const suyo = !ventas || (p?.owner_id ?? null) === user.id;
+      const suyo = !vistos || (p?.owner_id != null && vistos.has(Number(p.owner_id)));
       const dir = ds.find((d) => !d.retira);
       viajes.push({ fecha: m.fecha, tipo: 'entrega', clave: claveParada(m), nombre: m.cliente ?? '', company_id: p?.company_id ?? null, direccion: dir?.direccion ?? null,
         lat: dir?.validada ? dir.lat : null, lng: dir?.validada ? dir.lng : null, anonimo: !suyo,
@@ -766,7 +768,7 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
         const otra = dirDe.get(v);
         // Se ve el nombre si la arma algo propio o un proveedor o impresor (o, fuera del perfil Ventas, siempre).
         p = { clave: v.clave!, nombre: v.nombre, localidad: l?.localidad ?? otra?.localidad ?? localidadDe(v.direccion ?? otra?.direccion), direccion: v.direccion ?? otra?.direccion ?? null,
-          tipos: {}, detalle: [], encargos: [], anonima: ventas && !v.propio && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null,
+          tipos: {}, detalle: [], encargos: [], anonima: ventas && (v.tipo === 'entrega' ? !!v.anonimo : !v.propio) && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null,
           lugar_id: v.lugar_id ?? null, zona: null, dominio: null, zona_libreta: l?.zona ?? otra?.zona ?? null };
         paradas.push(p);
       }

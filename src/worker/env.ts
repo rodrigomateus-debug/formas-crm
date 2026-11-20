@@ -78,6 +78,8 @@ export interface User {
   avisos_mail?: number;        // 1: recibe los avisos por mail (avisos.ts); apagado por defecto
   superadmin?: number;         // 1: puede «Ver como» otro usuario (auth.ts); el de ADMIN_EMAIL lo es siempre
   gerencia_team?: number | null; // Ventas: gerenta de ese equipo, ve y edita lo del equipo (alcance.ts)
+  ve?: string;                 // Ventas, qué ve (alcance.ts): 'suyo', 'equipo' o 'todos'
+  ve_usuarios?: string;        // Ventas: además, lo de estas personas (JSON con sus ids)
   direccion?: number;          // 1: Inicio de Dirección, con los resultados de todo el equipo (direccion.ts)
   deleted_at?: string | null;  // eliminado en Configuración → Usuarios (no entra, no aparece; el historial conserva su nombre)
 }

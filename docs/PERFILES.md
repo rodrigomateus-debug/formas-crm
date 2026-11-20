@@ -6,7 +6,7 @@ Configuración → Usuarios.
 | Perfil | Qué ve |
 |---|---|
 | Admin | Todo, incluida Configuración. |
-| Comercial (Ventas) | Lo suyo (ver abajo). |
+| Comercial (Ventas) | Lo suyo; se puede ampliar a su equipo, a todo o a personas elegidas con [Qué ve](#qué-ve-pedido-de-rodrigo-del-20112026). |
 | Producción | Lo suyo: pedidos, Producción, Entregas y Cronograma (ver abajo). Edita Producción. |
 | Logística | Producción, Pedidos, Entregas, Recorridos y Cronograma (ver abajo). Revisa remitos y cierra entregas. |
 
@@ -47,6 +47,63 @@ No ve ni hace:
   que se lo pida a un administrador. Si intenta crear uno con el mismo mail o dominio, el aviso también dice de quién es.
 
 Lo que crea queda a su nombre (también si lo crea con Claude).
+
+## Qué ve (pedido de Rodrigo del 20/11/2026)
+
+«Que se pueda elegir qué ve cada usuario: solo lo suyo, lo de todos o elegir de qué usuarios. Carmen debería poder ver lo
+suyo, lo de Mili y lo de Sonia. Fijate cómo interactúa con el equipo.» Se elige en Configuración → Usuarios → **Qué ve**
+(perfil Comercial; los administradores ven todo y Producción y Logística tienen su propia regla).
+
+Está armado como lo resuelven los CRM grandes:
+
+- **HubSpot**: cada usuario tiene un alcance para *ver* y otro para *editar* (todo, lo de su equipo o lo suyo, más la
+  casilla de lo sin asignar). Si está en varios equipos, cuentan todos.
+- **Salesforce y Zoho**: la base es privada (lo suyo); el jefe ve lo de su gente y las **reglas para compartir** suman
+  acceso («lo de tal persona lo ve también tal otra», de solo lectura o editable). Solo suman, nunca restan.
+- **Pipedrive**: grupos de visibilidad (lo del grupo lo ve el grupo; el grupo de arriba ve lo de abajo).
+
+Acá, en la ventana «Qué ve» de cada vendedora:
+
+| Opción | Qué ve |
+|---|---|
+| **Solo lo suyo** (lo de siempre) | Lo que tiene a su nombre, lo sin propietario y lo asociado a eso. |
+| **Lo de su equipo** | Además, lo de quienes comparten alguno de sus equipos (columna Equipos, principal o extra). Si se suma alguien al equipo, lo ve solo. |
+| **Lo de todos** | Todos los contactos, empresas, negocios y pedidos, con sus tareas. |
+| **Y además, lo de estas personas** | Suma lo de las personas elegidas (las reglas para compartir de Salesforce). Con «Lo de todos» no hace falta. |
+
+Carmen Donoso arranca con «Solo lo suyo» y, además, lo de Mili Formosa y Sonia Andersen (migración `0104_que_ve.sql`).
+
+**Ver lo de otra persona** es ver sus registros como si fueran suyos: sus contactos, empresas, negocios y pedidos, lo
+asociado a ellos y sus tareas (aunque no estén en ningún registro), en las listas, los tableros, el buscador, la bandeja de
+conversaciones, Recorridos (sus entregas dicen el nombre del cliente) y Claude.
+
+**Ver no es editar** (como las reglas de solo lectura de Salesforce): edita lo suyo y lo sin propietario, y la gerenta, lo de
+su equipo. Lo de los demás lo mira: la ficha dice **«Solo para ver · es de Fulana»** y, si lo intenta cambiar, se le dice
+que lo cambia la propietaria o un administrador. Anotar y crear tareas en lo que ve sí puede, como en lo asociado a lo suyo.
+
+**Con el equipo:**
+
+- **Gerencia** (el «jefe ve lo de su gente» de Salesforce): está en la misma ventana. La gerenta de un equipo ve y edita
+  todo lo del equipo. Las personas del equipo que gerencia aparecen marcadas «Por la gerencia»; las de su equipo, si ve
+  «Lo de su equipo», «Por su equipo».
+- **Pipelines que ve** siguen encima, como los permisos por pipeline de HubSpot: un negocio de un pipeline que no ve no
+  aparece aunque vea a su dueña. Si elegís a alguien que trabaja en un pipeline que ella no ve, la ventana lo avisa
+  («de ahí verá sus contactos, empresas y pedidos, pero no sus negocios») y ofrece **Sumar esos pipelines** al guardar.
+- **Inicio** sigue mostrando sus números (no los de las personas que ve); los del equipo son de Dirección.
+
+Se controla en el servidor (`src/worker/alcance.ts`: `ve`, `ve_usuarios`, `vistos` y `duenosVistos`), así vale igual para la
+pantalla, la API y Claude. Columnas `users.ve` ('suyo', 'equipo' o 'todos') y `users.ve_usuarios` (JSON con ids). Prueba:
+`test/que-ve.test.mjs`.
+
+### La tabla de Usuarios (misma fecha: «quedó raro, desfasado»)
+
+La tabla desbordaba la pantalla y se corría toda la página de costado (el título quedaba «…guración»), y la columna de
+pipelines tenía dos renglones, así que los desplegables de una fila no quedaban a la misma altura. Ahora: el usuario lleva
+nombre y mail juntos y queda fijo a la izquierda; las columnas tienen ancho fijo (los textos largos se cortan con «…» y se
+leen enteros al pasar el mouse) y entran en una pantalla de notebook; si no entran, se desplaza solo la tabla. Los
+desplegables de varias opciones (`MultiPick`) flotan como los del DS, así no los corta la tabla. «Según sus equipos» y
+«volver a según sus equipos» de los pipelines están dentro de su desplegable («· a mano» cuando están elegidos a mano), y
+para Producción y Logística dice «No ven negocios». La Gerencia pasó a la ventana «Qué ve».
 
 **Qué puede cambiar** (revisión de la versión celular, 18/11/2026; `soloLoSuyoVentas` en `api.ts`): solo lo suyo o lo que no
 tiene propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Que vea una empresa ajena

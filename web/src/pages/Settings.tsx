@@ -54,70 +54,89 @@ function Users() {
   const teamsPick = (values: string[], onChange: (v: string[]) => void, small = true) => (
     <MultiPick small={small} options={meta.teams.map((t) => ({ value: String(t.id), label: t.name }))} values={values} onChange={onChange} />
   );
-  const profileSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
-    <Select className={cls} style={{ minWidth: 116 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
+  const profileSelect = (value: string, onChange: (v: string) => void, cls = 'input sm', style: CSSProperties = { minWidth: 116 }) => (
+    <Select className={cls} style={style} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
       {Object.entries(PROFILE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
   );
-  const roleSelect = (value: string, onChange: (v: string) => void, cls = 'input sm') => (
-    <Select className={cls} style={{ minWidth: 124 }} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Permisos">
+  const roleSelect = (value: string, onChange: (v: string) => void, cls = 'input sm', style: CSSProperties = { minWidth: 124 }) => (
+    <Select className={cls} style={style} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Permisos">
       {Object.entries(ROLE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
   );
+  const enTabla: CSSProperties = { width: '100%' };
   const patch = async (id: number, body: Record<string, unknown>) => {
     try { await http('PATCH', `/users/${id}`, body); users.reload(); reload(); toast('Guardado'); } catch (e) { toast((e as Error).message, true); }
   };
+  const [queVe, setQueVe] = useState<UsuarioFila | null>(null);
+  const lista = users.data ?? [];
   return (
     <>
-      <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas (login de Cloudflare Access). Para dar acceso, agregalo; para sacarlo, desactivalo o eliminalo.</span>
+      <div className="toolbar"><span className="muted small grow">Entra al CRM quien está en esta lista y activo, con su mail de Formas. Para dar acceso, agregalo; para sacarlo, desactivalo o eliminalo.</span>
         <button className="btn" disabled={trayendo || !fotos.data?.cuenta_de_servicio} onClick={traerFotos}
           title={fotos.data && !fotos.data.cuenta_de_servicio ? 'Falta la cuenta de servicio de Google (GOOGLE_SA_JSON).' : 'Trae la foto de la cuenta de Google de cada usuario (también se actualizan solas una vez por semana).'}>
           {trayendo ? 'Trayendo fotos…' : 'Traer fotos de Google'}</button>
         <button className="btn primary" onClick={() => setAdd(true)}>Agregar usuario</button></div>
       {fotos.data?.error && <p className="small danger-text" style={{ marginTop: 0 }}>Fotos de Google: {fotos.data.error}</p>}
-      <div className="table-wrap" style={{ overflow: 'visible' }}><table className="grid">
-        <thead><tr><th className="nosort">Nombre</th><th className="nosort">Email</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th><th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th><th className="nosort" title="Los pipelines de negocios que le aparecen. Si tiene más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.">Pipelines que ve</th><th className="nosort" title="Gerencia (perfil Comercial): ve y edita todo lo del equipo elegido, como si fuera suyo.">Gerencia de</th><th className="nosort" title="Dirección: Inicio con los resultados de todo el equipo (ganado por vendedora con sus pedidos, embudos, ranking por empresa), sin tareas.">Dirección</th><th className="nosort" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos por mail</th><th className="nosort">Activo</th><th className="nosort" aria-label="Eliminar" /></tr></thead>
-        <tbody>{users.data?.map((u) => (
-          <tr key={u.id}>
-            <td style={{ maxWidth: 200 }} title={u.name}><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} /><span className="ellipsis">{u.name}</span></span></td><td style={{ maxWidth: 180 }} title={u.email}>{u.email}</td>
-            <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }))}</td>
-            <td>{u.role === 'admin'
-              ? <span className="row small" style={{ gap: 8, flexWrap: 'nowrap' }}><span className="muted">Todo</span>
-                {meta.superadmin
-                  ? <label className="row" style={{ gap: 4 }} title={u.principal ? 'Administrador principal del CRM (ADMIN_EMAIL): es superadmin siempre.' : 'Superadmin: puede «Ver como» otro usuario y dar este permiso.'}>
+      {/* La tabla se desplaza sola de costado (con el nombre fijo a la izquierda): la página, el título y las pestañas quedan
+          quietos aunque la pantalla sea angosta. Los desplegables flotan, así que no hace falta dejarla desbordar. */}
+      <div className="table-wrap usuarios-tabla"><table className="grid">
+        {/* Anchos fijos: los textos largos se cortan con «…» (y se leen enteros al pasar el mouse) en lugar de estirar la tabla. */}
+        <colgroup><col style={{ width: 186 }} /><col style={{ width: 128 }} /><col style={{ width: 136 }} /><col style={{ width: 146 }} /><col style={{ width: 152 }} />
+          <col style={{ width: 146 }} /><col style={{ width: 80 }} /><col style={{ width: 60 }} /><col style={{ width: 62 }} /><col style={{ width: 72 }} /></colgroup>
+        <thead><tr><th className="nosort">Usuario</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th>
+          <th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th>
+          <th className="nosort" title="De quiénes ve los contactos, empresas, negocios y pedidos (perfil Comercial): lo suyo, lo de su equipo, todo o personas elegidas. Acá también va la Gerencia.">Qué ve</th>
+          <th className="nosort" title="Los pipelines de negocios que le aparecen. Si tiene más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.">Pipelines que ve</th>
+          <th className="nosort centro" title="Dirección: Inicio con los resultados de todo el equipo (ganado por vendedora con sus pedidos, embudos, ranking por empresa), sin tareas.">Dirección</th>
+          <th className="nosort centro" title="Recibe los avisos del CRM por mail: resumen de tareas, asignaciones y faltantes de entrega.">Avisos</th>
+          <th className="nosort centro">Activo</th><th className="nosort" aria-label="Acciones" /></tr></thead>
+        <tbody>{lista.map((u) => {
+          const aMano = !!pipelinesDe(u);
+          const ve = resumenVe(u, lista, meta.teams);
+          return (
+            <tr key={u.id} className={u.active ? undefined : 'inactivo'}>
+              <td className="usuario"><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} />
+                <span className="usuario-txt"><span className="ellipsis" title={u.name}>{u.name}</span><span className="ellipsis muted" title={u.email}>{u.email}</span></span></span></td>
+              <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }), 'input sm', enTabla)}</td>
+              <td>{u.role === 'admin'
+                // Admin puede todo (lo dice el perfil); acá va solo la marca de superadmin.
+                ? (meta.superadmin
+                  ? <label className="row small" style={{ gap: 6, flexWrap: 'nowrap' }} title={u.principal ? 'Administrador principal del CRM (ADMIN_EMAIL): es superadmin siempre.' : 'Admin: puede todo. Superadmin: además puede «Ver como» otro usuario y dar este permiso.'}>
                     <input type="checkbox" checked={!!u.superadmin} disabled={u.principal} onChange={(e) => patch(u.id, { superadmin: e.target.checked })} aria-label={`Superadmin: ${u.name}`} />Superadmin</label>
-                  : u.superadmin ? <span className="tag">Superadmin</span> : null}</span>
-              : roleSelect(u.role, (v) => patch(u.id, { role: v }))}</td>
-            <td style={{ minWidth: 190, maxWidth: 240, overflow: 'visible' }}>{teamsPick(teamsOf(u).map(String), (v) => patch(u.id, { teams: v.map(Number) }))}</td>
-            <td className="small" style={{ minWidth: 190, maxWidth: 240, whiteSpace: 'normal', overflow: 'visible' }}>{u.role === 'admin'
-              ? <span className="muted">{pipelinesSummary(u)}</span>
-              : <div className="stack" style={{ gap: 2, maxWidth: 240 }}>
-                <MultiPick small options={meta.pipelines.map((p) => ({ value: p.id, label: p.label }))} values={meta.pipelines.filter((p) => canSeePipeline(u, p)).map((p) => p.id)}
-                  resumen={pipelinesSummary(u) === 'Todos' ? 'Todos' : pipelinesSummary(u) === 'Ninguno' ? 'Ninguno' : undefined}
-                  onChange={(v) => patch(u.id, { pipelines: v })} />
-                {pipelinesDe(u)
-                  ? <button type="button" className="cr-link" title="Volver a la regla de cada pipeline (los equipos que lo ven)" onClick={() => patch(u.id, { pipelines: null })}>Elegidos a mano · volver a «según equipos»</button>
-                  : <span className="muted">Según sus equipos</span>}
-              </div>}</td>
-            <td>{u.role === 'admin' ? <span className="muted small">—</span>
-              : <Select className="input sm" style={{ minWidth: 130 }} value={u.gerencia_team ?? ''} onChange={(e) => patch(u.id, { gerencia_team: e.target.value ? Number(e.target.value) : null })} aria-label={`Gerencia de: ${u.name}`}>
-                <option value="">Ninguno</option>
-                {meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </Select>}</td>
-            <td><input type="checkbox" checked={!!u.direccion} onChange={(e) => patch(u.id, { direccion: e.target.checked })} aria-label={`Dirección: ${u.name}`} /></td>
-            <td><input type="checkbox" checked={!!u.avisos_mail} onChange={(e) => patch(u.id, { avisos_mail: e.target.checked })} aria-label={`Avisos por mail para ${u.name}`} /></td>
-            <td><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label="Activo" /></td>
-            <td style={{ whiteSpace: 'nowrap' }}>{meta.superadmin && u.active && u.id !== meta.me.id && <button className="btn sm ghost icon" title={`Ver el CRM como ${u.name} (solo para mirar)`}
-              aria-label={`Ver como ${u.name}`} onClick={() => verComo(u.id)}><Icon name="eye" size={14} /></button>}
-              {u.id !== meta.me.id && <button className="btn sm ghost icon danger" title={`Eliminar a ${u.name}`} aria-label={`Eliminar a ${u.name}`} onClick={() => setBorrar(u)}><Icon name="trash" size={14} /></button>}</td>
-          </tr>
-        ))}</tbody>
+                  : u.superadmin ? <span className="tag">Superadmin</span> : <span className="muted small">Todo</span>)
+                : roleSelect(u.role, (v) => patch(u.id, { role: v }), 'input sm', enTabla)}</td>
+              <td className="ancho">{teamsPick(teamsOf(u).map(String), (v) => patch(u.id, { teams: v.map(Number) }))}</td>
+              <td className="ancho">{ve.editable
+                ? <button type="button" className="input select-like sm" onClick={() => setQueVe(u)} title={ve.largo} aria-label={`Qué ve ${u.name}: ${ve.largo}`}>
+                  <span className="select-value">{ve.corto}</span></button>
+                : <span className="muted small" title={ve.largo}>{ve.corto}</span>}</td>
+              <td className="ancho">{u.role === 'admin'
+                ? <span className="muted small ellipsis" title="Administrador: ve todos los pipelines.">{pipelinesSummary(u)}</span>
+                : u.profile !== 'comercial'
+                  ? <span className="muted small ellipsis" title="Producción y Logística no ven negocios: los pipelines no les cambian nada.">No ven negocios</span>
+                  : <MultiPick small options={meta.pipelines.map((p) => ({ value: p.id, label: p.label }))} values={meta.pipelines.filter((p) => canSeePipeline(u, p)).map((p) => p.id)}
+                    resumen={`${pipelinesSummary(u)}${aMano ? ' · a mano' : ''}`}
+                    title={`${pipelinesSummary(u)}. ${aMano ? 'Elegidos a mano para esta persona.' : 'Según sus equipos (lo que dice cada pipeline en Pipelines).'}`}
+                    ariaLabel={`Pipelines que ve ${u.name}`} onChange={(v) => patch(u.id, { pipelines: v })}
+                    pie={aMano
+                      ? <button type="button" className="cr-link" onClick={() => patch(u.id, { pipelines: null })}>Elegidos a mano · volver a «según sus equipos»</button>
+                      : <span className="muted">Según sus equipos. Al marcar o desmarcar, quedan elegidos a mano.</span>} />}</td>
+              <td className="centro"><input type="checkbox" checked={!!u.direccion} onChange={(e) => patch(u.id, { direccion: e.target.checked })} aria-label={`Dirección: ${u.name}`} /></td>
+              <td className="centro"><input type="checkbox" checked={!!u.avisos_mail} onChange={(e) => patch(u.id, { avisos_mail: e.target.checked })} aria-label={`Avisos por mail para ${u.name}`} /></td>
+              <td className="centro"><input type="checkbox" checked={!!u.active} onChange={(e) => patch(u.id, { active: e.target.checked })} aria-label={`Activo: ${u.name}`} /></td>
+              <td className="acciones"><span className="row" style={{ gap: 2, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                {meta.superadmin && u.active && u.id !== meta.me.id && <button className="btn sm ghost icon" title={`Ver el CRM como ${u.name} (solo para mirar)`}
+                  aria-label={`Ver como ${u.name}`} onClick={() => verComo(u.id)}><Icon name="eye" size={14} /></button>}
+                {u.id !== meta.me.id && <button className="btn sm ghost icon danger" title={`Eliminar a ${u.name}`} aria-label={`Eliminar a ${u.name}`} onClick={() => setBorrar(u)}><Icon name="trash" size={14} /></button>}</span></td>
+            </tr>
+          );
+        })}</tbody>
       </table></div>
-      <p className="muted small">Perfiles: Admin ve y puede todo, incluida esta configuración. Comercial (ventas) ve sus contactos, empresas, negocios y pedidos, lo que no tiene propietario (para tomarlo) y lo asociado a lo suyo, con sus tareas y conversaciones; ve el saldo y la deuda del cliente y los remitos de sus pedidos (para ver y descargar), pero no Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta listas. Producción ve los pedidos, Producción, Entregas y el Cronograma; no ve negocios ni las listas de contactos y empresas (solo abre el cliente y los contactos de un pedido y los proveedores). Logística por ahora ve todo.
-        Permisos (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada.
-        Pipelines que ve: por defecto, según sus equipos (lo que dice cada pipeline en Pipelines); al marcarlos acá quedan elegidos a mano para esa persona. Si ve más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.
-        Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito, o su menú abajo a la izquierda), solo para mirar, y dar o sacar este permiso.
-        Gerencia de (perfil Comercial): ve y edita todo lo de ese equipo como si fuera suyo (lo de sus vendedoras, los negocios de sus pipelines y los pedidos de su unidad) y puede asignárselo a cualquiera del equipo.
-        Dirección: su Inicio muestra los resultados de todo el equipo en el período que elija (ganado por vendedora con sus pedidos, embudo de cada pipeline, motivos de pérdida, ranking por empresa), aunque su perfil sea Comercial; no muestra tareas.
-        Avisos por mail: el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega. Arranca apagado; solo les llega a los que lo tienen prendido.</p>
+      <div className="muted small usuarios-ayuda">
+        <p><b>Perfiles.</b> Admin ve y puede todo, incluida esta configuración. Comercial (ventas) ve lo que dice «Qué ve», lo que no tiene propietario (para tomarlo) y lo asociado a eso, con sus tareas y conversaciones; ve el saldo y la deuda del cliente y los remitos de sus pedidos, pero no Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta listas. Producción y Logística ven todos los pedidos y sus pantallas; no ven negocios ni las listas de contactos y empresas (solo abren el cliente y los contactos de un pedido y los proveedores).</p>
+        <p><b>Permisos</b> (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada. Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito), solo para mirar, y dar o sacar este permiso.</p>
+        <p><b>Qué ve</b> (perfil Comercial), como en HubSpot y Salesforce: solo lo suyo, lo de su equipo o todo, y además lo de las personas que elijas (por ejemplo, Carmen ve lo suyo, lo de Mili y lo de Sonia). Lo de los demás lo ve pero no lo cambia: lo cambia su propietario o un administrador. La Gerencia, en la misma ventana, es ver y editar todo lo de un equipo como si fuera suyo. Los negocios, además, solo de los pipelines que ve.</p>
+        <p><b>Pipelines que ve:</b> por defecto, según sus equipos (lo que dice cada pipeline en Pipelines); al marcarlos acá quedan elegidos a mano («· a mano»; desde la misma lista se vuelve a «según sus equipos»). Producción y Logística no ven negocios. <b>Dirección:</b> su Inicio muestra los resultados de todo el equipo, aunque su perfil sea Comercial. <b>Avisos:</b> el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega; arranca apagado.</p>
+      </div>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
         try { await http('POST', '/users', { ...f, teams: f.teams.map(Number) }); setAdd(false); users.reload(); reload(); toast('Usuario agregado'); } catch (e) { toast((e as Error).message, true); }
       }}>Agregar</button>}>
@@ -129,12 +148,176 @@ function Users() {
         <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={f.avisos_mail} onChange={(e) => setF({ ...f, avisos_mail: e.target.checked })} />Recibe avisos por mail</label>
       </Modal>}
       {borrar && <EliminarUsuario u={borrar} onClose={() => setBorrar(null)} onDone={() => { setBorrar(null); users.reload(); reload(); }} />}
+      {queVe && <QueVe u={queVe} usuarios={lista} onClose={() => setQueVe(null)} onGuardado={() => { setQueVe(null); users.reload(); reload(); }} />}
     </>
   );
 }
 
 type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
-  superadmin: number; direccion?: number; gerencia_team?: number | null; principal: boolean };
+  superadmin: number; direccion?: number; gerencia_team?: number | null; ve?: string; ve_usuarios?: string; principal: boolean };
+
+// ---------- Qué ve (src/worker/alcance.ts, docs/PERFILES.md) ----------
+// Como el «Ver» de HubSpot (todo, su equipo o lo suyo) más las reglas para compartir de Salesforce (además, lo de estas
+// personas). Vale para el perfil Comercial; la Gerencia (ver y editar lo de un equipo) se elige en la misma ventana.
+type Ve = 'suyo' | 'equipo' | 'todos';
+const veDe = (u: UsuarioFila): Ve => (u.ve === 'equipo' || u.ve === 'todos' ? u.ve : 'suyo');
+function idsDe(json?: string | null): number[] {
+  try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a.map(Number).filter(Number.isInteger) : []; } catch { return []; }
+}
+// Comparte algún equipo con ella (para «su equipo») o es del equipo que gerencia.
+const comparte = (a: UsuarioFila, b: UsuarioFila) => teamsOf(a).some((t) => teamsOf(b).includes(t));
+// Nombres cortos: el primer nombre, salvo que se repita («Alejandra Alvarez» y «Alejandra Mansilla»).
+function nombresCortos(us: UsuarioFila[], todos: UsuarioFila[]) {
+  return us.map((x) => { const n = x.name.split(' ')[0]; return todos.filter((y) => y.name.split(' ')[0] === n).length > 1 ? x.name : n; });
+}
+const yLista = (ns: string[]) => (ns.length > 1 ? `${ns.slice(0, -1).join(', ')} y ${ns[ns.length - 1]}` : ns[0] ?? '');
+// Por qué ya lo ve sin marcarlo: todo, su equipo o la gerencia.
+function cubierto(u: UsuarioFila, x: UsuarioFila, ve: Ve, gerencia: number | null): string | null {
+  if (ve === 'todos') return 've todo';
+  if (ve === 'equipo' && comparte(u, x)) return 'su equipo';
+  if (gerencia != null && teamsOf(x).includes(gerencia)) return 'gerencia';
+  return null;
+}
+// Las personas que eligió y que no ve ya por otro lado.
+function elegidas(u: UsuarioFila, usuarios: UsuarioFila[], ve: Ve, extra: number[], gerencia: number | null) {
+  return usuarios.filter((x) => x.id !== u.id && extra.includes(x.id) && !cubierto(u, x, ve, gerencia));
+}
+function resumenVe(u: UsuarioFila, usuarios: UsuarioFila[], teams: Array<{ id: number; name: string }>): { corto: string; largo: string; editable: boolean } {
+  if (u.role === 'admin') return { corto: 'Todo (administrador)', largo: 'Administrador: ve y edita todo.', editable: false };
+  if (u.profile !== 'comercial') {
+    return { corto: 'Según su perfil', editable: false,
+      largo: 'Producción y Logística ven todos los pedidos y, de contactos y empresas, los proveedores y los que están en algún pedido. No ven negocios.' };
+  }
+  const ve = veDe(u), ger = u.gerencia_team ?? null;
+  const equipos = teamsOf(u).map((t) => teams.find((x) => x.id === t)?.name).filter(Boolean) as string[];
+  const gerNombre = ger != null ? teams.find((t) => t.id === ger)?.name ?? 'su equipo' : null;
+  if (ve === 'todos') return { corto: 'Todo', largo: `Ve todo; edita lo suyo${gerNombre ? ` y lo de ${gerNombre} (gerencia)` : ''}.`, editable: true };
+  const extra = elegidas(u, usuarios, ve, idsDe(u.ve_usuarios), ger);
+  const nombres = nombresCortos(extra, usuarios);
+  const base = ve === 'equipo' ? 'Su equipo' : 'Lo suyo';
+  const partes = [base, ...(extra.length ? [`+ ${extra.length <= 2 ? nombres.join(' y ') : `${extra.length} personas`}`] : []), ...(gerNombre ? [`+ gerencia de ${gerNombre}`] : [])];
+  const largo = [
+    ve === 'equipo' ? `Ve lo suyo y lo de su equipo${equipos.length ? ` (${yLista(equipos)})` : ' (no está en ningún equipo)'}` : 'Ve lo suyo',
+    extra.length ? `además, lo de ${yLista(extra.map((x) => x.name))}` : '',
+    gerNombre ? `es gerenta de ${gerNombre}: ve y edita todo lo de ese equipo` : '',
+  ].filter(Boolean).join('; ') + '.';
+  return { corto: partes.join(' '), largo, editable: true };
+}
+
+function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios: UsuarioFila[]; onClose: () => void; onGuardado: () => void }) {
+  const { meta, reload } = useMeta();
+  const toast = useToast();
+  const [ve, setVe] = useState<Ve>(veDe(u));
+  const [extra, setExtra] = useState<number[]>(idsDe(u.ve_usuarios));
+  const [gerencia, setGerencia] = useState<number | null>(u.gerencia_team ?? null);
+  const [q, setQ] = useState('');
+  const [yendo, setYendo] = useState(false);
+  const nombre = u.name.split(' ')[0];
+  const equipos = teamsOf(u);
+  const nombreEquipo = (t: number) => meta.teams.find((x) => x.id === t)?.name ?? `Equipo ${t}`;
+  // Las personas, agrupadas por equipo: primero los suyos. Las inactivas solo si ya estaban elegidas.
+  const candidatas = usuarios.filter((x) => x.id !== u.id && (x.active || extra.includes(x.id)));
+  const orden = [...equipos, ...meta.teams.map((t) => t.id).filter((t) => !equipos.includes(t))];
+  const grupos: Array<{ titulo: string; us: UsuarioFila[] }> = [];
+  const puestos = new Set<number>();
+  for (const t of orden) {
+    const us = candidatas.filter((x) => !puestos.has(x.id) && teamsOf(x).includes(t));
+    us.forEach((x) => puestos.add(x.id));
+    if (us.length) grupos.push({ titulo: `${equipos.includes(t) ? 'Su equipo · ' : ''}${nombreEquipo(t)}`, us });
+  }
+  const sinEquipo = candidatas.filter((x) => !puestos.has(x.id));
+  if (sinEquipo.length) grupos.push({ titulo: 'Sin equipo', us: sinEquipo });
+  const nq = q.trim().toLowerCase();
+  const filtra = (x: UsuarioFila) => !nq || x.name.toLowerCase().includes(nq) || x.email.toLowerCase().includes(nq);
+  // A quiénes ve en total (para avisar de los pipelines que no ve).
+  const vistas = usuarios.filter((x) => x.id !== u.id && (x.profile === 'comercial' || x.role === 'admin') && (cubierto(u, x, ve, gerencia) || extra.includes(x.id)));
+  // Los negocios de las personas que ve, solo en los pipelines que ve: los pipelines de sus equipos que ella no ve.
+  const faltan = meta.pipelines.filter((p) => !canSeePipeline(u, p) && p.team_id != null)
+    .map((p) => ({ p, de: vistas.filter((x) => teamsOf(x).includes(p.team_id!)) })).filter((x) => x.de.length);
+  // «Sumar esos pipelines»: se suman al guardar, junto con lo demás (quedan elegidos a mano, como en la columna).
+  const [sumar, setSumar] = useState(false);
+  const pipesFaltan = faltan.map((x) => `«${x.p.label}»`);
+  const guardar = async () => {
+    setYendo(true);
+    try {
+      await http('PATCH', `/users/${u.id}`, { ve, ve_usuarios: extra, gerencia_team: gerencia,
+        ...(sumar && faltan.length ? { pipelines: [...meta.pipelines.filter((p) => canSeePipeline(u, p)).map((p) => p.id), ...faltan.map((x) => x.p.id)] } : {}) });
+      toast('Guardado'); reload(); onGuardado();
+    } catch (e) { toast((e as Error).message, true); setYendo(false); }
+  };
+  const opcion = (v: Ve, titulo: string, detalle: string) => (
+    <label className={`que-ve-op${ve === v ? ' on' : ''}`}>
+      <input type="radio" name="que-ve" checked={ve === v} onChange={() => setVe(v)} />
+      <span><b>{titulo}</b><span className="muted small">{detalle}</span></span>
+    </label>
+  );
+  const companeros = usuarios.filter((x) => x.id !== u.id && x.active && comparte(u, x));
+  return (
+    <Modal title={`Qué ve ${u.name}`} onClose={onClose} footer={<>
+      <button className="btn" onClick={onClose}>Cancelar</button>
+      <button className="btn primary" disabled={yendo} onClick={guardar}>{yendo ? 'Guardando…' : 'Guardar'}</button>
+    </>}>
+      <div className="que-ve">
+        <div className="stack" style={{ gap: 6 }} role="radiogroup" aria-label="Qué ve">
+          {opcion('suyo', 'Solo lo suyo', 'Lo que tiene a su nombre, lo que no tiene propietario (para tomarlo) y lo asociado a eso.')}
+          {opcion('equipo', 'Lo de su equipo', equipos.length
+            ? `${yLista(equipos.map(nombreEquipo))}: lo de ${companeros.length ? yLista(nombresCortos(companeros, usuarios)) : 'nadie más por ahora'}. Si se suma alguien al equipo, lo ve solo.`
+            : 'No está en ningún equipo: se elige en la columna Equipos. Mientras tanto, es lo mismo que «Solo lo suyo».')}
+          {opcion('todos', 'Lo de todos', 'Todos los contactos, empresas, negocios y pedidos, con sus tareas.')}
+        </div>
+        {ve !== 'todos' && <div className="stack" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 8 }}><b className="small grow">Y además, lo de estas personas</b>
+            <input className="input sm" style={{ width: 180 }} placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar personas" /></div>
+          <div className="que-ve-lista">
+            {grupos.map((g) => {
+              const us = g.us.filter(filtra);
+              if (!us.length) return null;
+              return (
+                <div key={g.titulo}>
+                  <div className="grp">{g.titulo}</div>
+                  {us.map((x) => {
+                    const por = cubierto(u, x, ve, gerencia);
+                    return (
+                      <label key={x.id} className={`opt small${por ? ' muted' : ''}`} title={por ? `Ya lo ve por ${por === 'gerencia' ? 'la gerencia' : 'su equipo'}.` : undefined}>
+                        <input type="checkbox" checked={!!por || extra.includes(x.id)} disabled={!!por}
+                          onChange={(e) => setExtra(e.target.checked ? [...extra, x.id] : extra.filter((i) => i !== x.id))} />
+                        <Avatar name={x.name} photo={x.photo_url} />
+                        <span className="grow ellipsis">{x.name}{!x.active ? ' (inactivo)' : ''}</span>
+                        {por ? <span className="tag">{por === 'gerencia' ? 'Por la gerencia' : 'Por su equipo'}</span>
+                          : x.profile !== 'comercial' ? <span className="muted">{PROFILE_LABEL[x.profile] ?? x.profile}</span> : null}
+                      </label>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>}
+        {faltan.length > 0 && (sumar
+          ? <div className="aviso-que-ve ok small">
+            <Icon name="check" size={14} />
+            <span className="grow">Al guardar, {nombre} ve también {yLista(pipesFaltan)}.</span>
+            <button type="button" className="btn sm" onClick={() => setSumar(false)}>Deshacer</button>
+          </div>
+          : <div className="aviso-que-ve small">
+            <Icon name="alert" size={14} />
+            <span className="grow">Los negocios se ven solo en los pipelines que ve, y {nombre} no ve {yLista(pipesFaltan)}, donde trabaja{new Set(faltan.flatMap((x) => x.de.map((d) => d.id))).size > 1 ? 'n' : ''} {yLista(nombresCortos([...new Map(faltan.flatMap((x) => x.de).map((x) => [x.id, x])).values()], usuarios))}. De ahí verá sus contactos, empresas y pedidos, pero no sus negocios.</span>
+            <button type="button" className="btn sm" onClick={() => setSumar(true)}>Sumar {faltan.length === 1 ? 'ese pipeline' : 'esos pipelines'}</button>
+          </div>)}
+        <div className="stack que-ve-edita" style={{ gap: 6 }}>
+          <b className="small">Qué edita</b>
+          <p className="muted small" style={{ margin: 0 }}>Lo suyo y lo que no tiene propietario. Lo de las demás personas lo puede mirar, no cambiar: en la ficha dice «Solo para ver» y lo cambia su propietario o un administrador.</p>
+          <label className="field">Gerencia de
+            <Select className="input" value={gerencia ?? ''} onChange={(e) => setGerencia(e.target.value ? Number(e.target.value) : null)} aria-label={`Gerencia de: ${u.name}`}>
+              <option value="">Ninguno</option>
+              {meta.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </Select></label>
+          <p className="muted small" style={{ margin: 0 }}>La gerenta de un equipo ve y edita todo lo de ese equipo como si fuera suyo (lo de sus integrantes, los negocios de sus pipelines y los pedidos de su unidad) y se lo puede asignar a cualquiera del equipo.</p>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 type Uso = { registros: Record<ObjectType, number>; tareas_abiertas: number; tokens: number; choferes: number };
 
 // Eliminar un usuario: antes dice qué tiene a su nombre y a quién se le pasa (src/worker/api.ts, DELETE /users/:id).

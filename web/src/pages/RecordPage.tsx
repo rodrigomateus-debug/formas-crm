@@ -17,7 +17,8 @@ import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasPro
 import { siFestejaPedido, siGano } from '../Chispin';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
-interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
+interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number };
+  solo_ver?: { de: string | null } }   // perfil Ventas: lo ve pero es de otra persona (no lo puede cambiar)
 
 const RELATED: Record<ObjectType, ObjectType[]> = {
   contact: ['company', 'deal', 'order'],
@@ -43,7 +44,7 @@ export default function RecordPage() {
   return (
     <div className="content flush record-wrap">
       <div className="record">
-        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} /></aside>
+        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} soloVer={data.data.solo_ver} /></aside>
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
@@ -166,7 +167,7 @@ function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r:
   return r.props.pdv_finnegans ? `PDV ${r.props.pdv_finnegans}` : '';
 }
 
-function LeftPanel({ type, record, associations, onChange, produccion }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion'] }) {
+function LeftPanel({ type, record, associations, onChange, produccion, soloVer }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion']; soloVer?: Loaded['solo_ver'] }) {
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
@@ -216,7 +217,9 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
                 {produccion && <QuienProduce {...produccion} />}
               </div>
             )}
-            <TagChips meta={meta} ids={record.tags} /></div>
+            <TagChips meta={meta} ids={record.tags} />
+            {soloVer && <div className="rec-solo-ver small" title={`Lo ves por tu permiso para ver lo de otras personas (o porque está asociado a lo tuyo). Lo cambia${soloVer.de ? ` ${soloVer.de}` : ' quien lo tiene'} o un administrador.`}>
+              <Icon name="eye" size={13} />Solo para ver{soloVer.de ? ` · es de ${soloVer.de}` : ''}</div>}</div>
           <RecordMenu items={[
             ...(meta.me.role !== 'viewer' ? [{ label: 'Cambiar nombre', icon: 'edit', onClick: () => setEditNombre(true) }] : []),
             { label: 'Combinar con otro…', icon: 'merge', onClick: () => setMerge(true) },

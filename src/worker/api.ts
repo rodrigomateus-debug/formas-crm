@@ -48,7 +48,7 @@ import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { festejosDePedidos } from './festejos';
-import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas, VE } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
@@ -299,7 +299,13 @@ api.get('/records/:type/:id', async (c) => {
   // de Rodrigo del 17/11/2026).
   const prod = type === 'order' ? await produccionDePedido(c.env.DB, row.id) : null;
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
-  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
+  // Perfil Ventas: lo ve pero no lo puede cambiar (es de otra persona: lo ve por Qué ve o porque está asociado a lo suyo).
+  // La ficha lo avisa arriba, en lugar de rebotar recién al guardar.
+  const user = c.get('ctx').user;
+  const soloVer = esVentas(user) && !(await esSuyo(c.env.DB, user, row))
+    ? { de: (await c.env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(row.owner_id).first<{ name: string }>())?.name ?? null } : null;
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user),
+    ...(produccion ? { produccion } : {}), ...(soloVer ? { solo_ver: soloVer } : {}) });
 });
 
 // Anular pedidos desde la pantalla (pedido de Rodrigo del 20/11/2026): antes de hacerlo se pide confirmación, con lo que
@@ -2100,7 +2106,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null; ve?: string; ve_usuarios?: number[] }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -2118,6 +2124,19 @@ api.patch('/users/:id', async (c) => {
     const t = b.gerencia_team == null ? null : Number(b.gerencia_team);
     if (t != null && !(await c.env.DB.prepare('SELECT 1 FROM teams WHERE id = ?').bind(t).first())) throw new HttpError(400, 'No existe ese equipo.');
     await c.env.DB.prepare('UPDATE users SET gerencia_team = ? WHERE id = ?').bind(t, cur.id).run();
+  }
+  // Qué ve (alcance.ts): lo suyo, lo de su equipo o todo, y además lo de las personas elegidas (solo usuarios que existen).
+  if (b.ve !== undefined) {
+    if (!(VE as readonly string[]).includes(b.ve)) throw new HttpError(400, `«Qué ve» desconocido: ${b.ve}.`);
+    await c.env.DB.prepare('UPDATE users SET ve = ? WHERE id = ?').bind(b.ve, cur.id).run();
+  }
+  if (b.ve_usuarios !== undefined) {
+    if (!Array.isArray(b.ve_usuarios)) throw new HttpError(400, 'Las personas que ve van en una lista.');
+    const pedidos = [...new Set(b.ve_usuarios.map(Number))].filter((n) => Number.isInteger(n) && n !== Number(cur.id));
+    const { results } = pedidos.length ? await c.env.DB.prepare('SELECT id FROM users WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify(pedidos)).all<{ id: number }>() : { results: [] as Array<{ id: number }> };
+    const existen = new Set(results.map((r) => r.id));
+    await c.env.DB.prepare('UPDATE users SET ve_usuarios = ? WHERE id = ?').bind(JSON.stringify(pedidos.filter((n) => existen.has(n))), cur.id).run();
   }
   const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {

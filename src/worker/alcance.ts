@@ -12,6 +12,8 @@ import { UNIDADES } from './records';
 //   - lo que no tiene propietario (para poder tomarlo: leads de Darwin, LinkedIn, formularios),
 //   - lo asociado a lo suyo: la empresa y los contactos de sus negocios, contactos y empresas; los pedidos de sus negocios.
 //   Un negocio de otra vendedora no se ve nunca por estar asociado a algo suyo (por ejemplo, a una empresa de ella).
+//   «Lo suyo» se puede ampliar en Configuración → Usuarios → Qué ve (su equipo, todo o personas elegidas; ver `vistos`):
+//   lo de esas personas lo ve como lo suyo, pero no lo edita.
 //   Encima de esto siguen los pipelines por equipo (pipelines.ts).
 // Pantallas: no ve Producción (ni quién tiene el pedido en producción), la bandeja de Entregas ni el ranking del equipo en
 // Inicio. Sí ve el saldo y la deuda del cliente (Finnegans) y los remitos de sus pedidos, para verlos y descargarlos.
@@ -45,12 +47,60 @@ export const restringido = (u: User) => esVentas(u) || esOperaciones(u);
 // ese equipo: los registros cuyo propietario es del equipo (equipo principal o extra), los negocios de los pipelines del
 // equipo y los pedidos de su unidad de negocio; y puede asignárselos a cualquiera del equipo. Lo demás, como Ventas.
 export const gerenciaDe = (u: User) => (esVentas(u) && u.gerencia_team ? Number(u.gerencia_team) : null);
-// Los ids de usuario que «son suyos»: ella y, si es gerenta, los del equipo (subconsulta SQL).
+
+// Qué ve (pedido de Rodrigo del 20/11/2026: «que se pueda elegir qué ve cada usuario: solo lo suyo, lo de todos o elegir de
+// qué usuarios; Carmen debería poder ver lo suyo, lo de Mili y lo de Sonia»). Como lo hacen los CRM grandes: el «Ver» de
+// HubSpot (todo, su equipo o lo suyo; si está en varios equipos, cuentan todos) y las reglas para compartir de Salesforce
+// (lo de tal persona lo ve también tal otra: solo suman, nunca restan). En Configuración → Usuarios → Qué ve:
+//   - `ve`: 'suyo' (lo de siempre), 'equipo' (lo de quienes comparten alguno de sus equipos) o 'todos';
+//   - `ve_usuarios`: además, lo de estas personas (con 'todos' no hace falta).
+// Ver lo de otra persona es ver sus registros y lo asociado a ellos, sus negocios incluidos, y sus tareas, como si fuera
+// suyo; editarlo, no (como en Salesforce, la regla es de solo lectura): eso sigue siendo lo suyo y, si es gerenta, lo de su
+// equipo. Encima siguen valiendo los pipelines que ve: un negocio de un pipeline que no ve no aparece.
+export type Ve = 'suyo' | 'equipo' | 'todos';
+export const VE: readonly Ve[] = ['suyo', 'equipo', 'todos'];
+export const veModo = (u: User): Ve => ((VE as readonly string[]).includes(String(u.ve)) ? u.ve as Ve : 'suyo');
+// Vendedora que ve todo (para ver es como un administrador; para editar, como Ventas).
+export const veTodo = (u: User) => esVentas(u) && veModo(u) === 'todos';
+export function veUsuarios(u: User): number[] {
+  try {
+    const a = JSON.parse(u.ve_usuarios || '[]');
+    return Array.isArray(a) ? [...new Set(a.map(Number).filter((n) => Number.isInteger(n) && n !== Number(u.id)))] : [];
+  } catch { return []; }
+}
+export function equiposDe(u: Pick<User, 'team_id' | 'extra_teams'>): number[] {
+  let extra: unknown[] = [];
+  try { const a = JSON.parse(u.extra_teams || '[]'); if (Array.isArray(a)) extra = a; } catch { /* sin equipos extra */ }
+  return [...new Set([u.team_id, ...extra].map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+}
+const enteros = (ns: number[]) => {
+  if (ns.some((n) => !Number.isInteger(n))) throw new HttpError(500, 'Usuario inválido.');
+  return ns.join(', ');
+};
+// El usuario `al` es de alguno de esos equipos (principal o extra).
+const deLosEquipos = (al: string, ts: number[]) => `(${al}.team_id IN (${enteros(ts)})
+    OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${al}.extra_teams) THEN ${al}.extra_teams ELSE '[]' END) WHERE value IN (${enteros(ts)})))`;
+// Los ids de usuario que «son suyos» para editar: ella y, si es gerenta, los del equipo (subconsulta SQL).
 function propios(user: User) {
   const id = Number(user.id), t = gerenciaDe(user);
-  if (!Number.isInteger(id) || (t != null && !Number.isInteger(t))) throw new HttpError(500, 'Usuario inválido.');
-  return t == null ? `(${id})` : `(SELECT gu.id FROM users gu WHERE gu.id = ${id} OR gu.team_id = ${t}
-    OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(gu.extra_teams) THEN gu.extra_teams ELSE '[]' END) WHERE value = ${t}))`;
+  return t == null ? `(${enteros([id])})` : `(SELECT gu.id FROM users gu WHERE gu.id = ${enteros([id])} OR ${deLosEquipos('gu', [t])})`;
+}
+// Los ids de usuario cuyo trabajo ve (no vale para «todos», que no filtra): los suyos para editar, los de sus equipos si ve
+// lo del equipo y las personas elegidas.
+function vistos(user: User) {
+  const g = gerenciaDe(user);
+  const ts = [...new Set([...(veModo(user) === 'equipo' ? equiposDe(user) : []), ...(g == null ? [] : [g])])];
+  const ids = enteros([Number(user.id), ...veUsuarios(user)]);
+  return ts.length ? `(SELECT gv.id FROM users gv WHERE gv.id IN (${ids}) OR ${deLosEquipos('gv', ts)})` : `(${ids})`;
+}
+// ¿Ve algo más que lo suyo? (para no sumar condiciones de más en las consultas).
+const veDeOtros = (u: User) => esVentas(u) && (veModo(u) !== 'suyo' || veUsuarios(u).length > 0 || gerenciaDe(u) != null);
+// Los ids de los usuarios cuyo trabajo ve, para las cuentas que se hacen fuera de SQL; null: todo (no es Ventas o ve todo).
+export async function duenosVistos(db: D1Database, user: User): Promise<Set<number> | null> {
+  if (!esVentas(user) || veTodo(user)) return null;
+  if (!veDeOtros(user)) return new Set([Number(user.id)]);
+  const { results } = await db.prepare(`SELECT id FROM users WHERE id IN ${vistos(user)}`).all<{ id: number }>();
+  return new Set([Number(user.id), ...results.map((r) => r.id)]);
 }
 // Lo de la unidad que no depende del propietario: negocios de los pipelines del equipo y pedidos de la unidad.
 function deLaUnidad(al: string, user: User) {
@@ -84,8 +134,9 @@ export function visibleSql(al: string, user: User) {
     return `(${al}.object_type = 'order' OR (${al}.object_type IN ('company', 'contact') AND (json_extract(${al}.props, '$.tipo_de_relacion') = 'proveedor'
       OR EXISTS (SELECT 1 FROM associations pa WHERE pa.to_id = ${al}.id AND pa.from_type = 'order'))))`;
   }
-  if (!esVentas(user)) return '1';
-  const mios = propios(user);
+  if (!esVentas(user) || veTodo(user)) return '1';
+  // Lo suyo, lo de su equipo si es gerenta y lo de quienes eligió ver (Qué ve).
+  const mios = vistos(user);
   const unidad = gerenciaDe(user) == null ? '' : ` OR ${deLaUnidad(al, user)} OR ${al}.id IN (SELECT ua.to_id FROM associations ua
     WHERE ua.to_type != 'deal' AND (ua.to_type != 'order' OR ua.from_type = 'deal') AND ua.from_id IN (SELECT uo.id FROM records uo WHERE ${deLaUnidad('uo', user)}))`;
   return `(${al}.owner_id IN ${mios} OR ${al}.owner_id IS NULL${unidad} OR ${al}.id IN (SELECT va.to_id FROM associations va
@@ -96,9 +147,11 @@ export function visibleSql(al: string, user: User) {
 // Lo mismo para una actividad (nota, mail, tarea…) `al`: la ve si es suya (la tiene asignada o la cargó ella) o si está en
 // algún registro que ve.
 export function actividadVisibleSql(al: string, user: User) {
-  if (!restringido(user)) return '1';
+  if (!restringido(user) || veTodo(user)) return '1';
   const id = Number(user.id);
-  return `(${al}.owner_id = ${id} OR ${al}.created_by = ${id} OR EXISTS (SELECT 1 FROM tarea_colaboradores vc WHERE vc.activity_id = ${al}.id AND vc.user_id = ${id})
+  // Las tareas de las personas cuyo trabajo ve (Qué ve, o su equipo si es gerenta), aunque no estén en ningún registro.
+  const deOtros = veDeOtros(user) ? ` OR ${al}.owner_id IN ${vistos(user)}` : '';
+  return `(${al}.owner_id = ${id}${deOtros} OR ${al}.created_by = ${id} OR EXISTS (SELECT 1 FROM tarea_colaboradores vc WHERE vc.activity_id = ${al}.id AND vc.user_id = ${id})
     OR EXISTS (SELECT 1 FROM activity_links vl
     JOIN records vr ON vr.id = vl.record_id WHERE vl.activity_id = ${al}.id AND ${visibleSql('vr', user)}))`;
 }
@@ -116,8 +169,8 @@ export async function puedeVer(db: D1Database, user: User, row: Pick<RecordRow, 
     if (row.object_type === 'deal') return false;
     return !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${visibleSql('r', user)}`).bind(row.id).first());
   }
-  if (!esVentas(user) || row.owner_id == null || Number(row.owner_id) === user.id) return true;
-  if (row.object_type === 'deal' && gerenciaDe(user) == null) return false;
+  if (!esVentas(user) || veTodo(user) || row.owner_id == null || Number(row.owner_id) === user.id || veUsuarios(user).includes(Number(row.owner_id))) return true;
+  if (row.object_type === 'deal' && !veDeOtros(user)) return false;
   return !!(await db.prepare(`SELECT 1 FROM records r WHERE r.id = ? AND ${visibleSql('r', user)}`).bind(row.id).first());
 }
 
@@ -130,7 +183,7 @@ export async function assertVisible(db: D1Database, meta: Meta, user: User, row:
       : `${NOMBRE[row.object_type] ?? 'Este registro'} no está en ningún pedido ni es un proveedor: no está en el perfil ${nombrePerfil(user)}.`, { ajeno: true });
   }
   const de = await duenio(db, row.owner_id);
-  throw new HttpError(403, `${NOMBRE[row.object_type] ?? 'Este registro'} es de ${de ?? 'otra vendedora'}: lo ven ${de ? 'ella' : 'quien lo tiene'} y los administradores. Si lo necesitás, pedile a un administrador que te lo pase.`, { ajeno: true });
+  throw new HttpError(403, `${NOMBRE[row.object_type] ?? 'Este registro'} es de ${de ?? 'otra vendedora'}: lo ven ${de ? 'ella' : 'quien lo tiene'}, quienes tienen permiso para ver lo suyo y los administradores. Si lo necesitás, pedile a un administrador que te lo pase.`, { ajeno: true });
 }
 
 // De una lista de ids, los que la vendedora ve (para filtrar bandejas y listas armadas por otro lado).

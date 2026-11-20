@@ -736,9 +736,13 @@ export function EstadoEntrega({ value, title }: { value: unknown; title?: string
 // Unidad de negocio con su ícono y su color.
 // Cada unidad con su logo (pedido de Rodrigo del 20/11/2026): formas.shop, «corporate» con el moño sobre la «a» y No Estrés, en
 // web/public/unidades, con una versión para fondo claro y otra para el tema oscuro (styles.css, .unidad-logo).
+// La versión circular de cada una (compacta): la de los design systems de Formas Shop (el círculo navy, el favicon) y
+// de Formas (el isotipo con degradé verde), y la de No Estrés sacada de su manual de marca (la manito sobre el verde).
+const CIRCULO: Record<UnidadKey, string> = { shop: '/unidades/shop-circulo.svg', corporate: '/unidades/corporate-circulo.svg', noestres: '/unidades/noestres-circulo.png' };
 export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean }) {
   const u = UNIDADES.find((x) => x.key === k);
   if (!u) return null;
+  if (compact) return <img className="unidad-circulo" src={CIRCULO[u.key]} alt={u.label} title={u.label} draggable={false} />;
   return (
     <span className={`unidad u-${u.key}${compact ? ' compact' : ''}`} title={u.label} role="img" aria-label={u.label}>
       <img className="unidad-logo claro" src={`/unidades/${u.key}-claro.png`} alt="" draggable={false} />

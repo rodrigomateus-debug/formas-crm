@@ -90,7 +90,9 @@ export interface Ctx {
   tokenId?: number;   // el token con que entró (integraciones y choferes)
   // Quién hizo el cambio afuera, cuando no es el usuario de la sincronización: en ClickUp, quien tiene asignado el PDV.
   // El historial lo guarda a su nombre (userId: su usuario del CRM, si lo tiene). Lo demás sigue siendo de `user`.
-  actor?: { name: string; userId: number | null };
+  // `via`: por dónde lo hizo, si no es el origen del pedido (el chofer, desde su app): el historial y la conversación lo
+  // guardan con ese origen, para que se vea «Gabriel (app del chofer)» y no parezca un usuario del CRM.
+  actor?: { name: string; userId: number | null; via?: 'chofer' };
   // «Ver como» (auth.ts): un superadmin mirando el CRM como `user`. Es solo para mirar: no se puede cambiar nada.
   realUser?: User;
 }

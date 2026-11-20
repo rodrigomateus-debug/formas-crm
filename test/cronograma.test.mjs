@@ -547,6 +547,12 @@ test('cronograma: la ruta del día, con las direcciones y la sugerencia si las �
   const ya = hoy.paradas.find((p) => p.clave === gorra.clave);
   assert.equal(ya.visita.resultado, 'hecho');
   assert.ok(ya.movimientos.filter((m) => m.npdv === PDV).every((m) => m.hecho));
+  // En la conversación del pedido queda a nombre del chofer y con su origen («Juan (app del chofer)»), no como si fuera un
+  // usuario del CRM.
+  const conv = (await api('GET', `/records/order/${gorra.movimientos.find((m) => m.npdv === PDV).record_id}/conversacion`)).data;
+  // El último paso a «en revision» (antes, en esta misma prueba, lo marcó Logística desde el cronograma).
+  const delChofer = conv.items.filter((i) => i.kind === 'articulo' && i.despues === 'en revision').sort((a, b) => a.at.localeCompare(b.at)).pop();
+  assert.deepEqual([delChofer?.actor, delChofer?.source, delChofer?.user_id], [`Juan ${RUN}`, 'chofer', null]);
   // Deshacer: vuelve al estado que tenía.
   assert.equal((await marcar({ resultado: '' })).status, 200);
   assert.deepEqual(escrito.filter((e) => e.body?.status).map((e) => [e.task, e.body.status]), [[G, 'en el impresor']]);

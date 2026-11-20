@@ -21,6 +21,7 @@ import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
 import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDeDestino, notasDePedido, type Destino as DestinoNota } from './logistica';
 import { textoPactada, type ModoHora } from '../../web/src/ruta';
+import { fotoVehiculo, guardarFotoVehiculo, guardarVehiculo, quitarFotoVehiculo, vehiculos } from './vehiculos';
 import { asignarChofer, colgarMovimiento, revisarColgados, guardarEnviado, guardarBultos, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
@@ -1269,6 +1270,21 @@ api.get('/choferes', async (c) => {
       (SELECT MAX(r.created_at) FROM remitos r WHERE r.token_id = t.id) AS ultimo
     FROM api_tokens t JOIN users u ON u.id = t.user_id WHERE t.source = 'chofer' ORDER BY t.revoked, t.name`).all();
   return c.json(results);
+});
+// La camioneta de cada chofer (vehiculos.ts): modelo, tamaño, foto y cuántas cajas entran. La cargan Logística y los
+// administradores; la foto la ve cualquiera con usuario (sale en la Ruta del día).
+api.get('/choferes/vehiculos', async (c) => c.json(await vehiculos(c.env.DB)));
+api.put('/choferes/vehiculo', async (c) => { const ctx = c.get('ctx'); logistica(ctx); return c.json(await guardarVehiculo(c.env.DB, ctx, await c.req.json())); });
+api.post('/choferes/vehiculo/foto', async (c) => {
+  const ctx = c.get('ctx'); logistica(ctx);
+  const f = await c.req.formData();
+  return c.json(await guardarFotoVehiculo(c.env.DB, ctx, f.get('nombre'), f.get('foto')));
+});
+api.delete('/choferes/vehiculo/foto', async (c) => { const ctx = c.get('ctx'); logistica(ctx); return c.json(await quitarFotoVehiculo(c.env.DB, ctx, c.req.query('nombre'))); });
+api.get('/choferes/vehiculo/foto', async (c) => {
+  const f = await fotoVehiculo(c.env.DB, c.req.query('nombre'));
+  // Con `v` (cuándo se subió) en la dirección, se puede guardar: una foto nueva tiene otra dirección.
+  return new Response(f.bytes, { headers: { 'content-type': f.mime, 'cache-control': c.req.query('v') ? 'private, max-age=31536000, immutable' : 'private, no-cache' } });
 });
 // Los choferes de la lista del cronograma (transportistas) que todavía no tienen código activo: en la pantalla Choferes
 // aparecen para crearles el código con un clic, con el mismo nombre (así ven su recorrido).

@@ -11,6 +11,7 @@ import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
 import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
 import { fotosDeArticulos } from './productos';
+import { vehiculos } from './vehiculos';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
@@ -96,7 +97,7 @@ export interface Movimiento {
   dir?: number | null; dir_n?: number; sitio?: string | null; repartida?: boolean;
   notas?: NotaLogistica[];   // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar (logistica.ts)
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó, si no es la cantidad del pedido (demasía)
-  bultos?: number | null;    // los bultos que anotó Logística (cronograma_bultos); la tarjeta muestra la suma de los suyos
+  bultos?: Bultos | null;    // los bultos que anotó Logística (cronograma_bultos); la tarjeta muestra la suma de los suyos
   foto?: string | null;      // la foto del producto, la misma que en el pedido y en Producción (fotosDeArticulos)
   despacho?: Despacho;       // si está listo para salir, qué falta y a quién le toca (ver «Estados de despacho» en docs/CRONOGRAMA.md)
 }
@@ -336,23 +337,37 @@ async function ponerExtras(db: D1Database, movs: Movimiento[]) {
 
 // ---------- Bultos ----------
 // Cuántos bultos lleva cada tarjeta (pedido de Rodrigo del 20/11/2026). Por ahora a mano, los anota Logística, en
-// cualquier tarjeta: entregas, ingresos, retiros, egresos y encargos. Se guarda por movimiento («task_id:tipo», o
-// «task_id:tipo@dir») o por encargo («enc:id»): lo de una tarjeta queda en su primer movimiento y la tarjeta muestra la
-// suma de los suyos, así sigue a la tarjeta si se pasa a otro día y, si dos tarjetas se juntan, se suman.
+// cualquier tarjeta: entregas, ingresos, retiros, egresos y encargos. Por medida: las cajas que más se usan (40x30 y
+// 60x40), con las que se calcula si la carga entra en la camioneta (cargaDeRecorrido), y las de otra medida. Se guarda
+// por movimiento («task_id:tipo», o «task_id:tipo@dir») o por encargo («enc:id»): lo de una tarjeta queda en su primer
+// movimiento y la tarjeta muestra la suma de los suyos, así sigue a la tarjeta si se pasa a otro día y, si dos tarjetas
+// se juntan, se suman.
+export interface Bultos { c40: number; c60: number; otros: number }
+export const sinBultos = (): Bultos => ({ c40: 0, c60: 0, otros: 0 });
+export const sumarBultos = (a: Bultos, b?: Bultos | null): Bultos => (b ? { c40: a.c40 + b.c40, c60: a.c60 + b.c60, otros: a.otros + b.otros } : a);
 const CLAVE_BULTOS = /^(?:([^:@\s]{1,40}):(entrega|ingreso|retiro_proveedor|egreso|retiro_impresor|ingreso_impresor)(?:@(\d{1,12}))?|enc:(\d{1,12}))$/;
 async function bultosDe(db: D1Database, claves: string[]) {
   const ks = [...new Set(claves)];
-  if (!ks.length) return new Map<string, number>();
-  const { results } = await db.prepare('SELECT clave, bultos FROM cronograma_bultos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ks)).all<{ clave: string; bultos: number }>();
-  return new Map(results.map((r) => [r.clave, r.bultos]));
+  if (!ks.length) return new Map<string, Bultos>();
+  const { results } = await db.prepare('SELECT clave, c40, c60, otros FROM cronograma_bultos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ks))
+    .all<Bultos & { clave: string }>();
+  return new Map(results.map((r) => [r.clave, { c40: r.c40, c60: r.c60, otros: r.otros }]));
 }
-// Guarda los bultos de una tarjeta: `claves` son las de sus movimientos (o la de su encargo). Sin número (o 0), se sacan.
-export async function guardarBultos(env: Env, ctx: Ctx, b: { claves?: unknown; bultos?: unknown }) {
+// Guarda los bultos de una tarjeta: `claves` son las de sus movimientos (o la de su encargo); `c40`, `c60` y `otros`, cuántas
+// cajas de cada medida. Todo en 0 (o vacío), se sacan.
+export async function guardarBultos(env: Env, ctx: Ctx, b: { claves?: unknown; c40?: unknown; c60?: unknown; otros?: unknown }) {
   exigir(ctx);
   const claves = Array.isArray(b.claves) ? [...new Set(b.claves.map(String))] : [];
   if (!claves.length || claves.length > 200) throw new HttpError(400, 'Faltan los movimientos de la tarjeta.');
   const partes = claves.map((k) => CLAVE_BULTOS.exec(k));
   if (partes.some((x) => !x)) throw new HttpError(400, 'Esa tarjeta no se reconoce.');
+  const cant = (v: unknown) => {
+    if (v == null || v === '') return 0;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0 || n > 9999) throw new HttpError(400, 'Los bultos son números enteros (de 0 a 9999).');
+    return n;
+  };
+  const nuevo: Bultos = { c40: cant(b.c40), c60: cant(b.c60), otros: cant(b.otros) };
   const db = env.DB;
   // Que existan: los artículos en producción y los encargos.
   const tareas = [...new Set(partes.map((x) => x![1]).filter(Boolean))], encargos = [...new Set(partes.map((x) => x![4]).filter(Boolean).map(Number))];
@@ -361,15 +376,14 @@ export async function guardarBultos(env: Env, ctx: Ctx, b: { claves?: unknown; b
     encargos.length ? db.prepare('SELECT COUNT(*) AS n FROM encargos WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(encargos)).first<{ n: number }>() : { n: 0 },
   ]);
   if ((ts?.n ?? 0) !== tareas.length || (es?.n ?? 0) !== encargos.length) throw new HttpError(404, 'No está esa tarjeta (puede que la hayan cambiado): actualizá la pantalla.');
-  const vacio = b.bultos == null || b.bultos === '' || Number(b.bultos) === 0;
-  const n = Number(b.bultos);
-  if (!vacio && (!Number.isInteger(n) || n < 0 || n > 9999)) throw new HttpError(400, 'Los bultos son un número entero.');
+  const vacio = !nuevo.c40 && !nuevo.c60 && !nuevo.otros;
   const primera = [...claves].sort()[0];
   await db.batch([
     db.prepare('DELETE FROM cronograma_bultos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(claves)),
-    ...(vacio ? [] : [db.prepare('INSERT INTO cronograma_bultos (clave, bultos, user_id, at) VALUES (?, ?, ?, ?)').bind(primera, n, ctx.user.id, now())]),
+    ...(vacio ? [] : [db.prepare('INSERT INTO cronograma_bultos (clave, c40, c60, otros, user_id, at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(primera, nuevo.c40, nuevo.c60, nuevo.otros, ctx.user.id, now())]),
   ]);
-  return { bultos: vacio ? null : n, clave: vacio ? null : primera };
+  return { bultos: vacio ? null : nuevo, clave: vacio ? null : primera };
 }
 
 // La cantidad que realmente se mandó (o llegó) en un egreso, un ingreso o un retiro (pedido de Producción del 19/11/2026):
@@ -1464,6 +1478,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   return {
     fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes, con_link, expresos, bases,
     buscando: pendientes + fin.pendientes, puede_editar: puedeEditarCronograma(user),
+    // La camioneta de cada chofer (vehiculos.ts): con los bultos, la pantalla avisa si la carga de un recorrido no entra.
+    vehiculos: await vehiculos(db),
   };
 }
 
@@ -1710,7 +1726,7 @@ export interface EncargoDia {
   parada?: string;          // en la semana: la parada en la que cae
   hora?: string | null;     // en la semana: la hora fijada a mano en esa parada
   anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (logistica.ts)
-  bultos?: number | null;   // los bultos que anotó Logística (cronograma_bultos, «enc:id»)
+  bultos?: Bultos | null;   // los bultos que anotó Logística (cronograma_bultos, «enc:id»)
 }
 export interface EncargoFila {
   id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; quien_foto?: string | null; destino: string; direccion: string | null; lugar_id: number | null;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Bultos } from '../bultos';
 import { useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
 import { InfoTip, Modal, QuienPidio, alEsc } from '../components';
@@ -24,7 +25,7 @@ export interface Encargo {
   notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
   origen: string; created_at: string; chofer?: string | null; parada?: string; hora?: string | null;
   anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (NotasLogistica.tsx)
-  bultos?: number | null;   // los bultos que anotó Logística en su tarjeta del cronograma
+  bultos?: Bultos | null;   // los bultos que anotó Logística en su tarjeta del cronograma, por medida
 }
 interface Habitual { texto: string; dias: number[]; por_semana: number }
 export interface DestinoOpcion {

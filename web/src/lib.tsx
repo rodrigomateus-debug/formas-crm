@@ -104,8 +104,9 @@ export async function http<T = any>(method: string, path: string, body?: unknown
   try {
     res = await fetch(`/api${path}`, {
       method,
-      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo() },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      // Un formulario con archivos (FormData) va como está: el navegador pone el tipo con su separador.
+      headers: { ...(body === undefined || body instanceof FormData ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo() },
+      body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       credentials: 'same-origin',
       // Con la sesión de Cloudflare Access vencida, /api contesta con un redireccionamiento al login: seguirlo falla sin
       // decir por qué. Así se ve y se recarga la página, que lleva al login (revisión de la versión celular, 18/11/2026).

@@ -11,6 +11,7 @@ const PDV = String(70000 + Math.floor(Math.random() * 20000));
 const PDV_ML = String(Number(PDV) + 1);
 const PDV_B = String(Number(PDV) + 2);
 const PDV_C = String(Number(PDV) + 3);   // de una vendedora que todavía no tiene usuario en el CRM
+const PDV_X = String(Number(PDV) + 4);   // el que se anula y se desanula desde el CRM (sus estados cambian con lo que escribe el CRM)
 const CUIT = `30-7${String(Date.now()).slice(-7)}-8`;
 const RECIBIDO = Date.now() - 86_400_000;   // ENTREGAS (FECHA REAL): ayer
 let asUser = null;
@@ -42,6 +43,8 @@ const pdvTask = (id, npdv, unidad, statuses, attachments = [], updated = Date.no
 });
 const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachments: [], bulk: 0, cGone: false, puts: [], adjuntos: [] };
 const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`, true);
+const cx = { on: false, pdv: 'pdv', arts: ['ingreso de pedido', 'pedido al proveedor', 'entregados'], updated: Date.now() };
+const pdvX = () => ({ ...pdvTask('cuX', PDV_X, 'FORMAS SHOP', cx.arts, [], cx.updated), status: { status: cx.pdv } });
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
 let hits = 0;   // consultas que recibe el ClickUp/Finnegans simulado
@@ -64,18 +67,26 @@ before(async () => {
     if (req.method === 'PUT' && p.startsWith('/clickup/task/')) {
       let body = '';
       req.on('data', (ch) => { body += ch; });
-      req.on('end', () => { cu.puts.push({ id: p.slice(14), status: JSON.parse(body || '{}').status }); send({ id: p.slice(14) }); });
+      req.on('end', () => {
+        const id = p.slice(14), status = JSON.parse(body || '{}').status;
+        cu.puts.push({ id, status });
+        // El PDV que se anula: lo que escribe el CRM queda (el resto del simulado no cambia).
+        if (id === 'cuX') { cx.pdv = status; cx.updated = Date.now(); }
+        else if (/^cuX-\d+$/.test(id)) { cx.arts[Number(id.slice(4))] = status; cx.updated = Date.now(); }
+        send({ id });
+      });
       return;
     }
     if (p === '/clickup/list/901326159292/task') {
       const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']), pdvC(),
-        ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER))].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
+        ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)), ...(cx.on ? [pdvX()] : [])].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
       const page = Number(url.searchParams.get('page') ?? 0);
       return send({ tasks: tasks.slice(page * 100, page * 100 + 100), last_page: (page + 1) * 100 >= tasks.length });
     }
     if (p === '/clickup/task/cuA') return send({ ...pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), attachments: cu.attachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) });
     if (p === '/clickup/task/cuML') return send(pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']));
     if (p === '/clickup/task/cuB') return send(pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']));
+    if (p === '/clickup/task/cuX') return send(pdvX());
     if (p === '/clickup/task/cuC') return cu.cGone ? send({ err: 'Task not found' }, 404) : send(pdvC());
     if (p.startsWith('/clickup/task/cuN')) { const i = Number(p.slice(17)); return send(pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)); }
     if (/^\/clickup\/task\/cuA-\d+$/.test(p)) return send({ id: p.slice(14), name: 'Artículo', parent: 'cuA', status: { status: 'entregados' }, attachments: p.endsWith('-0') ? cu.artAttachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) : [] });
@@ -512,4 +523,50 @@ test('bocetos: el aprobado se adjunta en ClickUp a la subtarea de su artículo, 
     await new Promise((r) => setTimeout(r, 800));
     assert.equal(cu.adjuntos.length, 2);
   } finally { await g.cerrar(); }
+});
+
+test('anular un pedido en el CRM lo anula en ClickUp (con confirmación) y desanularlo lo deja como estaba', async (t) => {
+  asUser = null;
+  const st = (await api('GET', '/integrations/pedidos')).data;
+  if (!st.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba (ver .dev.vars.example)'); return; }
+  const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
+  cx.on = true; cx.updated = Date.now();
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  const x = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_X}`)}`)).data.results[0];
+  assert.ok(x, 'el pedido entró desde ClickUp');
+  const antes = cu.puts.length;
+  const puts = async (n) => { for (let i = 0; i < 50 && cu.puts.length < antes + n; i++) await new Promise((r) => setTimeout(r, 100)); return cu.puts.slice(antes); };
+
+  // 1. Desde la pantalla, primero pregunta: qué se anula en ClickUp, qué queda (lo entregado) y que en Finnegans va a mano.
+  const pregunta = await api('PATCH', `/records/order/${x.id}`, { props: { hs_pipeline_stage: ANULADO } });
+  assert.equal(pregunta.status, 409);
+  assert.equal(pregunta.data.confirmar, 'anular');
+  assert.match(pregunta.data.error, /se anula el PDV y 2 artículos/);
+  assert.match(pregunta.data.error, /El artículo ya entregado queda como está/);
+  assert.match(pregunta.data.error, /Finnegans/);
+  assert.equal((await api('GET', `/records/order/${x.id}`)).data.record.props.hs_pipeline_stage !== ANULADO, true, 'sin confirmar no se anuló');
+
+  // 2. Confirmado: en ClickUp se anulan los artículos no entregados y el PDV; el entregado no se toca.
+  assert.equal((await api('PATCH', `/records/order/${x.id}`, { props: { hs_pipeline_stage: ANULADO } }, { 'x-confirmar': 'anular' })).status, 200);
+  assert.deepEqual(await puts(3), [{ id: 'cuX-0', status: 'anulado' }, { id: 'cuX-1', status: 'anulado' }, { id: 'cuX', status: 'anulado' }]);
+  assert.deepEqual([cx.pdv, ...cx.arts], ['anulado', 'anulado', 'anulado', 'entregados']);
+  // En la conversación del pedido, a nombre de quien lo anuló (no de ClickUp ni de quien tiene el PDV).
+  const yo = (await api('GET', '/meta')).data.me.id;
+  let anulados = [];
+  for (let i = 0; i < 30 && anulados.length < 3; i++) {
+    anulados = (await api('GET', `/records/order/${x.id}/conversacion`)).data.items.filter((it) => it.kind === 'articulo' && it.despues === 'anulado');
+    if (anulados.length < 3) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.equal(anulados.length, 3, 'el PDV y sus dos artículos, una sola vez');
+  assert.ok(anulados.every((it) => it.user_id === yo && it.source === 'crm'), JSON.stringify(anulados));
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  assert.equal((await api('GET', `/records/order/${x.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'sigue anulado');
+
+  // 3. Si fue un error, volverlo a otra etapa deja cada tarea como estaba.
+  assert.equal((await api('PATCH', `/records/order/${x.id}`, { props: { hs_pipeline_stage: '4b27b500-f031-4927-9811-68a0b525cbae' } })).status, 200);
+  await puts(6);
+  assert.deepEqual([cx.pdv, ...cx.arts], ['pdv', 'ingreso de pedido', 'pedido al proveedor', 'entregados']);
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  assert.notEqual((await api('GET', `/records/order/${x.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'ClickUp no lo vuelve a anular');
+  cx.on = false;
 });

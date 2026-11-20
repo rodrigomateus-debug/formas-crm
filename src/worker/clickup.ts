@@ -9,7 +9,7 @@ import { encolarLogo, logoDelProducto } from './logos';
 import { tareaPostEntrega } from './postentrega';
 import { montosDesdePedidos } from './montos';
 import { recalcularEntrega } from './remitos';
-import { completarProveedores, enlazarPedido, guardarTareas, leerEstados, podarArticulos, vincularOpciones } from './produccion';
+import { completarProveedores, enlazarPedido, guardarTareas, leerEstados, podarArticulos, refrescarPdv, vincularOpciones } from './produccion';
 import { articulosServicio, relecturasPedidas } from './servicios';
 import { vincularPedido } from './vinculos';
 
@@ -147,9 +147,10 @@ export async function articulosDelPdv(env: Env, taskId: string, b?: Budget): Pro
 }
 
 // ---------- Lo que el CRM escribe en ClickUp ----------
-// Solo dos cosas, por pedido de Rodrigo: (1) al pasar el pedido a «Listo para producción», el PDV y sus artículos que
-// siguen en «ingreso de pedido» pasan a «pdv» (4/11/2026; lo que ya avanzó no se toca); (2) el boceto aprobado de un
-// producto se adjunta a la subtarea de ese artículo (6/11/2026; solo adjunta, no cambia estados).
+// Por pedido de Rodrigo: (1) al pasar el pedido a «Listo para producción», el PDV y sus artículos que siguen en «ingreso
+// de pedido» pasan a «pdv» (4/11/2026; lo que ya avanzó no se toca); (2) el boceto aprobado de un producto se adjunta a la
+// subtarea de ese artículo (6/11/2026; solo adjunta, no cambia estados); (3) al anular el pedido a mano en el CRM, se
+// anulan el PDV y sus artículos no entregados, y al desanularlo vuelven a como estaban (20/11/2026).
 const INGRESO = 'ingreso de pedido';
 const PDV_STATUS = 'pdv';
 
@@ -166,6 +167,53 @@ export async function pasarAPdv(env: Env, taskId: string, b?: Budget) {
     movidas++;
   }
   return movidas;
+}
+
+// (3) Pedido anulado a mano en el CRM: los artículos que no se entregaron (ni en parte) y después el PDV pasan a «anulado».
+// Devuelve cómo estaba cada tarea que se cambió, para poder desanular (queda en el resultado de clickup_salida).
+const NO_SE_ANULAN = ['entregados', 'parcial entregado', ...ANULADOS];
+async function ponerEstado(env: Env, x: CuTask, status: string, b?: Budget) {
+  b?.take();
+  const res = await fetch(`${API(env)}/task/${encodeURIComponent(x.id)}`, {
+    method: 'PUT', headers: { Authorization: env.CLICKUP_TOKEN!, 'content-type': 'application/json' }, body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(`ClickUp no cambió el estado de ${x.name}: HTTP ${res.status}`);
+}
+type CambioEstado = { id: string; antes: string; despues: string };
+export async function anularEnClickup(env: Env, taskId: string, b?: Budget) {
+  const t = await cu<CuTask>(env, `/task/${encodeURIComponent(taskId)}`, { include_subtasks: 'true' }, b);
+  const cambios: CambioEstado[] = [];
+  const estado = (x: CuTask) => (x.status?.status ?? '').toLowerCase().trim();
+  for (const x of [...(t.subtasks ?? []).filter((s) => !NO_SE_ANULAN.includes(estado(s))), ...(ANULADOS.includes(estado(t)) ? [] : [t])]) {
+    await ponerEstado(env, x, 'anulado', b);
+    cambios.push({ id: x.id, antes: estado(x), despues: 'anulado' });
+  }
+  return { anuladas: cambios.length, antes: Object.fromEntries(cambios.map((c) => [c.id, c.antes])), cambios };
+}
+// Desanular: cada tarea que anuló el CRM vuelve al estado que tenía, si sigue anulada (si alguien la movió después, no se toca).
+export async function desanularEnClickup(env: Env, taskId: string, antes: Record<string, string>, b?: Budget) {
+  const t = await cu<CuTask>(env, `/task/${encodeURIComponent(taskId)}`, { include_subtasks: 'true' }, b);
+  const cambios: CambioEstado[] = [];
+  for (const x of [t, ...(t.subtasks ?? [])]) {
+    const previo = antes[x.id], ahora = (x.status?.status ?? '').toLowerCase().trim();
+    if (!previo || !ANULADOS.includes(ahora)) continue;
+    await ponerEstado(env, x, previo, b);
+    cambios.push({ id: x.id, antes: ahora, despues: previo });
+  }
+  return { vueltas: cambios.length, cambios };
+}
+// Lo que cambió el CRM queda en Producción ya y en la conversación del pedido a nombre de quien anuló (como lo que se
+// edita en Producción): al releer el PDV ya no hay diferencia, así que no aparece como movido por ClickUp.
+async function anotarCambios(db: D1Database, recordId: number, userId: number | null, cambios: CambioEstado[]) {
+  if (!cambios.length) return;
+  const filas = new Map((await db.prepare('SELECT task_id, nombre, es_pdv FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify(cambios.map((c) => c.id))).all<{ task_id: string; nombre: string; es_pdv: number }>()).results.map((f) => [f.task_id, f]));
+  const ts = new Date().toISOString();
+  await db.batch(cambios.filter((c) => filas.has(c.id)).flatMap((c) => [
+    db.prepare('UPDATE produccion SET estado = ?, leido_at = ? WHERE task_id = ?').bind(c.despues, ts, c.id),
+    db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, actor, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, NULL, 'crm')`)
+      .bind(recordId, c.id, filas.get(c.id)!.nombre, filas.get(c.id)!.es_pdv, c.antes, c.despues, userId),
+  ]));
 }
 
 // Bocetos aprobados en pedidos que ya tienen su PDV en ClickUp y todavía no se adjuntaron: a la cola (también los que se
@@ -240,8 +288,8 @@ export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)
   if (!env.CLICKUP_TOKEN) return { skipped: 'Falta CLICKUP_TOKEN.' };
   const db = env.DB;
   await encolarBocetos(db);
-  const { results } = await db.prepare(`SELECT s.id, s.record_id, s.action, s.ref, json_extract(r.props, '$.url_clickup') AS url FROM clickup_salida s
-    JOIN records r ON r.id = s.record_id WHERE s.done_at IS NULL AND s.attempts < 6 ORDER BY s.id LIMIT 10`).all<{ id: number; record_id: number; action: string; ref: string | null; url: string | null }>();
+  const { results } = await db.prepare(`SELECT s.id, s.record_id, s.action, s.ref, s.user_id, json_extract(r.props, '$.url_clickup') AS url FROM clickup_salida s
+    JOIN records r ON r.id = s.record_id WHERE s.done_at IS NULL AND s.attempts < 6 ORDER BY s.id LIMIT 10`).all<{ id: number; record_id: number; action: string; ref: string | null; user_id: number | null; url: string | null }>();
   let hechas = 0;
   for (const row of results) {
     if (b.left() < 6) break;
@@ -250,9 +298,20 @@ export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)
       if (!taskId) throw new Error('El pedido no tiene PDV de ClickUp.');
       const result = row.action === 'adjuntar_boceto' ? await adjuntarBoceto(env, taskId, Number(row.ref), b)
         : row.action === 'adjuntar_logo' ? await adjuntarLogo(env, row.record_id, row.ref ?? '', b)
+        : row.action === 'anular' ? await anularEnClickup(env, taskId, b)
+        : row.action === 'desanular' ? await desanularEnClickup(env, taskId, await antesDeAnular(db, row.record_id), b)
         : { movidas: await pasarAPdv(env, taskId, b) };
       await db.prepare('UPDATE clickup_salida SET done_at = ?, result = ?, error = NULL, attempts = attempts + 1 WHERE id = ?')
         .bind(new Date().toISOString(), JSON.stringify(result), row.id).run();
+      // Anular o desanular cambia estados: quedan a nombre de quien lo pidió y el PDV se vuelve a leer ya (Producción,
+      // Cronograma y la etapa del pedido). Si falla, queda para la próxima sincronización.
+      if (row.action === 'anular' || row.action === 'desanular') {
+        await anotarCambios(db, row.record_id, row.user_id, (result as { cambios?: CambioEstado[] }).cambios ?? []);
+        const quien = row.user_id ? await db.prepare('SELECT * FROM users WHERE id = ?').bind(row.user_id).first<User>() : null;
+        const sys = await systemCtx(env);
+        await refrescarPdv(env, { ...sys, user: quien ?? sys.user, source: 'crm', sourceDetail: row.action === 'anular' ? 'Pedido anulado en el CRM' : 'Pedido desanulado en el CRM' }, taskId)
+          .catch((e) => console.error('clickup: releer', taskId, (e as Error).message));
+      }
       hechas++;
     } catch (e) {
       if (e instanceof OutOfBudget) break;
@@ -260,6 +319,19 @@ export async function procesarSalidaClickup(env: Env, b: Budget = Budget.of(env)
     }
   }
   return { hechas, pendientes: results.length - hechas };
+}
+
+// Cómo estaban las tareas antes de la última anulación del CRM (la que se deshace).
+async function antesDeAnular(db: D1Database, recordId: number) {
+  const r = await db.prepare(`SELECT result FROM clickup_salida WHERE record_id = ? AND action = 'anular' AND done_at IS NOT NULL
+    AND json_extract(result, '$.antes') IS NOT NULL ORDER BY id DESC LIMIT 1`)
+    .bind(recordId).first<{ result: string | null }>();
+  try { return (JSON.parse(r?.result ?? '{}') as { antes?: Record<string, string> }).antes ?? {}; } catch { return {}; }
+}
+// Mientras hay una anulación (o desanulación) del CRM por salir a ClickUp, la sincronización no le cambia la etapa al
+// pedido con lo que todavía dice ClickUp (si no, lo desanularía, o lo volvería a anular, antes de que salga).
+async function anulacionPorSalir(db: D1Database, recordId: number) {
+  return !!(await db.prepare("SELECT 1 FROM clickup_salida WHERE record_id = ? AND action IN ('anular', 'desanular') AND done_at IS NULL AND attempts < 6").bind(recordId).first());
 }
 
 // Datos del PDV que necesita el pedido.
@@ -418,7 +490,7 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
     const cur = JSON.parse(existing.props) as Record<string, unknown>;
     const change: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(synced)) if (v != null && String(v) !== String(cur[k] ?? '')) change[k] = v;
-    if (pdv.stage && pdv.stage !== cur.hs_pipeline_stage) change.hs_pipeline_stage = pdv.stage;
+    if (pdv.stage && pdv.stage !== cur.hs_pipeline_stage && !(await anulacionPorSalir(db, id))) change.hs_pipeline_stage = pdv.stage;
     if (!cur.fecha_de_entrega && pdv.entrega) change.fecha_de_entrega = pdv.entrega;
     if (!cur.tipo_de_pedido) change.tipo_de_pedido = pdv.evento ? 'EVENTO' : 'PEDIDO NORMAL';
     if (cur.owner_id == null) { const o = await ownerFor(db, pdv.vendedor, pdv.mailVendedor); if (o) change.owner_id = o; }

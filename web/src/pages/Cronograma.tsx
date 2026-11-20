@@ -322,13 +322,17 @@ export default function CronogramaPage() {
             </div>
             {/* El mismo desplegable de unidades de negocio (con sus logos) que en Pedidos, Negocios, Empresas y Contactos. */}
             <UnidadFilter value={unidades} onChange={setUnidades} />
-            <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)} />Solo lo pendiente</label>
+            {/* Lo propio del cronograma (a quién le toca) y después lo terminado, como en el resto de los módulos. */}
             <div className="row cr-toca" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Le toca a">
               <span className="small muted">Le toca a</span>
               {(Object.keys(NOMBRE_ROL) as Rol[]).map((r) => <button key={r} type="button" className={`chip${toca === r ? ' on' : ''}`} aria-pressed={toca === r} onClick={() => setToca(toca === r ? '' : r)}
                 title={`Solo lo que le toca a ${NOMBRE_ROL[r]}`}>{NOMBRE_ROL[r]} <span className="num">{porRol[r] ?? 0}</span></button>)}
             </div>
-            <span className="grow" />
+            <button type="button" className={`btn qf-btn${pendientes ? ' on' : ''}`} aria-pressed={pendientes} onClick={() => setPendientes(!pendientes)}
+              title="Oculta lo que ya está hecho">Solo lo pendiente</button>
+          </div>
+          {/* La leyenda de colores, en la fila de la vista. */}
+          <div className="toolbar vista">
             <div className="cr-leyenda small">{CARRILES.map((c) => <span key={c.k} className={`cr-k-${c.k}`} title={c.ayuda}><i />{c.nombre}</span>)}<span className="cr-k-X" title="Lo que alguien pidió en Recorridos"><i />Encargos</span></div>
           </div>
           {v && !puede && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves el cronograma para saber cuándo sale cada cosa. Lo editan Logística, Producción y los administradores.</div>}

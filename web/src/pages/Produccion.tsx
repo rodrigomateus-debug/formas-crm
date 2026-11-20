@@ -304,14 +304,15 @@ export default function ProduccionPage() {
       <div className="page-head">
         <h1>Producción {v && <span className="muted small">{filtrados.length} PDV · {articulos} artículos</span>}</h1>
         <div className="seg" role="group" aria-label="Vista">
-          <button type="button" className={modo === 'lista' ? 'on' : ''} aria-pressed={modo === 'lista'} onClick={() => cambiarModo('lista')}><Icon name="table" size={14} />Lista</button>
+          <button type="button" className={modo === 'lista' ? 'on' : ''} aria-pressed={modo === 'lista'} onClick={() => cambiarModo('lista')}><Icon name="table" size={14} />Tabla</button>
           <button type="button" className={modo === 'tablero' ? 'on' : ''} aria-pressed={modo === 'tablero'} onClick={() => cambiarModo('tablero')}><Icon name="board" size={14} />Tablero</button>
         </div>
       </div>
       <PestanasVistas tipo="produccion" vistas={vistas.data} pestanas={pestanas} guardarOrden={guardarOrden} activa={activa} onElegir={elegir}
         recargar={vistas.reload} actual={actual} igual={(a, b) => normConfig(a) === normConfig({ ...b, unidades: b.unidades?.length ? b.unidades : base ?? [] })}
         filtrosCambiados={filtrosCambiados} total={v ? `${filtrados.length} PDV · ${articulos} artículos` : undefined} onActualizar={cargar} ayudaGuardar="Guarda la búsqueda, las unidades, a quién está asignado, el vendedor, el cliente, los filtros por columna, el orden, si se ven los entregados y si se ve en lista o tablero." />
-      {/* La barra de filtros, igual en todos los módulos: buscar, filtros, «Filtros» y, a la derecha, lo que es de la vista. */}
+      {/* La barra de filtros, en el mismo orden que en todos los módulos: buscar, unidad, la persona (vendedor), lo propio
+          (asignado, cliente, pasadas de lo pactado), ver lo terminado y los filtros por columna. */}
       <div className="toolbar">
         <div className="search"><Icon name="search" />
           <input className="input" placeholder="Buscar PDV, cliente o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
@@ -319,6 +320,13 @@ export default function ProduccionPage() {
         {/* El mismo desplegable de unidades (con sus logos) que en el resto del Hub; acá se guardan con el nombre de ClickUp. */}
         <UnidadFilter value={(unidades ?? []).map((u) => unidadDeTexto(u)).filter((k): k is UnidadKey => !!k)}
           onChange={(ks) => cambiarUnidades(UNIDADES_VISIBLES.filter((u) => ks.includes(unidadDeTexto(u.value) ?? '')).map((u) => u.value))} />
+        <div className="bar-select">
+          <Select value={claveElegida(meta, vendedor)} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className={`input${vendedor ? ' on' : ''}`}>
+            <option value="">Vendedor: todos</option>
+            {vendedor && !vendedores.some((x) => x.clave === claveElegida(meta, vendedor)) && <option value={claveElegida(meta, vendedor)}>{userOf(meta, claveElegida(meta, vendedor).replace(/^u/, ''))?.name ?? vendedor.replace(/^n:|^u/, '')}</option>}
+            {vendedores.map((x) => <option key={x.clave} value={x.clave}><Vendedor p={x.p} /></option>)}
+          </Select>
+        </div>
         <div className="bar-select">
           <Select value={persona} onChange={(e) => cambiarPersona(e.target.value)} aria-label="Asignado a" className={`input${persona ? ' on' : ''}`}>
             <option value="">Asignado: todos</option>
@@ -328,25 +336,20 @@ export default function ProduccionPage() {
           </Select>
         </div>
         <div className="bar-select">
-          <Select value={claveElegida(meta, vendedor)} onChange={(e) => setVendedor(e.target.value)} aria-label="Vendedor" className={`input${vendedor ? ' on' : ''}`}>
-            <option value="">Vendedor: todos</option>
-            {vendedor && !vendedores.some((x) => x.clave === claveElegida(meta, vendedor)) && <option value={claveElegida(meta, vendedor)}>{userOf(meta, claveElegida(meta, vendedor).replace(/^u/, ''))?.name ?? vendedor.replace(/^n:|^u/, '')}</option>}
-            {vendedores.map((x) => <option key={x.clave} value={x.clave}><Vendedor p={x.p} /></option>)}
-          </Select>
-        </div>
-        <div className="bar-select">
           <Select value={cliente} onChange={(e) => setCliente(e.target.value)} aria-label="Cliente" className={`input${cliente ? ' on' : ''}`}>
             <option value="">Cliente: todos</option>
             {cliente && !clientes.includes(cliente) && <option value={cliente}>{cliente}</option>}
             {clientes.map((c) => <option key={c} value={c}>{c}</option>)}
           </Select>
         </div>
-        <button type="button" className={`btn qf-btn${cerrados ? ' on' : ''}`} aria-pressed={cerrados} onClick={() => setCerrados(!cerrados)}
-          title="Suma los PDV entregados o anulados en los últimos 30 días">Ver entregados (30 días)</button>
         <button type="button" className={`btn qf-btn${pasadas ? ' on' : ''}`} aria-pressed={pasadas} onClick={() => setPasadas(!pasadas)}
           title="Los PDV con la entrega real (la de producción) después de la pactada (la del comercial)">Pasadas de lo pactado</button>
+        <button type="button" className={`btn qf-btn${cerrados ? ' on' : ''}`} aria-pressed={cerrados} onClick={() => setCerrados(!cerrados)}
+          title="Suma los PDV entregados o anulados en los últimos 30 días">Ver entregados (30 días)</button>
         {v && <FiltrosActivos f={columnas} onChange={setColumnas} ctx={ctxFiltros} />}
-        <div className="bar-end">
+      </div>
+      {/* Los controles de vista, en su propia fila (como en Pedidos y Negocios); a la derecha, qué se edita acá. */}
+      <div className="toolbar vista">
           {modo === 'tablero' && <BotonVacias value={vacias} onChange={cambiarVacias} />}
           {modo === 'lista' && <ElegirColumnas creado={colCreado} onCreado={cambiarColCreado} />}
           {modo === 'lista' && (
@@ -355,8 +358,7 @@ export default function ProduccionPage() {
               <Flecha abierto={!colapsado} />{colapsado ? 'Expandir todo' : 'Colapsar todo'}
             </button>
           )}
-          {meta.me.role === 'admin' && v && <ConfigUnidades config={v.config} onGuardado={cargar} />}
-        </div>
+          {meta.me.role === 'admin' && v && <span className="vista-fin"><ConfigUnidades config={v.config} onGuardado={cargar} /></span>}
       </div>
       {v && <AvisoUnidades v={v} unidades={unidades ?? []} />}
       {soloLectura && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves la producción para saber cómo vienen los pedidos. La editan las usuarias con perfil Producción.</div>}

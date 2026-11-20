@@ -171,23 +171,48 @@ test('negocio y pedido: el N° de PDV los asocia, y los pedidos entran desde Fin
   assert.equal(o6.props.tipo_de_pedido, 'EVENTO');
   assert.equal(o6.props.fecha_de_entrega, '2026-12-01');
   assert.equal((await asociados('order', o6.id)).company[0]?.id, empresa.id);
-  // Un pedido de FP DEMO (la empresa de pruebas) también entra, aparte: con su unidad y «DEMO» en el nombre y en el pedido.
+  // Un pedido de FP DEMO (donde va lo que no lleva IVA: el mismo negocio y la misma numeración) entra como uno de Formas,
+  // con la unidad de su tipo de documento.
   await aviso(`DEMO ${RUN}`);
   const [demo] = await pedidoPorNombre(N + 6);
   assert.ok(demo, 'el pedido de FP DEMO se dio de alta');
-  assert.deepEqual([demo.props.unidad_de_negocio, demo.props.pedido_finnegans], ['FP DEMO', `DEMO PEDVTASTP - ${N + 6}`]);
-  assert.match(demo.name, /· DEMO/);
+  assert.deepEqual([demo.props.unidad_de_negocio, demo.props.pedido_finnegans], ['FORMAS SHOP', `PEDVTASTP - ${N + 6}`]);
+  assert.doesNotMatch(demo.name, /DEMO/);
   await aviso(`DEMO ${RUN}`);
-  assert.equal((await pedidoPorNombre(N + 6)).length, 1, 'sin duplicarse');
-  // Un pedido de verdad con el mismo número que uno de FP DEMO es otro pedido.
+  // El informe de cada hora lo trae con el mismo número: es el mismo pedido.
   await totales({ totales: {}, pedidos: { [`PEDVTASTP - ${N + 6}`]: { cliente: `VINCULO ${RUN} S.A.`, cuit: CUIT, fecha: hoy } } });
-  assert.deepEqual((await pedidoPorNombre(N + 6)).map((o) => o.props.unidad_de_negocio).sort(), ['FORMAS SHOP', 'FP DEMO']);
+  assert.equal((await pedidoPorNombre(N + 6)).length, 1, 'sin duplicarse');
+  // Los que entraron aparte como FP DEMO hasta el 20/11/2026: si no tienen otro registro, al llegar su pedido pasan a ser
+  // un pedido normal; si lo tienen, vale ese y los dos salen en la lista de repetidos.
+  // El pedido de Finnegans no se carga por la API (es de solo lectura): se pone directo en la base local, como quedaron.
+  const { execFileSync } = await import('node:child_process');
+  const conPedido = (id, pedido) => execFileSync('npx', ['wrangler', 'd1', 'execute', 'formas-crm', '--local', '--command',
+    `UPDATE records SET props = json_set(props, '$.pedido_finnegans', '${pedido}') WHERE id = ${Number(id)}`], { stdio: 'pipe' });
+  const viejo = async (n) => {
+    const r = (await api('POST', '/records/order', { props: { hs_order_name: `PDV ${n} · DEMO · Viejo ${RUN}`, pdv_finnegans: String(n), unidad_de_negocio: 'FP DEMO' } })).data;
+    conPedido(r.id, `DEMO PEDVTASTP - ${n}`);
+    return r;
+  };
+  const solo = await viejo(N + 7);
+  const conOtro = await viejo(N + 8);
+  const suyo = (await api('POST', '/records/order', { props: { hs_order_name: `PDV ${N + 8} · Viejo ${RUN}`, pdv_finnegans: String(N + 8), unidad_de_negocio: 'FORMAS SHOP' } })).data;
+  conPedido(suyo.id, `PEDVTASTP - ${N + 8}`);
+  const t7 = await totales({ totales: { [`PEDVTASTP - ${N + 7}`]: 1000, [`PEDVTASTP - ${N + 8}`]: 2000 }, pedidos: {
+    [`PEDVTASTP - ${N + 7}`]: { cliente: `VINCULO ${RUN} S.A.`, cuit: CUIT, fecha: hoy }, [`PEDVTASTP - ${N + 8}`]: { cliente: `VINCULO ${RUN} S.A.`, cuit: CUIT, fecha: hoy } } });
+  assert.equal(t7.data.nuevos.creados, 0, 'ninguno nuevo');
+  const s7 = (await api('GET', `/records/order/${solo.id}`)).data.record;
+  assert.deepEqual([s7.props.unidad_de_negocio, s7.props.pedido_finnegans, s7.props.hs_order_name], ['FORMAS SHOP', `PEDVTASTP - ${N + 7}`, `PDV ${N + 7} · Viejo ${RUN}`]);
+  assert.equal(Number(s7.props.hs_total_price), 1000, 'y ya recibe su total');
+  assert.equal(Number((await api('GET', `/records/order/${suyo.id}`)).data.record.props.hs_total_price), 2000, 'el total va al suyo');
+  assert.equal((await api('GET', `/records/order/${conOtro.id}`)).data.record.props.hs_total_price, undefined, 'y no al viejo');
+  const repetidos = (await api('GET', '/integrations/pedidos')).data.finnegans.duplicados;
+  assert.deepEqual(repetidos.find((g) => g.pedidos.some((x) => x.id === suyo.id))?.pedidos.map((x) => x.id).sort(), [conOtro.id, suyo.id].sort(), 'para combinarlos');
   // Anulado en Finnegans: el pedido pasa a «Anulado» (por el aviso, o por el informe de cada hora).
   const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
   assert.equal((await aviso(`AVISO ${RUN}`, 'nullify')).status, 200);
   assert.equal((await api('GET', `/records/order/${o6.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'anulado por el aviso');
   assert.notEqual((await api('GET', `/records/order/${demo.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'el de FP DEMO con otro número, no');
-  const an = await totales({ totales: {}, pedidos: {}, anulados: [`PEDVTASTP - ${N + 4}`, `DEMO PEDVTASTP - ${N + 6}`, `PEDVTASTP - 99999999`] });
+  const an = await totales({ totales: {}, pedidos: {}, anulados: [`PEDVTASTP - ${N + 4}`, `PEDVTASTP - ${N + 6}`, `PEDVTASTP - 99999999`] });
   assert.equal(an.data.nuevos.anulados, 2);
   assert.equal((await api('GET', `/records/order/${o4.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'anulado por el informe');
   assert.equal((await api('GET', `/records/order/${demo.id}`)).data.record.props.hs_pipeline_stage, ANULADO);

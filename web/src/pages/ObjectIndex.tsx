@@ -670,7 +670,7 @@ function IndexFor({ type }: { type: ObjectType }) {
                     : col === '__produccion' ? <CeldaProduccion key={col} p={p} r={r} />
                     : col === '__oc' ? <CeldaOc key={col} p={p} />
                     : col === '__responsable' ? <CeldaResponsable key={col} p={p} r={r} />
-                    : col === '__cobro' ? <td key={col} className="ped-prod"><span className="ped-cobro"><Saldo r={r} corto />{adjuntos[r.id] && <Adjuntos r={{ ...r, adjuntos: adjuntos[r.id] } as CrmRecord} />}</span></td>
+                    : col === '__cobro' ? <td key={col} className="ped-prod"><span className="ped-cobro"><Saldo r={r} />{adjuntos[r.id] && <Adjuntos r={{ ...r, adjuntos: adjuntos[r.id] } as CrmRecord} />}</span></td>
                     : <EditCell key={col} type={type} record={r} col={col} onSaved={(nr) => setPatched((p) => ({ ...p, [r.id]: nr }))} />))}
                 </tr>
                 {abierto && p && <FilasProductos p={p} r={r} columns={columns} sel={preview?.id === r.id} onAbrir={() => setPreview(r.id)} />}

@@ -153,8 +153,8 @@ test('por facturar, sin IVA y al centavo: lo pendiente en Finnegans, los remitos
 });
 
 test('lo cobrado de cada pedido sale de sus facturas, no de restar el saldo del total del pedido', () => {
-  // PDV 31748 (20/11/2026): un pedido de 432.361,80 sin IVA cuya factura, sin cobrar nada, debe 432.361,80 con IVA (neto
-  // 357.323,80). Restando el saldo (357.323,80 sin IVA) del total del pedido parecía que ya había pagado el 17 %.
+  // Una factura que no coincide con su pedido (aviso del 20/11/2026, PDV 31748): pedido de 432.361,80 sin IVA, factura de
+  // neto 357.323,80 sin cobrar nada. Restando el saldo (357.323,80) del total del pedido parecía que ya había pagado el 17 %.
   const ped = (doc, neto, pend, total) => ({ DOCNROINT: doc, IMPORTEMONPRINCIPAL: neto, IMPORTEPENDIENTEDESTINO: pend, TOTAL: total, ESTADO: 'Activa' });
   const resumen = T.resumenPedidos([[ped('PEDVTASTP - 31748', 432361.8, 0, 523157.78), ped('PEDVTAFP - 2500', 10000, 0, 12100), ped('PEDVTAFP - 2501', 1000, 1000, 1210)]]);
   const fac = (doc, neto, total, desc) => ({ DOCNROINT: doc, IMPORTEMONPRINCIPAL: neto, TOTAL: total, DESCRIPCION: desc, ESTADO: 'Activa', IDENTIFICACIONEXTERNA: doc });

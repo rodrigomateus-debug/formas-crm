@@ -258,8 +258,8 @@ export const fmtNumber = (v: unknown) => (v == null || v === '' ? '' : number.fo
 // ¿El saldo pendiente del pedido es total o parcial? (pedido de Rodrigo del 13/11/2026: si ya pagó algo, el anticipo, o
 // no). Lo pagado es lo cobrado de sus facturas («Cobrado», importe_cobrado: de cada factura, su neto menos lo que falta
 // cobrar de ella; scripts/pedidos-totales.mjs), sobre lo cobrado más el saldo; todo sin IVA, de Finnegans. No se resta el
-// saldo del total del pedido: si la factura no coincide con el pedido (otro precio, el IVA incluido), la diferencia parecía
-// un pago (aviso de Rodrigo del 20/11/2026: el PDV 31748 figuraba con el 17 % pagado y era el IVA). Solo mientras no llegó
+// saldo del total del pedido: si la factura no coincide con el pedido (otro precio, otro IVA), la diferencia parecía un pago
+// (aviso de Rodrigo del 20/11/2026: el PDV 31748 figuraba con el 17 % pagado, que era un IVA que su factura no tenía). Solo mientras no llegó
 // lo cobrado se usa esa resta. Menos del 1 % cuenta como nada (redondeos, percepciones). Sin saldo, ya todo pago o sin con
 // qué comparar: null.
 export function cobroPedido(p: Record<string, unknown>) {

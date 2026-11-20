@@ -146,8 +146,9 @@ del 1 % cuenta como que no pagó nada (redondeos, percepciones). Un pago que tod
 (cobranza sin aplicar) no es de ningún comprobante, así que hasta que se aplica el pedido sigue diciendo «total».
 
 Antes lo pagado era el total del pedido menos el saldo, y si la factura no coincidía con el pedido la diferencia parecía un
-pago (aviso de Rodrigo del 20/11/2026: el PDV 31748, de $ 432.361,80 sin IVA, no había pagado nada y figuraba con «ya pagó
-$ 75.038 (17 %)»: su factura debía $ 432.361,80 con IVA, o sea $ 357.323,80 sin IVA, y la diferencia era justo el IVA). Esa resta queda solo para los pedidos a los que
+pago (aviso de Rodrigo del 20/11/2026: el PDV 31748, de $ 432.361,80, figuraba con «ya pagó $ 75.038 (17 %)» cuando su
+factura de FP DEMO, sin IVA, se debía entera: el CRM le había sacado un IVA que no tenía, $ 432.361,80 / 1,21 =
+$ 357.323,80). Esa resta queda solo para los pedidos a los que
 todavía no les llegó lo cobrado; sin eso ni total del pedido, se muestra solo el saldo.
 
 ## Los productos de cada pedido en la lista
@@ -399,10 +400,17 @@ Finnegans.
   anulación está por salir, la sincronización no le cambia la etapa al pedido. **En Finnegans hay que anularlo a mano**:
   la API de Finnegans no tiene «anular» para el pedido de venta (solo `DELETE pedidoVenta/{codigo}`, «Elimina la
   entidad», sin probar). Prueba: `test/pedidos.test.mjs`.
-- **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
-  los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
-  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni
-  los filtros por unidad de los pedidos de verdad; sí se pueden asociar a un negocio por su número.
+- **FP DEMO.** Es la empresa de Finnegans (código `7`) donde se factura lo que no lleva IVA: el mismo negocio que Formas
+  Publicitarias (Rodrigo, 20/11/2026: «fp demo y formas es lo mismo, solo cambia que en demo va lo que no lleva IVA»).
+  Comparte la numeración de pedidos y de facturas: desde 2023 ningún número se repite entre las dos (revisado en
+  Finnegans el 20/11/2026: 3.449 pedidos de Formas, 332 de FP DEMO, 0 en las dos). Sus pedidos entran como los de Formas,
+  con la unidad de su tipo de documento, y sus totales, facturas, saldos y cobros van al mismo pedido. Sus facturas van
+  sin IVA (el saldo no se divide por 1,21) y no tienen CAE, así que no se adjuntan.
+  Del 13 al 20/11/2026 entraron aparte, como si fueran de prueba (unidad «FP DEMO», «DEMO» en el nombre y el pedido de
+  Finnegans como «DEMO PEDVTASTP - 31748»). Esa forma se sigue reconociendo como el mismo pedido (`llavePedido` en
+  `pedidosfin.ts`): si el pedido ya tiene su registro de ClickUp, los dos salen en la lista de repetidos para combinarlos;
+  si no, cuando llega del informe de cada hora pasa a ser un pedido normal de su unidad. Prueba:
+  `test/negocio-pedido.test.mjs`.
 
 ### El N° de PDV en el negocio
 

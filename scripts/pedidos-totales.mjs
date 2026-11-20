@@ -12,7 +12,9 @@
 import { pathToFileURL } from 'node:url';
 
 const FIN = (process.env.FINNEGANS_API_URL ?? 'https://api.finneg.com/api').replace(/\/$/, '');
-// Formas Publicitarias SA primero: si un número de pedido está en las dos empresas, vale el de Formas (como las facturas).
+// Formas Publicitarias SA y FP DEMO (donde se factura lo que no lleva IVA): el mismo negocio, con una sola numeración de
+// pedidos y facturas (ningún número se repite entre las dos; revisado el 20/11/2026). Por las dudas, si un número
+// apareciera en las dos, vale el de Formas.
 const EMPRESAS = ['EMPRE01', '7'];
 const DIA = 86_400_000;
 const masDias = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * DIA).toISOString().slice(0, 10);
@@ -74,12 +76,11 @@ export function fechasPorPedido(filasPorEmpresa) {
 }
 // Finnegans cobra por cantidad de consultas: se cuentan y se informan al final de cada corrida.
 export const consultas = { n: 0 };
-// Los pedidos de venta recientes de Formas Publicitarias, para darlos de alta en el CRM sin esperar a ClickUp
+// Los pedidos de venta recientes de una empresa (Formas Publicitarias o FP DEMO), para darlos de alta en el CRM sin esperar a ClickUp
 // (src/worker/pedidosfin.ts): del primer renglón de cada pedido, el cliente, su CUIT, el vendedor, la fecha, la entrega y
 // si es evento. Sin los anulados, Mercado Libre, MarketShell ni los objetivos de venta. `desde`: AAAA-MM-DD.
 const aIso = (s) => { const m = String(s ?? '').match(/^(\d{2})[-/](\d{2})[-/](\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : String(s ?? '').match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null; };
-// `prefijo`: «DEMO » para los de FP DEMO (la empresa de pruebas), que van aparte.
-export function pedidosNuevos(filas, desde, prefijo = '') {
+export function pedidosNuevos(filas, desde) {
   const out = {};
   const anulados = new Set();
   for (const r of filas) {
@@ -92,10 +93,10 @@ export function pedidosNuevos(filas, desde, prefijo = '') {
       entrega: aIso(r.USRFECHAENTREGA), evento: r.USRESEVENTO === true || /^(s[ií]|true|1)$/i.test(String(r.USRESEVENTO ?? '')) };
   }
   for (const k of anulados) delete out[k];
-  return Object.fromEntries(Object.entries(out).map(([k, v]) => [prefijo + k, v]));
+  return out;
 }
 // Los pedidos anulados en Finnegans (todos sus renglones anulados): en el CRM pasan a «Anulado».
-export function pedidosAnulados(filas, prefijo = '') {
+export function pedidosAnulados(filas) {
   const vivos = new Set();
   const anulados = new Set();
   for (const r of filas) {
@@ -103,7 +104,7 @@ export function pedidosAnulados(filas, prefijo = '') {
     if (!k || !/^PEDVTA(STP|FP|NE) - /.test(k)) continue;
     (/anulad/i.test(r.ESTADO ?? '') ? anulados : vivos).add(k);
   }
-  return [...anulados].filter((k) => !vivos.has(k)).map((k) => prefijo + k);
+  return [...anulados].filter((k) => !vivos.has(k));
 }
 
 async function getJson(url, init, intentos = 4) {
@@ -345,9 +346,9 @@ export function facturasParaCrm(docs, asignadas, origenes = new Map()) {
 }
 // Lo cobrado de cada pedido, sin IVA: de cada comprobante del pedido, su neto menos lo que falta cobrar de él (el saldo del
 // informe, con IVA, pasado a sin IVA con el total/neto de ese comprobante). Con esto el CRM dice si el cliente ya pagó algo,
-// en vez de restar el saldo del total del pedido: si la factura no coincide con el pedido (otro precio, el IVA incluido en
-// el precio), esa diferencia no aparece como un pago (aviso de Rodrigo del 20/11/2026: el PDV 31748 figuraba con el 17 %
-// pagado, que era justo el IVA). Las notas de crédito restan. Una cobranza sin aplicar no es de ningún comprobante: no cuenta
+// en vez de restar el saldo del total del pedido: si la factura no coincide con el pedido (otro precio, otro IVA), esa
+// diferencia no aparece como un pago (aviso de Rodrigo del 20/11/2026: el PDV 31748 figuraba con el 17 % pagado, que era
+// un IVA que su factura no tenía). Las notas de crédito restan. Una cobranza sin aplicar no es de ningún comprobante: no cuenta
 // hasta que se aplica. Va para todos los pedidos leídos, en 0 si no tienen nada facturado o nada cobrado.
 export function cobradoDe(resumen, docs, asignadas, filasSaldo) {
   const saldoDoc = new Map();
@@ -426,9 +427,10 @@ async function main() {
   if (!base || !process.env.CRM_TOKEN) throw new Error('Faltan CRM_URL y CRM_TOKEN.');
   const res = await fetch(`${base}/hooks/pedidos/totales`, { method: 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas), fechas: fechasPorPedido(filas),
-      // Formas Publicitarias y FP DEMO (EMPRESAS[1], la de pruebas, que entra aparte).
-      pedidos: { ...pedidosNuevos(filas[0], masDias(hoy, -15)), ...pedidosNuevos(filas[1] ?? [], masDias(hoy, -15), 'DEMO ') },
-      anulados: [...pedidosAnulados(filas[0]), ...pedidosAnulados(filas[1] ?? [], 'DEMO ')] }) });
+      // Formas Publicitarias y FP DEMO (EMPRESAS[1], donde va lo que no lleva IVA): el mismo negocio y la misma numeración,
+      // así que sus pedidos entran como los de Formas.
+      pedidos: { ...pedidosNuevos(filas[1] ?? [], masDias(hoy, -15)), ...pedidosNuevos(filas[0], masDias(hoy, -15)) },
+      anulados: [...pedidosAnulados(filas[0]), ...pedidosAnulados(filas[1] ?? [])] }) });
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
   console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans), ${r.fechas ?? 0} con fecha del pedido nueva.`);

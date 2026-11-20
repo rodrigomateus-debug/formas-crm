@@ -537,6 +537,8 @@ export const UNIDADES = [
 ] as const;
 export type UnidadKey = (typeof UNIDADES)[number]['key'];
 const PEDIDO_UNIDAD: Record<string, UnidadKey> = { 'FORMAS SHOP': 'shop', CORPORATE: 'corporate', 'NO ESTRÉS': 'noestres', 'NO ESTRES': 'noestres', NOESTRES: 'noestres' };
+// La unidad escrita como viene de ClickUp o Finnegans («FORMAS SHOP», «CORPORATE», «NO ESTRÉS»): su clave.
+export const unidadDeTexto = (s: unknown): UnidadKey | undefined => PEDIDO_UNIDAD[String(s ?? '').trim().toUpperCase()];
 export const unidadDeEquipo = (team: number | null | undefined) => UNIDADES.find((u) => u.team === Number(team))?.key;
 export function teamsOf(u: User | undefined): number[] {
   if (!u) return [];

@@ -1,8 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf, userOf, type Meta } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, Icon, recordUrl, formatValue, useDebounced, propOf, userOf, unidadDeTexto, type Meta, type UnidadKey } from '../lib';
 import { PestanasVistas, esFija, useOrdenPestanas, type VistaGuardada } from '../vistas';
-import { Avatar, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug, OcLinks, type OcRef } from '../components';
+import { UnidadFilter } from './QuickFilters';
+import { Avatar, UnidadBadge, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug, OcLinks, type OcRef } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
 import { cumple, cumpleCreado, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol, type Rango } from './ProduccionFiltros';
@@ -315,13 +316,9 @@ export default function ProduccionPage() {
         <div className="search"><Icon name="search" />
           <input className="input" placeholder="Buscar PDV, cliente o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
         </div>
-        <div className="btn-group" role="group" aria-label="Unidades de negocio">
-          {UNIDADES_VISIBLES.map((u) => {
-            const on = (unidades ?? []).includes(u.value);
-            return <button key={u.value} type="button" className={`btn qf-btn${on ? ' on' : ''}`} aria-pressed={on}
-              onClick={() => cambiarUnidades(on ? (unidades ?? []).filter((x) => x !== u.value) : [...(unidades ?? []), u.value])}>{u.label}</button>;
-          })}
-        </div>
+        {/* El mismo desplegable de unidades (con sus logos) que en el resto del Hub; acá se guardan con el nombre de ClickUp. */}
+        <UnidadFilter value={(unidades ?? []).map((u) => unidadDeTexto(u)).filter((k): k is UnidadKey => !!k)}
+          onChange={(ks) => cambiarUnidades(UNIDADES_VISIBLES.filter((u) => ks.includes(unidadDeTexto(u.value) ?? '')).map((u) => u.value))} />
         <div className="bar-select">
           <Select value={persona} onChange={(e) => cambiarPersona(e.target.value)} aria-label="Asignado a" className={`input${persona ? ' on' : ''}`}>
             <option value="">Asignado: todos</option>
@@ -684,6 +681,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
             <Icon name="order" size={15} />
             <div className="prod-pdv-t">
               <div className="ellipsis">
+                {unidadDeTexto(p.unidad) && <UnidadBadge k={unidadDeTexto(p.unidad)!} compact />}{' '}
                 {p.record_id ? <Link to={recordUrl('order', p.record_id)}><b>PDV {p.npdv}</b></Link> : <b>PDV {p.npdv}</b>}
                 <span className="muted"> · {p.cliente ?? 'Sin cliente'}</span>
               </div>
@@ -885,6 +883,7 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
       onClick={(e) => { if (p.record_id && !clicAdentro(e)) onAbrir(p); }} title={p.record_id ? `Ver el pedido del PDV ${p.npdv}` : undefined}>
       <div className="prod-pdv-card-head">
         <div className="row" style={{ gap: 6, minWidth: 0 }}>
+          {unidadDeTexto(p.unidad) && <UnidadBadge k={unidadDeTexto(p.unidad)!} compact />}
           {p.record_id ? <Link to={recordUrl('order', p.record_id)} className="prod-npdv">PDV {p.npdv}</Link> : <span className="prod-npdv">PDV {p.npdv}</span>}
           <span className="grow" />
           {p.total > 0 && <span className={`prod-avance${listo ? ' ok' : ''}`} title={`${p.listos} de ${p.total} artículos listos`}>{p.listos}/{p.total}</span>}

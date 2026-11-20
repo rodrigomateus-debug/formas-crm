@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { http, qs, useToast, Icon } from '../lib';
+import { http, qs, useToast, Icon, unidadDeTexto } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
-import { Avatar, EditarEnLinea, Modal, QuienPidio, UserChip, alEsc } from '../components';
+import { Avatar, EditarEnLinea, Modal, QuienPidio, UnidadBadge, UserChip, alEsc } from '../components';
+import { UnidadFilter } from './QuickFilters';
 import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
@@ -141,7 +142,8 @@ export default function CronogramaPage() {
   const [datos, setDatos] = useState<Vista | null>(null);
   const [error, setError] = useState('');
   const [buscar, setBuscar] = useState('');
-  const [unidad, setUnidad] = useState('');
+  const [unidades, setUnidades] = useState<string[]>([]);   // filtro por unidad de negocio (claves: shop, corporate, noestres)
+  const deUnidad = (u: string | null) => !unidades.length || unidades.includes(unidadDeTexto(u) ?? '');
   const [pendientes, setPendientes] = useState(false);
   const [toca, setToca] = useState<Rol | ''>('');   // «Le toca a»: solo las tarjetas de Producción, Ventas, el proveedor o Logística
   const [preview, setPreview] = useState<number | null>(null);
@@ -195,15 +197,14 @@ export default function CronogramaPage() {
 
   const v = datos && datos.desde === semana ? datos : null;
   const q = buscar.trim().toLowerCase();
-  const unidades = useMemo(() => [...new Set((v?.movimientos ?? []).map((m) => m.unidad).filter((u): u is string => !!u))].sort(), [v]);
-  const movs = useMemo(() => (v?.movimientos ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad) && (!pendientes || !m.hecho)), [v, q, unidad, pendientes]);
+  const movs = useMemo(() => (v?.movimientos ?? []).filter((m) => coincide(m, q) && deUnidad(m.unidad) && (!pendientes || !m.hecho)), [v, q, unidades, pendientes]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Los encargos no son de una unidad de negocio: con ese filtro no se ven.
-  const encs = useMemo(() => (v?.encargos ?? []).filter((e) => coincideEnc(e, q) && !unidad && (!pendientes || e.estado !== 'hecho')), [v, q, unidad, pendientes]);
+  const encs = useMemo(() => (v?.encargos ?? []).filter((e) => coincideEnc(e, q) && !unidades.length && (!pendientes || e.estado !== 'hecho')), [v, q, unidades, pendientes]);
   // Sábado y domingo se ven si tienen algo: un movimiento, un encargo, una nota o un feriado.
   const finDeSemana = [5, 6].filter((i) => { const d = sumar(semana, i); return movs.some((m) => m.fecha === d) || encs.some((e) => e.fecha === d) || !!v?.notas.some((n) => n.fecha === d); });
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
-  const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && (!unidad || m.unidad === unidad)), [v, q, unidad]);
+  const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && deUnidad(m.unidad)), [v, q, unidades]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Estados de despacho: la dirección de la parada de una tarjeta (llega aparte) y a quién le toca cada una.
   const dirDe = (t: Tarjeta) => (t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined);
   const pasaToca = (t: Tarjeta) => !toca || despachoTarjeta(t, dirDe(t))?.quien === toca;
@@ -319,11 +320,8 @@ export default function CronogramaPage() {
             <div className="search" style={{ minWidth: 220, flex: '0 1 280px' }}><Icon name="search" />
               <input className="input" placeholder="Buscar PDV, cliente, proveedor o producto" value={buscar} onChange={(e) => setBuscar(e.target.value)} aria-label="Buscar" />
             </div>
-            {unidades.length > 1 && (
-              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Unidad de negocio">
-                {unidades.map((u) => <button key={u} type="button" className={`chip${unidad === u ? ' on' : ''}`} aria-pressed={unidad === u} onClick={() => setUnidad(unidad === u ? '' : u)}>{u.charAt(0) + u.slice(1).toLowerCase()}</button>)}
-              </div>
-            )}
+            {/* El mismo desplegable de unidades de negocio (con sus logos) que en Pedidos, Negocios, Empresas y Contactos. */}
+            <UnidadFilter value={unidades} onChange={setUnidades} />
             <label className="small row" style={{ gap: 6 }}><input type="checkbox" checked={pendientes} onChange={(e) => setPendientes(e.target.checked)} />Solo lo pendiente</label>
             <div className="row cr-toca" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Le toca a">
               <span className="small muted">Le toca a</span>
@@ -430,7 +428,7 @@ export default function CronogramaPage() {
           )}
           {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
           {enviando && <ModalEnviado m={enviando} onCerrar={() => setEnviando(null)} onListo={() => { setEnviando(null); void cargar(); }} />}
-          {v && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && (!unidad || s.unidad === unidad))} puede={puede}
+          {v && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && deUnidad(s.unidad))} puede={puede}
             onArrastrar={(a) => { arrastre.current = a; if (!a) setSobre(null); }} onMover={(ids, f, pdv) => mover(ids, 'entrega', f, pdv)} onAbrir={setPreview} />}
         </>
       )}
@@ -587,6 +585,7 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
       {puede ? <button type="button" className="cr-check on" aria-pressed="true" aria-label="Volver a pendiente" title="Volver a pendiente" onClick={onMarcar}><Icon name="check" size={12} /></button>
         : <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
       <span className="cr-compacta-tit" title={t.titulo}>{t.titulo}</span>
+      {unidadDeTexto(t.movs[0]?.unidad) && <UnidadBadge k={unidadDeTexto(t.movs[0]?.unidad)!} compact />}
       <span className="cr-compacta-pdv num">{t.pdv.replace('PDV ', '')}</span>
       <button type="button" className="cr-mini" aria-label="Ver la tarjeta entera" title="Ver la tarjeta entera" onClick={() => setAbierta(true)}><Icon name="down" size={13} /></button>
     </article>
@@ -602,6 +601,7 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
         <span>{t.titulo}</span>
       </div>
       <div className="cr-t-linea">
+        {unidadDeTexto(t.movs[0]?.unidad) && <UnidadBadge k={unidadDeTexto(t.movs[0]?.unidad)!} compact />}
         <span className="cr-t-pdv num">{t.pdv}</span>
         {t.para && <span className="cr-t-para">{t.para}</span>}
         {t.movs[0]?.expreso && (() => {
@@ -1000,7 +1000,7 @@ function SinFecha({ items, puede, onArrastrar, onMover, onAbrir }: {
             onDragEnd={() => onArrastrar(null)}
             onClick={(e) => { if (g[0].record_id && !(e.target as HTMLElement).closest('button, .popover, [role="dialog"]')) onAbrir(g[0].record_id); }}>
             <div className="cr-t-quien">{lindo(g[0].cliente) || pdv}</div>
-            <div className="cr-t-linea"><span className="cr-t-pdv num">{pdv}</span></div>
+            <div className="cr-t-linea">{unidadDeTexto(g[0].unidad) && <UnidadBadge k={unidadDeTexto(g[0].unidad)!} compact />}<span className="cr-t-pdv num">{pdv}</span></div>
             {g.filter((x) => x.articulo).slice(0, 3).map((x) => <div key={x.task_id} className="cr-t-item">{cantidad(x)}</div>)}
             {g.length > 3 && <div className="cr-t-item muted">+ {g.length - 3} más</div>}
             {puede && <div className="cr-t-acc"><SelectorFecha valor={null} onElegir={(f) => f && onMover(ids, f, pdv)} label="Ponerle fecha de entrega" className="cr-mini" title="Ponerle fecha de entrega"><Icon name="calendar" size={13} /></SelectorFecha></div>}

@@ -6,14 +6,16 @@ remito (cuando lo cargan en ClickUp al entregar). Las vendedoras y el backoffice
 producción (de «Pedido confirmado» a «Listo para producción», pasando si hace falta por «$ Pendiente de Anticipo» y
 «Pendiente Boceto Digital»); lo demás lo mueve ClickUp.
 
-**Finnegans solo se lee. De ClickUp se lee todo y se escriben dos cosas, más lo que edita producción desde la pestaña Producción** ([PRODUCCION.md](PRODUCCION.md): estado, asignados, proveedor, impresor y fechas de cada artículo, en las unidades que se trabajan desde el CRM). La primera (pedido de Rodrigo del 4/11/2026): cuando la
+**Finnegans solo se lee. De ClickUp se lee todo y se escriben tres cosas, más lo que edita producción desde la pestaña Producción** ([PRODUCCION.md](PRODUCCION.md): estado, asignados, proveedor, impresor y fechas de cada artículo, en las unidades que se trabajan desde el CRM). La primera (pedido de Rodrigo del 4/11/2026): cuando la
 vendedora pasa el pedido a «Listo para producción» desde «Pedido confirmado», «$ Pendiente de Anticipo» o «Pendiente Boceto
 Digital» (en la pantalla, en masa o desde Claude), el PDV y
 sus artículos que siguen en «ingreso de pedido» pasan a «pdv» en ClickUp. Lo que ya avanzó no se toca. El pedido queda en
 la cola `clickup_salida` y sale enseguida; si ClickUp falla, se reintenta cada 10 minutos (hasta 6 veces). Con token de
 administrador, `GET /hooks/clickup/salida` muestra lo último que se mandó y si hubo errores. Los cambios en ClickUp
 quedan a nombre del dueño del token `CLICKUP_TOKEN`. La segunda (pedido de Rodrigo del 6/11/2026): el boceto aprobado de un producto se adjunta a la subtarea de ese
-artículo en el PDV (ver «Bocetos de producción»); solo se adjunta, no se cambia ningún estado.
+artículo en el PDV (ver «Bocetos de producción»); solo se adjunta, no se cambia ningún estado. La tercera (pedido de
+Rodrigo del 20/11/2026): al anular el pedido a mano en el CRM, se anulan en ClickUp el PDV y sus artículos no entregados
+(ver «Anulado a mano en el CRM», más abajo).
 
 ## De dónde sale cada cosa
 
@@ -379,6 +381,16 @@ Finnegans.
   con `{"activo": true}`).
 - **Anulados.** Un pedido anulado en Finnegans pasa a «Anulado» en el CRM: por el aviso, o por el informe de cada hora
   (los pedidos con todos sus renglones anulados). ClickUp lo anula por su lado, con su propia integración con Finnegans.
+- **Anulado a mano en el CRM** (pedido de Rodrigo del 20/11/2026; solo administración puede). Antes de anular, la
+  pantalla pide confirmación con lo que va a pasar («En ClickUp también se anula el PDV y 4 artículos…»): el servidor
+  contesta 409 con `confirmar: 'anular'` y la pantalla (`http` en `web/src/lib.tsx`) pregunta y repite con
+  `x-confirmar: anular`, en la ficha, el tablero, la lista y las acciones masivas; Claude y la API no preguntan. Con eso
+  queda en la cola (`clickup_salida`, acción `anular`) y en ClickUp se anulan los artículos que no se entregaron (ni en
+  parte) y el PDV (`anularEnClickup` en `clickup.ts`); queda en la conversación del pedido a nombre de quien anuló.
+  Volver el pedido a otra etapa (`desanular`) deja cada tarea como estaba, si nadie la movió después. Mientras la
+  anulación está por salir, la sincronización no le cambia la etapa al pedido. **En Finnegans hay que anularlo a mano**:
+  la API de Finnegans no tiene «anular» para el pedido de venta (solo `DELETE pedidoVenta/{codigo}`, «Elimina la
+  entidad», sin probar). Prueba: `test/pedidos.test.mjs`.
 - **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
   los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
   «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni

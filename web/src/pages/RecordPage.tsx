@@ -189,7 +189,11 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
       toast('Guardado');
       onChange();
       siFestejaPedido(type, name, record.props[name], value, record);
-    } catch (e) { toast((e as Error).message, true); throw e; }
+    } catch (e) {
+      // Si la persona no confirmó (anular un pedido: http en lib.tsx), el campo se cierra con lo que ya tenía.
+      if ((e as { data?: { cancelado?: boolean } }).data?.cancelado) { toast((e as Error).message); onChange(); return; }
+      toast((e as Error).message, true); throw e;
+    }
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record.props.pipeline)?.config.key_props : undefined;
   // El «Link a Darwin» no se repite como texto: está el botón «Chat en Darwin» (sigue en la lista completa, por si hay que corregirlo).
@@ -1272,7 +1276,10 @@ function PreviewBody({ type, id, compose: composeIn, onClose, onChange, onBack, 
       toast('Guardado');
       changed();
       if (record) siFestejaPedido(type, name, record.props[name], value, record);
-    } catch (e) { toast((e as Error).message, true); throw e; }
+    } catch (e) {
+      if ((e as { data?: { cancelado?: boolean } }).data?.cancelado) { toast((e as Error).message); changed(); return; }
+      toast((e as Error).message, true); throw e;
+    }
   };
   const pipeKeys = type === 'deal' ? meta.pipelines.find((p) => p.id === record?.props.pipeline)?.config.key_props : undefined;
   const keyProps = ((pipeKeys?.length ? pipeKeys : keyPropsFor(meta, type)).map((n) => propOf(meta, type, n)).filter(Boolean) as Property[])

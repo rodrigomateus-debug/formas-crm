@@ -7,6 +7,7 @@ import { Avatar, EditarEnLinea, Modal, QuienPidio, UnidadBadge, UserChip, alEsc 
 import { Pop, UnidadFilter } from './QuickFilters';
 import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
+import { BarraPie } from '../vistas';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
 import { EncargoModal, ESTADO as ESTADO_ENC, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
@@ -433,6 +434,8 @@ export default function CronogramaPage() {
               </div>
             </div>
           )}
+          {/* Abajo a la izquierda, como en Pedidos y Producción: cuánto hay en la semana (con lo que se ve filtrado). */}
+          {v && <BarraPie onRecargar={cargar} total={`${total} movimiento${total === 1 ? '' : 's'} · ${hechos} hecho${hechos === 1 ? '' : 's'} · ${encs.length} encargo${encs.length === 1 ? '' : 's'}`} />}
           {colgando && <ModalColgar a={colgando} onCerrar={() => setColgando(null)} onColgar={(m) => colgar(colgando, m)} />}
           {anotando && anotando.record_id && (
             <Modal title={`Anotaciones de logística · ${anotando.titulo} (${anotando.pdv})`} onClose={() => setAnotando(null)}>

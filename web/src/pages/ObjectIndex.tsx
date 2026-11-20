@@ -244,6 +244,7 @@ function IndexFor({ type }: { type: ObjectType }) {
   const setSelected = (s: Set<number>) => { setSelectedRaw(s); if (!s.size) setSelAll(false); };
   const toggleSel = (id: number) => { const s = new Set(selected); s.has(id) ? s.delete(id) : s.add(id); setSelected(s); setSelAll(false); };
   const [boardTotal, setBoardTotal] = useState<number>();
+  const [closedDays, setClosedDays] = useState(90);   // tablero de negocios: cuántos días de cerrados se ven
   const [createDefaults, setCreateDefaults] = useState<Record<string, unknown> | undefined>();
   const [filterProp, setFilterProp] = useState<string>();
   const createIn = (d: Record<string, unknown>) => { setCreateDefaults(d); setShow('create'); };
@@ -495,18 +496,27 @@ function IndexFor({ type }: { type: ObjectType }) {
     const f: Filter = { prop: 'estado_entrega', op: 'in', values: FALTAN };
     return { ...c, groups: c.groups.length ? c.groups.map((g) => [...g, f]) : [[f]] };
   });
-  const quickBar = (
+  // Los filtros propios de los pedidos van después de la unidad y el propietario (QuickFilterBar, `propios`).
+  const propios = type === 'order' && (
     <>
-    {type === 'order' && (
       <div className="qf"><button className={`btn qf-btn${sinNegocio ? ' on' : ''}`} aria-pressed={sinNegocio} onClick={toggleSinNegocio}
         title="Pedidos que no están en ningún negocio (para control)">Sin negocio</button></div>
-    )}
-    {type === 'order' && <CobroFilter value={cobroDe(cfg.groups)} onChange={(v) => setCfg((c) => ({ ...c, groups: conCobro(c.groups, v) }))} />}
-    {type === 'order' && (
+      <CobroFilter value={cobroDe(cfg.groups)} onChange={(v) => setCfg((c) => ({ ...c, groups: conCobro(c.groups, v) }))} />
       <div className="qf"><button className={`btn qf-btn${faltanEntregas ? ' on' : ''}`} aria-pressed={faltanEntregas} onClick={toggleFaltan}
         title="Pedidos a los que les falta entregar algo según sus remitos, con diferencias, o entregados sin remito">Faltan entregas</button></div>
-    )}
-    <QuickFilterBar type={type} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} relacion={cfg.relacion} extra={cfg.groups.length > 0}
+    </>
+  );
+  // Ver lo terminado: en el tablero de negocios, cuántos días de cerrados se muestran (va en el lugar de «ver terminados»).
+  const terminados = mode === 'board' && type === 'deal' && (
+    <Select className={`input${closedDays !== 90 ? ' on' : ''}`} style={{ width: 170 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados" title="Negocios cerrados que se muestran">
+      <option value={30}>Cerrados: 30 días</option>
+      <option value={90}>Cerrados: 90 días</option>
+      <option value={365}>Cerrados: 1 año</option>
+    </Select>
+  );
+  const quickBar = (
+    <>
+    <QuickFilterBar type={type} propios={propios} terminados={terminados} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} relacion={cfg.relacion} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
       onUnidades={(unidades) => setCfg((c) => ({ ...c, unidades }))} onRelacion={(relacion) => setCfg((c) => ({ ...c, relacion }))}
       onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [], relacion: undefined }))} />
@@ -605,7 +615,7 @@ function IndexFor({ type }: { type: ObjectType }) {
           onSelectAll={() => setSelAll(true)} onClear={() => setSelected(new Set())}
           onDone={() => { setSelected(new Set()); list.reload(); setBoardKey((k) => k + 1); }} />
       )}
-      {sinVista ? <Cargando /> : mode === 'board' && type === 'deal' ? <Board vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
+      {sinVista ? <Cargando /> : mode === 'board' && type === 'deal' ? <Board closedDays={closedDays} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
         sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
         : mode === 'board' ? <PropBoard productos={type === 'order' ? productos : undefined} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
           cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
@@ -616,7 +626,9 @@ function IndexFor({ type }: { type: ObjectType }) {
           {quickBar}
           {filterButton}
           {filterChips}
-          <div className="bar-end">
+        </div>
+        {/* Los controles de vista, en su propia fila: no se mezclan con los filtros. */}
+        <div className="toolbar vista">
             {type === 'order' && (
               <button type="button" className="btn ghost" onClick={() => productos.todos(productos.cerrados)} aria-pressed={productos.cerrados}
                 title={productos.cerrados ? 'Mostrar los productos de cada pedido' : 'Ver solo los pedidos, sin sus productos'}>
@@ -624,7 +636,6 @@ function IndexFor({ type }: { type: ObjectType }) {
               </button>
             )}
             <button className="btn ghost" onClick={() => setShow('columns')}><Icon name="columns" size={15} />Columnas</button>
-          </div>
         </div>
 
         <div className={`table-wrap${list.fresh && !esperaProductos ? '' : ' cargando'}`} aria-busy={list.loading || esperaProductos}>

@@ -78,16 +78,15 @@ export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact'
 }
 
 // Tablero de negocios por pipeline: arrastrar una tarjeta a otra columna cambia la etapa.
-export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias }: {
+export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools, search, onSearch, openId, onOpen, reloadKey, selected, onSelect, onTotal, onCreate, vacias = false, onVacias, closedDays = 90 }: {
   vacias?: boolean; onVacias?: (v: boolean) => void;
   pipelineId: string; q: string; groups?: Filter[][]; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void;
-  tools?: ReactNode; search: string; onSearch: (s: string) => void;
+  tools?: ReactNode; search: string; onSearch: (s: string) => void; closedDays?: number;
   openId?: number | null; onOpen?: (id: number, compose?: Activity['type']) => void; reloadKey?: number;
   selected?: Set<number>; onSelect?: (id: number) => void; onTotal?: (n: number) => void; onCreate?: (defaults: Record<string, unknown>) => void;
 }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const [closedDays, setClosedDays] = useState(90);
   const [dragId, setDragId] = useState<number | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [ask, setAsk] = useState<{ deal: CrmRecord; stage: Stage; missing: string[] } | null>(null);
@@ -150,16 +149,15 @@ export default function Board({ pipelineId, q, groups, sort, dir, onSort, tools,
 
   return (
     <>
+      {/* Filtros arriba; los controles de vista (ordenar, colapsar) y los totales, en su propia fila. «Cerrados: N días» va
+          con los filtros, en el lugar de «ver terminados» (lo arma ObjectIndex). */}
       <div className="toolbar">
         <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar negocios…" aria-label="Buscar" value={search} onChange={(e) => onSearch(e.target.value)} /></div>
-        <Select className="input" style={{ width: 170 }} value={closedDays} onChange={(e) => setClosedDays(Number(e.target.value))} aria-label="Cerrados" title="Negocios cerrados que se muestran">
-          <option value={30}>Cerrados: 30 días</option>
-          <option value={90}>Cerrados: 90 días</option>
-          <option value={365}>Cerrados: 1 año</option>
-        </Select>
+        {tools}
+      </div>
+      <div className="toolbar vista">
         <SortPick type="deal" sort={sort} dir={dir} onSort={onSort} />
         <BotonVacias value={vacias} onChange={onVacias} />
-        {tools}
         <span className="board-sum">
           <b className="num">{sum.n.toLocaleString('es-AR')}</b> {sum.n === 1 ? 'negocio' : 'negocios'}
           <span className="sep">·</span>Total <b className="num">{fmtMoney(sum.amount) || '$ 0'}</b>

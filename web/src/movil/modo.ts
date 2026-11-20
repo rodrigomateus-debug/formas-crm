@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
-import { esVentas, type User } from '../lib';
+import { esVentas, perfilesDe, tienePerfil, type User } from '../lib';
 
 // Qué versión celular: la de Ventas, la de Logística o la de Producción (cada una con lo suyo).
 export type PerfilMovil = 'ventas' | 'logistica' | 'produccion';
-export function perfilMovil(me: Pick<User, 'profile' | 'role'>): PerfilMovil | null {
-  if (esVentas(me)) return 'ventas';
-  if (me.profile === 'logistica' && me.role !== 'admin') return 'logistica';
-  if (me.profile === 'produccion' && me.role !== 'admin') return 'produccion';
+// Con varios perfiles, la del principal (o la del primero que tenga versión celular).
+export function perfilMovil(me: Pick<User, 'profile' | 'role'> & { perfiles?: string | null }): PerfilMovil | null {
+  if (me.role === 'admin') return null;
+  const principal = perfilesDe(me)[0];
+  if (esVentas(me) || ['comercial', 'backoffice'].includes(principal)) return 'ventas';
+  if (principal === 'logistica') return 'logistica';
+  if (principal === 'produccion') return 'produccion';
+  if (tienePerfil(me, 'logistica')) return 'logistica';
+  if (tienePerfil(me, 'produccion')) return 'produccion';
   return null;
 }
 

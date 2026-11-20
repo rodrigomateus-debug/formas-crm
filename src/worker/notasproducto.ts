@@ -1,6 +1,6 @@
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
-import { visibleSql } from './alcance';
+import { conPerfilSql, tienePerfil, visibleSql } from './alcance';
 import { STAGE } from './clickup';
 import { bajarArchivo, driveConfig, subirArchivo } from './drive';
 
@@ -41,7 +41,7 @@ export function modeloDe(sku: string): string | null {
 }
 
 // Puede escribir notas: Producción y los administradores (no los de solo lectura).
-export const puedeEscribirNotas = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || u.profile === 'produccion');
+export const puedeEscribirNotas = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || tienePerfil(u, 'produccion'));
 
 // La nota `n` vale para el SKU `s` (una expresión SQL): el mismo SKU o, si es del modelo, uno que empieza con el modelo y
 // sigue con un separador.
@@ -359,7 +359,7 @@ export async function avisarNotasDelPedido(db: D1Database, recordId: number) {
     porSku.set(x.sku, a);
   }
   if (!porSku.size) return 0;
-  const gente = (await db.prepare(`SELECT id FROM users WHERE active = 1 AND deleted_at IS NULL AND role != 'viewer' AND (id = ?1 OR profile = 'produccion')`)
+  const gente = (await db.prepare(`SELECT id FROM users WHERE active = 1 AND deleted_at IS NULL AND role != 'viewer' AND (id = ?1 OR ${conPerfilSql('produccion')})`)
     .bind(r.owner_id ?? 0).all<{ id: number }>()).results.map((u) => u.id);
   if (!gente.length) return 0;
   const ahora = now();

@@ -59,9 +59,10 @@ export interface Env {
 }
 
 // Perfiles (pedido de Rodrigo del 02/11/2026): el área de cada usuario. Admin ve y puede todo; Comercial es el perfil
-// Ventas, que ve lo suyo (alcance.ts, 12/11/2026); Producción y Logística, por ahora, ven todo. Qué puede hacer (editar, borrar, solo
-// mirar) lo dice role; un admin tiene perfil admin y viceversa.
-export const PROFILES = ['admin', 'comercial', 'produccion', 'logistica'] as const;
+// Ventas, que ve lo suyo (alcance.ts, 12/11/2026); Back office atiende a otras vendedoras (20/11/2026); Producción y Logística
+// ven los pedidos. Se pueden tener varios (`perfiles`, el primero el principal; alcance.ts). Qué puede hacer
+// (editar, borrar, solo mirar) lo dice role; un admin tiene perfil admin y viceversa.
+export const PROFILES = ['admin', 'comercial', 'backoffice', 'produccion', 'logistica'] as const;
 export type Profile = (typeof PROFILES)[number];
 
 export interface User {
@@ -69,7 +70,8 @@ export interface User {
   email: string;
   name: string;
   role: 'admin' | 'manager' | 'member' | 'viewer';
-  profile: Profile;
+  profile: Profile;            // el principal, por compatibilidad (Back office se guarda como comercial; alcance.ts)
+  perfiles?: string | null;    // JSON con todos sus perfiles, el primero el principal (alcance.ts, perfilesDe)
   team_id: number | null;
   extra_teams?: string;
   pipelines?: string | null;   // JSON con los pipelines que ve (Configuración → Usuarios); NULL: según sus equipos

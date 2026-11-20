@@ -3325,6 +3325,8 @@ body.movil .sb-mickey { bottom: calc(58px + env(safe-area-inset-bottom)); }   /*
 .usuarios-tabla .usuario-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .usuarios-tabla .usuario-txt .muted { font-size: 12px; }
 .usuarios-tabla td .input.select-like, .usuarios-tabla td .multipick { width: 100%; }
+.usuarios-tabla td .input.select-like { padding-right: 28px; }
+.usuarios-tabla td .input.select-like::after { right: 8px; }
 .usuarios-tabla td.ancho > .ellipsis { display: block; }
 .usuarios-tabla th.centro, .usuarios-tabla td.centro { text-align: center; }
 .usuarios-tabla td.acciones { white-space: nowrap; text-align: right; }

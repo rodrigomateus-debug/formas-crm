@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router-dom';
-import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, pipelinesDe, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon, verComo } from '../lib';
+import { http, qs, useMeta, useToast, useAsync, propsOf, OBJECTS, fmtDate, TagChips, type Filter, type ObjectType, type Option, type Pipeline, type Property, type Stage, type Tag, canSeePipeline, pipelinesDe, perfilesDe, nombresPerfiles, teamsOf, PROFILE_LABEL, ROLE_LABEL, Icon, verComo } from '../lib';
 import { Avatar, FilterRow, Modal, teclasAlSalir, MultiPick, UserChip, describeFilter, filterableProps, opsFor, userOption } from '../components';
 import { Select } from '../Select';
 
@@ -49,14 +49,22 @@ function Users() {
     if (!sees.length) return 'Ninguno';
     return hidden.length <= sees.length ? `Todos menos: ${hidden.map((p) => p.label).join(', ')}` : sees.map((p) => p.label).join(', ');
   };
-  const [f, setF] = useState({ email: '', name: '', profile: 'comercial', role: 'member', teams: [] as string[], avisos_mail: false });
+  const [f, setF] = useState({ email: '', name: '', perfiles: ['comercial'], role: 'member', teams: [] as string[], avisos_mail: false });
   // Equipos: una sola lista. El primero es el principal (Negocios arranca en su pipeline); al sumar uno va al final.
   const teamsPick = (values: string[], onChange: (v: string[]) => void, small = true) => (
     <MultiPick small={small} options={meta.teams.map((t) => ({ value: String(t.id), label: t.name }))} values={values} onChange={onChange} />
   );
-  const profileSelect = (value: string, onChange: (v: string) => void, cls = 'input sm', style: CSSProperties = { minWidth: 116 }) => (
-    <Select className={cls} style={style} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Perfil">
-      {Object.entries(PROFILE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
+  // Perfiles (pedido de Rodrigo del 20/11/2026): puede tener varios, como Carmen (Comercial + Back office). Una sola lista: el
+  // primero es el principal (con el que arranca el Hub). Admin va solo: elegirlo saca los demás, y sumar otro lo saca.
+  const perfilesPick = (values: string[], onChange: (v: string[]) => void, small = true, nombre?: string) => (
+    <MultiPick small={small} options={Object.entries(PROFILE_LABEL).map(([v, l]) => ({ value: v, label: l }))} values={values}
+      resumen={values.map((x) => PROFILE_LABEL[x] ?? x).join(' + ') || 'Elegir…'} ariaLabel={nombre ? `Perfiles de ${nombre}` : 'Perfiles'}
+      title={`${values.map((x) => PROFILE_LABEL[x] ?? x).join(' + ')}. El primero es el principal (con el que arranca el Hub).`}
+      onChange={(v) => {
+        const nuevo = v.find((x) => !values.includes(x));
+        const r = nuevo === 'admin' ? ['admin'] : nuevo ? v.filter((x) => x !== 'admin') : v;
+        if (r.length) onChange(r); else toast('Tiene que tener al menos un perfil.', true);
+      }} />
   );
   const roleSelect = (value: string, onChange: (v: string) => void, cls = 'input sm', style: CSSProperties = { minWidth: 124 }) => (
     <Select className={cls} style={style} value={value} onChange={(e) => onChange(e.target.value)} aria-label="Permisos">
@@ -80,9 +88,9 @@ function Users() {
           quietos aunque la pantalla sea angosta. Los desplegables flotan, así que no hace falta dejarla desbordar. */}
       <div className="table-wrap usuarios-tabla"><table className="grid">
         {/* Anchos fijos: los textos largos se cortan con «…» (y se leen enteros al pasar el mouse) en lugar de estirar la tabla. */}
-        <colgroup><col style={{ width: 186 }} /><col style={{ width: 128 }} /><col style={{ width: 136 }} /><col style={{ width: 146 }} /><col style={{ width: 152 }} />
-          <col style={{ width: 146 }} /><col style={{ width: 80 }} /><col style={{ width: 60 }} /><col style={{ width: 62 }} /><col style={{ width: 72 }} /></colgroup>
-        <thead><tr><th className="nosort">Usuario</th><th className="nosort">Perfil</th><th className="nosort">Permisos</th>
+        <colgroup><col style={{ width: 160 }} /><col style={{ width: 206 }} /><col style={{ width: 130 }} /><col style={{ width: 130 }} /><col style={{ width: 150 }} />
+          <col style={{ width: 126 }} /><col style={{ width: 78 }} /><col style={{ width: 60 }} /><col style={{ width: 62 }} /><col style={{ width: 66 }} /></colgroup>
+        <thead><tr><th className="nosort">Usuario</th><th className="nosort" title="Puede tener varios (por ejemplo, Comercial + Back office). El primero es el principal: con ese arranca el Hub. Admin va solo.">Perfiles</th><th className="nosort">Permisos</th>
           <th className="nosort" title="El primero es el principal: Negocios arranca en su pipeline.">Equipos</th>
           <th className="nosort" title="De quiénes ve los contactos, empresas, negocios y pedidos (perfil Comercial): lo suyo, lo de su equipo, todo o personas elegidas. Acá también va la Gerencia.">Qué ve</th>
           <th className="nosort" title="Los pipelines de negocios que le aparecen. Si tiene más de uno, elige cuál se le abre guardando una vista con ese pipeline y dejándola primera.">Pipelines que ve</th>
@@ -96,7 +104,7 @@ function Users() {
             <tr key={u.id} className={u.active ? undefined : 'inactivo'}>
               <td className="usuario"><span className="user-chip"><Avatar name={u.name} photo={u.photo_url} />
                 <span className="usuario-txt"><span className="ellipsis" title={u.name}>{u.name}</span><span className="ellipsis muted" title={u.email}>{u.email}</span></span></span></td>
-              <td>{profileSelect(u.profile, (v) => patch(u.id, { profile: v }), 'input sm', enTabla)}</td>
+              <td>{perfilesPick(perfilesDe(u), (v) => patch(u.id, { perfiles: v }), true, u.name)}</td>
               <td>{u.role === 'admin'
                 // Admin puede todo (lo dice el perfil); acá va solo la marca de superadmin.
                 ? (meta.superadmin
@@ -111,7 +119,7 @@ function Users() {
                 : <span className="muted small" title={ve.largo}>{ve.corto}</span>}</td>
               <td className="ancho">{u.role === 'admin'
                 ? <span className="muted small ellipsis" title="Administrador: ve todos los pipelines.">{pipelinesSummary(u)}</span>
-                : u.profile !== 'comercial'
+                : !delLadoComercial(u)
                   ? <span className="muted small ellipsis" title="Producción y Logística no ven negocios: los pipelines no les cambian nada.">No ven negocios</span>
                   : <MultiPick small options={meta.pipelines.map((p) => ({ value: p.id, label: p.label }))} values={meta.pipelines.filter((p) => canSeePipeline(u, p)).map((p) => p.id)}
                     resumen={`${pipelinesSummary(u)}${aMano ? ' · a mano' : ''}`}
@@ -132,9 +140,9 @@ function Users() {
         })}</tbody>
       </table></div>
       <div className="muted small usuarios-ayuda">
-        <p><b>Perfiles.</b> Admin ve y puede todo, incluida esta configuración. Comercial (ventas) ve lo que dice «Qué ve», lo que no tiene propietario (para tomarlo) y lo asociado a eso, con sus tareas y conversaciones; ve el saldo y la deuda del cliente y los remitos de sus pedidos, pero no Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta listas. Producción y Logística ven todos los pedidos y sus pantallas; no ven negocios ni las listas de contactos y empresas (solo abren el cliente y los contactos de un pedido y los proveedores).</p>
+        <p><b>Perfiles</b> (puede tener varios; el primero es el principal, con el que arranca el Hub). Admin ve y puede todo, incluida esta configuración, y va solo. Comercial (ventas) ve lo suyo, lo que no tiene propietario (para tomarlo) y lo asociado a eso, con sus tareas y conversaciones; ve el saldo y la deuda del cliente y los remitos de sus pedidos, pero no Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta listas. Back office es lo mismo, más lo de las personas que atiende (en «Qué ve»): lo ve y lo edita, se lo asigna y carga cosas a su nombre. Producción y Logística ven todos los pedidos y sus pantallas; no ven negocios ni las listas de contactos y empresas (solo abren el cliente y los contactos de un pedido y los proveedores). Con perfiles de los dos lados (por ejemplo, Comercial y Producción) tiene las pantallas y lo que ven los dos.</p>
         <p><b>Permisos</b> (para los que no son Admin): «Edita» crea y edita, «Edita y borra» además borra y restaura registros, y «Solo mira» no cambia nada. Superadmin (un Admin con la marca; el administrador principal lo es siempre): puede ver el CRM como otro usuario (el ojito), solo para mirar, y dar o sacar este permiso.</p>
-        <p><b>Qué ve</b> (perfil Comercial), como en HubSpot y Salesforce: solo lo suyo, lo de su equipo o todo, y además lo de las personas que elijas (por ejemplo, Carmen ve lo suyo, lo de Mili y lo de Sonia). Lo de los demás lo ve pero no lo cambia: lo cambia su propietario o un administrador. La Gerencia, en la misma ventana, es ver y editar todo lo de un equipo como si fuera suyo. Los negocios, además, solo de los pipelines que ve.</p>
+        <p><b>Qué ve</b> (Comercial y Back office): lo suyo o todo y, además, lo de las personas que elijas, de a una. Sin el perfil Back office, lo de esas personas lo ve sin editarlo (la ficha dice «Solo para ver»); con Back office, lo ve, lo edita, se lo asigna y lo carga a su nombre (por ejemplo, Carmen es el back office de Mili y de Sonia). La Gerencia, en la misma ventana, es ver y editar todo lo de un equipo. Los negocios, además, solo de los pipelines que ve.</p>
         <p><b>Pipelines que ve:</b> por defecto, según sus equipos (lo que dice cada pipeline en Pipelines); al marcarlos acá quedan elegidos a mano («· a mano»; desde la misma lista se vuelve a «según sus equipos»). Producción y Logística no ven negocios. <b>Dirección:</b> su Inicio muestra los resultados de todo el equipo, aunque su perfil sea Comercial. <b>Avisos:</b> el resumen de tareas de la mañana, lo que le asignan otros y, a Logística y a los administradores, los pedidos con faltantes de entrega; arranca apagado.</p>
       </div>
       {add && <Modal title="Agregar usuario" onClose={() => setAdd(false)} footer={<button className="btn primary" onClick={async () => {
@@ -142,8 +150,8 @@ function Users() {
       }}>Agregar</button>}>
         <label className="field">Nombre<input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label className="field">Email<input className="input" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
-        <label className="field">Perfil{profileSelect(f.profile, (v) => setF({ ...f, profile: v }), 'input')}</label>
-        {f.profile !== 'admin' && <label className="field">Permisos{roleSelect(f.role, (v) => setF({ ...f, role: v }), 'input')}</label>}
+        <label className="field">Perfiles{perfilesPick(f.perfiles, (v) => setF({ ...f, perfiles: v }), false)}</label>
+        {!f.perfiles.includes('admin') && <label className="field">Permisos{roleSelect(f.role, (v) => setF({ ...f, role: v }), 'input')}</label>}
         <label className="field">Equipos{teamsPick(f.teams, (v) => setF({ ...f, teams: v }), false)}</label>
         <label className="row small" style={{ gap: 8 }}><input type="checkbox" checked={f.avisos_mail} onChange={(e) => setF({ ...f, avisos_mail: e.target.checked })} />Recibe avisos por mail</label>
       </Modal>}
@@ -153,52 +161,44 @@ function Users() {
   );
 }
 
-type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
+type UsuarioFila = { id: number; email: string; name: string; role: string; profile: string; perfiles?: string | null; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; hs_owner_id: string | null; photo_url: string | null; avisos_mail: number;
   superadmin: number; direccion?: number; gerencia_team?: number | null; ve?: string; ve_usuarios?: string; principal: boolean };
 
-// ---------- Qué ve (src/worker/alcance.ts, docs/PERFILES.md) ----------
-// Como el «Ver» de HubSpot (todo, su equipo o lo suyo) más las reglas para compartir de Salesforce (además, lo de estas
-// personas). Vale para el perfil Comercial; la Gerencia (ver y editar lo de un equipo) se elige en la misma ventana.
-type Ve = 'suyo' | 'equipo' | 'todos';
-const veDe = (u: UsuarioFila): Ve => (u.ve === 'equipo' || u.ve === 'todos' ? u.ve : 'suyo');
+// ---------- Perfiles, Qué ve y back office (src/worker/alcance.ts, docs/PERFILES.md) ----------
+// Varios perfiles por usuario (el primero, el principal). Del lado comercial (Comercial y Back office), «Qué ve»: lo suyo o
+// todo y, además, lo de estas personas, por usuario (las reglas para compartir de Salesforce). Con el perfil Back office,
+// lo de esas personas además lo edita, se lo asigna y lo carga a su nombre. La Gerencia va en la misma ventana.
+type Ve = 'suyo' | 'todos';
+const veDe = (u: UsuarioFila): Ve => (u.ve === 'todos' ? 'todos' : 'suyo');
 function idsDe(json?: string | null): number[] {
   try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a.map(Number).filter(Number.isInteger) : []; } catch { return []; }
 }
-// Comparte algún equipo con ella (para «su equipo») o es del equipo que gerencia.
-const comparte = (a: UsuarioFila, b: UsuarioFila) => teamsOf(a).some((t) => teamsOf(b).includes(t));
+const delLadoComercial = (u: UsuarioFila) => u.role !== 'admin' && perfilesDe(u).some((p) => p === 'comercial' || p === 'backoffice');
 // Nombres cortos: el primer nombre, salvo que se repita («Alejandra Alvarez» y «Alejandra Mansilla»).
 function nombresCortos(us: UsuarioFila[], todos: UsuarioFila[]) {
   return us.map((x) => { const n = x.name.split(' ')[0]; return todos.filter((y) => y.name.split(' ')[0] === n).length > 1 ? x.name : n; });
 }
 const yLista = (ns: string[]) => (ns.length > 1 ? `${ns.slice(0, -1).join(', ')} y ${ns[ns.length - 1]}` : ns[0] ?? '');
-// Por qué ya lo ve sin marcarlo: todo, su equipo o la gerencia.
-function cubierto(u: UsuarioFila, x: UsuarioFila, ve: Ve, gerencia: number | null): string | null {
-  if (ve === 'todos') return 've todo';
-  if (ve === 'equipo' && comparte(u, x)) return 'su equipo';
-  if (gerencia != null && teamsOf(x).includes(gerencia)) return 'gerencia';
-  return null;
-}
-// Las personas que eligió y que no ve ya por otro lado.
-function elegidas(u: UsuarioFila, usuarios: UsuarioFila[], ve: Ve, extra: number[], gerencia: number | null) {
-  return usuarios.filter((x) => x.id !== u.id && extra.includes(x.id) && !cubierto(u, x, ve, gerencia));
-}
+// Ya lo ve (y edita) sin marcarlo, por la gerencia de su equipo.
+const porGerencia = (x: UsuarioFila, gerencia: number | null) => gerencia != null && teamsOf(x).includes(gerencia);
 function resumenVe(u: UsuarioFila, usuarios: UsuarioFila[], teams: Array<{ id: number; name: string }>): { corto: string; largo: string; editable: boolean } {
   if (u.role === 'admin') return { corto: 'Todo (administrador)', largo: 'Administrador: ve y edita todo.', editable: false };
-  if (u.profile !== 'comercial') {
+  if (!delLadoComercial(u)) {
     return { corto: 'Según su perfil', editable: false,
       largo: 'Producción y Logística ven todos los pedidos y, de contactos y empresas, los proveedores y los que están en algún pedido. No ven negocios.' };
   }
-  const ve = veDe(u), ger = u.gerencia_team ?? null;
-  const equipos = teamsOf(u).map((t) => teams.find((x) => x.id === t)?.name).filter(Boolean) as string[];
+  const ve = veDe(u), ger = u.gerencia_team ?? null, bo = perfilesDe(u).includes('backoffice');
   const gerNombre = ger != null ? teams.find((t) => t.id === ger)?.name ?? 'su equipo' : null;
-  if (ve === 'todos') return { corto: 'Todo', largo: `Ve todo; edita lo suyo${gerNombre ? ` y lo de ${gerNombre} (gerencia)` : ''}.`, editable: true };
-  const extra = elegidas(u, usuarios, ve, idsDe(u.ve_usuarios), ger);
-  const nombres = nombresCortos(extra, usuarios);
-  const base = ve === 'equipo' ? 'Su equipo' : 'Lo suyo';
-  const partes = [base, ...(extra.length ? [`+ ${extra.length <= 2 ? nombres.join(' y ') : `${extra.length} personas`}`] : []), ...(gerNombre ? [`+ gerencia de ${gerNombre}`] : [])];
+  const personas = usuarios.filter((x) => x.id !== u.id && idsDe(u.ve_usuarios).includes(x.id) && !porGerencia(x, ger));
+  const mostrar = bo || ve !== 'todos' ? personas : [];
+  const nombres = nombresCortos(mostrar, usuarios);
+  const partes = [ve === 'todos' ? 'Todo' : 'Lo suyo',
+    ...(mostrar.length ? [`+ ${mostrar.length <= 2 ? nombres.join(' y ') : `${mostrar.length} personas`}${bo ? ' (back office)' : ''}`] : []),
+    ...(gerNombre ? [`+ gerencia de ${gerNombre}`] : [])];
   const largo = [
-    ve === 'equipo' ? `Ve lo suyo y lo de su equipo${equipos.length ? ` (${yLista(equipos)})` : ' (no está en ningún equipo)'}` : 'Ve lo suyo',
-    extra.length ? `además, lo de ${yLista(extra.map((x) => x.name))}` : '',
+    ve === 'todos' ? 'Ve todo; edita lo suyo' : 'Ve y edita lo suyo',
+    mostrar.length ? (bo ? `es back office de ${yLista(mostrar.map((x) => x.name))}: ve y edita lo de ellas, se lo asigna y lo carga a su nombre`
+      : `además ve (sin editar) lo de ${yLista(mostrar.map((x) => x.name))}`) : '',
     gerNombre ? `es gerenta de ${gerNombre}: ve y edita todo lo de ese equipo` : '',
   ].filter(Boolean).join('; ') + '.';
   return { corto: partes.join(' '), largo, editable: true };
@@ -210,6 +210,7 @@ function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios:
   const [ve, setVe] = useState<Ve>(veDe(u));
   const [extra, setExtra] = useState<number[]>(idsDe(u.ve_usuarios));
   const [gerencia, setGerencia] = useState<number | null>(u.gerencia_team ?? null);
+  const [bo, setBo] = useState(perfilesDe(u).includes('backoffice'));
   const [q, setQ] = useState('');
   const [yendo, setYendo] = useState(false);
   const nombre = u.name.split(' ')[0];
@@ -229,8 +230,9 @@ function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios:
   if (sinEquipo.length) grupos.push({ titulo: 'Sin equipo', us: sinEquipo });
   const nq = q.trim().toLowerCase();
   const filtra = (x: UsuarioFila) => !nq || x.name.toLowerCase().includes(nq) || x.email.toLowerCase().includes(nq);
+  const verLista = bo || ve !== 'todos';
   // A quiénes ve en total (para avisar de los pipelines que no ve).
-  const vistas = usuarios.filter((x) => x.id !== u.id && (x.profile === 'comercial' || x.role === 'admin') && (cubierto(u, x, ve, gerencia) || extra.includes(x.id)));
+  const vistas = usuarios.filter((x) => x.id !== u.id && (delLadoComercial(x) || x.role === 'admin') && (ve === 'todos' || porGerencia(x, gerencia) || extra.includes(x.id)));
   // Los negocios de las personas que ve, solo en los pipelines que ve: los pipelines de sus equipos que ella no ve.
   const faltan = meta.pipelines.filter((p) => !canSeePipeline(u, p) && p.team_id != null)
     .map((p) => ({ p, de: vistas.filter((x) => teamsOf(x).includes(p.team_id!)) })).filter((x) => x.de.length);
@@ -239,8 +241,11 @@ function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios:
   const pipesFaltan = faltan.map((x) => `«${x.p.label}»`);
   const guardar = async () => {
     setYendo(true);
+    const perfiles = perfilesDe(u);
+    const nuevos = bo ? (perfiles.includes('backoffice') ? perfiles : [...perfiles, 'backoffice']) : perfiles.filter((p) => p !== 'backoffice');
     try {
       await http('PATCH', `/users/${u.id}`, { ve, ve_usuarios: extra, gerencia_team: gerencia,
+        ...(nuevos.join() !== perfiles.join() ? { perfiles: nuevos.length ? nuevos : ['comercial'] } : {}),
         ...(sumar && faltan.length ? { pipelines: [...meta.pipelines.filter((p) => canSeePipeline(u, p)).map((p) => p.id), ...faltan.map((x) => x.p.id)] } : {}) });
       toast('Guardado'); reload(); onGuardado();
     } catch (e) { toast((e as Error).message, true); setYendo(false); }
@@ -251,22 +256,22 @@ function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios:
       <span><b>{titulo}</b><span className="muted small">{detalle}</span></span>
     </label>
   );
-  const companeros = usuarios.filter((x) => x.id !== u.id && x.active && comparte(u, x));
   return (
-    <Modal title={`Qué ve ${u.name}`} onClose={onClose} footer={<>
+    <Modal title={`Qué ve y edita ${u.name}`} onClose={onClose} footer={<>
       <button className="btn" onClick={onClose}>Cancelar</button>
       <button className="btn primary" disabled={yendo} onClick={guardar}>{yendo ? 'Guardando…' : 'Guardar'}</button>
     </>}>
       <div className="que-ve">
         <div className="stack" style={{ gap: 6 }} role="radiogroup" aria-label="Qué ve">
-          {opcion('suyo', 'Solo lo suyo', 'Lo que tiene a su nombre, lo que no tiene propietario (para tomarlo) y lo asociado a eso.')}
-          {opcion('equipo', 'Lo de su equipo', equipos.length
-            ? `${yLista(equipos.map(nombreEquipo))}: lo de ${companeros.length ? yLista(nombresCortos(companeros, usuarios)) : 'nadie más por ahora'}. Si se suma alguien al equipo, lo ve solo.`
-            : 'No está en ningún equipo: se elige en la columna Equipos. Mientras tanto, es lo mismo que «Solo lo suyo».')}
-          {opcion('todos', 'Lo de todos', 'Todos los contactos, empresas, negocios y pedidos, con sus tareas.')}
+          {opcion('suyo', 'Lo suyo', 'Lo que tiene a su nombre, lo que no tiene propietario (para tomarlo) y lo asociado a eso; y lo de las personas que elijas abajo.')}
+          {opcion('todos', 'Lo de todos', 'Todos los contactos, empresas, negocios y pedidos, con sus tareas. Lo de los demás lo ve sin editarlo.')}
         </div>
-        {ve !== 'todos' && <div className="stack" style={{ gap: 6 }}>
-          <div className="row" style={{ gap: 8 }}><b className="small grow">Y además, lo de estas personas</b>
+        <label className={`que-ve-op${bo ? ' on' : ''}`}>
+          <input type="checkbox" checked={bo} onChange={(e) => setBo(e.target.checked)} />
+          <span><b>Es back office (perfil Back office)</b><span className="muted small">Lo de las personas que elijas abajo lo ve y lo edita como si fuera suyo: les asigna negocios, contactos y pedidos, y carga cosas a su nombre (también encargos de Recorridos). Ve sus números en Inicio.</span></span>
+        </label>
+        {verLista && <div className="stack" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 8 }}><b className="small grow">{bo ? `Back office de estas personas` : 'Y además, ve lo de estas personas (sin editar)'}</b>
             <input className="input sm" style={{ width: 180 }} placeholder="Buscar…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar personas" /></div>
           <div className="que-ve-lista">
             {grupos.map((g) => {
@@ -276,15 +281,14 @@ function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios:
                 <div key={g.titulo}>
                   <div className="grp">{g.titulo}</div>
                   {us.map((x) => {
-                    const por = cubierto(u, x, ve, gerencia);
+                    const por = porGerencia(x, gerencia);
                     return (
-                      <label key={x.id} className={`opt small${por ? ' muted' : ''}`} title={por ? `Ya lo ve por ${por === 'gerencia' ? 'la gerencia' : 'su equipo'}.` : undefined}>
-                        <input type="checkbox" checked={!!por || extra.includes(x.id)} disabled={!!por}
+                      <label key={x.id} className={`opt small${por ? ' muted' : ''}`} title={por ? 'Ya lo ve y lo edita por la gerencia de su equipo.' : undefined}>
+                        <input type="checkbox" checked={por || extra.includes(x.id)} disabled={por}
                           onChange={(e) => setExtra(e.target.checked ? [...extra, x.id] : extra.filter((i) => i !== x.id))} />
                         <Avatar name={x.name} photo={x.photo_url} />
                         <span className="grow ellipsis">{x.name}{!x.active ? ' (inactivo)' : ''}</span>
-                        {por ? <span className="tag">{por === 'gerencia' ? 'Por la gerencia' : 'Por su equipo'}</span>
-                          : x.profile !== 'comercial' ? <span className="muted">{PROFILE_LABEL[x.profile] ?? x.profile}</span> : null}
+                        {por ? <span className="tag">Por la gerencia</span> : <span className="muted">{nombresPerfiles(x)}</span>}
                       </label>
                     );
                   })}
@@ -305,8 +309,6 @@ function QueVe({ u, usuarios, onClose, onGuardado }: { u: UsuarioFila; usuarios:
             <button type="button" className="btn sm" onClick={() => setSumar(true)}>Sumar {faltan.length === 1 ? 'ese pipeline' : 'esos pipelines'}</button>
           </div>)}
         <div className="stack que-ve-edita" style={{ gap: 6 }}>
-          <b className="small">Qué edita</b>
-          <p className="muted small" style={{ margin: 0 }}>Lo suyo y lo que no tiene propietario. Lo de las demás personas lo puede mirar, no cambiar: en la ficha dice «Solo para ver» y lo cambia su propietario o un administrador.</p>
           <label className="field">Gerencia de
             <Select className="input" value={gerencia ?? ''} onChange={(e) => setGerencia(e.target.value ? Number(e.target.value) : null)} aria-label={`Gerencia de: ${u.name}`}>
               <option value="">Ninguno</option>

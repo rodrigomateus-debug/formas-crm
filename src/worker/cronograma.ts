@@ -13,6 +13,7 @@ import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
 import { fotosDeArticulos } from './productos';
 import { vehiculos } from './vehiculos';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
+import { conPerfilSql, tienePerfil } from './alcance';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
 // repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
@@ -73,7 +74,7 @@ export async function guardarCronogramaConfig(db: D1Database, cfg: Partial<Crono
 }
 
 // Logística, Producción y los administradores editan; el resto mira.
-export const puedeEditarCronograma = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || u.profile === 'logistica' || u.profile === 'produccion');
+export const puedeEditarCronograma = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || tienePerfil(u, 'logistica') || tienePerfil(u, 'produccion'));
 function exigir(ctx: Ctx) {
   if (!puedeEditarCronograma(ctx.user)) throw new HttpError(403, 'El cronograma lo editan Logística, Producción y los administradores.');
 }
@@ -451,7 +452,7 @@ export async function revisarColgados(env: Env) {
     const c = porId.get(m.id) ?? (m.dir != null ? porId.get(`${m.task_id}:${m.tipo}`) : undefined);
     if (c) grupos.set(claveColgado(c), [...(grupos.get(claveColgado(c)) ?? []), m]);
   }
-  const logistica = (await db.prepare("SELECT id FROM users WHERE active = 1 AND profile = 'logistica'").all<{ id: number }>()).results.map((u) => u.id);
+  const logistica = (await db.prepare(`SELECT id FROM users WHERE active = 1 AND ${conPerfilSql('logistica')}`).all<{ id: number }>()).results.map((u) => u.id);
   const duenios = new Map((await db.prepare('SELECT id, owner_id FROM records WHERE id IN (SELECT value FROM json_each(?))')
     .bind(JSON.stringify([...new Set(movs.map((m) => m.record_id).filter((x): x is number => !!x))])).all<{ id: number; owner_id: number | null }>()).results.map((r) => [r.id, r.owner_id]));
   const ts = now();

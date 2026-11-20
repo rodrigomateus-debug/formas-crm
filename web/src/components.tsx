@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, faltanObligatorias, UNIDADES, type UnidadKey,
-  userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney,
+  userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney, propietariosPosibles,
 } from './lib';
 import { Select, useFloating } from './Select';
 
@@ -372,13 +372,16 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type, onCerrar
     );
   }
   switch (prop.type) {
-    case 'owner':
+    case 'owner': {
+      // Una vendedora: ella, a quienes atiende como back office y su equipo si es gerenta (el servidor no deja otros).
+      const posibles = propietariosPosibles(meta);
       return (
         <Select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus} onCerrar={onCerrar}>
           <option value="">Sin asignar</option>
-          {meta.users.filter((u) => u.active || u.id === Number(v)).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
+          {meta.users.filter((u) => u.id === Number(v) || (u.active && (!posibles || posibles.has(u.id)))).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
       );
+    }
     case 'enum':
     case 'bool':
       return (

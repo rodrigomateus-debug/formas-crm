@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
-import { http, qs, useMeta, useAsync, fmtMoney, recordUrl, stageOf } from '../lib';
+import { http, qs, useMeta, useAsync, fmtMoney, recordUrl, stageOf, tienePerfil } from '../lib';
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 import { usePeriodo, corto, pct, plural } from './Periodo';
@@ -37,7 +37,7 @@ export default function InicioDireccion() {
   const k = d?.kpis;
 
   const ganados = Number(k?.ganados ?? 0), perdidos = Number(k?.perdidos ?? 0);
-  const vendedoras = meta.users.filter((x) => x.active && x.profile === 'comercial');
+  const vendedoras = meta.users.filter((x) => x.active && tienePerfil(x, 'comercial'));
   const empresas = d?.empresas ?? [];
   const sueltos = d?.sin_negocio;
   const nSueltos = (sueltos?.por_duenio ?? []).reduce((a, x) => a + x.n, 0);

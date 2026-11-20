@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
+  http, qs, useMeta, esVentas, esOperaciones, tienePerfil, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
 } from '../lib';
 import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, NombreEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
@@ -863,7 +863,7 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const me = useMeta().meta.me;
   const admin = me.role === 'admin';
   // Notas de producto: las escriben Producción y los administradores (notasproducto.ts).
-  const puedeNotas = me.role !== 'viewer' && (admin || me.profile === 'produccion');
+  const puedeNotas = me.role !== 'viewer' && (admin || tienePerfil(me, 'produccion'));
   // Solo un administrador cambia el tipo de un renglón; vale para ese código en este pedido.
   const cambiarTipo = async (it: ProductRow) => {
     const tipo = esServicio(it) ? 'producto' : 'servicio';

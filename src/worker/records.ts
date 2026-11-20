@@ -5,7 +5,7 @@ import type { Ctx, ObjectType } from './env';
 import { HttpError, now } from './env';
 import { Meta, type Property, type Tag } from './meta';
 import { emitDealEvent } from './events';
-import { esVentas, restringido, visibleSql } from './alcance';
+import { esVentas, ladoComercial, restringido, visibleSql } from './alcance';
 import { checkCreate, checkMove, requireCompany, stageAutomation, visiblePipelineIds } from './pipelines';
 import { RELACIONES, propagarRelacion, relacionSola } from './relacion';
 
@@ -351,7 +351,7 @@ export async function createRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   }
   if (type === 'company' && !props.domain && props.website) props.domain = normDomain(props.website);
   // Lo que crea una vendedora queda a su nombre también si lo crea con Claude: si no, quedaría sin propietario, a la vista de todas.
-  if (props.owner_id == null && (ctx.source === 'crm' || (ctx.source === 'mcp' && esVentas(ctx.user))) && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
+  if (props.owner_id == null && (ctx.source === 'crm' || (ctx.source === 'mcp' && ladoComercial(ctx.user))) && ctx.user.role !== 'viewer') props.owner_id = ctx.user.id;
   if (type === 'contact' && props.email && !opts.skipDedupe) {
     const dup = await db.prepare("SELECT r.id, u.name AS duenio FROM records r LEFT JOIN users u ON u.id = r.owner_id WHERE r.object_type = 'contact' AND r.email = ? AND r.archived = 0").bind(props.email).first<{ id: number; duenio: string | null }>();
     if (dup) throw new HttpError(409, `Ya existe un contacto con ${props.email} (id ${dup.id}${dup.duenio ? `, de ${dup.duenio}` : ''}).`);

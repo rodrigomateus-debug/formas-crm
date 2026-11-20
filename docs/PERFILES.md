@@ -1,12 +1,13 @@
 # Perfiles: qué ve cada uno
 
-Cada usuario tiene un **perfil** (su área) y un **permiso** (qué puede hacer con lo que ve). Se eligen en
-Configuración → Usuarios.
+Cada usuario tiene uno o más **perfiles** (su área; el primero es el principal) y un **permiso** (qué puede hacer con lo que
+ve). Se eligen en Configuración → Usuarios.
 
 | Perfil | Qué ve |
 |---|---|
-| Admin | Todo, incluida Configuración. |
-| Comercial (Ventas) | Lo suyo; se puede ampliar a su equipo, a todo o a personas elegidas con [Qué ve](#qué-ve-pedido-de-rodrigo-del-20112026). |
+| Admin | Todo, incluida Configuración. Va solo. |
+| Comercial (Ventas) | Lo suyo; se puede ampliar a todo o a personas elegidas con [Qué ve](#qué-ve-back-office-y-varios-perfiles-pedidos-de-rodrigo-del-20112026) (solo para ver). |
+| Back office | Lo mismo, y lo de las personas que atiende lo ve **y lo edita**: les asigna, carga a su nombre y pide encargos por ellas. |
 | Producción | Lo suyo: pedidos, Producción, Entregas y Cronograma (ver abajo). Edita Producción. |
 | Logística | Producción, Pedidos, Entregas, Recorridos y Cronograma (ver abajo). Revisa remitos y cierra entregas. |
 
@@ -48,52 +49,76 @@ No ve ni hace:
 
 Lo que crea queda a su nombre (también si lo crea con Claude).
 
-## Qué ve (pedido de Rodrigo del 20/11/2026)
+## Qué ve, Back office y varios perfiles (pedidos de Rodrigo del 20/11/2026)
 
-«Que se pueda elegir qué ve cada usuario: solo lo suyo, lo de todos o elegir de qué usuarios. Carmen debería poder ver lo
-suyo, lo de Mili y lo de Sonia. Fijate cómo interactúa con el equipo.» Se elige en Configuración → Usuarios → **Qué ve**
-(perfil Comercial; los administradores ven todo y Producción y Logística tienen su propia regla).
+Primero: «que se pueda elegir qué ve cada usuario: solo lo suyo, lo de todos o elegir de qué usuarios; Carmen debería
+poder ver lo suyo, lo de Mili y lo de Sonia». Después: «lo que quiero es que Carmen pueda ver y editar lo suyo, lo de Mili
+y lo de Sonia, y asignarles ventas o pedir en nombre de ellas, ya que es su back office. Hacer un perfil de back office y
+poder tener más de un perfil: Carmen tendría back office y ventas. Y elegir lo de quiénes puede ver además de lo suyo,
+por usuario».
 
-Está armado como lo resuelven los CRM grandes:
+Cómo lo resuelven los CRM grandes, y qué tomamos:
 
-- **HubSpot**: cada usuario tiene un alcance para *ver* y otro para *editar* (todo, lo de su equipo o lo suyo, más la
-  casilla de lo sin asignar). Si está en varios equipos, cuentan todos.
-- **Salesforce y Zoho**: la base es privada (lo suyo); el jefe ve lo de su gente y las **reglas para compartir** suman
-  acceso («lo de tal persona lo ve también tal otra», de solo lectura o editable). Solo suman, nunca restan.
-- **Pipedrive**: grupos de visibilidad (lo del grupo lo ve el grupo; el grupo de arriba ve lo de abajo).
+- **HubSpot**: ver y editar por separado (todo, lo del equipo o lo suyo). Acá: «Qué ve» y «Qué edita» en la misma ventana.
+- **Salesforce y Zoho**: la base es lo suyo y las **reglas para compartir** suman acceso, de solo lectura o editable («lo de
+  tal persona lo ve también tal otra»). Acá, por usuario: sin Back office es de solo lectura; con Back office, editable.
+- **Pipedrive / Salesforce**: un usuario con varios roles o grupos. Acá, varios perfiles.
 
-Acá, en la ventana «Qué ve» de cada vendedora:
+### Varios perfiles
+
+En la columna **Perfiles**, una lista como la de Equipos: el primero es el **principal** (con ese arranca el Hub y elige la
+versión celular). Admin va solo (elegirlo saca los demás). Los perfiles son de dos lados: **comercial** (Comercial y Back
+office) y **operaciones** (Producción y Logística). Comercial + Back office (Carmen) es lo de siempre de Ventas más lo de
+las personas que atiende. Quien tiene perfiles de los dos lados (por ejemplo, Comercial y Producción) tiene las pantallas de
+los dos y ve la suma: todos los pedidos (por Producción) y sus negocios (por Comercial); los negocios de otras, no.
+
+Columna `users.perfiles` (JSON, el primero el principal). `profile` queda por compatibilidad y por su CHECK de la base, que
+no conoce Back office: guarda el principal, con Back office como `comercial` (su mismo lado). En el código, `perfilesDe`,
+`tienePerfil`, `ladoComercial` y `ladoOperaciones` (`alcance.ts`) y `conPerfilSql` para las consultas. Las reglas que
+cierran pantallas (`esVentas`, `esOperaciones`) valen para quien tiene un solo lado.
+
+### Qué ve (ventana «Qué ve y edita», perfiles Comercial y Back office)
 
 | Opción | Qué ve |
 |---|---|
-| **Solo lo suyo** (lo de siempre) | Lo que tiene a su nombre, lo sin propietario y lo asociado a eso. |
-| **Lo de su equipo** | Además, lo de quienes comparten alguno de sus equipos (columna Equipos, principal o extra). Si se suma alguien al equipo, lo ve solo. |
-| **Lo de todos** | Todos los contactos, empresas, negocios y pedidos, con sus tareas. |
-| **Y además, lo de estas personas** | Suma lo de las personas elegidas (las reglas para compartir de Salesforce). Con «Lo de todos» no hace falta. |
+| **Lo suyo** (lo de siempre) | Lo que tiene a su nombre, lo sin propietario y lo asociado a eso. |
+| **Lo de todos** | Todos los contactos, empresas, negocios y pedidos, con sus tareas (lo de los demás, sin editarlo). |
+| **Personas elegidas** (de a una) | Suma lo de esas personas: sus registros, lo asociado a ellos y sus tareas. |
 
-Carmen Donoso arranca con «Solo lo suyo» y, además, lo de Mili Formosa y Sonia Andersen (migración `0105_que_ve.sql`).
+Sin el perfil Back office, lo de las personas elegidas es **solo para ver**: la ficha dice «Solo para ver · es de Fulana» y
+cambiarlo rebota. Ya no está la opción «Lo de su equipo» de la primera versión: se elige por usuario.
 
-**Ver lo de otra persona** es ver sus registros como si fueran suyos: sus contactos, empresas, negocios y pedidos, lo
-asociado a ellos y sus tareas (aunque no estén en ningún registro), en las listas, los tableros, el buscador, la bandeja de
-conversaciones, Recorridos (sus entregas dicen el nombre del cliente) y Claude.
+### Back office
 
-**Ver no es editar** (como las reglas de solo lectura de Salesforce): edita lo suyo y lo sin propietario, y la gerenta, lo de
-su equipo. Lo de los demás lo mira: la ficha dice **«Solo para ver · es de Fulana»** y, si lo intenta cambiar, se le dice
-que lo cambia la propietaria o un administrador. Anotar y crear tareas en lo que ve sí puede, como en lo asociado a lo suyo.
+Con el perfil **Back office**, las personas elegidas son las que atiende (en la ventana: «Back office de estas personas»).
+Lo de ellas lo trata como suyo:
 
-**Con el equipo:**
+- **Ve y edita** sus contactos, empresas, negocios y pedidos (la ficha no dice «Solo para ver»).
+- **Asigna**: como propietario puede ponerse a ella o a cualquiera de las personas que atiende (el desplegable de
+  propietario solo ofrece esas); pasárselo a otra persona sigue siendo de un administrador.
+- **Carga a su nombre**: crea empresas, contactos, negocios y pedidos con una de ellas de propietaria. Una vendedora sin
+  back office crea solo a su nombre (antes la API no lo controlaba al crear).
+- **Pide en su nombre** en Recorridos: «Lo pide» al cargar un encargo. Queda como si lo hubiera pedido ella (lo ve en sus
+  encargos y le llega el aviso); el back office lo ve y lo cambia. Logística puede cargar a nombre de cualquiera.
+- **Inicio**: elige «Mis números» o «Los de Mili», etc.
+- **Claude**: lo mismo (`list_users` dice a quiénes atiende).
 
-- **Gerencia** (el «jefe ve lo de su gente» de Salesforce): está en la misma ventana. La gerenta de un equipo ve y edita
-  todo lo del equipo. Las personas del equipo que gerencia aparecen marcadas «Por la gerencia»; las de su equipo, si ve
-  «Lo de su equipo», «Por su equipo».
-- **Pipelines que ve** siguen encima, como los permisos por pipeline de HubSpot: un negocio de un pipeline que no ve no
-  aparece aunque vea a su dueña. Si elegís a alguien que trabaja en un pipeline que ella no ve, la ventana lo avisa
-  («de ahí verá sus contactos, empresas y pedidos, pero no sus negocios») y ofrece **Sumar esos pipelines** al guardar.
-- **Inicio** sigue mostrando sus números (no los de las personas que ve); los del equipo son de Dirección.
+Carmen Donoso arranca con Comercial + Back office de Mili Formosa y Sonia Andersen (migración `0105_que_ve.sql`).
 
-Se controla en el servidor (`src/worker/alcance.ts`: `ve`, `ve_usuarios`, `vistos` y `duenosVistos`), así vale igual para la
-pantalla, la API y Claude. Columnas `users.ve` ('suyo', 'equipo' o 'todos') y `users.ve_usuarios` (JSON con ids). Prueba:
-`test/que-ve.test.mjs`.
+### Con el equipo
+
+- **Gerencia** (en la misma ventana): la gerenta de un equipo ve y edita todo lo del equipo y lo asigna a cualquiera del
+  equipo. Las personas del equipo que gerencia aparecen marcadas «Por la gerencia».
+- **Pipelines que ve** siguen encima: un negocio de un pipeline que no ve no aparece aunque vea (o atienda) a su dueña. Si
+  elegís a alguien que trabaja en un pipeline que ella no ve, la ventana avisa y ofrece **Sumar esos pipelines** al guardar.
+
+Se controla en el servidor (`src/worker/alcance.ts`: `vistos` para ver, `propios` para editar y asignar, `atiende`,
+`esSuyo`, `esDeSuEquipo`), así vale igual para la pantalla, la API y Claude. Columnas `users.ve` ('suyo' o 'todos'),
+`users.ve_usuarios` (JSON con ids) y `users.perfiles`. Prueba: `test/que-ve.test.mjs`.
+
+### Pendiente
+
+- En la versión celular de Recorridos todavía no está «Lo pide» (sí en la de escritorio).
 
 ### La tabla de Usuarios (misma fecha: «quedó raro, desfasado»)
 
@@ -103,10 +128,12 @@ nombre y mail juntos y queda fijo a la izquierda; las columnas tienen ancho fijo
 leen enteros al pasar el mouse) y entran en una pantalla de notebook; si no entran, se desplaza solo la tabla. Los
 desplegables de varias opciones (`MultiPick`) flotan como los del DS, así no los corta la tabla. «Según sus equipos» y
 «volver a según sus equipos» de los pipelines están dentro de su desplegable («· a mano» cuando están elegidos a mano), y
-para Producción y Logística dice «No ven negocios». La Gerencia pasó a la ventana «Qué ve».
+para Producción y Logística dice «No ven negocios». La Gerencia pasó a la ventana «Qué ve y edita». La columna Perfiles admite
+varios («Comercial + Back office»).
 
 **Qué puede cambiar** (revisión de la versión celular, 18/11/2026; `soloLoSuyoVentas` en `api.ts`): solo lo suyo o lo que no
-tiene propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Que vea una empresa ajena
+tiene propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin); el back office, también lo de
+las personas que atiende, y se lo puede asignar a ellas. Que vea una empresa ajena
 porque está asociada a lo suyo no la habilita a editarla ni a quedársela. Un contacto nuevo con el mail de una empresa de
 otra vendedora queda sin empresa (antes se asociaba solo y la empresa le quedaba a la vista y a mano). Es la misma regla
 que ya tenía Claude para todos. Prueba: `test/ventas-lo-suyo.test.mjs`.

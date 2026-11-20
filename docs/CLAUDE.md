@@ -18,7 +18,8 @@ En el botón se ve «Claude conectado» y, en la ventana, desde cuándo y cuánd
 
 - **Ver**: lo mismo que ve la persona en el CRM (incluido el perfil Ventas, `alcance.ts`).
 - **Cambiar** (`mcp.ts`, `soloLoSuyo`): los administradores, todo. Los demás, solo lo suyo: registros de los que son
-  propietarios o sin propietario (para tomarlos), sus tareas y actividades; asignarse cosas solo a sí mismos. Combinar
+  propietarios o sin propietario (para tomarlos), sus tareas y actividades; asignarse cosas solo a sí mismos. El back
+  office, también lo de las personas que atiende, y se lo puede asignar a ellas ([PERFILES.md](PERFILES.md#back-office)). Combinar
   registros y el alta inteligente (`upsert_bundle`, que completa registros existentes sean de quien sean) quedan para los
   administradores. Todo queda en el historial a nombre de la persona, con origen «Claude».
 

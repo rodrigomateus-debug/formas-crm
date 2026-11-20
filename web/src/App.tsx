@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, esOperaciones, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
+import { http, qs, useMeta, useDebounced, recordUrl, registrarRuta, OBJECTS, Icon, verComo, esVentas, esOperaciones, nombresPerfiles, perfilesDe, tienePerfil, PROFILE_LABEL, ROLE_LABEL, type CrmRecord, type ObjectType, type User } from './lib';
 import { Avatar, CreateRecord, Modal, UserChip } from './components';
 import Home from './pages/Home';
 import ObjectIndex from './pages/ObjectIndex';
@@ -43,7 +43,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
   const ventas = esVentas(meta.me);
   // Perfiles Producción y Logística: sin la parte comercial (contactos, empresas y negocios).
   const produccion = esOperaciones(meta.me);   // Producción y Logística: sin la parte comercial
-  const logistica = meta.me.profile === 'logistica';   // la barra lateral de Logística suma Choferes
+  const logistica = tienePerfil(meta.me, 'logistica');   // la barra lateral de Logística suma Choferes
   useEffect(() => {
     if (ventas) { setRemitos(null); return; }
     http<{ total: number }>('GET', '/remitos/revisar/cuantos').then((r) => setRemitos(r.total)).catch(() => {});
@@ -52,7 +52,7 @@ export default function App({ puedeVolver = false }: { puedeVolver?: boolean }) 
   // Al abrir el Hub (no al tocar «Inicio»): el perfil Producción arranca en Producción y Logística en el Cronograma.
   const navigate = useNavigate();
   useEffect(() => {
-    const inicio = PANTALLA_INICIAL[meta.me.profile];
+    const inicio = meta.me.role === 'admin' ? undefined : PANTALLA_INICIAL[perfilesDe(meta.me)[0]];   // el perfil principal
     if (inicio && loc.pathname === '/') navigate(inicio, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -184,7 +184,7 @@ function VerComoCartel() {
   return (
     <div className="ver-como-cartel" role="status">
       <Icon name="eye" size={16} />
-      <span className="grow">Estás viendo el CRM como <b>{u.name}</b> <span className="ver-como-quien">({PROFILE_LABEL[u.profile] ?? u.profile}{u.role !== 'admin' ? ` · ${ROLE_LABEL[u.role] ?? u.role}` : ''})</span>.
+      <span className="grow">Estás viendo el CRM como <b>{u.name}</b> <span className="ver-como-quien">({nombresPerfiles(u)}{u.role !== 'admin' ? ` · ${ROLE_LABEL[u.role] ?? u.role}` : ''})</span>.
         {' '}Es solo para mirar: no se puede cambiar nada.</span>
       <button className="btn sm" onClick={() => verComo(null)}>Volver a {meta.real_user?.name.split(' ')[0] ?? 'mi usuario'}</button>
     </div>
@@ -199,7 +199,7 @@ function VerComoModal({ onClose }: { onClose: () => void }) {
   const norm = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const equipo = (u: User) => meta.teams.find((t) => t.id === u.team_id)?.name ?? '';
   const lista = meta.users.filter((u) => u.active && !u.deleted_at && u.id !== yo)
-    .filter((u) => !q || norm(`${u.name} ${u.email} ${PROFILE_LABEL[u.profile] ?? ''} ${equipo(u)}`).includes(norm(q)));
+    .filter((u) => !q || norm(`${u.name} ${u.email} ${nombresPerfiles(u)} ${equipo(u)}`).includes(norm(q)));
   return (
     <Modal title="Ver el CRM como…" onClose={onClose}>
       <p className="muted small" style={{ margin: 0 }}>Ves lo mismo que ve esa persona (sus pipelines, sus tareas, sus conversaciones y lo que puede hacer), sin salir de tu sesión.
@@ -211,7 +211,7 @@ function VerComoModal({ onClose }: { onClose: () => void }) {
           <button key={u.id} type="button" className="ver-como-fila" onClick={() => verComo(u.id)}>
             <Avatar name={u.name} photo={u.photo_url} />
             <span className="grow" style={{ minWidth: 0 }}><b className="ellipsis" style={{ display: 'block' }}>{u.name}</b><span className="small muted ellipsis" style={{ display: 'block' }}>{u.email}</span></span>
-            <span className="small muted">{[PROFILE_LABEL[u.profile] ?? u.profile, equipo(u)].filter(Boolean).join(' · ')}</span>
+            <span className="small muted">{[nombresPerfiles(u), equipo(u)].filter(Boolean).join(' · ')}</span>
           </button>
         ))}
         {!lista.length && <div className="muted small" style={{ padding: 12 }}>Nadie coincide con «{q}».</div>}

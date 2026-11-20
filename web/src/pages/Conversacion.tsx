@@ -125,7 +125,7 @@ export function Cuerpo({ body, meId }: { body: string; meId: number }) {
 
 // ---------- Eventos ----------
 
-const FUENTE: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API', remitos: 'remitos', pedidos: 'pedidos' };
+const FUENTE: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API', remitos: 'remitos', pedidos: 'pedidos', chofer: 'app del chofer' };
 const CAMBIO: Record<string, string> = { hs_pipeline_stage: 'la etapa', dealstage: 'la etapa', pipeline: 'el pipeline', owner_id: 'el propietario', amount: 'el monto',
   hs_total_price: 'el total sin IVA', closedate: 'la fecha de cierre', fecha_de_entrega: 'la fecha de entrega', estado_entrega: 'el estado de entrega', factura_numero: 'la factura' };
 const ICONO: Record<string, string> = { cambio: 'history', articulo: 'printer', boceto: 'boceto', remito: 'truck', logo: 'vector' };

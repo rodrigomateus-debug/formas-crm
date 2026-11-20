@@ -719,7 +719,7 @@ export async function marcarHecho(env: Env, ctx: Ctx, b: { ids?: unknown; dirs?:
   const porLugar = tipo === 'entrega' ? dirsDe(b) : new Map<string, number[]>();
   if (porLugar.size) return hechoPorLugar(env, ctx, porLugar, hecho, opts);
   // Lo que marca el chofer queda a su nombre (en la conversación del pedido y en el historial), no al de quien creó su link.
-  const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null } } : ctx;
+  const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null, via: 'chofer' } } : ctx;
   const filas = await filasDe(db, b.ids);
   const destino = (await cronogramaConfig(db)).estados[tipo];
   const orden = (await estadosPec(db)).map((e) => e.status);
@@ -794,7 +794,7 @@ async function fechaEnClickup(env: Env, ctx: Ctx, pedidos: number[]) {
 // Marca (o desmarca) la entrega en un lugar de un pedido que va a varios.
 async function hechoPorLugar(env: Env, ctx: Ctx, porLugar: Map<string, number[]>, hecho: boolean, opts: { chofer?: string; enFondo?: (p: Promise<unknown>) => void }) {
   const db = env.DB;
-  const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null } } : ctx;
+  const c2: Ctx = opts.chofer ? { ...ctx, actor: { name: opts.chofer, userId: null, via: 'chofer' } } : ctx;
   const filas = await filasDe(db, [...porLugar.keys()]);
   const ts = now();
   const dirs = [...new Set([...porLugar.values()].flat())];

@@ -704,9 +704,11 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   await db.prepare(`UPDATE produccion SET ${cols.map((k) => `${k} = ?`).join(', ')}, leido_at = ? WHERE task_id = ?`).bind(...cols.map((k) => local[k] ?? null), now(), taskId).run();
   // El cambio de estado, en la conversación del pedido, a nombre de quien lo hizo.
   if (c === 'estado' && fila.record_id && local.estado !== fila.estado) {
-    // Si lo hizo otro por el usuario (el chofer, desde su app: ctx.actor), queda a nombre de quien lo hizo.
-    await db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, actor, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, ?, 'crm')`)
-      .bind(fila.record_id, taskId, fila.nombre, fila.es_pdv, fila.estado, local.estado, ctx.actor ? ctx.actor.userId : ctx.user.id, ctx.actor && !ctx.actor.userId ? ctx.actor.name : null).run();
+    // Si lo hizo otro por el usuario (el chofer, desde su app: ctx.actor), queda a nombre de quien lo hizo y con su origen
+    // («chofer»: en la conversación se lee «Gabriel (app del chofer)»).
+    await db.prepare(`INSERT INTO produccion_cambios (record_id, task_id, articulo, es_pdv, campo, antes, despues, user_id, actor, source) VALUES (?, ?, ?, ?, 'estado', ?, ?, ?, ?, ?)`)
+      .bind(fila.record_id, taskId, fila.nombre, fila.es_pdv, fila.estado, local.estado, ctx.actor ? ctx.actor.userId : ctx.user.id, ctx.actor && !ctx.actor.userId ? ctx.actor.name : null,
+        ctx.actor?.via ?? 'crm').run();
   }
   // El estado (o la fecha real de entrega) del PDV cambia el pedido: se relee el PDV y se actualiza ya, sin esperar la
   // sincronización. Si falla, queda para la próxima corrida.

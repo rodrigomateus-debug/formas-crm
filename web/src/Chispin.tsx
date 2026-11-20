@@ -94,8 +94,78 @@ export function siGano(antes: Stage | null | undefined, despues: Stage | null | 
   if (esGanada(despues) && !esGanada(antes)) festejarGanado(n);
 }
 export function festejarGanado(n: NegocioGanado) {
-  lluvia();
-  ganadoDesdeAfuera?.(n, 'ganado');
+  if (ganadoDesdeAfuera) ganadoDesdeAfuera(n, 'ganado'); else lluvia();
+}
+
+// ---------- Cierre ganado al estilo «Steamboat Willie» (pedido de Rodrigo del 20/11/2026, por ahora solo para Mili) ----------
+// Mickey de 1928 (dominio público en EE. UU. desde 2024): los cuadros reales del corto, recortados (web/public/festejos), sube
+// desde abajo al timón silbando, tira de la cuerda, bailan los silbatos del barco, flota un cartel de cine mudo con el negocio
+// y cierra con el iris de las películas viejas. Con el silbido original. Se saltea como los otros festejos.
+const STEAMBOAT_PARA = ['emilia.formosa@formaspublicitarias.com'];
+export const conSteamboat = (email?: string | null) => STEAMBOAT_PARA.includes((email ?? '').toLowerCase());
+const SB = { mickey: '/festejos/steamboat-mickey.webp', silbatos: '/festejos/steamboat-silbatos.webp', sonido: '/festejos/steamboat-silbido.m4a' };
+const SB_MICKEY_MS = 7719, SB_SILBATOS_MS = 4150;   // lo que duran las dos animaciones (12 cuadros por segundo, como la película)
+let sbAudio: HTMLAudioElement | null = null;
+let sbNotas: ReturnType<typeof setInterval> | undefined;
+// Se bajan una sola vez (solo a quien le toca): así el festejo arranca enseguida.
+let sbPrecargado = false;
+function precargarSteamboat() {
+  if (sbPrecargado) return; sbPrecargado = true;
+  for (const u of [SB.mickey, SB.silbatos]) { const i = new Image(); i.src = u; }
+  try { sbAudio = new Audio(SB.sonido); sbAudio.preload = 'auto'; sbAudio.volume = 0.6; } catch { /* sin audio */ }
+}
+export function cortarSteamboat() {
+  clearInterval(sbNotas);
+  try { sbAudio?.pause(); } catch { /* nada */ }
+  document.querySelectorAll('.chispin-steamboat, .sb-nota').forEach((e) => e.remove());
+}
+// Devuelve cuánto dura, para que Chispín sepa cuándo terminó.
+function steamboat(n: NegocioGanado, quien: string, timers: ReturnType<typeof setTimeout>[]) {
+  cortarSteamboat();
+  const capa = document.createElement('div');
+  capa.className = 'chispin-steamboat';
+  // Cada vez la URL con un número nuevo: así el WebP animado arranca desde el primer cuadro.
+  const vez = Date.now();
+  const mickey = document.createElement('img'); mickey.className = 'sb-mickey'; mickey.alt = ''; mickey.src = `${SB.mickey}?v=${vez}`;
+  const silbatos = document.createElement('img'); silbatos.className = 'sb-silbatos'; silbatos.alt = '';
+  const cartel = document.createElement('div'); cartel.className = 'sb-cartel'; cartel.setAttribute('role', 'status');
+  const h = document.createElement('b'); h.textContent = '¡VENTA CERRADA!';
+  const linea = document.createElement('span'); linea.className = 'sb-linea';
+  const que = document.createElement('span'); que.textContent = `${n.nombre.length > 52 ? `${n.nombre.slice(0, 50)}…` : n.nombre}${n.monto ? ` · ${fmtMoney(n.monto, n.moneda)}` : ''}`;
+  const bien = document.createElement('i'); bien.textContent = quien ? `¡Bien ahí, ${quien}!` : '¡Bien ahí!';
+  for (const e of [h, linea, que, bien]) cartel.appendChild(e);
+  const iris = document.createElement('div'); iris.className = 'sb-iris';
+  for (const e of [silbatos, mickey, cartel, iris]) capa.appendChild(e);
+  document.body.appendChild(capa);
+  const despues = (ms: number, fn: () => void) => timers.push(setTimeout(fn, ms));
+  const arrancar = () => {
+    capa.classList.add('on');
+    if (sbAudio) { try { sbAudio.currentTime = 0; void sbAudio.play().catch(() => {}); } catch { /* sin audio */ } }
+    // notitas mientras silba, hasta que agarra la cuerda
+    sbNotas = setInterval(() => {
+      const r = mickey.getBoundingClientRect(), nota = document.createElement('span');
+      nota.className = 'sb-nota'; nota.textContent = Math.random() < 0.5 ? '♪' : '♫';
+      nota.style.left = `${r.left + r.width * (0.36 + Math.random() * 0.06)}px`; nota.style.top = `${r.top + r.height * 0.3}px`;
+      nota.style.setProperty('--dx', `${-30 + Math.random() * 60}px`);
+      document.body.appendChild(nota); setTimeout(() => nota.remove(), 1800);
+    }, 520);
+    despues(SB_MICKEY_MS - 1300, () => clearInterval(sbNotas));
+    despues(SB_MICKEY_MS, () => { silbatos.src = `${SB.silbatos}?v=${vez}`; silbatos.classList.add('on'); });
+    despues(SB_MICKEY_MS + 900, () => cartel.classList.add('on'));
+    const fin = SB_MICKEY_MS + SB_SILBATOS_MS + 900;
+    despues(fin, () => {   // el iris se cierra sobre la cara de Mickey
+      const r = mickey.getBoundingClientRect();
+      iris.style.setProperty('--x', `${r.left + r.width * 0.58}px`); iris.style.setProperty('--y', `${r.top + r.height * 0.32}px`);
+      iris.classList.add('cierra');
+    });
+    despues(fin + 1350, () => { capa.classList.remove('on'); capa.classList.add('sale'); cartel.classList.remove('on'); silbatos.classList.remove('on'); iris.classList.replace('cierra', 'abre'); });
+    despues(fin + 1950, cortarSteamboat);
+  };
+  // Espera a que Mickey esté listo para mostrarse (ya está precargado; si no, no más de un segundo y medio).
+  let listo = false;
+  const ya = () => { if (!listo) { listo = true; arrancar(); } };
+  mickey.decode().then(ya, ya); despues(1500, ya);
+  return SB_MICKEY_MS + SB_SILBATOS_MS + 900 + 1950 + 300;
 }
 
 // ---------- Entró el anticipo (pedido de Rodrigo del 19/11/2026) ----------
@@ -453,6 +523,15 @@ export default function Chispin() {
         ];
         return;
       }
+      if (!ajeno && conSteamboat(meta.me.email) && !reducido()) {
+        // Mickey de Steamboat Willie (solo a quien está en STEAMBOAT_PARA): sin globo, el cartel de cine mudo hace de mensaje.
+        setAbierto(false); setFestejando(true); setGlobo(null); setAnimo('feliz');
+        const timers: ReturnType<typeof setTimeout>[] = [];
+        const dura = steamboat(n, primerNombre(meta.me.name), timers);
+        festejoT.current = [...timers, setTimeout(() => setAnimo(''), 2600), setTimeout(() => setFestejando(false), dura)];
+        return;
+      }
+      lluvia();
       const texto = ajeno
         ? `¡Ganó ${primerNombre(ajeno.name)}! 🏆 ${negocio}. ¡Mandale un aplauso!`
         : FELICITACIONES[Math.floor(Math.random() * FELICITACIONES.length)](primerNombre(meta.me.name) || 'campeón/a', negocio);
@@ -468,6 +547,7 @@ export default function Chispin() {
     return () => { ganadoDesdeAfuera = null; };
   }, [meta, yo, ponerAnteojos]);
   useEffect(() => () => festejoT.current.forEach(clearTimeout), []);
+  useEffect(() => { if (conSteamboat(meta.me.email) && !reducido()) precargarSteamboat(); }, [meta.me.email]);
 
   // Saltear el festejo si estás apurado (pedido de Rodrigo del 19/11/2026): el botón «Saltear», la tecla Esc, tocar a Chispín
   // o la ✕ del globo cortan todo de una (papelitos, plata, la caja o el camión, los anteojos y el globo).
@@ -475,6 +555,7 @@ export default function Chispin() {
     festejoT.current.forEach(clearTimeout);
     festejoT.current = [];
     document.querySelectorAll('.chispin-lluvia, .chispin-plata, .chispin-papelitos, .chispin-embalar, .chispin-camion').forEach((e) => e.remove());
+    cortarSteamboat();
     setFestejando(false); setGlobo(null); setAnimo(''); ponerAnteojos(false);
   }, [ponerAnteojos]);
   useEffect(() => {

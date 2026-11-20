@@ -7,7 +7,7 @@ import { assertType, HttpError, now, OBJECT_TYPES, PROFILES } from './env';
 import { requireRole, canWrite, esSuperadmin, newToken, sha256 } from './auth';
 import { Meta } from './meta';
 import {
-  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
+  archiveRecords, buildWhere, createRecord, getRow, mergeRecords, ORDER_ANULADO, restoreRecord, rowToRecord, searchRecords, sqlFor, tagsFor, tagSql, updateRecord,
   type CrmRecord, type Filter, type RecordRow, type SearchParams, UNIDADES, unidadesDeContactos } from './records';
 import { associate, associationsOf, dissociate } from './associations';
 import { createActivity, getActivity, listTasks, timeline, unlinkActivity, updateActivity, type ActivityInput } from './activities';
@@ -301,6 +301,34 @@ api.get('/records/:type/:id', async (c) => {
   return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
 });
 
+// Anular pedidos desde la pantalla (pedido de Rodrigo del 20/11/2026): antes de hacerlo se pide confirmación, con lo que
+// se anula también en ClickUp (records.ts lo deja en la cola; clickup.ts, anularEnClickup). La pantalla muestra el
+// mensaje y, si la persona acepta, repite el pedido con «x-confirmar: anular» (http en web/src/lib.tsx).
+async function confirmarAnulacion(c: { env: Env; req: { header: (k: string) => string | undefined }; get: (k: 'ctx') => Ctx }, ids: number[], props: Record<string, unknown> | undefined) {
+  // Solo administración anula a mano (records.ts, checkOrderStage): a los demás les llega el «no» de siempre, sin preguntar antes.
+  const ctx = c.get('ctx');
+  if (ctx.source !== 'crm' || ctx.user.role !== 'admin' || props?.hs_pipeline_stage !== ORDER_ANULADO || c.req.header('x-confirmar') === 'anular' || !ids.length) return;
+  const db = c.env.DB;
+  const pedidos = (await db.prepare(`SELECT id, name, json_extract(props, '$.pedido_finnegans') AS fin, json_extract(props, '$.url_clickup') AS cu FROM records
+    WHERE object_type = 'order' AND id IN (SELECT value FROM json_each(?)) AND COALESCE(json_extract(props, '$.hs_pipeline_stage'), '') != ?`)
+    .bind(JSON.stringify(ids), ORDER_ANULADO).all<{ id: number; name: string; fin: string | null; cu: string | null }>()).results;
+  if (!pedidos.length) return;
+  const arts = (await db.prepare(`SELECT estado, COUNT(*) AS n FROM produccion WHERE es_pdv = 0 AND record_id IN (SELECT value FROM json_each(?)) GROUP BY estado`)
+    .bind(JSON.stringify(pedidos.map((p) => p.id))).all<{ estado: string; n: number }>()).results;
+  const suma = (estados: string[], dentro: boolean) => arts.filter((a) => estados.includes(a.estado) === dentro).reduce((t, a) => t + a.n, 0);
+  const entregados = suma(['entregados', 'parcial entregado'], true);
+  const anula = suma(['entregados', 'parcial entregado', 'anulado', 'anulada', 'cancelado'], false);
+  const uno = pedidos.length === 1;
+  const partes = [
+    uno ? `¿Anular el pedido «${pedidos[0].name}»?` : `¿Anular ${pedidos.length} pedidos?`,
+    pedidos.some((p) => p.cu) ? `En ClickUp también se ${uno ? 'anula el PDV' : 'anulan sus PDV'}${anula ? ` y ${anula === 1 ? 'su artículo' : `${anula} artículos`}` : ''}.` : '',
+    entregados === 1 ? 'El artículo ya entregado queda como está.' : entregados > 1 ? `Los ${entregados} artículos ya entregados quedan como están.` : '',
+    pedidos.some((p) => p.fin) ? 'En Finnegans hay que anularlo a mano.' : '',
+    pedidos.some((p) => p.cu) ? 'Si te equivocás, volverlo a otra etapa deja ClickUp como estaba.' : '',
+  ];
+  throw new HttpError(409, partes.filter(Boolean).join(' '), { confirmar: 'anular' });
+}
+
 api.patch('/records/:type/:id', async (c) => {
   const ctx = c.get('ctx');
   canWrite(ctx);
@@ -308,6 +336,7 @@ api.patch('/records/:type/:id', async (c) => {
   const body = await c.req.json<{ props: Record<string, unknown> }>();
   if (type === 'deal') await assertDealVisible(new Meta(c.env.DB), ctx.user, (await getRow(c.env.DB, Number(c.req.param('id')), type)).pipeline_id);
   await soloLoSuyoVentas(c, await registroVisible(c, Number(c.req.param('id'))), body.props);
+  if (type === 'order') await confirmarAnulacion(c, [Number(c.req.param('id'))], body.props);
   // Quien cambia a mano el monto de un negocio con pedidos lo deja «Monto a mano»: los pedidos ya no lo pisan (montos.ts).
   if (type === 'deal' && body.props && 'amount' in body.props && !('monto_a_mano' in body.props) && await tienePedidos(c.env.DB, Number(c.req.param('id')))) {
     body.props.monto_a_mano = true;
@@ -361,6 +390,7 @@ api.post('/records/:type/batch', async (c) => {
     for (const id of ids) await registroVisible(c, id);
     return c.json({ archived: await archiveRecords(c.env.DB, ctx, ids), failed: [] });
   }
+  if (type === 'order' && !body.task) await confirmarAnulacion(c, ids, body.props);
   const failed: Array<{ id: number; name?: string; error: string; missing?: string[] }> = [];
   let updated = 0;
   let tasks = 0;

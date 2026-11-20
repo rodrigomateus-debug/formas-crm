@@ -7,9 +7,9 @@ import assert from 'node:assert/strict';
 const BASE = process.env.CRM_URL ?? 'http://localhost:8787';
 const RUN = Date.now().toString(36);
 let asUser = null;
-async function api(method, path, body) {
+async function api(method, path, body, headers = {}) {
   const res = await fetch(`${BASE}/api${path}`, {
-    method, headers: { 'content-type': 'application/json', ...(asUser ? { 'x-dev-user': asUser } : {}) }, body: body === undefined ? undefined : JSON.stringify(body),
+    method, headers: { 'content-type': 'application/json', ...(asUser ? { 'x-dev-user': asUser } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body),
   });
   const type = res.headers.get('content-type') ?? '';
   return { status: res.status, data: type.includes('json') ? await res.json() : await res.text() };
@@ -22,7 +22,8 @@ test('festejos de pedidos: listo para entregar y entregado, los suyos y los que 
   const vero = (await api('POST', '/users', { email: `vero.festejos.${RUN}@formas.ar`, name: `Vero ${RUN}`, profile: 'comercial', role: 'member' })).data;
   const otra = (await api('POST', '/users', { email: `otra.festejos.${RUN}@formas.ar`, name: `Otra ${RUN}`, profile: 'comercial', role: 'member' })).data;
   const pedido = async (nombre, owner) => (await api('POST', '/records/order', { props: { hs_order_name: `${nombre} ${RUN}`, hs_pipeline_stage: EN_PRODUCCION, hs_total_price: 1000, owner_id: owner } })).data;
-  const mover = (id, etapa) => api('PATCH', `/records/order/${id}`, { props: { hs_pipeline_stage: etapa } });
+  // Anular desde la pantalla pide confirmar: se manda ya confirmado (como repite la pantalla).
+  const mover = (id, etapa) => api('PATCH', `/records/order/${id}`, { props: { hs_pipeline_stage: etapa } }, etapa === ANULADO ? { 'x-confirmar': 'anular' } : {});
 
   const listo = await pedido('Listo', vero.id);
   const entregado = await pedido('Entregado', vero.id);

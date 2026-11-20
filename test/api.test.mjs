@@ -321,8 +321,12 @@ test('el monto del negocio sigue al total de sus pedidos (y los casos raros)', a
   // Llega su total: la suma de los dos.
   await api('PATCH', `/records/order/${o2.id}`, { props: { hs_total_price: 250000.5 } });
   assert.equal((await monto(deal.id)).amount, 650000.5);
-  // Se anula un pedido: deja de contar.
-  assert.equal((await api('PATCH', `/records/order/${o2.id}`, { props: { hs_pipeline_stage: '3c85a297-e9ce-400b-b42e-9f16853d69d6' } })).status, 200);
+  // Se anula un pedido: deja de contar. Desde la pantalla, anular pide confirmar antes (la pantalla repite con x-confirmar).
+  const anular = { props: { hs_pipeline_stage: '3c85a297-e9ce-400b-b42e-9f16853d69d6' } };
+  const pregunta = await api('PATCH', `/records/order/${o2.id}`, anular);
+  assert.deepEqual([pregunta.status, pregunta.data.confirmar], [409, 'anular']);
+  assert.equal((await monto(deal.id)).amount, 650000.5, 'sin confirmar, sigue contando');
+  assert.equal((await call('PATCH', `/api/records/order/${o2.id}`, anular, { 'x-confirmar': 'anular' })).status, 200);
   assert.equal((await monto(deal.id)).amount, 400000);
 
   // Un pedido va en un solo negocio (un negocio sí puede tener varios): sumarlo a otro no se puede.

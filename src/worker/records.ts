@@ -316,6 +316,7 @@ export const ORDER_CONFIRMED = '4b27b500-f031-4927-9811-68a0b525cbae';
 export const ORDER_ANTICIPO = '937ea84d-0a4f-4dcf-9028-3f9c2aafbf03';
 export const ORDER_BOCETO_DIGITAL = 'aa99e8d0-c1d5-4071-b915-d240bbb1aed9';
 export const ORDER_READY = '3725360f-519b-4b18-a593-494d60a29c9f';
+export const ORDER_ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
 // Antes de producción: de cualquiera de estas, pasar a «Listo para producción» mueve el PDV en ClickUp.
 export const ORDER_PREVIAS = [ORDER_CONFIRMED, ORDER_ANTICIPO, ORDER_BOCETO_DIGITAL];
 const ORDER_MANUAL = [...ORDER_PREVIAS, ORDER_READY];
@@ -447,6 +448,17 @@ export async function updateRecord(db: D1Database, ctx: Ctx, type: ObjectType, i
   if (type === 'order' && changed.includes('hs_pipeline_stage') && ORDER_PREVIAS.includes(String(current.hs_pipeline_stage ?? ORDER_CONFIRMED))
     && next.hs_pipeline_stage === ORDER_READY && !opts.system && ['crm', 'mcp', 'api'].includes(ctx.source)) {
     await db.prepare("INSERT INTO clickup_salida (record_id, action, user_id) VALUES (?, 'pasar_a_pdv', ?)").bind(id, ctx.user.id).run();
+  }
+  // Anulado a mano (pedido de Rodrigo del 20/11/2026): en ClickUp se anulan el PDV y sus artículos no entregados
+  // (clickup.ts, anularEnClickup). Desanularlo los vuelve a dejar como estaban; si la anulación todavía no había salido,
+  // simplemente no sale.
+  if (type === 'order' && changed.includes('hs_pipeline_stage') && !opts.system && ['crm', 'mcp', 'api'].includes(ctx.source) && next.url_clickup
+    && (next.hs_pipeline_stage === ORDER_ANULADO) !== (current.hs_pipeline_stage === ORDER_ANULADO)) {
+    const anula = next.hs_pipeline_stage === ORDER_ANULADO;
+    const pendiente = await db.prepare("SELECT id FROM clickup_salida WHERE record_id = ? AND action = ? AND done_at IS NULL ORDER BY id DESC LIMIT 1")
+      .bind(id, anula ? 'desanular' : 'anular').first<{ id: number }>();
+    if (pendiente) await db.prepare("UPDATE clickup_salida SET done_at = ?, result = '{\"cancelado\":true}' WHERE id = ?").bind(now(), pendiente.id).run();
+    else await db.prepare('INSERT INTO clickup_salida (record_id, action, user_id) VALUES (?, ?, ?)').bind(id, anula ? 'anular' : 'desanular', ctx.user.id).run();
   }
   if (type === 'deal' && stageMoved) {
     const st = (await meta.stage(next.dealstage as string))!;

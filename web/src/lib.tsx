@@ -99,12 +99,12 @@ export function verComo(id: number | null) {
 
 // ---------- HTTP ----------
 
-export async function http<T = any>(method: string, path: string, body?: unknown): Promise<T> {
+export async function http<T = any>(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`/api${path}`, {
       method,
-      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo() },
+      headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...cabecerasVerComo(), ...extra },
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: 'same-origin',
       // Con la sesión de Cloudflare Access vencida, /api contesta con un redireccionamiento al login: seguirlo falla sin
@@ -128,6 +128,15 @@ export async function http<T = any>(method: string, path: string, body?: unknown
   if (res.status === 401 && data?.login) {
     window.location.assign(`${data.login}?volver=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     return new Promise<T>(() => { /* la página se va */ });
+  }
+  // El servidor pide confirmar antes de hacer algo que tiene consecuencias afuera del CRM (anular un pedido también lo anula
+  // en ClickUp): se pregunta con su mensaje y, si se acepta, se repite igual con la confirmación. Vale para todas las
+  // pantallas que lo cambian (la ficha, el tablero, la lista, las acciones masivas).
+  if (res.status === 409 && data?.confirmar && !extra['x-confirmar']) {
+    if (window.confirm(data.error)) return http<T>(method, path, body, { ...extra, 'x-confirmar': String(data.confirmar) });
+    const err = new Error('Quedó como estaba.') as Error & { data?: any };
+    err.data = { ...data, cancelado: true };
+    throw err;
   }
   if (!res.ok) {
     const err = new Error(data?.error ?? `Error ${res.status}`) as Error & { data?: any };

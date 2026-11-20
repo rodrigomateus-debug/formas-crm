@@ -798,9 +798,18 @@ table.grid th .col-menu:hover { background: var(--ui-line); color: var(--accent-
 .unidad.u-corporate { color: var(--u-corp); background: var(--u-corp-bg); border-color: var(--u-corp-line); }
 .unidad.u-noestres { color: var(--u-ne); background: var(--u-ne-bg); border-color: var(--u-ne-line); }
 .unidad.compact { padding: 2px; gap: 0; line-height: 0; }
+/* Con logo: el pill queda neutro (el logo ya trae sus colores) con el borde del color de la unidad. */
+.unidad:has(.unidad-logo) { gap: 0; height: 23px; box-sizing: border-box; padding: 0 9px; line-height: 0; background: var(--ui-surface); }   /* las tres del mismo alto */
+.unidad-logo { display: block; height: 15px; width: auto; }
+.unidad.u-noestres .unidad-logo { height: 13px; }
+.unidad-logo.oscuro { display: none; }
+/* La versión circular (UnidadBadge compacto): el logo en un círculo, sin pill. */
+.unidad-circulo { display: inline-block; width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; flex: 0 0 auto; }
+[data-theme="dark"] .unidad-logo.claro { display: none; }
+[data-theme="dark"] .unidad-logo.oscuro { display: block; }
 .unidades { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
 .qf-pop .opt .unidad { margin-left: 2px; }
-.qf-btn .unidad.compact { margin-left: 2px; }
+.qf-btn .unidad-circulo { margin-left: 3px; }
 .pipe-menu .grp .unidad { text-transform: none; letter-spacing: normal; font-size: 12px; }
 
 /* Ancho de columnas: el borde derecho del encabezado se arrastra. */

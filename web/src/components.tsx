@@ -734,12 +734,20 @@ export function EstadoEntrega({ value, title }: { value: unknown; title?: string
 }
 
 // Unidad de negocio con su ícono y su color.
+// Cada unidad con su logo (pedido de Rodrigo del 20/11/2026): formas.shop, «corporate» con el moño sobre la «a» y No Estrés, en
+// web/public/unidades, con una versión para fondo claro y otra para el tema oscuro (styles.css, .unidad-logo).
+// La versión circular de cada una (compacta): Shop, el círculo navy de su design system con una «S» y el moño verde
+// arriba; Corporate, el disco con degradé verde del isotipo de Formas con una «C» y el moño blanco; No Estrés, la manito
+// sobre el verde de su manual de marca. Las iniciales para que Shop y Corporate se distingan sin depender del color.
+const CIRCULO: Record<UnidadKey, string> = { shop: '/unidades/shop-circulo.png', corporate: '/unidades/corporate-circulo.png', noestres: '/unidades/noestres-circulo.png' };
 export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean }) {
   const u = UNIDADES.find((x) => x.key === k);
   if (!u) return null;
+  if (compact) return <img className="unidad-circulo" src={CIRCULO[u.key]} alt={u.label} title={u.label} draggable={false} />;
   return (
-    <span className={`unidad u-${u.key}${compact ? ' compact' : ''}`} title={u.label}>
-      <Icon name={u.icon} size={compact ? 12 : 13} />{!compact && u.label}
+    <span className={`unidad u-${u.key}${compact ? ' compact' : ''}`} title={u.label} role="img" aria-label={u.label}>
+      <img className="unidad-logo claro" src={`/unidades/${u.key}-claro.png`} alt="" draggable={false} />
+      <img className="unidad-logo oscuro" src={`/unidades/${u.key}-oscuro.png`} alt="" draggable={false} />
     </span>
   );
 }

@@ -483,10 +483,12 @@ const paths: Record<string, string> = {
   star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z',
   vector: 'M5 19C7 9 17 9 19 19M3.5 17.5h3v3h-3zM17.5 17.5h3v3h-3zM10.5 5.5h3v3h-3zM12 8.5v3',
 };
+// Con tamaño fijo no se achica nunca: en una fila flex, al lado de un texto largo con «…», el navegador le sacaba ancho
+// y el ícono se veía más chico o desaparecía según el largo del nombre (el ícono del PDV en Producción, 20/11/2026).
 export function Icon({ name, size }: { name: keyof typeof paths | string; size?: number }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
-      width={size} height={size} aria-hidden="true">
+      width={size} height={size} aria-hidden="true" style={size ? { flexShrink: 0 } : undefined}>
       <path d={paths[name] ?? paths.note} />
     </svg>
   );

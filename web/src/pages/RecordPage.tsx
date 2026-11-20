@@ -428,7 +428,7 @@ function StageBar({ record, onChange }: { record: CrmRecord; onChange: () => voi
 
 const FILTERS: Array<[string, string]> = [['', 'Actividad'], ['note', 'Notas'], ['email', 'Emails'], ['call', 'Llamadas'], ['task', 'Tareas'], ['meeting', 'Reuniones'], ['whatsapp', 'WhatsApp']];
 // De dónde vino un cambio, como se lee en el historial.
-const SOURCE_LABEL: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API' };
+const SOURCE_LABEL: Record<string, string> = { clickup: 'ClickUp', finnegans: 'Finnegans', mcp: 'Claude', hubspot: 'HubSpot', api: 'API', chofer: 'app del chofer' };
 const CHANGE_LABEL: Record<string, string> = { dealstage: 'Etapa', pipeline: 'Pipeline', owner_id: 'Propietario', lifecyclestage: 'Ciclo de vida', amount: 'Monto', archived: 'Borrado', merged: 'Combinado con', hs_pipeline_stage: 'Estado del pedido', factura_numero: 'Factura' };
 
 function Timeline({ type, record, associations, onChange }: { type: ObjectType; record: CrmRecord; associations: Assoc; onChange: () => void }) {

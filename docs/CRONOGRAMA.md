@@ -356,8 +356,9 @@ con el «atrás» del celular. Hecha, queda abierta (para la foto del remito) y 
 En cada parada marca cómo le fue (se ve en el momento; si no se pudo guardar, vuelve a como estaba y lo avisa arriba):
 
 - **Entregué / Retiré todo / Listo**: los artículos quedan hechos (y cambian de estado en ClickUp, igual que cuando lo
-  marca Logística, pero a nombre del chofer en la conversación del pedido). Si era una entrega, se abre la cámara para
-  la foto del remito firmado. «Deshacer» vuelve atrás solo lo que marcó él, no lo que había marcado Logística.
+  marca Logística, pero a nombre del chofer en la conversación del pedido y en el historial, con el origen «app del
+  chofer»: se lee «Gabriel Cimino (app del chofer) pasó…», para que no parezca un usuario del CRM). Si era una entrega,
+  se abre la cámara para la foto del remito firmado. «Deshacer» vuelve atrás solo lo que marcó él, no lo que había marcado Logística.
 - **No se pudo**, con el motivo: no había nadie, estaba cerrado, no encontré la dirección, no lo quisieron recibir, no
   estaba listo (en los retiros) u otro, y una nota. Logística lo ve en la parada, en el momento.
 - **Dejar para después**.

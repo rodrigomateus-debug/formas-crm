@@ -163,7 +163,10 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     return d ? facturasCrm[`${f.emp || 'EMPRE01'}|${d}`] : undefined;
   };
   const factorOk = (v: unknown) => (Number(v) >= 1 && Number(v) < 2 ? Number(v) : undefined);
-  const sinIva = (id: number, importe: number, f?: FilaSaldo) => importe / (factorOk(f && deFactura(f)?.factor) ?? factorDe.get(id) ?? IVA);
+  // FP DEMO (empresa '7') es donde se factura lo que no lleva IVA (Rodrigo, 20/11/2026): sin el total/neto de la factura, su
+  // saldo va tal cual, no con el del pedido, que sí lleva IVA (PDV 31748: la factura de $ 432.361,80 quedaba en $ 357.323,80).
+  const sinIva = (id: number, importe: number, f?: FilaSaldo) =>
+    importe / (factorOk(f && deFactura(f)?.factor) ?? (f?.emp === '7' ? 1 : undefined) ?? factorDe.get(id) ?? IVA);
 
   const pedidoDe = (f: FilaSaldo): number | undefined => {
     const fx = deFactura(f)?.pedido;

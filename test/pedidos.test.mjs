@@ -397,6 +397,10 @@ test('total sin IVA de Finnegans en los pedidos y el pie de las columnas del tab
   // Ya facturado todo y cobrado: 0.
   await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [], porFacturar: { [b.props.pedido_finnegans]: 0 } }, H);
   assert.deepEqual([(await props(b)).saldo_pendiente_de_pago_mxn, (await props(b)).importe_por_facturar], [0, 0]);
+  // Una factura de FP DEMO (empresa 7: lo que no lleva IVA) sin su total/neto: el saldo va tal cual, sin sacarle el IVA.
+  await api('POST', '/hooks/pedidos/saldos', { filas: [{ emp: '7', ie: `FC PEDVTASTP-${PDV.padStart(8, '0')} 1`, doc: 'FCVTAELECT - 2726', desc: PDV, importe: 1000 }] }, H);
+  assert.equal((await props(a)).saldo_pendiente_de_pago_mxn, 1000, 'sin IVA: no se divide por 1,21');
+  await api('POST', '/hooks/pedidos/saldos', { completo: true, filas: [] }, H);
   assert.equal((await api('GET', '/hooks/pedidos/saldos', undefined, H)).data.filas, 0, 'lo último que llegó');
   // Carga en tandas de los productos de los pedidos que no se leyeron.
   const tanda = (await api('POST', '/hooks/productos/pendientes?limit=5', {}, H)).data;

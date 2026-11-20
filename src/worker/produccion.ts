@@ -9,6 +9,8 @@ import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
 import { admiteNotas, resumenNotas, skusDeArticulos, type ResumenNotas } from './notasproducto';
 import { costosLogoDeArticulos, type CostoLogo } from './costoslogo';
 import { ocsDeCodigo, ocsDePedidos, sinCodigos, type OcRef } from './ordenescompra';
+import { recalcularTallesPdvs } from './tallesdb';
+import { compararTalles, costoLogoDeGrupo, nombreSinTalle, talleCanonico, TALLES_VERSION, type CostoLogoTalles } from './talles';
 
 // Producción en el CRM (pedido de Rodrigo del 12/11/2026). Producción (Ceci y Sole) trabaja en ClickUp con la vista «Estado
 // PDV CECI»: cada PDV con sus artículos abiertos abajo, y en cada artículo su estado, proveedor, impresor y las fechas de
@@ -188,6 +190,8 @@ export async function guardarTareas(db: D1Database, tasks: CuTask[]) {
   await guardarPersonas(db, tasks);
   await guardarOpciones(db, tasks);
   await enlazarPedidos(db, [...new Set(filas.map((f) => f.pdv_task))]);
+  // El talle de cada artículo y los talles que van juntos (talles.ts): con los nombres y códigos que acaban de llegar.
+  await recalcularTallesPdvs(db, [...new Set(filas.map((f) => f.pdv_task))]);
   const cambios = filas.filter((f) => { const a = antes.get(f.task_id); return a && a.record_id && f.estado && a.estado !== f.estado && f.actualizado >= a.actualizado; });
   if (cambios.length) await anotarCambiosDeEstado(db, cambios.map((f) => ({ ...f, record_id: antes.get(f.task_id)!.record_id!, antes: antes.get(f.task_id)!.estado })));
   return filas.length;
@@ -230,7 +234,9 @@ export async function enlazarPedido(db: D1Database, pdvTask: string, recordId: n
 
 // Saca los artículos que ya no están en el PDV (los borraron o los movieron a otro PDV). `ids`: el PDV y sus subtareas.
 export async function podarArticulos(db: D1Database, pdvTask: string, ids: string[]) {
-  await db.prepare('DELETE FROM produccion WHERE pdv_task = ? AND task_id NOT IN (SELECT value FROM json_each(?))').bind(pdvTask, JSON.stringify(ids)).run();
+  const r = await db.prepare('DELETE FROM produccion WHERE pdv_task = ? AND task_id NOT IN (SELECT value FROM json_each(?))').bind(pdvTask, JSON.stringify(ids)).run();
+  // Sin ese artículo, los talles que quedan pueden dejar de ser un grupo.
+  if (r.meta?.changes) await recalcularTallesPdvs(db, [pdvTask]);
 }
 
 async function guardarPersonas(db: D1Database, tasks: CuTask[]) {
@@ -471,7 +477,8 @@ export async function leerEstados(env: Env, b: Budget) {
 
 // ---------- La vista de Producción ----------
 
-export type FilaDb = Fila & { record_id: number | null; proveedor_auto?: string | null };
+export type FilaDb = Fila & { record_id: number | null; proveedor_auto?: string | null;
+  talle?: string | null; grupo_talle?: string | null; talles_v?: number };   // talles.ts (migración 0105)
 export interface ArticuloVista {
   task_id: string; nombre: string; estado: string; cantidad: number | null; cantidad_controlada: number | null; cliente: string | null;
   proveedor: string | null; impresor: string | null; entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null;
@@ -483,13 +490,19 @@ export interface ArticuloVista {
   notas?: ResumenNotas | null;     // las notas vigentes de ese SKU (notasproducto.ts)
   costo_logo?: CostoLogo | null;   // lo que se tomó para el logo en la cotización del STP, por unidad (costoslogo.ts)
   oc?: OcRef[];                    // sus órdenes de compra de Finnegans (ordenescompra.ts)
+  talle?: string | null;           // su talle, si es una prenda con talles (talles.ts)
+  grupo?: string | null;           // los talles del mismo producto comparten esta clave (vienen juntos, en el orden de los talles)
 }
+// Un producto con talles: el nombre sin el talle y lo que se tomó para el logo del producto entero (con el setup una sola
+// vez, aunque el STP lo prorratee en cada talle).
+export interface GrupoVista { nombre: string; costo_logo: CostoLogoTalles | null }
 export interface PdvVista extends ArticuloVista {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: ArticuloVista[];
   ocs?: OcRef[];   // todas las órdenes de compra del pedido (también las que no se pudieron atar a un producto)
   creado: string | null;   // fecha de creación del PDV, AAAA-MM-DD (SELECT_PDV)
+  grupos: Record<string, GrupoVista>;   // los productos con talles de sus artículos, por la clave del grupo
 }
 
 export const lista = (s: string | null | undefined) => { try { const v = JSON.parse(s ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -497,8 +510,28 @@ const articulo = (f: FilaDb): ArticuloVista => ({
   task_id: f.task_id, nombre: f.nombre, estado: f.estado, cantidad: f.cantidad, cantidad_controlada: f.cantidad_controlada, cliente: f.cliente,
   proveedor: f.proveedor, impresor: f.impresor, entrega_real: f.entrega_real, ingreso_proveedor: f.ingreso_proveedor, retiro_proveedor: f.retiro_proveedor,
   egreso_impresor: f.egreso_impresor, retiro_impresor: f.retiro_impresor, ingreso_impresor: f.ingreso_impresor, vence: f.vence, asignados: lista(f.asignados).map(Number), etiquetas: lista(f.etiquetas).map(String),
-  url: f.url, proveedor_sku: f.proveedor && f.proveedor === f.proveedor_auto ? f.codigo : null,
+  url: f.url, proveedor_sku: f.proveedor && f.proveedor === f.proveedor_auto ? f.codigo : null, talle: f.talle ?? null, grupo: f.grupo_talle ?? null,
 });
+
+// Cuántos productos tiene y cuántos están listos: un producto con talles es uno solo, listo cuando lo están todos sus talles.
+export function contarProductos(arts: Array<{ task_id: string; pdv_task?: string; grupo_talle?: string | null; estado: string }>) {
+  const productos = new Map<string, boolean>();
+  for (const a of arts) {
+    const k = a.grupo_talle ? `${a.pdv_task ?? ''}|${a.grupo_talle}` : a.task_id;
+    productos.set(k, (productos.get(k) ?? true) && LISTOS.includes(a.estado));
+  }
+  return { total: productos.size, listos: [...productos.values()].filter(Boolean).length };
+}
+
+// Los artículos en el orden del PDV, con los talles de cada producto juntos (donde va el primero) y en el orden de los
+// talles (XS S M L XL…).
+function ordenarArticulos<T extends FilaDb>(arts: T[]) {
+  const pos = new Map<string, number>();
+  for (const a of arts) if (a.grupo_talle) pos.set(a.grupo_talle, Math.min(pos.get(a.grupo_talle) ?? Infinity, a.orden));
+  const p = (a: T) => (a.grupo_talle ? pos.get(a.grupo_talle)! : a.orden);
+  return [...arts].sort((a, b) => p(a) - p(b) || (a.grupo_talle ?? '').localeCompare(b.grupo_talle ?? '')
+    || compararTalles(talleCanonico(a.talle), talleCanonico(b.talle)) || a.orden - b.orden || a.nombre.localeCompare(b.nombre));
+}
 
 // El estado del PDV: el de la combinación de sus artículos (como el estado del pedido). Si la producción todavía no
 // arrancó, el que tiene el pedido (lo que puso la vendedora).
@@ -522,11 +555,19 @@ function armarPdv(p: FilaPdv, arts: FilaDb[], editables: string[], verCerrados: 
   const ver = (e: string) => (anticipo && SIN_ARRANCAR.includes(e) ? PENDIENTE_ANTICIPO : e);
   const todos = new Set<number>(lista(p.asignados).map(Number));
   for (const a of vivos) for (const x of lista(a.asignados)) todos.add(Number(x));
+  const { listos, total } = contarProductos(vivos);
+  // Cada producto con talles: su nombre sin el talle y el costo del logo del producto entero.
+  const grupos: Record<string, GrupoVista> = {};
+  for (const a of ordenarArticulos(arts)) {
+    if (!a.grupo_talle || grupos[a.grupo_talle]) continue;
+    const suyos = arts.filter((x) => x.grupo_talle === a.grupo_talle);
+    grupos[a.grupo_talle] = { nombre: nombreSinTalle(a.nombre), costo_logo: costoLogoDeGrupo(suyos.map((x) => costos.get(x.task_id)), suyos.map((x) => x.cantidad)) };
+  }
   return {
     ...articulo(p), estado: ver(p.estado), npdv: p.npdv, unidad: p.unidad, vendedor: p.vendedor, record_id: p.record_id, pedido: p.pedido, owner_id: p.owner_id,
     entrega_prometida: p.entrega_prometida, creado: p.creado_pdv, etapa, etapa_auto: auto, editable: editables.includes(p.unidad ?? ''),
-    listos: vivos.filter((a) => LISTOS.includes(a.estado)).length, total: vivos.length, asignados_todos: [...todos],
-    articulos: visibles.sort((a, b) => a.orden - b.orden || a.nombre.localeCompare(b.nombre)).map((a) => ({ ...articulo(a), estado: ver(a.estado), foto: fotos.get(a.task_id) ?? null,
+    listos, total, asignados_todos: [...todos], grupos,
+    articulos: ordenarArticulos(visibles).map((a) => ({ ...articulo(a), estado: ver(a.estado), foto: fotos.get(a.task_id) ?? null,
       // El aviso del logo, solo mientras falta producirlo (ya listo, entregado o anulado no importa).
       logo: LISTOS.includes(a.estado) || CERRADOS.includes(a.estado) ? null : logos.get(a.task_id) ?? null, ...notasDe(notas, a.task_id),
       costo_logo: costos.get(a.task_id) ?? null, oc: ocsDeCodigo(ocs.get(p.record_id ?? -1), notas.skus.get(a.task_id)) })),
@@ -567,6 +608,9 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
         OR (NOT EXISTS (SELECT 1 FROM produccion a WHERE a.pdv_task = p.task_id AND a.es_pdv = 0) AND p.estado NOT IN ('entregados', 'anulado'))
         OR (?2 = 1 AND p.actualizado > ?3))`)
     .bind(JSON.stringify(unidades), q.cerrados ? 1 : 0, desde).all<FilaPdv>()).results;
+  // Los PDV que todavía no tienen los talles calculados (o con reglas viejas): antes de mostrarlos (tallesdb.ts).
+  const viejos = pdvs.filter((p) => (p.talles_v ?? 0) < TALLES_VERSION).map((p) => p.task_id);
+  if (viejos.length) await recalcularTallesPdvs(db, viejos);
   const arts = pdvs.length ? (await db.prepare('SELECT * FROM produccion WHERE es_pdv = 0 AND pdv_task IN (SELECT value FROM json_each(?))')
     .bind(JSON.stringify(pdvs.map((p) => p.task_id))).all<FilaDb>()).results : [];
   const dePdv = new Map<string, FilaDb[]>();
@@ -614,6 +658,7 @@ async function pdvVista(db: D1Database, pdvTask: string) {
   const p = await db.prepare(`${SELECT_PDV} WHERE p.task_id = ?`).bind(pdvTask)
     .first<FilaPdv>();
   if (!p) return null;
+  if ((p.talles_v ?? 0) < TALLES_VERSION) await recalcularTallesPdvs(db, [pdvTask]);
   const arts = (await db.prepare('SELECT * FROM produccion WHERE es_pdv = 0 AND pdv_task = ?').bind(pdvTask).all<FilaDb>()).results;
   const conPedido = arts.map((a) => ({ ...a, record_id: a.record_id ?? p.record_id }));
   const [fotos, logos, servicios, notas] = await Promise.all([fotosDeArticulos(db, conPedido), logosDeArticulos(db, conPedido), tareasServicio(db, [p.record_id]),
@@ -718,6 +763,30 @@ export async function editarProduccion(env: Env, ctx: Ctx, taskId: string, campo
   return pdvVista(db, fila.pdv_task);
 }
 
+// Un producto con talles (talles.ts) se edita entero, desde su renglón: el mismo cambio en cada talle (cada uno es su
+// subtarea en ClickUp, se escriben a la vez). Si ClickUp no acepta alguno, los otros quedan cambiados y se avisa cuántos
+// no; la pantalla muestra cómo quedó. Después, cada talle se puede cambiar aparte desde la rama.
+export async function editarProduccionGrupo(env: Env, ctx: Ctx, tareas: unknown, campo: string, valor: unknown) {
+  const db = env.DB;
+  const ids = [...new Set((Array.isArray(tareas) ? tareas : []).map((t) => String(t ?? '').trim()).filter(Boolean))];
+  if (!ids.length) throw new HttpError(400, 'Faltan los talles del producto.');
+  if (ids.length > 40) throw new HttpError(400, 'Son demasiados artículos juntos.');
+  const filas = (await db.prepare('SELECT task_id, pdv_task, es_pdv FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids))
+    .all<{ task_id: string; pdv_task: string; es_pdv: number }>()).results;
+  if (filas.length !== ids.length) throw new HttpError(404, 'Algún talle ya no está en ClickUp: actualizá la pantalla.');
+  const pdvTask = filas[0].pdv_task;
+  if (filas.some((f) => f.es_pdv || f.pdv_task !== pdvTask)) throw new HttpError(400, 'Los talles tienen que ser artículos del mismo PDV.');
+  const res = await Promise.allSettled(ids.map((id) => editarProduccion(env, ctx, id, campo, valor, { sinRefrescar: true })));
+  const fallas = res.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+  // Si no se pudo ninguno (sin permiso, otra unidad, un valor que no va), el mismo error que con uno solo.
+  if (fallas.length === ids.length) throw fallas[0].reason;
+  if (campo === 'estado' || campo === 'entrega_real') await refrescarPdv(env, ctx, pdvTask).catch((e) => console.error('produccion: refrescar', pdvTask, (e as Error).message));
+  const error = fallas.length
+    ? `${fallas.length === 1 ? 'Un talle quedó' : `${fallas.length} talles quedaron`} como estaba${fallas.length === 1 ? '' : 'n'}: ${(fallas[0].reason as Error).message}`
+    : null;
+  return { pdv: await pdvVista(db, pdvTask), error };
+}
+
 // Los artículos abiertos del PDV, a las mismas personas que el PDV. Se escriben en ClickUp de a varios a la vez; los que
 // ClickUp acepta quedan cambiados y, si alguno no, se avisa cuántos quedaron como estaban.
 async function reasignarArticulos(env: Env, pdv: FilaDb, nuevos: number[]) {
@@ -768,9 +837,9 @@ export async function produccionDeEmpresa(db: D1Database, companyId: number) {
 export interface Persona { id: number; nombre: string; user_id: number | null; foto: string | null }
 export async function produccionDePedido(db: D1Database, recordId: number) {
   // Sin los artículos que son un servicio (servicios.ts): no cuentan en «2/3 listos».
-  const { results } = await db.prepare(`SELECT p.task_id, p.es_pdv, p.estado, p.asignados FROM produccion p WHERE p.record_id = ?1
+  const { results } = await db.prepare(`SELECT p.task_id, p.pdv_task, p.es_pdv, p.estado, p.asignados, p.grupo_talle FROM produccion p WHERE p.record_id = ?1
       AND p.task_id NOT IN ${TAREAS_SERVICIO_SQL('?1')}`).bind(recordId)
-    .all<{ task_id: string; es_pdv: number; estado: string; asignados: string }>();
+    .all<{ task_id: string; pdv_task: string; es_pdv: number; estado: string; asignados: string; grupo_talle: string | null }>();
   if (!results.length) return null;
   const ids = [...new Set(results.flatMap((r) => lista(r.asignados).map(Number)))];
   const personas = ids.length ? (await db.prepare(`SELECT cp.clickup_id AS id, COALESCE(u.name, cp.nombre) AS nombre, cp.user_id, COALESCE(u.photo_url, cp.foto) AS foto
@@ -781,12 +850,16 @@ export async function produccionDePedido(db: D1Database, recordId: number) {
   const vivos = arts.filter((a) => !CERRADOS.slice(1).includes(a.estado));
   const todos = new Map<number, Persona>();
   for (const r of [...(pdv ? [pdv] : []), ...vivos.filter((a) => !CERRADOS.includes(a.estado))]) for (const p of de(r.asignados)) todos.set(p.id, p);
+  // Un producto con talles cuenta una vez (talles.ts).
   return {
-    asignados: [...todos.values()], listos: vivos.filter((a) => LISTOS.includes(a.estado)).length, total: vivos.length,
+    asignados: [...todos.values()], ...contarProductos(vivos),
     porTarea: new Map(arts.map((a) => [a.task_id, de(a.asignados)])),
   };
 }
 
+// Un producto de Producción: el artículo o, si es un talle de una prenda, la prenda entera (talles.ts). Listo, si están
+// listos todos sus talles.
+export const PRODUCTO_SQL = (a: string) => `COALESCE(${a}.pdv_task || '|' || ${a}.grupo_talle, ${a}.task_id)`;
 // Para la tarjeta del tablero de pedidos (productos.ts, adjuntosSql): quién lo tiene asignado en producción (el PDV y
 // sus artículos abiertos) y cuántos artículos están listos. Los artículos que son un servicio no cuentan.
 export const PRODUCCION_TARJETA_SQL = `,
@@ -794,7 +867,9 @@ export const PRODUCCION_TARJETA_SQL = `,
         FROM clickup_personas cp LEFT JOIN users u ON u.id = cp.user_id
         WHERE cp.clickup_id IN (SELECT j.value FROM produccion pr, json_each(pr.asignados) j
           WHERE pr.record_id = r.id AND (pr.es_pdv = 1 OR pr.estado NOT IN ('entregados', 'anulado')) AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')})) AS prod_asignados,
-      (SELECT COUNT(*) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado NOT IN ('anulado', 'anulada', 'cancelado')
+      (SELECT COUNT(DISTINCT ${PRODUCTO_SQL('pr')}) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado NOT IN ('anulado', 'anulada', 'cancelado')
         AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')}) AS prod_total,
-      (SELECT COUNT(*) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado IN ('listo para entergar', 'listo para entregar', 'entregados')
-        AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')}) AS prod_listos`;
+      (SELECT COUNT(DISTINCT ${PRODUCTO_SQL('pr')}) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado NOT IN ('anulado', 'anulada', 'cancelado')
+        AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')})
+      - (SELECT COUNT(DISTINCT ${PRODUCTO_SQL('pr')}) FROM produccion pr WHERE pr.record_id = r.id AND pr.es_pdv = 0 AND pr.estado NOT IN ('anulado', 'anulada', 'cancelado')
+        AND pr.estado NOT IN ('listo para entergar', 'listo para entregar', 'entregados') AND pr.task_id NOT IN ${TAREAS_SERVICIO_SQL('r.id')}) AS prod_listos`;

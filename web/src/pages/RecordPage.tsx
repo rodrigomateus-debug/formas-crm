@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
 } from '../lib';
-import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, NombreEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
+import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, TallesProducto, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, NombreEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
 import { LogoProducto, LogosCard, useLogos } from './Logos';
 import { AvisoSubida, BocetoChips, BocetosNegocioCard, BocetoVisor, BotonArchivos, claveEmpresas, SoltarBocetos, useBocetos, useSubirBocetos, type Boceto, type ProductoRef } from './Bocetos';
@@ -830,9 +830,29 @@ function OcProducto({ ocs }: { ocs?: OcRef[] }) {
 interface ProductRow { code: string | null; name: string; description: string | null; image_url: string | null; quantity: number | null; unit_price: number | null; discount: number; currency: string; subtotal: number | null; status?: string | null; status_color?: string | null; asignados?: PersonaProduccion[]; oc?: OcRef[];
   tipo?: 'producto' | 'servicio';   // servicio: envío, setup, un adicional… no se produce, así que va sin logo, boceto ni estado
   clickup_task?: string | null;
-  sku?: string | null; notas?: ResumenNotas | null }   // las notas de Producción del SKU (notasProducto.tsx); los genéricos no tienen
+  sku?: string | null; notas?: ResumenNotas | null;   // las notas de Producción del SKU (notasProducto.tsx); los genéricos no tienen
+  talle?: string | null; grupo?: string | null }      // una prenda en varios talles (talles.ts): los talles de un producto comparten `grupo`
 interface OrderProducts { pedido: string | null; configured: boolean; clickup?: boolean; source?: 'finnegans' | 'clickup' | null; error: string | null; items: ProductRow[]; total: number; currency: string; tax_included: boolean; cotizacion_fotos?: string[];
-  produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } | null }
+  produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } | null;
+  grupos?: Record<string, { nombre: string }> }   // el nombre sin el talle de cada producto con talles
+
+// Productos con talle (pedido de Rodrigo del 20/11/2026; talles.ts, docs/TALLES.md): una prenda en varios talles es un solo
+// producto, con un logo y un boceto, la cantidad de todos los talles y el desglose («XS 3 · S 4 · M 8»). «Ver talles» muestra
+// cada renglón. Solo junta talles del mismo producto, color y material.
+type EntradaProducto = { k: 'item'; it: ProductRow } | { k: 'grupo'; clave: string; nombre: string; talles: ProductRow[] };
+function entradasDe(d: OrderProducts | undefined): EntradaProducto[] {
+  const out: EntradaProducto[] = [];
+  for (const it of d?.items ?? []) {
+    const g = it.grupo ? d?.grupos?.[it.grupo] : undefined;
+    const ult = out[out.length - 1];
+    if (!g) out.push({ k: 'item', it });
+    else if (ult?.k === 'grupo' && ult.clave === it.grupo) ult.talles.push(it);
+    else out.push({ k: 'grupo', clave: it.grupo!, nombre: g.nombre, talles: [it] });
+  }
+  return out;
+}
+// El boceto y el logo de un producto van con su código (o su nombre); el de un producto con talles, con el de su primer talle.
+const claveProducto = (it: ProductRow) => it.code || it.name;
 // Productos del pedido, de Finnegans: foto, nombre, descripción, cantidad y precio. Si Finnegans no tiene los renglones,
 // los artículos del PDV de ClickUp (producto, cantidad, código y estado de producción, sin precio).
 // En la vista previa se ven los primeros 3 productos y en la ficha los primeros 5; «Ver más» despliega el resto.
@@ -845,7 +865,10 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const [all, setAll] = useState(false);
   const d = res.data;
   const items = d?.items ?? [];
-  const shown = all ? items : items.slice(0, max);
+  // Cada producto una vez: los talles de una prenda, juntos.
+  const entradas = useMemo(() => entradasDe(d), [d]);
+  const shown = all ? entradas : entradas.slice(0, max);
+  const [verTalles, setVerTalles] = useState<Set<string>>(new Set());
   // Bocetos de cada producto (PDF o foto en Drive); se suben con el botón o soltándolos encima del recuadro.
   const toast = useToast();
   const bo = useBocetos('order', recordId, empresas);
@@ -855,8 +878,10 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const cambio = () => { bo.reload(); onCambio?.(); };
   // Los servicios (envío, setup de logo, un adicional) no llevan boceto ni logo.
   const esServicio = (it: ProductRow) => it.tipo === 'servicio';
-  const productos: ProductoRef[] = items.filter((it) => !esServicio(it)).map((it) => ({ key: it.code || it.name, nombre: it.name }));
+  const productos: ProductoRef[] = entradas.flatMap((x): ProductoRef[] => (x.k === 'grupo' ? [{ key: claveProducto(x.talles[0]), nombre: x.nombre }]
+    : esServicio(x.it) ? [] : [{ key: claveProducto(x.it), nombre: x.it.name }]));
   const nServicios = items.filter(esServicio).length;
+  const nProductos = entradas.filter((x) => x.k === 'grupo' || !esServicio(x.it)).length;
   const me = useMeta().meta.me;
   const admin = me.role === 'admin';
   // Notas de producto: las escriben Producción y los administradores (notasproducto.ts).
@@ -877,8 +902,9 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   // Se cargó un boceto o un logo desde la conversación del pedido (CargarAdjunto.tsx).
   useCambioArchivos(recordId, () => { bo.reload(); lg.reload(); onCambio?.(); });
   const bocetos = bo.data?.bocetos ?? [];
-  const deProducto = (k: string) => bocetos.filter((b) => b.producto === k);
-  const sinProducto = bocetos.filter((b) => !productos.some((p) => p.key === b.producto));
+  const deProducto = (...k: string[]) => bocetos.filter((b) => b.producto != null && k.includes(b.producto));
+  // Sin producto: los que no son de ningún renglón (los de cualquier talle de un producto son de ese producto).
+  const sinProducto = bocetos.filter((b) => !items.some((it) => claveProducto(it) === b.producto));
   const puedeSubir = !!bo.data?.configurado;
   const usar = async (b: Boceto, key: string) => {
     const p = productos.find((x) => x.key === key);
@@ -894,16 +920,9 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
     : !d?.pedido && !d?.clickup ? 'Este pedido no tiene pedido de Finnegans ni PDV de ClickUp asociado.'
     : !d?.configured && !d?.clickup ? 'Falta conectar Finnegans (Configuración → Integraciones).'
     : 'Ni Finnegans ni ClickUp tienen productos para este pedido (pasa con los anulados).';
-  return (
-    <SoltarBocetos className="panel assoc-card soltar" onArchivos={(f) => (puedeSubir ? sub.elegir(f) : toast('Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).', true))}>
-      <div className="panel-head"><h3>Productos <span className="muted small">({items.length - nServicios}{nServicios ? ` + ${nServicios} ${nServicios === 1 ? 'servicio' : 'servicios'}` : ''})</span></h3>
-        {puedeSubir && productos.length > 0 && <BotonArchivos onArchivos={sub.elegir} disabled={sub.subiendo} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
-      </div>
-      {pg && !sub.cuadro && <div className="panel-body" style={{ paddingTop: 0 }}><AvisoSubida p={pg} /></div>}
-      {/* Quién lo tiene en producción (asignado en ClickUp), con su foto: a quién preguntarle cómo viene. */}
-      {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
-      {shown.map((it, i) => (
-        <div key={i} className="assoc-item product-item">
+  // Un renglón del pedido (un producto sin talles, o un servicio).
+  const fila = (it: ProductRow) => (
+        <div className="assoc-item product-item">
           {it.image_url
             ? <a href={it.image_url} target="_blank" rel="noreferrer" className="product-img" title="Ver la foto"><img src={it.image_url} alt="" loading="lazy" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).classList.add('broken'); }} /></a>
             : <span className="product-img none" aria-hidden><Icon name="order" size={18} /></span>}
@@ -939,7 +958,29 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
           </div>
           {it.subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(it.subtotal, it.currency)}</b>}
         </div>
-      ))}
+  );
+  return (
+    <SoltarBocetos className="panel assoc-card soltar" onArchivos={(f) => (puedeSubir ? sub.elegir(f) : toast('Para subir bocetos falta elegir la carpeta de Drive (Configuración → Integraciones).', true))}>
+      <div className="panel-head"><h3>Productos <span className="muted small">({nProductos}{nServicios ? ` + ${nServicios} ${nServicios === 1 ? 'servicio' : 'servicios'}` : ''})</span></h3>
+        {puedeSubir && productos.length > 0 && <BotonArchivos onArchivos={sub.elegir} disabled={sub.subiendo} title="Subir bocetos (PDF o fotos); también podés soltarlos encima">{sub.subiendo ? 'Subiendo…' : '+ Bocetos'}</BotonArchivos>}
+      </div>
+      {pg && !sub.cuadro && <div className="panel-body" style={{ paddingTop: 0 }}><AvisoSubida p={pg} /></div>}
+      {/* Quién lo tiene en producción (asignado en ClickUp), con su foto: a quién preguntarle cómo viene. */}
+      {deClickup && items.length > 0 && <div className="panel-body small muted" style={{ paddingTop: 0 }}>Según ClickUp: {d?.pedido ? `el pedido ${d.pedido} no tiene renglones en Finnegans` : 'este PDV no tiene pedido de Finnegans'}, así que van sin precio.</div>}
+      {shown.map((x, i) => (x.k === 'item' ? <Fragment key={i}>{fila(x.it)}</Fragment> : (
+        <ProductoConTalles key={`g-${x.clave}`} x={x} abierto={verTalles.has(x.clave)} qty={qty}
+          onVerTalles={() => setVerTalles((v) => { const n = new Set(v); if (n.has(x.clave)) n.delete(x.clave); else n.add(x.clave); return n; })}>
+          {/* Lo del producto entero: un boceto y un logo (con la clave de su primer talle), las OC y las notas de cualquiera de sus talles. */}
+          <OcProducto ocs={[...new Map(x.talles.flatMap((t) => t.oc ?? []).map((o) => [o.nombre ?? o.numero, o])).values()]} />
+          {(() => { const n = x.talles.find((t) => t.notas) ?? x.talles[0]; return <NotasDelProducto sku={n.sku} resumen={n.notas} nombre={x.nombre} foto={n.image_url} recordId={recordId} taskId={n.clickup_task} puedeAgregar={puedeNotas} />; })()}
+          <BocetoChips lista={deProducto(...x.talles.map(claveProducto))} onAbrir={(b) => abrir(b)} />
+          <LogoProducto type="order" recordId={recordId} producto={claveProducto(x.talles[0])} productoNombre={x.nombre} res={lg.data} onCambio={() => lg.reload()} />
+          {pg && pg.fase !== 'leyendo' && pg.producto === claveProducto(x.talles[0])
+            ? <span className="boceto-subiendo" aria-hidden><span className="spinner" />{pg.fase === 'subiendo' ? `Subiendo… ${Math.round(pg.pct * 100)} %` : 'Guardando en Drive…'}</span>
+            : puedeSubir && <BotonArchivos className="btn ghost sm boceto-mas" multiple={false} disabled={sub.subiendo} title={`Subir un boceto de ${x.nombre} (vale para todos sus talles)`}
+              onArchivos={(f) => sub.elegir(f, { key: claveProducto(x.talles[0]), nombre: x.nombre })}>+ Boceto</BotonArchivos>}
+        </ProductoConTalles>
+      )))}
       {(d?.cotizacion_fotos?.length ?? 0) > 0 && (
         <div className="assoc-item" style={{ flexDirection: 'column', gap: 6 }}>
           <div className="small muted">{items.length ? 'Fotos de la cotización del STP que no se pudieron atribuir a un producto' : 'Fotos de la cotización del STP'}</div>
@@ -950,8 +991,8 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
           </div>
         </div>
       )}
-      {items.length > max && (
-        <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)} aria-expanded={all}>{all ? 'Ver menos' : `Ver más (${items.length - max})`}</button></div>
+      {entradas.length > max && (
+        <div className="panel-body"><button className="btn sm ghost" onClick={() => setAll(!all)} aria-expanded={all}>{all ? 'Ver menos' : `Ver más (${entradas.length - max})`}</button></div>
       )}
       {items.length > 0 && !deClickup && (
         <div className="assoc-item product-total">
@@ -986,6 +1027,61 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
       {ver && <BocetoVisor key={ver.id} b={ver} esPedido productos={productos} subidos={subidos} onIr={(b) => setVer(bocetos.find((y) => y.id === b.id) ?? b)}
         onClose={() => abrir(null)} onCambio={cambio} logos={{ type: 'order', recordId, res: lg.data, onCambio: () => lg.reload() }} />}
     </SoltarBocetos>
+  );
+}
+
+// Un producto con talles en los productos del pedido: foto, nombre sin el talle, cantidad y precio de todos los talles, el
+// desglose y el estado (el de todos o, si son distintos, cada uno). `children`: lo del producto entero (OC, notas, boceto,
+// logo). «Ver talles» abre cada renglón: talle, cantidad, precio, estado y código.
+function ProductoConTalles({ x, abierto, onVerTalles, qty, children }: {
+  x: Extract<EntradaProducto, { k: 'grupo' }>; abierto: boolean; onVerTalles: () => void; qty: (n: number | null) => string; children: ReactNode;
+}) {
+  const ts = x.talles;
+  const cant = ts.reduce((n, t) => n + (t.quantity ?? 0), 0);
+  const subtotal = ts.every((t) => t.subtotal == null) ? null : ts.reduce((n, t) => n + (t.subtotal ?? 0), 0);
+  const moneda = ts[0].currency;
+  const unPrecio = ts.every((t) => t.unit_price != null && t.unit_price === ts[0].unit_price && t.discount === ts[0].discount);
+  const estados = [...new Map(ts.filter((t) => t.status).map((t) => [t.status!, t])).values()];
+  const asignados = [...new Map(ts.flatMap((t) => t.asignados ?? []).map((p) => [p.id, p])).values()];
+  const foto = ts.find((t) => t.image_url)?.image_url;
+  return (
+    <div className="assoc-item product-item">
+      {foto
+        ? <a href={foto} target="_blank" rel="noreferrer" className="product-img" title="Ver la foto"><img src={foto} alt="" loading="lazy" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).classList.add('broken'); }} /></a>
+        : <span className="product-img none" aria-hidden><Icon name="order" size={18} /></span>}
+      <div className="grow" style={{ minWidth: 0 }}>
+        <div className="product-name">{x.nombre}</div>
+        <div className="small muted">{unPrecio
+          ? <>{qty(cant)} × {fmtMoney(ts[0].unit_price!, moneda)}{ts[0].discount ? ` · ${qty(ts[0].discount)} % de descuento` : ''}</>
+          : `${qty(cant)} unidades`} · {ts.length} talles</div>
+        <TallesProducto talles={ts.map((t) => ({ talle: t.talle, quantity: t.quantity }))} />
+        {(estados.length > 0 || asignados.length > 0) && (
+          <div className="small row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+            {estados.map((t) => <EstadoClickup key={t.status} estado={t.status!} color={t.status_color} />)}
+            {asignados.map((p) => <span key={p.id} className="user-inline" title={`Lo tiene ${p.nombre}`}><PersonaProd p={p} size="xs" />{p.nombre.split(' ')[0]}</span>)}
+          </div>
+        )}
+        <div className="row" style={{ gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+          {children}
+          <button type="button" className="btn ghost sm" onClick={onVerTalles} aria-expanded={abierto}>{abierto ? 'Ocultar talles' : 'Ver talles'}</button>
+        </div>
+        {abierto && (
+          <div className="product-talles-lista">
+            {ts.map((t, i) => (
+              <div key={i} className="product-talle-fila small"
+                title={[`Talle ${t.talle}`, t.unit_price != null ? `${qty(t.quantity)} × ${fmtMoney(t.unit_price, t.currency)}` : null, t.code].filter(Boolean).join(' · ')}>
+                <span className="prod-talle grande">{t.talle}</span>
+                <span className="num">{qty(t.quantity)} u.</span>
+                <span className="grow" />
+                {t.status && <EstadoClickup estado={t.status} color={t.status_color} />}
+                {t.subtotal != null && <span className="num muted">{fmtMoney(t.subtotal, t.currency)}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {subtotal != null && <b className="num" style={{ whiteSpace: 'nowrap' }}>{fmtMoney(subtotal, moneda)}</b>}
+    </div>
   );
 }
 

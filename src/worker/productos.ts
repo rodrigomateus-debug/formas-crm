@@ -9,6 +9,8 @@ import { HttpError } from './env';
 import { estadosSinServicios, pedirRelectura, TIPO_SQL, tipoPorDefecto } from './servicios';
 import { admiteNotas, avisarNotasDelPedido, resumenNotas, skuDe } from './notasproducto';
 import { ocsDeCodigo, ocsDePedidos } from './ordenescompra';
+import { recalcularTallesPdvs, recalcularTallesPedidos } from './tallesdb';
+import { compararTalles, nombreSinTalle, talleCanonico, TALLES_VERSION } from './talles';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -150,6 +152,8 @@ export async function reatarRenglones(db: D1Database, recordId: number) {
   const cambios = sueltos.flatMap((r, i) => (asignados[i] ? [db.prepare('UPDATE line_items SET clickup_task = ?, status = ? WHERE id = ? AND clickup_task IS NULL')
     .bind(asignados[i]!.task_id, asignados[i]!.status || null, r.id)] : []));
   if (cambios.length) await db.batch(cambios);
+  // Los artículos que no tienen «Código:» toman el SKU del renglón: con el renglón atado, su talle puede ser otro.
+  if (cambios.length) await recalcularTallesPdvs(db, [filas[0].pdv_task]);
   return cambios.length;
 }
 
@@ -189,7 +193,8 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   const taskId = String(props.url_clickup ?? '').match(/\/t\/([A-Za-z0-9]+)/)?.[1] ?? null;
   const configured = !!(env.FINNEGANS_CLIENT_ID && env.FINNEGANS_CLIENT_SECRET);
   const canRead = (pedido && configured) || (taskId && !!env.CLICKUP_TOKEN);
-  let sync = await db.prepare('SELECT fetched_at, error, source FROM line_item_sync WHERE record_id = ?').bind(recordId).first<{ fetched_at: string; error: string | null; source: string | null }>();
+  let sync = await db.prepare('SELECT fetched_at, error, source, talles_v FROM line_item_sync WHERE record_id = ?').bind(recordId)
+    .first<{ fetched_at: string; error: string | null; source: string | null; talles_v?: number }>();
   // Si la última vez falló, se reintenta a los 10 minutos.
   const stale = !sync || opts.refresh || Date.now() - Date.parse(sync.fetched_at) > (sync.error ? 10 * 60_000 : RENGLONES_HORAS * 3600_000);
   if (canRead && stale) {
@@ -202,7 +207,7 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     }
     if (cortado) { if (opts.budget) throw new OutOfBudget(); }
     else {
-      sync = { fetched_at: new Date().toISOString(), error, source };
+      sync = { fetched_at: new Date().toISOString(), error, source, talles_v: 0 };
       await db.prepare('INSERT OR REPLACE INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, ?, ?)').bind(recordId, sync.fetched_at, error, source).run();
       // Recién ahora se sabe qué artículos del PDV son un servicio: si sin ellos el pedido queda en otra etapa (un adicional
       // lo tenía en «Entregado parcial»), se pide volver a leer el PDV (servicios.ts).
@@ -218,17 +223,19 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   }
   // Los renglones sin su artículo de ClickUp, con lo que ya está guardado (sin consultas).
   await reatarRenglones(db, recordId).catch((e) => console.error('productos: reatar', recordId, (e as Error).message));
+  // El talle de cada renglón y los talles que van juntos (talles.ts), si se leyeron de nuevo o cambiaron las reglas.
+  if (sync && (sync.talles_v ?? 0) < TALLES_VERSION) await recalcularTallesPedidos(db, [recordId]).catch((e) => console.error('productos: talles', recordId, (e as Error).message));
   const clave = clavePedido(props.pedido_finnegans);
   const [renglones, cot] = await db.batch([
     db.prepare(`SELECT li.code, li.description, li.quantity, li.unit_price, li.discount, li.tax_included, li.currency,
-        li.name AS li_name, li.status, li.clickup_task, p.name, p.description AS product_description, ${TIPO_SQL()} AS tipo,
+        li.name AS li_name, li.status, li.clickup_task, li.talle, li.grupo_talle, p.name, p.description AS product_description, ${TIPO_SQL()} AS tipo,
         so.image_url AS foto_cot, p.image_url AS foto_fin, sk.image_url AS foto_sku
       FROM line_items li LEFT JOIN products p ON p.code = li.code ${FOTO_STP('?')} WHERE li.record_id = ? ORDER BY li.position`).bind(clave, recordId),
     db.prepare('SELECT sku, nombre, cantidades, image_url FROM stp_items WHERE pedido = ? ORDER BY pos').bind(clave ?? ''),
   ]);
   const results = renglones.results as Array<{ code: string | null; description: string | null; quantity: number | null; unit_price: number | null; discount: number; tax_included: number; currency: string | null;
     li_name: string | null; status: string | null; clickup_task: string | null; name: string | null; product_description: string | null; tipo: 'producto' | 'servicio';
-    foto_cot: string | null; foto_fin: string | null; foto_sku: string | null }>;
+    foto_cot: string | null; foto_fin: string | null; foto_sku: string | null; talle: string | null; grupo_talle: string | null }>;
   const { fotos, sueltas } = fotosDeRenglones(results, cot.results as StpItem[]);
   // Producción: quién tiene asignado cada artículo en ClickUp (y el PDV entero).
   const prod = await produccionDePedido(db, recordId);
@@ -249,9 +256,19 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     status_color: estados.find((e) => e.status === String(r.status ?? '').toLowerCase().trim())?.color ?? null,
     quantity: r.quantity, unit_price: r.unit_price, discount: r.discount, tax_included: !!r.tax_included, currency: r.currency ?? 'ARS',
     subtotal: r.quantity != null && r.unit_price != null ? Math.round(r.quantity * r.unit_price * (1 - r.discount / 100) * 100) / 100 : null,
+    // Una prenda en varios talles (talles.ts): su talle y la clave que comparten los talles del mismo producto.
+    talle: r.tipo !== 'servicio' ? r.talle : null, grupo: r.tipo !== 'servicio' ? r.grupo_talle : null,
   }));
+  // Los talles de cada producto juntos (donde va el primero), en el orden de los talles; y el nombre del producto sin el talle.
+  const pos = new Map<string, number>();
+  items.forEach((it, i) => { if (it.grupo && !pos.has(it.grupo)) pos.set(it.grupo, i); });
+  const ordenados = items.map((it, i) => ({ it, i })).sort((a, b) => (a.it.grupo ? pos.get(a.it.grupo)! : a.i) - (b.it.grupo ? pos.get(b.it.grupo)! : b.i)
+    || compararTalles(talleCanonico(a.it.talle), talleCanonico(b.it.talle)) || a.i - b.i).map((x) => x.it);
+  const grupos: Record<string, { nombre: string }> = {};
+  for (const it of ordenados) if (it.grupo && !grupos[it.grupo]) grupos[it.grupo] = { nombre: nombreSinTalle(it.name) };
   return {
-    pedido, configured, clickup: !!taskId, source: sync?.source ?? null, fetched_at: sync?.fetched_at ?? null, error: sync?.error ?? null, items,
+    grupos,
+    pedido, configured, clickup: !!taskId, source: sync?.source ?? null, fetched_at: sync?.fetched_at ?? null, error: sync?.error ?? null, items: ordenados,
     produccion: prod ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null,
     // Las fotos de la cotización que no quedaron en ningún producto (solo si a alguno le falta foto).
     cotizacion_fotos: items.length && items.every((i) => i.image_url) ? [] : sueltas,
@@ -473,7 +490,7 @@ export async function aplicarImagenes(env: Env, body: { filas?: unknown; product
 export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
   const conIds = `WITH ids(id) AS (${ids})`;   // usada varias veces, SQLite la calcula una sola
   return [
-    db.prepare(`${conIds} SELECT * FROM (SELECT r.id AS record_id, (SELECT COUNT(*) FROM line_items li WHERE li.record_id = r.id) AS n,
+    db.prepare(`${conIds} SELECT * FROM (SELECT r.id AS record_id, (SELECT COUNT(DISTINCT ${RENGLON_SQL}) FROM line_items li WHERE li.record_id = r.id) AS n,
         (SELECT COUNT(*) FROM stp_imagenes s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_stp,
         (SELECT COUNT(*) FROM stp_items s WHERE s.pedido = ${PEDIDO_DE_R}) AS n_items
       FROM records r WHERE r.id IN (SELECT id FROM ids)) WHERE n > 0 OR n_stp > 0 OR n_items > 0`).bind(...binds),
@@ -491,6 +508,10 @@ export function fotosSql(db: D1Database, ids: string, binds: unknown[]) {
         ORDER BY 2, 1, 3`).bind(...binds),
   ];
 }
+// Un producto del pedido: el renglón o, si es un talle de una prenda, la prenda entera (talles.ts). Con boceto, si alguno
+// de sus talles lo tiene.
+const RENGLON_SQL = "COALESCE(li.grupo_talle, 'li' || li.id)";
+
 // Lo adjunto de cada pedido, para los iconitos de abajo de la tarjeta: facturas, remitos y bocetos (cuántos de sus
 // productos tienen al menos uno; el boceto va atado al código del producto o, si no tiene, a su nombre). Los renglones de
 // servicio (servicios.ts) no cuentan como producto.
@@ -505,9 +526,9 @@ export function adjuntosSql(db: D1Database, ids: string, binds: unknown[]) {
       (SELECT COUNT(*) FROM files f WHERE f.record_id = r.id AND f.kind = 'factura') AS facturas,
       (SELECT COUNT(*) FROM remitos m WHERE m.record_id = r.id AND m.estado NOT IN ('descartado', 'duplicado')) AS remitos,
       (SELECT COUNT(*) FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0) AS bocetos,
-      (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id AND ${TIPO_SQL()} != 'servicio'
+      (SELECT COUNT(DISTINCT ${RENGLON_SQL}) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id AND ${TIPO_SQL()} != 'servicio'
         AND EXISTS (SELECT 1 FROM bocetos b WHERE b.record_id = r.id AND b.archived = 0 AND b.producto IN (li.code, li.name, p.name))) AS con_boceto,
-      (SELECT COUNT(*) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id AND ${TIPO_SQL()} != 'servicio') AS productos,
+      (SELECT COUNT(DISTINCT ${RENGLON_SQL}) FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = r.id AND ${TIPO_SQL()} != 'servicio') AS productos,
       (SELECT COUNT(*) FROM mensajes ms WHERE ms.record_id = r.id AND ms.borrado_at IS NULL) AS mensajes${PRODUCCION_TARJETA_SQL}
     FROM records r WHERE r.id IN (SELECT id FROM ids)`).bind(...binds);
 }

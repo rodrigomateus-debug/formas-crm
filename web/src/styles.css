@@ -464,7 +464,9 @@ table.grid td.editable .cell-edit:hover { border-color: var(--accent-ink); }
 .card .when.late { color: var(--bad); font-weight: 600; }
 /* Saldo pendiente del pedido (tarjeta y filtro «Cobro»): rojo y en negrita si debe; verde con tilde si está todo pago. */
 .qf-btn .saldo { align-self: center; margin-left: 6px; padding: 0 7px; font-size: 12px; }
-.saldo { display: inline-flex; align-self: flex-start; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
+.saldo { display: inline-flex; align-self: flex-start; align-items: center; gap: 0 4px; padding: 2px 8px; border-radius: 999px; font-size: 12.5px; font-weight: 700; line-height: 1.5; white-space: nowrap; }
+/* En una tarjeta angosta, el «· parcial» baja de renglón en vez de quedar cortado. */
+.card .saldo { flex-wrap: wrap; max-width: 100%; }
 .saldo.debe { background: var(--bad-soft); color: var(--bad); }
 /* Ya pagó algo (el anticipo): ámbar, y «· total» / «· parcial» al lado del monto (pages/PropBoard.tsx, cobroPedido). */
 .saldo.debe.parcial { background: var(--warn-soft); color: var(--warn); }

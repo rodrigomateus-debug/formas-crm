@@ -235,6 +235,17 @@ test('cronograma: estados de despacho, con lo que falta y a quién le toca', asy
   caja = mov(await otra(), 'entrega', 'Caja').despacho;
   assert.deepEqual([caja.estado, caja.checks.find((c) => c.k === 'pago').v], ['nopago', 'parcial']);
   assert.match(caja.checks.find((c) => c.k === 'pago').t, /Pagó una parte: falta \$ 1\.500 de \$ 3\.000/);
+  // Pero manda lo cobrado de sus facturas: si llega en 0, no pagó nada aunque el total del pedido sea mayor que el saldo (la
+  // factura no coincide con el pedido; PDV 31748, 20/11/2026). Con $ 500 cobrados, pagó una parte de $ 2.000.
+  const cobrado = (n) => fetch(`${BASE}/hooks/pedidos/saldos`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+    body: JSON.stringify({ filas: [], cobrado: { [`PEDVTASTP - ${PDV}`]: n } }) });
+  assert.equal((await cobrado(0)).status, 200);
+  caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.deepEqual([caja.estado, caja.checks.find((c) => c.k === 'pago').v], ['nopago', 'no']);
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /No pagó nada: falta \$ 1\.500 en Finnegans/);
+  await cobrado(500);
+  caja = mov(await otra(), 'entrega', 'Caja').despacho;
+  assert.match(caja.checks.find((c) => c.k === 'pago').t, /Pagó una parte: falta \$ 1\.500 de \$ 2\.000/);
   await saldo(0);
   assert.equal(mov(await otra(), 'entrega', 'Caja').despacho.checks.find((c) => c.k === 'pago').v, 'ok');
 

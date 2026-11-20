@@ -20,16 +20,18 @@ import { Budget } from './budget';
 
 // La unidad sale del tipo de documento. Mercado Libre, MarketShell y los objetivos de venta no son pedidos del CRM.
 const UNIDAD: Record<string, string> = { PEDVTASTP: 'FORMAS SHOP', PEDVTAFP: 'CORPORATE', PEDVTANE: 'NO ESTRÉS' };
-// Los pedidos de FP DEMO (la empresa de pruebas de Finnegans) también entran, para probar el circuito entero (pedido de
-// Rodrigo del 13/11/2026). FP DEMO usa los mismos tipos de documento y su propia numeración, que se pisa con la de
-// Formas: van aparte, con unidad «FP DEMO», «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741»,
-// así no se cruzan con los pedidos de verdad ni entran en sus totales, facturas ni filtros por unidad.
+// FP DEMO (la empresa '7' de Finnegans) es donde se factura lo que no lleva IVA: es el mismo negocio que Formas
+// Publicitarias (Rodrigo, 20/11/2026: «fp demo y formas es lo mismo, solo cambia que en demo va lo que no lleva IVA»).
+// Comparte la numeración de pedidos y de facturas: desde 2023 ningún número se repite entre las dos (revisado en
+// Finnegans el 20/11/2026). Sus pedidos entran como los de Formas, con la unidad de su tipo de documento.
+// Del 13 al 20/11/2026 entraron aparte, como si fueran de prueba (unidad «FP DEMO», «DEMO» en el nombre y el pedido de
+// Finnegans como «DEMO PEDVTASTP - 31748»): esa forma se sigue reconociendo como el mismo pedido, así esos registros
+// salen en la lista de repetidos para combinarlos con el suyo.
 export const DEMO = 'FP DEMO';
-const esDemo = (pedido: unknown) => /^\s*DEMO\s+/i.test(String(pedido ?? ''));
-// La llave de un pedido: «PEDVTASTP - 31277», o «DEMO|PEDVTASTP - 10741» si es de FP DEMO.
+const sinDemo = (pedido: unknown) => String(pedido ?? '').replace(/^\s*DEMO\s+/i, '');
+// La llave de un pedido: «PEDVTASTP - 31277» (también para «DEMO PEDVTASTP - 31277»).
 export function llavePedido(pedido: unknown) {
-  const c = clavePedido(String(pedido ?? '').replace(/^\s*DEMO\s+/i, ''));
-  return c ? (esDemo(pedido) ? `DEMO|${c}` : c) : null;
+  return clavePedido(sinDemo(pedido));
 }
 
 export interface PedidoFin { cliente?: string; cuit?: string; vendedor?: string; fecha?: string; entrega?: string; evento?: boolean }
@@ -38,20 +40,21 @@ export interface PedidosEstado { recibidos: number; creados: number; completados
 const fecha = (s: unknown) => { const m = String(s ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/) ?? null; return m ? `${m[1]}-${m[2]}-${m[3]}` : null; };
 
 // {"PEDVTASTP - 31277": {cliente, cuit, vendedor, fecha, entrega, evento}, …}: los pedidos recientes y no anulados de
-// Formas Publicitarias. Crea los que no están y completa el pedido de Finnegans y la unidad de los que sí.
+// Formas Publicitarias y de FP DEMO. Crea los que no están y completa el pedido de Finnegans y la unidad de los que sí.
 export async function aplicarPedidos(env: Env, pedidos: Record<string, PedidoFin>): Promise<PedidosEstado> {
   const db = env.DB;
   const sys = await db.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<User>();
   const ctx: Ctx = { user: sys!, source: 'finnegans', sourceDetail: 'Pedidos de venta' };
   const out: PedidosEstado = { recibidos: 0, creados: 0, completados: 0, con_negocio: 0, duplicados: 0, at: new Date().toISOString() };
-  const entradas = Object.entries(pedidos ?? {}).map(([k, p]) => ({ clave: clavePedido(k.replace(/^\s*DEMO\s+/i, '')), demo: esDemo(k), p }))
-    .filter((x): x is { clave: string; demo: boolean; p: PedidoFin } => !!x.clave && !!UNIDAD[x.clave.split(' - ')[0]]);
+  const entradas = Object.entries(pedidos ?? {}).map(([k, p]) => ({ clave: llavePedido(k), p }))
+    .filter((x): x is { clave: string; p: PedidoFin } => !!x.clave && !!UNIDAD[x.clave.split(' - ')[0]]);
   out.recibidos = entradas.length;
   if (entradas.length) {
     const existentes = (await db.prepare(`SELECT id, json_extract(props, '$.pedido_finnegans') AS pedido, json_extract(props, '$.pdv_finnegans') AS pdv,
-        json_extract(props, '$.unidad_de_negocio') AS unidad, COALESCE(json_extract(props, '$.razon_social'), '') != '' AS con_razon
+        json_extract(props, '$.unidad_de_negocio') AS unidad, COALESCE(json_extract(props, '$.razon_social'), '') != '' AS con_razon,
+        json_extract(props, '$.hs_order_name') AS nombre
         FROM records WHERE object_type = 'order' AND archived = 0`)
-      .all<{ id: number; pedido: string | null; pdv: string | number | null; unidad: string | null; con_razon: number }>()).results;
+      .all<{ id: number; pedido: string | null; pdv: string | number | null; unidad: string | null; con_razon: number; nombre: string | null }>()).results;
     const conRazon = new Set(existentes.filter((e) => e.con_razon).map((e) => e.id));
     // La razón social y el CUIT con que se factura (razones.ts): a los pedidos que ya estaban (los de ClickUp) se les suma
     // la primera vez, y con eso se resuelve su empresa.
@@ -67,22 +70,30 @@ export async function aplicarPedidos(env: Env, pedidos: Record<string, PedidoFin
     const porNumero = new Map<number, typeof existentes>();
     for (const e of existentes) {
       const c = llavePedido(e.pedido);
-      if (c) porClave.set(c, e.id);
+      // Si el pedido todavía tiene su registro viejo de FP DEMO además del suyo, vale el suyo.
+      if (c && (!porClave.has(c) || e.unidad?.toUpperCase() !== DEMO)) porClave.set(c, e.id);
       const n = numeroPdv(e.pdv);
       if (n) porNumero.set(n, [...(porNumero.get(n) ?? []), e]);
     }
     const users = (await db.prepare('SELECT id, name, email FROM users WHERE active = 1').all<{ id: number; name: string; email: string }>()).results;
     const pipeline = (await new Meta(db).property('order', 'hs_pipeline'))?.options[0]?.value;
-    for (const { clave: sinDemo, demo, p } of entradas) {
-      const [tipo, num] = sinDemo.split(' - ');
+    for (const { clave, p } of entradas) {
+      const [tipo, num] = clave.split(' - ');
       const n = Number(num);
-      const unidad = demo ? DEMO : UNIDAD[tipo];
-      const clave = demo ? `DEMO|${sinDemo}` : sinDemo;
-      const pedidoFin = `${demo ? 'DEMO ' : ''}${tipo} - ${n}`;
-      if (porClave.has(clave)) { await completarRazon(porClave.get(clave)!, p); continue; }
+      const unidad = UNIDAD[tipo];
+      const pedidoFin = `${tipo} - ${n}`;
+      if (porClave.has(clave)) {
+        // Uno de los que entraron aparte como FP DEMO, y sin otro registro del mismo pedido: pasa a ser un pedido normal de
+        // su unidad (si tiene otro, vale ese y este sale en la lista de repetidos para combinarlos).
+        const viejo = existentes.find((e) => e.id === porClave.get(clave));
+        const normal = viejo && /^\s*DEMO\s+/i.test(viejo.pedido ?? '')
+          ? { pedido_finnegans: pedidoFin, unidad_de_negocio: unidad, ...(viejo.nombre ? { hs_order_name: viejo.nombre.replace(/\s+·\s+DEMO(?=\s+·|$)/, '') } : {}) } : {};
+        await completarRazon(porClave.get(clave)!, p, normal);
+        continue;
+      }
       // El mismo número de PDV en la misma unidad, todavía sin su pedido de Finnegans (cargado a mano o traído de ClickUp sin
       // el dato): es este. El mismo número en otra unidad es otro pedido (cada unidad tiene su numeración).
-      const mismo = (porNumero.get(n) ?? []).find((e) => !llavePedido(e.pedido) && ((!e.unidad && !demo) || e.unidad?.toUpperCase() === unidad));
+      const mismo = (porNumero.get(n) ?? []).find((e) => !llavePedido(e.pedido) && (!e.unidad || e.unidad.toUpperCase() === unidad));
       if (mismo) {
         await completarRazon(mismo.id, p, { pedido_finnegans: pedidoFin, ...(mismo.unidad ? {} : { unidad_de_negocio: unidad }) });
         porClave.set(clave, mismo.id);
@@ -91,14 +102,14 @@ export async function aplicarPedidos(env: Env, pedidos: Record<string, PedidoFin
       }
       const cliente = String(p.cliente ?? '').trim();
       const row = await createRecord(db, ctx, 'order', {
-        hs_order_name: `PDV ${n}${demo ? ' · DEMO' : ''}${cliente ? ` · ${cliente}` : ''}`, pdv_finnegans: String(n), pedido_finnegans: pedidoFin, unidad_de_negocio: unidad,
+        hs_order_name: `PDV ${n}${cliente ? ` · ${cliente}` : ''}`, pdv_finnegans: String(n), pedido_finnegans: pedidoFin, unidad_de_negocio: unidad,
         cliente_clickup: cliente || null, ...facturacion(p), hs_pipeline_stage: STAGE.confirmado, hs_pipeline: pipeline ?? null, tipo_de_pedido: p.evento ? 'EVENTO' : 'PEDIDO NORMAL',
         fecha_de_entrega: fecha(p.entrega), fecha_pedido: fecha(p.fecha),
         // El vendedor viene como nombre (informe) o como mail (el pedido de Finnegans de la tienda).
         owner_id: usuarioPorNombre(users, /@/.test(p.vendedor ?? '') ? '' : String(p.vendedor ?? ''), /@/.test(p.vendedor ?? '') ? String(p.vendedor) : '') ?? null,
       }, { system: true, strict: false, createdAt: fecha(p.fecha) ? `${fecha(p.fecha)}T12:00:00.000Z` : undefined });
       porClave.set(clave, row.id);
-      porNumero.set(n, [...(porNumero.get(n) ?? []), { id: row.id, pedido: pedidoFin, pdv: String(n), unidad, con_razon: 1 }]);
+      porNumero.set(n, [...(porNumero.get(n) ?? []), { id: row.id, pedido: pedidoFin, pdv: String(n), unidad, con_razon: 1, nombre: null }]);
       conRazon.add(row.id);
       out.creados++;
       // Su empresa, por el CUIT (razones.ts); con ella se busca su negocio (vinculos.ts), y si el negocio ya tenía otra
@@ -116,7 +127,7 @@ export async function aplicarPedidos(env: Env, pedidos: Record<string, PedidoFin
 
 // Pedidos anulados en Finnegans (pedido de Rodrigo del 13/11/2026): el pedido pasa a «Anulado» en el CRM. ClickUp también
 // lo anula por su lado (tiene su integración con Finnegans), así que los dos llegan a lo mismo. `pedidos`: como las llaves
-// de aplicarPedidos («PEDVTASTP - 31277» o «DEMO PEDVTASTP - 10741»).
+// de aplicarPedidos («PEDVTASTP - 31277»).
 export async function aplicarAnulados(env: Env, pedidos: string[]) {
   const llaves = new Set(pedidos.map(llavePedido).filter((x): x is string => !!x));
   if (!llaves.size) return { anulados: 0 };
@@ -192,10 +203,10 @@ export async function avisoDeFinnegans(env: Env, cuerpo: string) {
   const leer = async <T>(path: string) => { b.take(); const r = await fetch(`${FIN_API(env)}/${path}?ACCESS_TOKEN=${encodeURIComponent(token)}`); return r.ok ? (await r.json()) as T : null; };
   const p = await leer<PedidoVenta & { EmpresaCodigo?: string; NumeroInterno?: number }>(`pedidoVenta/${encodeURIComponent(ie)}`);
   if (!p?.NumeroInterno) return { evento, pedido: ie, hecho: 'Finnegans no devolvió el pedido' };
-  // Formas Publicitarias y FP DEMO (la de pruebas, que va aparte). Soutex usa los mismos tipos de documento: no entra.
-  const demo = p.EmpresaCodigo === '7';
-  if (p.EmpresaCodigo !== 'EMPRE01' && !demo) return { evento, pedido: ie, hecho: `de otra empresa (${p.EmpresaCodigo ?? 'sin empresa'}): no se carga` };
-  const clave = `${demo ? 'DEMO ' : ''}${tipo} - ${p.NumeroInterno}`;
+  // Formas Publicitarias y FP DEMO (lo que no lleva IVA; el mismo negocio y la misma numeración). Soutex usa los mismos
+  // tipos de documento: no entra.
+  if (p.EmpresaCodigo !== 'EMPRE01' && p.EmpresaCodigo !== '7') return { evento, pedido: ie, hecho: `de otra empresa (${p.EmpresaCodigo ?? 'sin empresa'}): no se carga` };
+  const clave = `${tipo} - ${p.NumeroInterno}`;
   if (anulacion) return { evento, pedido: clave, hecho: 'anulado', ...(await aplicarAnulados(env, [clave])) };
   if (!p.Cliente) return { evento, pedido: clave, hecho: 'Finnegans no devolvió el cliente' };
   const cli = await leer<{ IdentificacionTributariaNumero?: string; RazonSocial?: string }>(`cliente/${encodeURIComponent(p.Cliente)}`);

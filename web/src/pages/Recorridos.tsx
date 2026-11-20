@@ -24,6 +24,7 @@ export interface Encargo {
   notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
   origen: string; created_at: string; chofer?: string | null; parada?: string; hora?: string | null;
   anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (NotasLogistica.tsx)
+  bultos?: number | null;   // los bultos que anotó Logística en su tarjeta del cronograma
 }
 interface Habitual { texto: string; dias: number[]; por_semana: number }
 export interface DestinoOpcion {

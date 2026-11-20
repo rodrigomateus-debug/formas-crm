@@ -21,7 +21,7 @@ import { completarDestinos } from './destinosia';
 import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from './destinos';
 import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDeDestino, notasDePedido, type Destino as DestinoNota } from './logistica';
 import { textoPactada, type ModoHora } from '../../web/src/ruta';
-import { asignarChofer, colgarMovimiento, revisarColgados, guardarEnviado, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { asignarChofer, colgarMovimiento, revisarColgados, guardarEnviado, guardarBultos, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
@@ -1660,6 +1660,8 @@ api.get('/cronograma', async (c) => {
   return c.json(await vistaCronograma(c.env.DB, c.get('ctx').user, { desde: q.desde, hasta: q.hasta, rd: q.rd, rh: q.rh }));
 });
 api.post('/cronograma/enviado', async (c) => c.json(await guardarEnviado(c.env, c.get('ctx'), await c.req.json())));
+// Los bultos de una tarjeta del cronograma (Logística, a mano): `{ claves, bultos }`.
+api.post('/cronograma/bultos', async (c) => c.json(await guardarBultos(c.env, c.get('ctx'), await c.req.json())));
 // Anotaciones de logística (logistica.ts): las de un pedido, las de siempre de su empresa; las escribe quien ve el pedido
 // (la vendedora, desde su ficha) o quien edita el cronograma.
 api.get('/logistica/notas', async (c) => {

@@ -1096,3 +1096,57 @@ test('cronograma: un colgado destrabado avisa a Logística, y una anotación «s
   // Se le da fecha: sale de Colgados.
   assert.equal((await api('POST', '/cronograma/mover', { ids: [caja.task_id], tipo: 'entrega', fecha: '2026-11-25' })).status, 200);
 });
+
+test('cronograma: los bultos de una tarjeta los anota Logística y siguen a la tarjeta', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const rango = '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20';
+  const semana = async () => (await api('GET', rango)).data;
+  let v = await semana();
+  // Una tarjeta: los artículos de un PDV con el mismo movimiento, el mismo día y en el mismo lugar.
+  const m0 = v.movimientos.find((x) => x.npdv === PDV && v.movimientos.filter((y) => y.npdv === PDV && y.tipo === x.tipo && y.fecha === x.fecha && y.lugar === x.lugar).length > 1)
+    ?? v.movimientos.find((x) => x.npdv === PDV);
+  assert.ok(m0, 'hay una tarjeta del PDV de la prueba');
+  const tarjeta = v.movimientos.filter((y) => y.npdv === PDV && y.tipo === m0.tipo && y.fecha === m0.fecha && y.lugar === m0.lugar);
+  const claves = tarjeta.map((x) => x.id);
+  const suma = (vv) => vv.movimientos.filter((x) => claves.includes(x.id)).reduce((n, x) => n + (x.bultos ?? 0), 0);
+  const bultos = (b, como) => { asUser = como ?? null; return api('POST', '/cronograma/bultos', b).finally(() => { asUser = null; }); };
+
+  // Se anotan: quedan en el primer movimiento y la tarjeta suma 3.
+  const r = await bultos({ claves, bultos: 3 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual([r.data.bultos, r.data.clave], [3, [...claves].sort()[0]]);
+  v = await semana();
+  assert.equal(suma(v), 3);
+  assert.equal(v.movimientos.filter((x) => claves.includes(x.id) && x.bultos).length, 1, 'en un solo movimiento');
+  // Se cambian (no se suman a lo de antes) y se sacan con 0 o vacío.
+  assert.equal((await bultos({ claves, bultos: 5 })).status, 200);
+  assert.equal(suma(await semana()), 5);
+  // Si la tarjeta pasa a otro día, los bultos van con ella.
+  assert.equal((await api('POST', '/cronograma/mover', { ids: tarjeta.map((x) => x.task_id), dirs: tarjeta.map((x) => x.dir ?? null), tipo: m0.tipo, fecha: '2026-11-21' })).status, 200);
+  v = await semana();
+  assert.ok(v.movimientos.filter((x) => claves.includes(x.id)).every((x) => x.fecha === '2026-11-21'));
+  assert.equal(suma(v), 5);
+  assert.equal((await api('POST', '/cronograma/mover', { ids: tarjeta.map((x) => x.task_id), dirs: tarjeta.map((x) => x.dir ?? null), tipo: m0.tipo, fecha: m0.fecha })).status, 200);
+  assert.equal((await bultos({ claves, bultos: 0 })).status, 200);
+  assert.equal(suma(await semana()), 0);
+
+  // Lo que no vale.
+  assert.equal((await bultos({ claves, bultos: 2.5 })).status, 400, 'enteros');
+  assert.equal((await bultos({ claves, bultos: -1 })).status, 400);
+  assert.equal((await bultos({ claves: [], bultos: 1 })).status, 400);
+  assert.equal((await bultos({ claves: ['cualquier cosa'], bultos: 1 })).status, 400);
+  assert.equal((await bultos({ claves: [`no-existe-${RUN}:entrega`], bultos: 1 })).status, 404);
+  // Quien solo mira el cronograma no los anota.
+  await api('POST', '/users', { email: `mira.bultos.${RUN}@formas.ar`, name: `Mira ${RUN}`, role: 'member' });
+  assert.equal((await bultos({ claves, bultos: 1 }, `mira.bultos.${RUN}@formas.ar`)).status, 403);
+
+  // Un encargo también.
+  const enc = (v.encargos ?? [])[0];
+  if (enc) {
+    assert.equal((await bultos({ claves: [`enc:${enc.id}`], bultos: 2 })).status, 200);
+    assert.equal((await semana()).encargos.find((e) => e.id === enc.id).bultos, 2);
+    assert.equal((await bultos({ claves: [`enc:${enc.id}`], bultos: null })).status, 200);
+    assert.equal((await semana()).encargos.find((e) => e.id === enc.id).bultos ?? null, null);
+  }
+});

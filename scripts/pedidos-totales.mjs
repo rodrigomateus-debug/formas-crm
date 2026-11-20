@@ -330,14 +330,24 @@ export function porFacturarDe(resumen, pendRemitos = new Map(), anticipos = new 
   return out;
 }
 
+// Total con IVA / neto de un comprobante o un pedido, entre 1 y 2; si no, null. Los dos se redondean a centavos antes:
+// el neto es la suma de los renglones en coma flotante y puede pasarse por una nada del total. En una factura sin IVA
+// (FP DEMO) daba 0,9999999999999999, se descartaba y el CRM le sacaba un IVA que no tenía (FCVTAELECT - 2726 del
+// PDV 31748, 20/11/2026: 3 × 144.120,60 = 432.361,80000000005 contra un total de 432.361,80).
+const centavos = (v) => Math.round(Number(v) * 100) / 100;
+export function factorTotalNeto(total, neto) {
+  const t = centavos(total), n = centavos(neto);
+  const r = n ? t / n : 0;
+  return r >= 1 && r < 2 ? r : null;
+}
 // Para el CRM: cada comprobante, de qué pedido es y su total/neto (con eso pasa a sin IVA lo que falta cobrar de él).
 // `origenes` (informe de facturas): con él va también la identificación de la factura y si ya tiene CAE, así el CRM
 // adjunta al pedido solo las facturas nuevas en vez de consultar todos los pedidos (Finnegans cobra por consulta).
 export function facturasParaCrm(docs, asignadas, origenes = new Map()) {
   const out = {};
   for (const [k, d] of docs) {
-    const r = d.neto ? d.total / d.neto : 0;
-    const factor = r >= 1 && r < 2 ? Math.round(r * 1e6) / 1e6 : null;
+    const r = factorTotalNeto(d.total, d.neto);
+    const factor = r == null ? null : Math.round(r * 1e6) / 1e6;
     const pedido = asignadas.get(k) ?? null;
     const cae = (origenes.get(`${d.emp}|${d.ie}`) ?? []).some((o) => o.cae);
     if (pedido || factor) out[k] = { pedido, factor, ...(cae && pedido ? { ie: d.ie, cae: true } : {}) };
@@ -361,8 +371,8 @@ export function cobradoDe(resumen, docs, asignadas, filasSaldo) {
   for (const [k, d] of docs) {
     const p = asignadas.get(k);
     if (!p || !(p in out)) continue;
-    const r = d.neto ? d.total / d.neto : 0;
-    out[p] += d.neto - (saldoDoc.get(k) ?? 0) / (r >= 1 && r < 2 ? r : 1.21);
+    // Sin total/neto, el IVA general; en FP DEMO, donde va lo que no lleva IVA, nada.
+    out[p] += centavos(d.neto) - (saldoDoc.get(k) ?? 0) / (factorTotalNeto(d.total, d.neto) ?? (d.emp === '7' ? 1 : 1.21));
   }
   for (const [k, v] of Object.entries(out)) out[k] = v >= 0.01 ? Math.round(v * 100) / 100 : 0;
   return out;
@@ -370,7 +380,7 @@ export function cobradoDe(resumen, docs, asignadas, filasSaldo) {
 // Total con IVA / neto de cada pedido: si una factura con saldo es anterior a lo que se leyó, se usa el de su pedido.
 export function factoresDe(resumen) {
   const out = {};
-  for (const [k, o] of resumen) if (o.neto > 0 && o.total >= o.neto) out[k] = Math.round((o.total / o.neto) * 10000) / 10000;
+  for (const [k, o] of resumen) { const r = o.neto > 0 ? factorTotalNeto(o.total, o.neto) : null; if (r != null) out[k] = Math.round(r * 10000) / 10000; }
   return out;
 }
 

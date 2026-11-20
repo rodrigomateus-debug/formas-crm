@@ -3,7 +3,7 @@ import { Meta } from './meta';
 import { createRecord, updateRecord } from './records';
 import { STAGE, usuarioPorNombre } from './clickup';
 import { resolverEmpresa, soloNumeros } from './razones';
-import { clavePedido } from './totales';
+import { clavePedido, esPedidoDemo, llavePedido } from './totales';
 import { numeroPdv, vincularPedido, vincularPendientes } from './vinculos';
 import { montosDesdePedidos } from './montos';
 import { finnegansToken, type PedidoVenta } from './finnegans';
@@ -23,14 +23,10 @@ const UNIDAD: Record<string, string> = { PEDVTASTP: 'FORMAS SHOP', PEDVTAFP: 'CO
 // Los pedidos de FP DEMO (la empresa de pruebas de Finnegans) también entran, para probar el circuito entero (pedido de
 // Rodrigo del 13/11/2026). FP DEMO usa los mismos tipos de documento y su propia numeración, que se pisa con la de
 // Formas: van aparte, con unidad «FP DEMO», «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741»,
-// así no se cruzan con los pedidos de verdad ni entran en sus totales, facturas ni filtros por unidad.
+// así no se cruzan con los pedidos de verdad ni entran en sus totales, facturas ni filtros por unidad. Los totales, las
+// fechas, los vendedores, lo que falta facturar y los saldos de FP DEMO también llegan con «DEMO » adelante y se cruzan
+// por la misma llave (llavePedido, en totales.ts).
 export const DEMO = 'FP DEMO';
-const esDemo = (pedido: unknown) => /^\s*DEMO\s+/i.test(String(pedido ?? ''));
-// La llave de un pedido: «PEDVTASTP - 31277», o «DEMO|PEDVTASTP - 10741» si es de FP DEMO.
-export function llavePedido(pedido: unknown) {
-  const c = clavePedido(String(pedido ?? '').replace(/^\s*DEMO\s+/i, ''));
-  return c ? (esDemo(pedido) ? `DEMO|${c}` : c) : null;
-}
 
 export interface PedidoFin { cliente?: string; cuit?: string; vendedor?: string; fecha?: string; entrega?: string; evento?: boolean }
 export interface PedidosEstado { recibidos: number; creados: number; completados: number; con_negocio: number; duplicados: number; at: string }
@@ -44,7 +40,7 @@ export async function aplicarPedidos(env: Env, pedidos: Record<string, PedidoFin
   const sys = await db.prepare("SELECT * FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<User>();
   const ctx: Ctx = { user: sys!, source: 'finnegans', sourceDetail: 'Pedidos de venta' };
   const out: PedidosEstado = { recibidos: 0, creados: 0, completados: 0, con_negocio: 0, duplicados: 0, at: new Date().toISOString() };
-  const entradas = Object.entries(pedidos ?? {}).map(([k, p]) => ({ clave: clavePedido(k.replace(/^\s*DEMO\s+/i, '')), demo: esDemo(k), p }))
+  const entradas = Object.entries(pedidos ?? {}).map(([k, p]) => ({ clave: clavePedido(k.replace(/^\s*DEMO\s+/i, '')), demo: esPedidoDemo(k), p }))
     .filter((x): x is { clave: string; demo: boolean; p: PedidoFin } => !!x.clave && !!UNIDAD[x.clave.split(' - ')[0]]);
   out.recibidos = entradas.length;
   if (entradas.length) {

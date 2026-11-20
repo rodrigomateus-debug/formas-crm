@@ -442,9 +442,14 @@ async function companyFor(env: Env, pdv: ReturnType<typeof readPdv>, fin: string
 async function findOrder(db: D1Database, pdv: ReturnType<typeof readPdv>) {
   const { results } = await db.prepare(`SELECT id, props FROM records WHERE object_type = 'order' AND archived = 0
     AND CAST(json_extract(props, '$.pdv_finnegans') AS TEXT) IN (?, ?, ?)`).bind(pdv.npdv, `PDV - ${pdv.npdv}`, `PDV ${pdv.npdv}`).all<{ id: number; props: string }>();
-  if (results.length <= 1) return results[0];
-  // El mismo número en dos unidades (talonarios distintos): el de la misma unidad o el del mismo pedido de Finnegans.
-  return results.find((r) => { const p = JSON.parse(r.props); return p.pedido_finnegans === pdv.pedido || p.unidad_de_negocio === pdv.unidad; }) ?? results[0];
+  // Los de FP DEMO (la empresa de pruebas, pedidosfin.ts) no son de ClickUp aunque tengan el mismo número: si se tomara uno,
+  // la sincronización le pondría la unidad y el pedido de Finnegans del de verdad y pasaría a ser ese (así quedaron el
+  // PDV 31748 y uno de los dos 31537, el 20 y el 17/11/2026).
+  const cand = results.map((r) => ({ r, p: JSON.parse(r.props) as Record<string, unknown> }))
+    .filter(({ p }) => String(p.unidad_de_negocio ?? '').toUpperCase() !== 'FP DEMO' && !/^\s*DEMO\s+/i.test(String(p.pedido_finnegans ?? '')));
+  if (cand.length <= 1) return cand[0]?.r;
+  // El mismo número en dos unidades (talonarios distintos): el del mismo pedido de Finnegans; si no, el de la misma unidad.
+  return (cand.find(({ p }) => pdv.pedido && p.pedido_finnegans === pdv.pedido) ?? cand.find(({ p }) => p.unidad_de_negocio === pdv.unidad) ?? cand[0]).r;
 }
 
 // Un PDV de ClickUp → su pedido en el CRM. Devuelve qué hizo.

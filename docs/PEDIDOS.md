@@ -79,12 +79,15 @@ Pedido de Rodrigo del 4/11/2026: en el tablero de pedidos, como en el de negocio
 etapa, sin IVA. El «Total sin IVA» de cada pedido es el neto de su pedido de venta en Finnegans (la suma de sus renglones,
 en pesos). Lo trae `scripts/pedidos-totales.mjs` (`.github/workflows/pedidos-totales.yml`, solo lectura de Finnegans) del
 informe de pedidos de venta por producto: cada hora de 9 a 20, de lunes a viernes, con los pedidos de los últimos 120 días,
-y a las 7 todos desde 2023. Cruza por el número interno del pedido («PEDVTASTP - 31277», con o sin ceros adelante);
-primero Formas Publicitarias y, si no está, FP DEMO. No cuentan los renglones anulados ni los objetivos de venta.
+y a las 7 todos desde 2023. Cruza por el número interno del pedido («PEDVTASTP - 31277», con o sin ceros adelante). Los
+de FP DEMO van como «DEMO PEDVTASTP - 31277» y le llegan solo a su pedido de FP DEMO (ver [FP DEMO, aparte en
+todo](#fp-demo-aparte-en-todo)). No cuentan los renglones anulados ni los objetivos de venta.
 
 El CRM lo guarda con `POST /hooks/pedidos/totales` (token de administrador; `GET` da el resumen de la última corrida): solo
 los que cambiaron, en el historial de la propiedad, sin tocar la fecha de modificación del pedido (así el tablero no se
 reordena). Los anulados no están en el informe y quedan sin monto; el pie de la columna dice cuántos pedidos no tienen.
+El total de un pedido de FP DEMO no pasa al monto de su negocio (`montos.ts`): un negocio que solo tiene pedidos de
+FP DEMO queda como estaba.
 
 ## Saldo pendiente de cada pedido
 
@@ -95,12 +98,15 @@ con saldo: lo que falta cobrar, que Finnegans da con IVA. Todo se muestra **sin 
 números sin IVA»): el saldo de cada factura se divide por la proporción total/neto de su pedido (o por 1,21 si no se
 sabe). El CRM cruza cada fila con su pedido (`aplicarSaldos` en `totales.ts`):
 
-1. Por la factura que el CRM ya tiene enganchada al pedido (tabla `files`).
-2. Si no, por la identificación de la factura («FC PEDVTASTP-00031277 1»).
-3. Si no, por el número de PDV con que empieza la descripción («31089», «2407 / OC N°…», «PDV:36 NOESTRES»), que también
+1. Por el pedido que le asignó el análisis de facturas del script (`facturas`, más abajo).
+2. Si no, por la factura que el CRM ya tiene enganchada al pedido (tabla `files`).
+3. Si no, por la identificación de la factura («FC PEDVTASTP-00031277 1»).
+4. Si no, por el número de PDV con que empieza la descripción («31089», «2407 / OC N°…», «PDV:36 NOESTRES»), que también
    tienen las facturas que salen de un remito («FC FPREMVTA-1979 1»).
 
 Las notas de crédito restan en el pedido de la factura que corrigen; las cobranzas sin aplicar no son de ningún pedido.
+Cada fila se cruza **solo con los pedidos de su empresa**: el informe trae las dos y FP DEMO numera igual que Formas, así
+que una factura, una identificación o un PDV de FP DEMO pueden ser iguales a los de un pedido de verdad (ver abajo).
 
 **Lo que falta facturar también es saldo** (Rodrigo, 7/11/2026: «si están sin facturar, el 100% es saldo pendiente»;
 «saber exactamente cuánto falta que nos paguen, casi al centavo»). Va en «Por facturar» (`importe_por_facturar`) y se
@@ -141,6 +147,31 @@ mouse, cuánto y qué porcentaje), «Pagado» en verde si no queda nada. En la v
 $ 1,7 M (49 %)». Una diferencia de menos del 1 % del total cuenta como que no pagó nada (redondeos, percepciones). Sin
 total del pedido no se puede saber y se muestra solo el saldo. Un pago que todavía no se imputó a ninguna factura
 (cobranza sin aplicar) no baja el saldo del pedido, así que hasta que se aplica el pedido sigue diciendo «total».
+
+### FP DEMO, aparte en todo
+
+FP DEMO (la empresa de pruebas de Finnegans, código `7`) usa los mismos tipos de documento y la misma numeración que
+Formas Publicitarias (`EMPRE01`), y tiene copias de pedidos de verdad con el mismo número (en noviembre de 2026, los PDV
+31526, 31537, 31544, 31704 y 31748, entre otros). Sus pedidos entran aparte (pedido de Finnegans «DEMO PEDVTASTP - 31748»,
+unidad «FP DEMO», [más abajo](#el-pedido-entra-desde-finnegans-sin-esperar-a-clickup)) y todo lo que viene de Finnegans
+respeta esa separación (20/11/2026; antes el total, la fecha, el vendedor y las facturas de FP DEMO podían caer en el
+pedido de verdad con el mismo número, y el saldo o el «por facturar» de un pedido de verdad podían incluir facturas de
+prueba):
+
+- `scripts/pedidos-totales.mjs` manda todo lo de la empresa `7` con «DEMO » adelante: totales, vendedores, fechas, el
+  resumen de cada pedido, el pedido de cada factura (`facturas`: `{"7|FCVTAELECT - 5": {pedido: "DEMO PEDVTAFP - 99"}}`),
+  lo que falta facturar y los factores. Una factura o un remito de FP DEMO solo se asigna a un pedido de FP DEMO (por su
+  identificación, por el pedido del que sale o por el PDV de la descripción); si FP DEMO no tiene ese pedido, queda sin
+  pedido. La búsqueda de remitos pedido por pedido (consultas que se pagan) es solo para los de Formas.
+- Las filas de saldo llevan la empresa (`emp: '7'` para FP DEMO).
+- El CRM cruza todo por `llavePedido` (`totales.ts`: «PEDVTASTP - 31748» o «DEMO|PEDVTASTP - 31748»), en `aplicarTotales`
+  y en `aplicarSaldos`: cada dato va al pedido de su empresa, y los de FP DEMO reciben su total, su fecha, su «por
+  facturar» y su saldo.
+- La sincronización de ClickUp nunca toma un pedido de FP DEMO (`findOrder` en `clickup.ts`): el PDV de ClickUp es
+  siempre el de verdad. Antes, si el de FP DEMO había entrado primero, ClickUp lo tomaba por el de verdad y le cambiaba
+  la unidad y el pedido de Finnegans (así quedó el pedido 900000002173, el PDV 31748, el 20/11/2026), y
+  si al de FP DEMO le cambiaban la unidad a mano, también (el 900000001612, PDV 31537, repetido con el 900000001088 desde el
+  17/11/2026). En los dos casos, después el informe de Finnegans volvió a crear el de FP DEMO.
 
 ## Los productos de cada pedido en la lista
 
@@ -393,8 +424,9 @@ Finnegans.
   entidad», sin probar). Prueba: `test/pedidos.test.mjs`.
 - **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
   los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
-  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni
-  los filtros por unidad de los pedidos de verdad; sí se pueden asociar a un negocio por su número.
+  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas, los
+  saldos ni los filtros por unidad de los pedidos de verdad ([FP DEMO, aparte en todo](#fp-demo-aparte-en-todo)); sí se
+  pueden asociar a un negocio por su número, pero su total no cambia el monto del negocio. ClickUp nunca los toma.
 
 ### El N° de PDV en el negocio
 

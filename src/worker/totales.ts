@@ -13,6 +13,16 @@ export const clavePedido = (p: unknown) => {
   const m = String(p ?? '').match(/^\s*([A-Za-z]+)\s*-\s*(\d+)\s*$/);
   return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null;
 };
+// FP DEMO (la empresa de pruebas de Finnegans, código '7'; pedidosfin.ts) numera igual que Formas: sus pedidos llevan
+// «DEMO » adelante («DEMO PEDVTASTP - 10741»), en el CRM y en todo lo que manda scripts/pedidos-totales.mjs.
+export const EMPRESA_DEMO = '7';
+export const esPedidoDemo = (pedido: unknown) => /^\s*DEMO\s+/i.test(String(pedido ?? ''));
+// La llave de un pedido: «PEDVTASTP - 31277», o «DEMO|PEDVTASTP - 10741» si es de FP DEMO. Con ella se cruza todo lo que
+// llega de Finnegans, así cada dato va al pedido de su empresa aunque los dos tengan el mismo número.
+export function llavePedido(pedido: unknown) {
+  const c = clavePedido(String(pedido ?? '').replace(/^\s*DEMO\s+/i, ''));
+  return c ? (esPedidoDemo(pedido) ? `DEMO|${c}` : c) : null;
+}
 
 export interface TotalesEstado { recibidos: number; pedidos: number; cruzados: number; actualizados: number; propietarios?: number; fechas?: number; at: string; negocios?: MontosEstado }
 
@@ -21,25 +31,26 @@ export interface TotalesEstado { recibidos: number; pedidos: number; cruzados: n
 // `fechas` ({"PEDVTASTP - 31277": "2026-11-03"}): la fecha del pedido de venta en Finnegans. Queda en «Fecha del pedido»
 // (fecha_pedido), que usa el Inicio de Producción para los tiempos de entrega (inicioprod.ts): la fecha de alta en el CRM no
 // sirve, porque los pedidos traídos de ClickUp se dieron de alta todos juntos. Sin historial ni fecha de modificación.
+// Los de FP DEMO llegan como «DEMO PEDVTASTP - 10741» y van a su pedido de FP DEMO, nunca al de verdad con el mismo número.
 export async function aplicarTotales(env: Env, body: { totales?: Record<string, number>; vendedores?: Record<string, string>; fechas?: Record<string, string> }): Promise<TotalesEstado> {
   const tot = body?.totales;
   if (!tot || typeof tot !== 'object' || Array.isArray(tot)) throw new HttpError(400, 'Falta totales: {"PEDVTASTP - 31277": 123456.78, …}.');
   const db = env.DB;
   const porPedido = new Map<string, number>();
   for (const [k, v] of Object.entries(tot)) {
-    const c = clavePedido(k);
+    const c = llavePedido(k);
     const n = Number(v);
     if (c && Number.isFinite(n)) porPedido.set(c, Math.round(n * 100) / 100);
   }
   const sys = await db.prepare("SELECT id FROM users WHERE role = 'admin' AND active = 1 ORDER BY (email = ?) DESC, id LIMIT 1").bind(env.ADMIN_EMAIL ?? '').first<{ id: number }>();
   const porVendedor = new Map<string, string>();
   if (body.vendedores && typeof body.vendedores === 'object' && !Array.isArray(body.vendedores)) {
-    for (const [k, v] of Object.entries(body.vendedores)) { const c = clavePedido(k); if (c && typeof v === 'string' && v.trim()) porVendedor.set(c, v.trim()); }
+    for (const [k, v] of Object.entries(body.vendedores)) { const c = llavePedido(k); if (c && typeof v === 'string' && v.trim()) porVendedor.set(c, v.trim()); }
   }
   const users = porVendedor.size ? (await db.prepare('SELECT id, name, email FROM users WHERE active = 1').all<{ id: number; name: string; email: string }>()).results : [];
   const porFecha = new Map<string, string>();
   if (body.fechas && typeof body.fechas === 'object' && !Array.isArray(body.fechas)) {
-    for (const [k, v] of Object.entries(body.fechas)) { const c = clavePedido(k); if (c && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) porFecha.set(c, v); }
+    for (const [k, v] of Object.entries(body.fechas)) { const c = llavePedido(k); if (c && typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)) porFecha.set(c, v); }
   }
   const { results } = await db.prepare(`SELECT id, owner_id, json_extract(props, '$.pedido_finnegans') AS pedido, json_extract(props, '$.hs_total_price') AS total,
       json_extract(props, '$.fecha_pedido') AS fecha
@@ -50,7 +61,7 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
   let cruzados = 0, actualizados = 0, propietarios = 0, fechas = 0;
   const cambiados: number[] = [];
   for (const r of results) {
-    const k = clavePedido(r.pedido);
+    const k = llavePedido(r.pedido);
     // El propietario, si no tiene: el vendedor de Finnegans, si es usuario del CRM.
     const uid = k && !r.owner_id && porVendedor.has(k) ? usuarioPorNombre(users, porVendedor.get(k)!) : null;
     if (uid) {
@@ -92,6 +103,8 @@ export async function aplicarTotales(env: Env, body: { totales?: Record<string, 
 // o por el número de PDV con que empieza la descripción («31089», «2407 / OC N°…», «PDV:36 NOESTRES»), que también lo
 // tienen las facturas que salen de un remito. Las notas de crédito restan en el pedido de la factura que corrigen. Al
 // saldo de las facturas se le suma lo que falta facturar (`porFacturar`). Facturado y cobrado queda en 0; sin dato, vacío.
+// FP DEMO va aparte: sus filas vienen con `emp: '7'` y sus pedidos como «DEMO PEDVTASTP - 10741», y cada cosa se cruza
+// solo con los pedidos de su empresa (llavePedido), así una factura de prueba nunca suma en el saldo de un pedido de verdad.
 
 export interface FilaSaldo { emp?: string | null; ie?: string | null; doc?: string | null; desc?: string | null; importe: number; vto?: string | null }
 export interface SaldosEstado { filas: number; cruzadas: number; sin_cruce: number; pedidos_con_saldo: number; total: number; actualizados: number; at: string }
@@ -106,7 +119,8 @@ const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
 // `porFacturar` ({"PEDVTAFP - 2413": 1234.5}): lo que falta facturar de cada pedido, sin IVA (scripts/pedidos-totales.mjs);
 // queda en el pedido («Por facturar») y se suma al saldo. Los pedidos que no vienen conservan el último que llegó.
 // `factores` ({"PEDVTAFP - 2413": 1.21}): total con IVA / neto de cada pedido.
-// `facturas` ({"EMPRE01|FCVTAELECT - 2583": {pedido: "PEDVTAFP - 2413", factor: 1.2345}}): de qué pedido es cada comprobante
+// `facturas` ({"EMPRE01|FCVTAELECT - 2583": {pedido: "PEDVTAFP - 2413", factor: 1.2345}}, o {"7|FCVTAELECT - 5": {pedido:
+// "DEMO PEDVTAFP - 99", …}} si es de FP DEMO): de qué pedido es cada comprobante
 // y su total/neto exacto, del análisis de facturas (scripts/pedidos-totales.mjs). Manda sobre las otras formas de cruzarlo.
 const IVA = 1.21;
 // `ie` y `cae`: la identificación de la factura en Finnegans y si ya tiene CAE (para adjuntarla al pedido, finnegans.ts).
@@ -127,46 +141,57 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     por_facturar: number | string | null; etapa: string | null }>;
   const porFacturar = new Map<string, number>();
   for (const [k, v] of Object.entries(body.porFacturar && typeof body.porFacturar === 'object' ? body.porFacturar : {})) {
-    const c = clavePedido(k);
+    const c = llavePedido(k);
     if (c && Number.isFinite(Number(v))) porFacturar.set(c, Math.max(0, Math.round(Number(v) * 100) / 100));
   }
   const fac = facturas.results as Array<{ record_id: number; source_ref: string; documento: string | null }>;
-  const porIe = new Map(fac.map((f) => [norm(f.source_ref), f.record_id]));
-  const porDoc = new Map(fac.filter((f) => claveDoc(f.documento)).map((f) => [claveDoc(f.documento)!, f.record_id]));
-  const porPedido = new Map(ped.map((p) => [clavePedido(p.pedido), p.id]));
-  const porPdv = new Map<number, Array<{ id: number; tipo: string }>>();
+  // Cada fila se cruza solo con los pedidos de su empresa: FP DEMO numera igual que Formas, así que una factura, una
+  // identificación («FC PEDVTASTP-00031277 1») o un número de PDV de FP DEMO pueden ser iguales a los de un pedido de verdad.
+  const demos = new Set(ped.filter((p) => esPedidoDemo(p.pedido)).map((p) => p.id));
+  const empDe = (f: FilaSaldo) => (String(f.emp ?? '') === EMPRESA_DEMO ? EMPRESA_DEMO : 'EMPRE01');
+  const empDelPedido = (id: number) => (demos.has(id) ? EMPRESA_DEMO : 'EMPRE01');
+  const porIe = new Map(fac.map((f) => [`${empDelPedido(f.record_id)}|${norm(f.source_ref)}`, f.record_id]));
+  const porDoc = new Map(fac.filter((f) => claveDoc(f.documento)).map((f) => [`${empDelPedido(f.record_id)}|${claveDoc(f.documento)!}`, f.record_id]));
+  const porPedido = new Map(ped.map((p) => [llavePedido(p.pedido), p.id]).filter((x): x is [string, number] => !!x[0]));
+  const porPdv = new Map<number, Array<{ id: number; tipo: string; emp: string }>>();
   for (const p of ped) {
-    const n = Number(String(p.pdv ?? '').match(/\d+/)?.[0] ?? clavePedido(p.pedido)?.split(' - ')[1]);
+    const c = llavePedido(p.pedido)?.replace(/^DEMO\|/, '');
+    const n = Number(String(p.pdv ?? '').match(/\d+/)?.[0] ?? c?.split(' - ')[1]);
     if (!n) continue;
     const l = porPdv.get(n) ?? [];
-    l.push({ id: p.id, tipo: clavePedido(p.pedido)?.split(' - ')[0] ?? '' });
+    l.push({ id: p.id, tipo: c?.split(' - ')[0] ?? '', emp: empDelPedido(p.id) });
     porPdv.set(n, l);
   }
   const conFactura = new Set([...fac.map((f) => f.record_id), ...ped.filter((p) => p.factura).map((p) => p.id)]);
   const factorDe = new Map<number, number>();
   for (const [k, v] of Object.entries(body.factores && typeof body.factores === 'object' ? body.factores : {})) {
-    const id = porPedido.get(clavePedido(k));
+    const c = llavePedido(k);
+    const id = c ? porPedido.get(c) : undefined;
     if (id !== undefined && Number(v) >= 1 && Number(v) < 2) factorDe.set(id, Number(v));
   }
   const facturasCrm = body.facturas && typeof body.facturas === 'object' ? body.facturas : {};
   const deFactura = (f: FilaSaldo): FacturaCrm | undefined => {
     const d = claveDoc(f.doc);
-    return d ? facturasCrm[`${f.emp || 'EMPRE01'}|${d}`] : undefined;
+    return d ? facturasCrm[`${empDe(f)}|${d}`] : undefined;
   };
+  // El pedido que el análisis de facturas le asignó al comprobante («DEMO PEDVTASTP - 10741» si es de FP DEMO).
+  const pedidoDeFactura = (f: FilaSaldo) => { const c = llavePedido(deFactura(f)?.pedido); return c ? porPedido.get(c) : undefined; };
   const factorOk = (v: unknown) => (Number(v) >= 1 && Number(v) < 2 ? Number(v) : undefined);
   const sinIva = (id: number, importe: number, f?: FilaSaldo) => importe / (factorOk(f && deFactura(f)?.factor) ?? factorDe.get(id) ?? IVA);
 
   const pedidoDe = (f: FilaSaldo): number | undefined => {
-    const fx = deFactura(f)?.pedido;
-    if (fx && porPedido.has(clavePedido(fx))) return porPedido.get(clavePedido(fx));
+    const emp = empDe(f);
+    const fx = pedidoDeFactura(f);
+    if (fx !== undefined) return fx;
     const ie = norm(f.ie);
-    if (porIe.has(ie)) return porIe.get(ie);
+    if (porIe.has(`${emp}|${ie}`)) return porIe.get(`${emp}|${ie}`);
     const d = claveDoc(f.doc);
-    if (d && porDoc.has(d)) return porDoc.get(d);
+    if (d && porDoc.has(`${emp}|${d}`)) return porDoc.get(`${emp}|${d}`);
     const m = ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
-    if (m && porPedido.has(`${m[1]} - ${Number(m[2])}`)) return porPedido.get(`${m[1]} - ${Number(m[2])}`);
+    const deIe = m ? llavePedido(`${emp === EMPRESA_DEMO ? 'DEMO ' : ''}${m[1]} - ${m[2]}`) : null;
+    if (deIe && porPedido.has(deIe)) return porPedido.get(deIe);
     const n = Number(String(f.desc ?? '').match(/^\s*(?:PDV\s*:?\s*)?(\d+)/i)?.[1]);
-    let cand = n ? porPdv.get(n) ?? [] : [];
+    let cand = n ? (porPdv.get(n) ?? []).filter((c) => c.emp === emp) : [];
     if (cand.length > 1) {
       // Mismo número en otra unidad: la descripción o la identificación dicen cuál.
       const tipo = /NO\s*ESTRES/i.test(String(f.desc ?? '')) ? 'PEDVTANE' : m?.[1] ?? null;
@@ -176,24 +201,24 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
   };
 
   const saldo = new Map<number, number>();
-  const pedidoDeDoc = new Map<string, number>();
+  const pedidoDeDoc = new Map<string, number>();   // «EMPRE01|FCVTAELECT - 2583» → el pedido de esa factura
   let cruzadas = 0;
-  // Primero las facturas; después las notas de crédito, que van al pedido de la factura que corrigen.
+  // Primero las facturas; después las notas de crédito, que van al pedido de la factura que corrigen (de su misma empresa).
   for (const f of filas.filter((x) => !esNota(x))) {
     const id = pedidoDe(f);
     if (id === undefined) continue;
     cruzadas++;
     saldo.set(id, (saldo.get(id) ?? 0) + sinIva(id, Number(f.importe), f));
     const d = claveDoc(f.doc);
-    if (d) pedidoDeDoc.set(d, id);
+    if (d) pedidoDeDoc.set(`${empDe(f)}|${d}`, id);
   }
   for (const f of filas.filter(esNota)) {
+    const emp = empDe(f);
     const ref = String(f.ie ?? '').match(/^NC\s+([A-Za-z]+)-0*(\d+)/i);
-    const refDoc = ref ? `${ref[1].toUpperCase()} - ${Number(ref[2])}` : null;
+    const refDoc = ref ? `${emp}|${ref[1].toUpperCase()} - ${Number(ref[2])}` : null;
     const anula = Number(String(f.desc ?? '').match(/ANULA\s+FC\s*0*(\d+)/i)?.[1]);
-    const fx = deFactura(f)?.pedido;
-    let id = (fx && porPedido.get(clavePedido(fx))) || (refDoc && (pedidoDeDoc.get(refDoc) ?? porDoc.get(refDoc))) || undefined;
-    if (id === undefined && anula) id = [...pedidoDeDoc].find(([k]) => Number(k.split(' - ')[1]) === anula)?.[1];
+    let id = pedidoDeFactura(f) ?? (refDoc ? pedidoDeDoc.get(refDoc) ?? porDoc.get(refDoc) : undefined);
+    if (id === undefined && anula) id = [...pedidoDeDoc].find(([k]) => k.startsWith(`${emp}|`) && Number(k.split(' - ')[1]) === anula)?.[1];
     id ??= pedidoDe(f);
     if (id === undefined) continue;
     cruzadas++;
@@ -217,7 +242,7 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     return true;
   };
   for (const p of ped) {
-    const clave = clavePedido(p.pedido);
+    const clave = llavePedido(p.pedido);
     const llega = clave != null && porFacturar.has(clave);
     // Sin la lista completa (body.completo), solo se tocan los pedidos que aparecen.
     if (!saldo.has(p.id) && !llega && !body.completo) continue;
@@ -239,7 +264,8 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
   const nuevas: D1PreparedStatement[] = [];
   for (const [k, f] of Object.entries(facturasCrm)) {
     const [emp, doc] = k.split('|');
-    const id = f?.cae && f.ie && f.pedido ? porPedido.get(clavePedido(f.pedido)) : undefined;
+    const c = f?.cae && f.ie ? llavePedido(f.pedido) : null;
+    const id = c ? porPedido.get(c) : undefined;
     if (id === undefined || emp !== 'EMPRE01' || /^(NC|ND)/i.test(doc ?? '') || adjuntas.has(`${id}|${f.ie!.trim().toUpperCase()}`)) continue;
     nuevas.push(db.prepare('INSERT OR IGNORE INTO facturas_pendientes (record_id, ie) VALUES (?, ?)').bind(id, f.ie!.trim()));
   }

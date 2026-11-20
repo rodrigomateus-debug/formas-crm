@@ -10,7 +10,9 @@ import type { Ctx } from './env';
 // - si a alguno de sus pedidos todavía no le llegó el total, el negocio espera: nunca queda un monto a medias;
 // - un pedido va en un solo negocio (associations.ts no deja sumarlo a un segundo); si alguno quedó en dos (de HubSpot),
 //   no se sabe cuánto es de cada uno, así que esos negocios no se tocan;
-// - negocios perdidos, en otra moneda que los pedidos, o con «Monto a mano» marcado: no se tocan.
+// - negocios perdidos, en otra moneda que los pedidos, o con «Monto a mano» marcado: no se tocan;
+// - los pedidos de FP DEMO (la empresa de pruebas de Finnegans, pedidosfin.ts) no cuentan: tienen total propio, pero de
+//   prueba. Un negocio que solo tiene pedidos de FP DEMO queda como estaba.
 // El cambio queda en el historial del monto, con fuente «pedidos». Se escribe en tanda (pocas consultas aunque sean muchos
 // negocios) y sin tocar la fecha de modificación del negocio, así el tablero no se reordena (como los totales de los pedidos).
 
@@ -27,7 +29,9 @@ export interface MontosEstado {
 interface Fila {
   deal_id: number; monto: number | null; moneda: string | null; a_mano: unknown; perdido: number;
   order_id: number; total: number | null; etapa: string | null; moneda_pedido: string | null; negocios: number;
+  unidad: string | null; pedido: string | null;
 }
+const esDemo = (f: Fila) => String(f.unidad ?? '').toUpperCase() === 'FP DEMO' || /^\s*DEMO\s+/i.test(String(f.pedido ?? ''));
 
 // ¿El negocio tiene algún pedido no anulado? Si una persona le cambia el monto, queda «Monto a mano» (api.ts): si no, la
 // próxima corrida lo volvería a poner como el total de los pedidos.
@@ -47,6 +51,7 @@ export async function montosDesdePedidos(db: D1Database, ids: number[], ctx?: Ct
       json_extract(d.props, '$.monto_a_mano') AS a_mano, (s.is_closed = 1 AND s.is_won = 0) AS perdido,
       o.id AS order_id, o.amount AS total, json_extract(o.props, '$.hs_pipeline_stage') AS etapa,
       json_extract(o.props, '$.hs_currency_code') AS moneda_pedido,
+      json_extract(o.props, '$.unidad_de_negocio') AS unidad, json_extract(o.props, '$.pedido_finnegans') AS pedido,
       (SELECT COUNT(*) FROM associations a2 JOIN records d2 ON d2.id = a2.to_id AND d2.archived = 0
         WHERE a2.from_id = o.id AND a2.to_type = 'deal') AS negocios
     FROM associations a
@@ -66,7 +71,7 @@ export async function montosDesdePedidos(db: D1Database, ids: number[], ctx?: Ct
     estado.revisados++;
     const d = filas[0];
     const moneda = d.moneda || 'ARS';
-    const vivos = filas.filter((f) => f.etapa !== ANULADO);
+    const vivos = filas.filter((f) => f.etapa !== ANULADO && !esDemo(f));
     if (String(d.a_mano) === 'true' || d.perdido || vivos.some((f) => (f.moneda_pedido || 'ARS') !== moneda)) { estado.a_mano++; continue; }
     if (vivos.some((f) => f.negocios > 1)) { estado.compartidos++; continue; }
     if (!vivos.length) continue;

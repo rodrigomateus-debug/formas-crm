@@ -3,7 +3,8 @@
 //
 // Lee el informe de pedidos de venta por producto de Finnegans (solo lectura), suma el neto de cada renglón (sin IVA, en
 // pesos) por pedido y le pasa al CRM {"PEDVTASTP - 31277": total, …}. El CRM lo guarda en el «Total sin IVA» de los pedidos
-// con ese pedido de Finnegans; el tablero de pedidos lo suma abajo de cada columna.
+// con ese pedido de Finnegans; el tablero de pedidos lo suma abajo de cada columna. Los de FP DEMO van como
+// «DEMO PEDVTASTP - 10741» (ver EMPRESAS).
 //
 //   CRM_URL=https://formas-crm.rodrigo-mateus.workers.dev CRM_TOKEN=fcrm_… FIN_CLIENT_ID=… FIN_SECRET=… node scripts/pedidos-totales.mjs
 //   DESDE=2023-01-01 trae desde esa fecha (si no, los últimos 120 días). DRY_RUN=1 calcula sin mandar nada.
@@ -12,8 +13,13 @@
 import { pathToFileURL } from 'node:url';
 
 const FIN = (process.env.FINNEGANS_API_URL ?? 'https://api.finneg.com/api').replace(/\/$/, '');
-// Formas Publicitarias SA primero: si un número de pedido está en las dos empresas, vale el de Formas (como las facturas).
-const EMPRESAS = ['EMPRE01', '7'];
+// Formas Publicitarias SA y FP DEMO (la empresa de pruebas, '7'). FP DEMO numera igual que Formas y tiene copias de
+// pedidos de verdad con el mismo número: todo lo suyo (totales, vendedores, fechas, resumen, facturas, remitos, factores)
+// viaja con «DEMO » adelante («DEMO PEDVTASTP - 10741», como el pedido de Finnegans de sus pedidos en el CRM,
+// src/worker/pedidosfin.ts), así nunca se cruza con el pedido de verdad del mismo número.
+export const EMPRESAS = ['EMPRE01', '7'];
+export const EMPRESA_DEMO = '7';
+const prefijoDe = (emp) => (emp === EMPRESA_DEMO ? 'DEMO ' : '');
 const DIA = 86_400_000;
 const masDias = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * DIA).toISOString().slice(0, 10);
 
@@ -22,53 +28,55 @@ export const clavePedido = (p) => {
   const m = String(p ?? '').match(/^\s*([A-Za-z]+)\s*-\s*(\d+)\s*$/);
   return m ? `${m[1].toUpperCase()} - ${Number(m[2])}` : null;
 };
+// La clave de un pedido de una empresa: «PEDVTASTP - 31277» en Formas, «DEMO PEDVTASTP - 31277» en FP DEMO.
+export const clavePedidoDe = (emp, p) => { const c = clavePedido(p); return c ? prefijoDe(emp) + c : null; };
+const sinDemo = (k) => String(k ?? '').replace(/^DEMO /, '');
+const deEmpresa = (k, emp) => String(k ?? '').startsWith('DEMO ') === (emp === EMPRESA_DEMO);
 
-// Renglones del informe → total sin IVA por pedido. Los renglones anulados y los objetivos de venta no cuentan.
+// Renglones del informe ([{emp, filas}], una por empresa) → total sin IVA por pedido. Los renglones anulados y los
+// objetivos de venta no cuentan.
 export function totalesPorPedido(filasPorEmpresa) {
-  const out = {};
-  for (const filas of filasPorEmpresa) {
-    const suma = new Map();
+  const suma = new Map();
+  for (const { emp, filas } of filasPorEmpresa) {
     for (const r of filas) {
-      const k = clavePedido(r.DOCNROINT);
-      if (!k || /^PDVOBJETIVOS/.test(k) || /anulad/i.test(r.ESTADO ?? '')) continue;
+      const c = clavePedido(r.DOCNROINT);
+      if (!c || /^PDVOBJETIVOS/.test(c) || /anulad/i.test(r.ESTADO ?? '')) continue;
+      const k = prefijoDe(emp) + c;
       suma.set(k, (suma.get(k) ?? 0) + Number(r.IMPORTEMONPRINCIPAL ?? r.IMPORTE ?? 0));
     }
-    for (const [k, v] of suma) if (!(k in out)) out[k] = Math.round(v * 100) / 100;
   }
-  return out;
+  return Object.fromEntries([...suma].map(([k, v]) => [k, Math.round(v * 100) / 100]));
 }
 
 // El vendedor de cada pedido según los mismos renglones (el que más se repite; sin «STP», que es la tienda). El CRM se
 // lo pone de propietario a los pedidos que no tienen (ClickUp no trae el VENDEDOR o trae uno que no es usuario).
 export function vendedoresPorPedido(filasPorEmpresa) {
-  const out = {};
-  for (const filas of filasPorEmpresa) {
-    const cuenta = new Map();
+  const cuenta = new Map();
+  for (const { emp, filas } of filasPorEmpresa) {
     for (const r of filas) {
-      const k = clavePedido(r.DOCNROINT);
+      const c = clavePedido(r.DOCNROINT);
       const v = String(r.VENDEDOR ?? '').trim();
-      if (!k || !v || /^stp$/i.test(v) || /^PDVOBJETIVOS/.test(k)) continue;
+      if (!c || !v || /^stp$/i.test(v) || /^PDVOBJETIVOS/.test(c)) continue;
+      const k = prefijoDe(emp) + c;
       const m = cuenta.get(k) ?? new Map();
       m.set(v, (m.get(v) ?? 0) + 1);
       cuenta.set(k, m);
     }
-    for (const [k, m] of cuenta) if (!(k in out)) out[k] = [...m].sort((a, b) => b[1] - a[1])[0][0];
   }
-  return out;
+  return Object.fromEntries([...cuenta].map(([k, m]) => [k, [...m].sort((a, b) => b[1] - a[1])[0][0]]));
 }
 // La fecha de cada pedido de venta (la más vieja de sus renglones): el CRM la guarda en «Fecha del pedido», para los tiempos
 // de entrega del Inicio de Producción.
 export function fechasPorPedido(filasPorEmpresa) {
   const out = {};
-  for (const filas of filasPorEmpresa) {
-    const de = {};
+  for (const { emp, filas } of filasPorEmpresa) {
     for (const r of filas) {
-      const k = clavePedido(r.DOCNROINT);
+      const c = clavePedido(r.DOCNROINT);
       const f = aIso(r.FECHA);
-      if (!k || !f || /^PDVOBJETIVOS/.test(k)) continue;
-      if (!de[k] || f < de[k]) de[k] = f;
+      if (!c || !f || /^PDVOBJETIVOS/.test(c)) continue;
+      const k = prefijoDe(emp) + c;
+      if (!out[k] || f < out[k]) out[k] = f;
     }
-    for (const [k, f] of Object.entries(de)) if (!(k in out)) out[k] = f;
   }
   return out;
 }
@@ -169,19 +177,20 @@ export function pdvDeDescripcion(desc) {
 }
 const esAnticipo = (r) => /ANTICIPO/i.test(`${r.PRODUCTO ?? ''} ${r.CODIGOPROD ?? ''}`);
 
+// Renglones del informe de pedidos ([{emp, filas}]) → por pedido («DEMO …» si es de FP DEMO): total con IVA, neto,
+// pendiente y si está anulado.
 export function resumenPedidos(filasPorEmpresa) {
   const out = new Map();
-  for (const filas of filasPorEmpresa) {
-    const vistos = new Map();
+  for (const { emp, filas } of filasPorEmpresa) {
     for (const r of filas) {
-      const k = clavePedido(r.DOCNROINT);
-      if (!k || !/^PEDVTA/.test(k) || out.has(k)) continue;
-      const o = vistos.get(k) ?? { total: Number(r.TOTAL ?? 0), neto: 0, pendiente: 0, anulado: false };
+      const c = clavePedido(r.DOCNROINT);
+      if (!c || !/^PEDVTA/.test(c)) continue;
+      const k = prefijoDe(emp) + c;
+      const o = out.get(k) ?? { total: Number(r.TOTAL ?? 0), neto: 0, pendiente: 0, anulado: false };
       if (/anulad/i.test(r.ESTADO ?? '')) o.anulado = true;
       else { o.neto += Number(r.IMPORTEMONPRINCIPAL ?? 0); o.pendiente += Number(r.IMPORTEPENDIENTEDESTINO ?? 0); }
-      vistos.set(k, o);
+      out.set(k, o);
     }
-    for (const [k, v] of vistos) out.set(k, v);
   }
   return out;
 }
@@ -206,7 +215,7 @@ export function docsDeFacturas(filasPorEmpresa) {
 }
 
 // Informe de facturas: de qué pedido o remito sale cada factura (por empresa e identificación: Formas y FP DEMO usan la
-// misma numeración).
+// misma numeración; el pedido de una factura de FP DEMO es «DEMO PEDVTA… - N»).
 export function origenesDe(filasPorEmpresa) {
   const out = new Map();
   for (const { emp, filas } of filasPorEmpresa) for (const x of filas) {
@@ -215,23 +224,26 @@ export function origenesDe(filasPorEmpresa) {
     const dePedido = /^PEDVTA/.test(String(x.TRANSACCIONSUBTIPOCODIGO ?? ''));
     // Una factura puede salir de varios documentos (un pedido y un remito, o varios remitos): se guardan todos.
     const k = `${emp}|${ie}`;
-    out.set(k, [...(out.get(k) ?? []), { pedido: dePedido ? clavePedido(x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
+    out.set(k, [...(out.get(k) ?? []), { pedido: dePedido ? clavePedidoDe(emp, x.IDENTIFICACIONEXTERNA) : null, remito: dePedido ? null : claveDoc(x.IDENTIFICACIONEXTERNA),
       pdv: dePedido ? null : pdvDeDescripcion(x.DESCRIPCION)?.n ?? null, cae: x.OBTUVOCAE === 'SI' }]);
   }
   return out;
 }
 
+// El pedido de un número de PDV (de una factura o un remito) entre los de su empresa: el mismo número en FP DEMO es otro
+// pedido. `ne`: dice «NO ESTRES» (No Estrés tiene su propia numeración).
 function porNumeroDe(resumen) {
   const porNumero = new Map();
   for (const k of resumen.keys()) { const n = Number(k.split(' - ')[1]); porNumero.set(n, [...(porNumero.get(n) ?? []), k]); }
-  return (n, ne) => {
-    let c = porNumero.get(n) ?? [];
-    if (c.length > 1) c = c.filter((k) => (ne ? /^PEDVTANE/.test(k) : !/^PEDVTANE/.test(k)));
+  return (n, ne, emp = EMPRESAS[0]) => {
+    let c = (porNumero.get(n) ?? []).filter((k) => deEmpresa(k, emp));
+    if (c.length > 1) c = c.filter((k) => (ne ? /^PEDVTANE/.test(sinDemo(k)) : !/^PEDVTANE/.test(sinDemo(k))));
     return c.length === 1 ? c[0] : null;
   };
 }
 
-// A qué pedido va cada comprobante. `remitoAPedido`: remitos buscados pedido por pedido (los que no dicen el PDV).
+// A qué pedido va cada comprobante, siempre uno de su misma empresa («DEMO …» para los de FP DEMO). `remitoAPedido`:
+// remitos buscados pedido por pedido (los que no dicen el PDV), solo de los pedidos de Formas.
 export function asignarFacturas(docs, origenes, resumen, remitoAPedido = new Map()) {
   const deNumero = porNumeroDe(resumen);
   const out = new Map();
@@ -239,16 +251,16 @@ export function asignarFacturas(docs, origenes, resumen, remitoAPedido = new Map
     const os = origenes.get(`${d.emp}|${d.ie}`) ?? [];
     const ped = d.ie.match(/^FC (PEDVTA[A-Z]*)-0*(\d+)/);
     const p = pdvDeDescripcion(d.desc);
-    const escrito = p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne) : null;
+    const escrito = p && !/^\s*(NC|ND|FC)\s+ANULA/i.test(d.desc) ? deNumero(p.n, p.ne, d.emp) : null;
     // De qué pedidos sale según Finnegans: el pedido, o el PDV que dice su remito.
-    const desdeOrigen = [...new Set(os.map((o) => o.pedido ?? (o.pdv != null ? deNumero(o.pdv, false) : null)).filter(Boolean))];
+    const desdeOrigen = [...new Set(os.map((o) => o.pedido ?? (o.pdv != null ? deNumero(o.pdv, false, d.emp) : null)).filter(Boolean))];
     // Si sale de varios, el que coincide con el PDV escrito en la factura; si sale de uno, ese; si no, lo escrito; la
     // búsqueda de remitos, al final.
-    const elegido = (ped ? `${ped[1]} - ${Number(ped[2])}` : null)
+    const elegido = (ped ? clavePedidoDe(d.emp, `${ped[1]} - ${ped[2]}`) : null)
       ?? (escrito && desdeOrigen.includes(escrito) ? escrito : null)
       ?? (desdeOrigen.length === 1 ? desdeOrigen[0] : null)
       ?? escrito ?? desdeOrigen[0]
-      ?? os.map((o) => (o.remito ? remitoAPedido.get(o.remito) : null)).find(Boolean) ?? null;
+      ?? (d.emp === EMPRESAS[0] ? os.map((o) => (o.remito ? remitoAPedido.get(o.remito) : null)).find(Boolean) : null) ?? null;
     out.set(k, elegido);
   }
   // Las notas (y las facturas o débitos que anulan una nota) van con el comprobante que corrigen.
@@ -285,13 +297,14 @@ export function remitosPendientes(filasPorEmpresa) {
 }
 // Solo cuentan los remitos de Corporate: en Formas Shop el remito es de la entrega y nunca se factura. Si un pedido
 // Corporate se facturó directo y su remito quedó sin facturar, lo corrige el otro cálculo (neto menos lo facturado).
+// Cada remito va a un pedido de su misma empresa.
 export function pendientePorRemitos(remitos, resumen, remitoAPedido = new Map()) {
-  const soloFp = new Map([...resumen].filter(([k]) => /^PEDVTAFP/.test(k)));
+  const soloFp = new Map([...resumen].filter(([k]) => /^PEDVTAFP/.test(sinDemo(k))));
   const deNumero = porNumeroDe(soloFp);
   const out = new Map(), sinPedido = [];
   for (const [, r] of remitos) {
     if (!(r.pendiente > 0)) continue;
-    const p = (r.pdv != null ? deNumero(r.pdv, false) : null) ?? (r.pdv == null ? remitoAPedido.get(r.doc) : null) ?? null;
+    const p = (r.pdv != null ? deNumero(r.pdv, false, r.emp) : null) ?? (r.pdv == null && r.emp === EMPRESAS[0] ? remitoAPedido.get(r.doc) : null) ?? null;
     if (!p) { sinPedido.push(r); continue; }
     out.set(p, (out.get(p) ?? 0) + r.pendiente);
   }
@@ -329,7 +342,8 @@ export function porFacturarDe(resumen, pendRemitos = new Map(), anticipos = new 
   return out;
 }
 
-// Para el CRM: cada comprobante, de qué pedido es y su total/neto (con eso pasa a sin IVA lo que falta cobrar de él).
+// Para el CRM: cada comprobante («EMPRE01|FCVTAELECT - 2583», «7|FCVTAELECT - 5»), de qué pedido es («DEMO …» si es de
+// FP DEMO) y su total/neto (con eso pasa a sin IVA lo que falta cobrar de él).
 // `origenes` (informe de facturas): con él va también la identificación de la factura y si ya tiene CAE, así el CRM
 // adjunta al pedido solo las facturas nuevas en vez de consultar todos los pedidos (Finnegans cobra por consulta).
 export function facturasParaCrm(docs, asignadas, origenes = new Map()) {
@@ -359,7 +373,8 @@ export async function porTramos(tok, informe, params, desde, hasta) {
   }
   return filas;
 }
-// Los remitos de un pedido (para los que el remito facturado no dice el PDV).
+// Los remitos de un pedido de Formas (para los que el remito facturado no dice el PDV). Los de FP DEMO no se buscan: cada
+// consulta a Finnegans se paga.
 export async function remitosDe(tok, claves) {
   const out = new Map();
   for (const k of claves) {
@@ -380,7 +395,8 @@ export async function remitosDe(tok, claves) {
 // que falta cobrar, con IVA (el CRM lo pasa a sin IVA). El CRM la cruza con su pedido (/hooks/pedidos/saldos). Del cliente no se manda nada más.
 export function filasDeSaldo(reporte) {
   return (Array.isArray(reporte) ? reporte : []).filter((x) => x.CUENTA === 'Deudores en Cta. Cte.').map((x) => ({
-    emp: /FP\s*DEMO/i.test(String(x.EMPRESA ?? '')) ? '7' : 'EMPRE01',
+    // La empresa de cada fila: el CRM cruza las de FP DEMO solo con sus pedidos de FP DEMO (src/worker/totales.ts).
+    emp: /FP\s*DEMO/i.test(String(x.EMPRESA ?? '')) ? EMPRESA_DEMO : 'EMPRE01',
     ie: x.IDENTIFICACIONEXTERNA ?? null, doc: x.DOCUMENTO ?? null, desc: x.DESCRIPCION ?? null, importe: Number(x.IMPORTEMONPPAL ?? 0), vto: x.FECHAVTO ?? null,
   })).filter((f) => Number.isFinite(f.importe) && f.importe !== 0);
 }
@@ -395,17 +411,17 @@ async function main() {
   const desde = process.env.DESDE || masDias(hoy, -120);
   const tok = await finToken();
   const filas = [];
-  for (const emp of EMPRESAS) filas.push(await filasDe(tok, emp, desde, hoy));
+  for (const emp of EMPRESAS) filas.push({ emp, filas: await filasDe(tok, emp, desde, hoy) });
   const totales = totalesPorPedido(filas);
-  console.log(`Desde ${desde}: ${filas.reduce((n, f) => n + f.length, 0)} renglones, ${Object.keys(totales).length} pedidos con total.`);
+  console.log(`Desde ${desde}: ${filas.reduce((n, f) => n + f.filas.length, 0)} renglones, ${Object.keys(totales).length} pedidos con total.`);
   if (process.env.DRY_RUN) return;
   const base = (process.env.CRM_URL ?? '').replace(/\/$/, '');
   if (!base || !process.env.CRM_TOKEN) throw new Error('Faltan CRM_URL y CRM_TOKEN.');
   const res = await fetch(`${base}/hooks/pedidos/totales`, { method: 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify({ totales, vendedores: vendedoresPorPedido(filas), fechas: fechasPorPedido(filas),
-      // Formas Publicitarias y FP DEMO (EMPRESAS[1], la de pruebas, que entra aparte).
-      pedidos: { ...pedidosNuevos(filas[0], masDias(hoy, -15)), ...pedidosNuevos(filas[1] ?? [], masDias(hoy, -15), 'DEMO ') },
-      anulados: [...pedidosAnulados(filas[0]), ...pedidosAnulados(filas[1] ?? [], 'DEMO ')] }) });
+      // Formas Publicitarias y FP DEMO (la de pruebas, que entra aparte, con «DEMO » adelante).
+      pedidos: Object.assign({}, ...filas.map((f) => pedidosNuevos(f.filas, masDias(hoy, -15), prefijoDe(f.emp)))),
+      anulados: filas.flatMap((f) => pedidosAnulados(f.filas, prefijoDe(f.emp))) }) });
   if (!res.ok) throw new Error(`CRM /hooks/pedidos/totales: HTTP ${res.status}`);
   const r = await res.json();
   console.log(`CRM: ${r.pedidos} pedidos con pedido de Finnegans, ${r.cruzados} cruzan, ${r.actualizados} actualizados, ${r.propietarios ?? 0} con propietario nuevo (vendedor de Finnegans), ${r.fechas ?? 0} con fecha del pedido nueva.`);
@@ -427,7 +443,7 @@ async function main() {
   // Remitos con algo sin facturar que no dicen el PDV: se buscan los remitos de los pedidos Corporate recientes que ya
   // remitieron todo y no tienen factura (los 150 de número más alto; son pocos y siempre recientes).
   const conFactura = new Set(asignadas.values());
-  const faltan = pend.sinPedido.some((r) => r.pdv == null);
+  const faltan = pend.sinPedido.some((r) => r.pdv == null && r.emp === EMPRESAS[0]);
   const candidatos = faltan ? [...resumen].filter(([k, o]) => /^PEDVTAFP/.test(k) && !o.anulado && o.pendiente < 0.01 && !conFactura.has(k) && !pend.porPedido.has(k))
     .map(([k]) => k).sort((a, b) => Number(b.split(' - ')[1]) - Number(a.split(' - ')[1])).slice(0, 150) : [];
   const remitoAPedido = await remitosDe(tok, candidatos);

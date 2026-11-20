@@ -12,6 +12,7 @@ const PDV_ML = String(Number(PDV) + 1);
 const PDV_B = String(Number(PDV) + 2);
 const PDV_C = String(Number(PDV) + 3);   // de una vendedora que todavía no tiene usuario en el CRM
 const PDV_X = String(Number(PDV) + 4);   // el que se anula y se desanula desde el CRM (sus estados cambian con lo que escribe el CRM)
+const PDV_D = String(Number(PDV) + 5);   // uno de verdad con una copia en FP DEMO (la empresa de pruebas), con el mismo número
 const CUIT = `30-7${String(Date.now()).slice(-7)}-8`;
 const RECIBIDO = Date.now() - 86_400_000;   // ENTREGAS (FECHA REAL): ayer
 let asUser = null;
@@ -45,6 +46,8 @@ const cu = { statuses: ['ingreso de pedido', 'pdv'], attachments: [], artAttachm
 const pdvC = () => pdvTask('cuC', PDV_C, 'CORPORATE', ['pdv'], [], Date.now(), `Nueva ${RUN}`, true);
 const cx = { on: false, pdv: 'pdv', arts: ['ingreso de pedido', 'pedido al proveedor', 'entregados'], updated: Date.now() };
 const pdvX = () => ({ ...pdvTask('cuX', PDV_X, 'FORMAS SHOP', cx.arts, [], cx.updated), status: { status: cx.pdv } });
+const cd = { on: false };
+const pdvD = () => pdvTask('cuD', PDV_D, 'FORMAS SHOP', ['pdv']);
 const BULK = (i) => String(Number(PDV) + 100 + i);
 const AYER = Date.now() - 86_400_000;
 let hits = 0;   // consultas que recibe el ClickUp/Finnegans simulado
@@ -79,7 +82,7 @@ before(async () => {
     }
     if (p === '/clickup/list/901326159292/task') {
       const tasks = [pdvTask('cuA', PDV, 'FORMAS SHOP', cu.statuses, cu.attachments), pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']), pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']), pdvC(),
-        ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)), ...(cx.on ? [pdvX()] : [])].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
+        ...Array.from({ length: cu.bulk }, (_, i) => pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)), ...(cx.on ? [pdvX()] : []), ...(cd.on ? [pdvD()] : [])].flatMap((t) => [t, ...t.subtasks]).filter((t) => Number(t.date_updated) > Number(url.searchParams.get('date_updated_gt') ?? 0));
       const page = Number(url.searchParams.get('page') ?? 0);
       return send({ tasks: tasks.slice(page * 100, page * 100 + 100), last_page: (page + 1) * 100 >= tasks.length });
     }
@@ -87,6 +90,7 @@ before(async () => {
     if (p === '/clickup/task/cuML') return send(pdvTask('cuML', PDV_ML, 'MERCADO LIBRE ', ['pdv']));
     if (p === '/clickup/task/cuB') return send(pdvTask('cuB', PDV_B, 'CORPORATE', ['pdv']));
     if (p === '/clickup/task/cuX') return send(pdvX());
+    if (p === '/clickup/task/cuD') return send(pdvD());
     if (p === '/clickup/task/cuC') return cu.cGone ? send({ err: 'Task not found' }, 404) : send(pdvC());
     if (p.startsWith('/clickup/task/cuN')) { const i = Number(p.slice(17)); return send(pdvTask(`cuN${i}`, BULK(i), 'FORMAS SHOP', ['en el impresor'], [], AYER)); }
     if (/^\/clickup\/task\/cuA-\d+$/.test(p)) return send({ id: p.slice(14), name: 'Artículo', parent: 'cuA', status: { status: 'entregados' }, attachments: p.endsWith('-0') ? cu.artAttachments.map((a) => ({ ...a, url: 'http://localhost:8797/archivos/remito.jpg' })) : [] });
@@ -569,4 +573,76 @@ test('anular un pedido en el CRM lo anula en ClickUp (con confirmación) y desan
   await api('POST', '/integrations/clickup/sync', { full: true });
   assert.notEqual((await api('GET', `/records/order/${x.id}`)).data.record.props.hs_pipeline_stage, ANULADO, 'ClickUp no lo vuelve a anular');
   cx.on = false;
+});
+
+// FP DEMO (la empresa de pruebas de Finnegans) numera igual que Formas y tiene copias de pedidos de verdad con el mismo
+// número. Sus pedidos van aparte («DEMO PEDVTASTP - N», pedidosfin.ts), y también sus totales, fechas, lo que falta
+// facturar y los saldos: scripts/pedidos-totales.mjs los manda con «DEMO » adelante y las filas de saldo con emp '7'.
+test('FP DEMO aparte: con el mismo número que un pedido de verdad, cada total y cada saldo va al pedido de su empresa', async () => {
+  asUser = null;
+  const tok = (await api('POST', '/tokens', { name: `FP DEMO ${RUN}`, source: 'api' })).data.token;
+  const H = { authorization: `Bearer ${tok}` };
+  const n = 800000 + Math.floor(Math.random() * 90000);
+  const ceros = String(n).padStart(8, '0');
+  const alta = (await api('POST', '/hooks/pedidos/totales', { totales: {}, pedidos: {
+    [`PEDVTASTP - ${n}`]: { cliente: `Real ${RUN}` }, [`DEMO PEDVTASTP - ${n}`]: { cliente: `Demo ${RUN}` },
+  } }, H)).data;
+  assert.equal(alta.nuevos?.creados, 2, JSON.stringify(alta));
+  const pedidos = async () => (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${n}`)}`)).data.results;
+  const real = (await pedidos()).find((o) => o.props.unidad_de_negocio === 'FORMAS SHOP');
+  const demo = (await pedidos()).find((o) => o.props.unidad_de_negocio === 'FP DEMO');
+  assert.ok(real && demo, 'uno de cada empresa');
+  const props = async (o) => (await api('GET', `/records/order/${o.id}`)).data.record.props;
+  // Un negocio con el pedido de FP DEMO: su total (de prueba) no le cambia el monto (montos.ts).
+  const deal = (await api('POST', '/records/deal', { props: { dealname: `Negocio FP DEMO ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', amount: 5000 } })).data;
+  assert.equal((await api('POST', '/associations', { from_id: deal.id, to_id: demo.id })).status, 200);
+
+  // Totales y fechas: cada uno al suyo (antes el de FP DEMO no llegaba a ninguno, o caía en el de verdad).
+  const tot = (await api('POST', '/hooks/pedidos/totales', { totales: { [`PEDVTASTP - ${ceros}`]: 1000, [`DEMO PEDVTASTP - ${ceros}`]: 300 },
+    fechas: { [`PEDVTASTP - ${n}`]: '2026-11-03', [`DEMO PEDVTASTP - ${n}`]: '2026-11-01' } }, H)).data;
+  assert.equal(tot.recibidos, 2, JSON.stringify(tot));
+  assert.deepEqual([Number((await props(real)).hs_total_price), Number((await props(demo)).hs_total_price)], [1000, 300]);
+  assert.deepEqual([(await props(real)).fecha_pedido, (await props(demo)).fecha_pedido], ['2026-11-03', '2026-11-01']);
+  assert.equal((await api('GET', `/records/deal/${deal.id}`)).data.record.props.amount, 5000, 'el pedido de FP DEMO no pone el monto del negocio');
+
+  // Saldos: Formas y FP DEMO tienen una factura con el mismo número, una identificación que nombra el mismo pedido y
+  // facturas que dicen el mismo PDV en la descripción. Cada fila va al pedido de su empresa.
+  const f1 = n + 10, f2 = n + 11;
+  const sal = (await api('POST', '/hooks/pedidos/saldos', {
+    porFacturar: { [`PEDVTASTP - ${n}`]: 0, [`DEMO PEDVTASTP - ${n}`]: 100 },
+    factores: { [`PEDVTASTP - ${n}`]: 1.21, [`DEMO PEDVTASTP - ${n}`]: 1.25 },
+    facturas: {
+      [`EMPRE01|FCVTAELECT - ${f1}`]: { pedido: `PEDVTASTP - ${n}`, factor: 1.21 },
+      [`7|FCVTAELECT - ${f1}`]: { pedido: `DEMO PEDVTASTP - ${n}`, factor: 1.21 },
+    },
+    filas: [
+      { emp: '7', ie: `FCVTAELECT - ${f1}`, doc: `FCVTAELECT - ${f1}`, desc: 'texto', importe: 121 },                // por el análisis de facturas
+      { emp: 'EMPRE01', ie: `FCVTAELECT - ${f1}`, doc: `FCVTAELECT - ${f1}`, desc: 'texto', importe: 1210 },
+      { emp: '7', ie: `FC PEDVTASTP-${ceros} 1`, doc: `FCVTAELECT - ${n + 12}`, desc: '', importe: 250 },          // por su identificación
+      { emp: '7', ie: `FC FPREMVTA-${f2} 1`, doc: `FCVTAELECT - ${f2}`, desc: `${n} / SIN OC`, importe: 50 },       // por el PDV de la descripción
+      { emp: 'EMPRE01', ie: `FC FPREMVTA-${f2} 1`, doc: `FCVTAELECT - ${f2}`, desc: `${n} / SIN OC`, importe: 605 },
+      { emp: '7', ie: `NC FCVTAELECT-${f2} 1`, doc: `NCVEE - ${n}`, desc: `NC ANULA FC ${f2}`, importe: -25 },      // la nota, con su factura
+    ] }, H)).data;
+  assert.deepEqual([sal.cruzadas, sal.sin_cruce], [6, 0], JSON.stringify(sal));
+  assert.deepEqual([(await props(real)).saldo_pendiente_de_pago_mxn, (await props(real)).importe_por_facturar], [1500, 0], '1.210 / 1,21 + 605 / 1,21');
+  assert.deepEqual([(await props(demo)).saldo_pendiente_de_pago_mxn, (await props(demo)).importe_por_facturar], [420, 100],
+    '121 / 1,21 + 250 / 1,25 + (50 − 25) / 1,25 + lo que falta facturar');
+});
+
+// Así pasó con el PDV 31748 (20/11/2026): el pedido de FP DEMO entró primero y, como era el único con ese número, la
+// sincronización de ClickUp lo tomó por el de verdad y le cambió la unidad y el pedido de Finnegans.
+test('ClickUp no toma el pedido de FP DEMO con el mismo número: el de verdad es otro pedido', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const tok = (await api('POST', '/tokens', { name: `FP DEMO ClickUp ${RUN}`, source: 'api' })).data.token;
+  await api('POST', '/hooks/pedidos/totales', { totales: {}, pedidos: { [`DEMO PEDVTASTP - ${PDV_D}`]: { cliente: `Demo ${RUN}` } } }, { authorization: `Bearer ${tok}` });
+  cd.on = true;
+  await api('POST', '/integrations/clickup/sync', { full: true });
+  const ps = (await api('GET', `/records/order?q=${encodeURIComponent(`PDV ${PDV_D}`)}`)).data.results;
+  const demo = ps.find((o) => o.props.unidad_de_negocio === 'FP DEMO');
+  const real = ps.find((o) => o.props.unidad_de_negocio === 'FORMAS SHOP');
+  assert.equal(ps.length, 2, JSON.stringify(ps.map((o) => [o.name, o.props.unidad_de_negocio, o.props.pedido_finnegans])));
+  assert.deepEqual([demo?.props.pedido_finnegans, demo?.props.url_clickup ?? null], [`DEMO PEDVTASTP - ${PDV_D}`, null], 'el de FP DEMO queda como estaba');
+  assert.deepEqual([real?.props.pedido_finnegans, real?.props.url_clickup], [`PEDVTASTP - ${PDV_D}`, 'https://app.clickup.com/t/cuD']);
+  cd.on = false;
 });

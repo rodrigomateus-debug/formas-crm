@@ -842,13 +842,15 @@ function VehiculoChip({ v }: { v: Vehiculo }) {
 function AvisoCarga({ a }: { a: { r: Recorrido; paradas: Parada[]; vehiculo: Vehiculo | null; carga: Carga } }) {
   const c = a.carga, estado = estadoCarga(c), quien = a.r.chofer;
   if (!totalBultos(c.total) || !quien) return null;
-  const otros = c.pico.otros ? ` Además van ${textoBultos(c.pico.otros)} de otra medida, que no entran en la cuenta.` : '';
+  const otros = c.pico.otros === 1 ? ' Además va 1 bulto de otra medida, que no entra en la cuenta.'
+    : c.pico.otros > 1 ? ` Además van ${textoBultos(c.pico.otros)} de otra medida, que no entran en la cuenta.` : '';
   if (estado == null) {
     return <div className="aviso info small">Hay bultos anotados en este recorrido. Para saber si entran, cargá en Choferes cuántas cajas entran en la camioneta de {quien}.</div>;
   }
   if (estado === 'ok') return null;
   const cuando = c.donde < 0 ? 'al salir' : `después de ${lindo(a.paradas[c.donde]?.nombre ?? 'una parada')}`;
-  const cajas = desgloseBultos({ ...c.pico, otros: 0 });
+  // «56 de 40×30 y 20 de 60×40».
+  const cajas = desgloseBultos({ ...c.pico, otros: 0 }).replace(' · ', ' y ');
   const camioneta = `la camioneta de ${quien}${a.vehiculo?.modelo ? ` (${a.vehiculo.modelo})` : ''}`;
   return estado === 'excede'
     ? <div className="aviso bad small"><b>No entra en {camioneta}.</b> {cuando[0].toUpperCase() + cuando.slice(1)} lleva {cajas}: el {porciento(c.ocupacion!)} de lo que entra ({textoCapacidad(a.vehiculo!).replace(/^Entran/, 'entran')}). Pasá alguna parada a otro recorrido o revisá los bultos.{otros}</div>

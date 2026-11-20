@@ -154,7 +154,7 @@ function Camioneta({ nombre, v, abierta, onAbrir, onCambio }: { nombre: string; 
         : <span className="ch-cam-foto vacia" aria-hidden="true"><Icon name="truck" size={18} /></span>}
       <div className="grow" style={{ minWidth: 0 }}>
         {datos || cap ? <><div className="ch-cam-tit">{datos || 'Camioneta'}</div>{cap ? <div className="small muted">{cap}</div> : <div className="small warn-text">Falta cuántas cajas entran</div>}</>
-          : <div className="small muted">Sin la camioneta cargada</div>}
+          : <div className="small muted">{v ? 'Falta el modelo y cuántas cajas entran' : 'Sin la camioneta cargada'}</div>}
       </div>
       {!abierta && <button type="button" className="btn sm" onClick={abrir}><Icon name="edit" size={14} />{v ? 'Camioneta' : 'Cargar camioneta'}</button>}
       {abierta && (

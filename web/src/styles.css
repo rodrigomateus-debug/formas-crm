@@ -163,8 +163,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent-ink); w
 /* ---------- Cabecera de módulo: la misma en todas las pantallas ----------
    1. .page-head: título con su cuenta al lado; a la derecha, cómo se ve (.seg) y las acciones.
    2. .tabs: las vistas.
-   3. .toolbar: buscar, los filtros, «Filtros» y, a la derecha (.bar-end), lo que es de la vista (columnas, colapsar…).
-      Los filtros activos van en un renglón propio abajo (.bar-chips).
+   3. .toolbar: los filtros, en el mismo orden en todos los módulos: buscar, unidad de negocio, la persona (propietario /
+      vendedor), los filtros propios del módulo, las fechas, la etiqueta, ver lo terminado, «Filtros» y «Borrar todo». Los
+      filtros activos van en un renglón propio abajo (.bar-chips).
+   4. .toolbar.vista: los controles de vista (agrupar, ordenar, colapsar, tarjeta, columnas), siempre en su propia fila,
+      sin mezclarse con los filtros; a la derecha, los totales.
    Todos los controles miden lo mismo (32 px) y un filtro en uso se marca siempre igual (borde y fondo de acento). */
 .page-head, .toolbar { --control-h: 32px; --control-h-sm: 32px; }
 .page-head { display: flex; align-items: center; gap: 8px; min-height: 36px; margin-bottom: 16px; flex-wrap: wrap; }
@@ -344,6 +347,11 @@ body:has(.barra-vista) .toast { bottom: 76px; }
 .toolbar .bar-end { order: 2; margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .toolbar .board-sum { order: 2; }
 .toolbar .bar-chips { order: 10; flex: 0 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* La fila de vista (pedido de Rodrigo del 20/11/2026): abajo de los filtros, siempre en su propia fila — agrupar, ordenar,
+   colapsar, tarjeta, columnas — y a la derecha los totales o lo que es de configuración. No se mezcla con los filtros. */
+.toolbar.vista { gap: 6px; margin-top: -4px; min-height: 0; }
+.toolbar.vista:empty { display: none; }
+.toolbar.vista .board-sum, .toolbar.vista .vista-fin { margin-left: auto; }
 .toolbar .bar-chips .btn { height: 26px; padding: 0 8px; font-size: 12px; }
 /* Varios botones de prender y apagar que son un solo filtro (las unidades de Producción): pegados. */
 .btn-group { display: inline-flex; flex-wrap: wrap; }

@@ -326,8 +326,12 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
 
   return (
     <>
+      {/* Filtros arriba; los controles de vista (agrupar, ordenar, colapsar, tarjeta) y los totales, en su propia fila. */}
       <div className="toolbar">
         <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar…" value={search} onChange={(e) => onSearch(e.target.value)} aria-label="Buscar" /></div>
+        {tools}
+      </div>
+      <div className="toolbar vista">
         <label className="row small bar-label">Agrupar por
           <Select className="input" style={{ width: 220 }} value={prop} onChange={(e) => onProp(e.target.value)} aria-label="Agrupar por">
             {groupable.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
@@ -346,7 +350,6 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           <MultiPick small options={propsOf(meta, type).filter((p) => !['name', 'hs_order_name'].includes(p.name)).map((p) => ({ value: p.name, label: p.label }))}
             values={cardProps ?? []} onChange={(v) => onCardProps(v.slice(0, 5))} />
         </div>
-        {tools}
         {/* Hasta que llega el tablero, sin «0 en el tablero» (ocupa su lugar igual, para que la barra no salte). */}
         <span className="board-sum" style={board.data ? undefined : { visibility: 'hidden' }}><b className="num">{total.toLocaleString('es-AR')}</b> en el tablero
           {activos != null && <><span className="sep">·</span><b className="num" title="Ni entregados ni anulados">{activos.toLocaleString('es-AR')}</b> {activos === 1 ? 'activo' : 'activos'}</>}

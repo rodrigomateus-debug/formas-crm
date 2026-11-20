@@ -176,10 +176,14 @@ export function RelacionFilter({ value, onChange }: { value: string[]; onChange:
   );
 }
 
-export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, onOwners, onDates, onTags, onUnidades, onRelacion, onClear, extra }: {
+// La fila de filtros, en el mismo orden en todos los módulos (pedido de Rodrigo del 20/11/2026: «las mismas cosas en los
+// mismos lugares»): unidad de negocio, la persona (propietario), los filtros propios del módulo (`propios`), las fechas, la
+// etiqueta y ver lo terminado (`terminados`); después, «Filtros» y «Borrar todo». Los controles de vista (agrupar, ordenar,
+// colapsar, columnas) no van acá: van en su propia fila, abajo (.toolbar.vista).
+export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, onOwners, onDates, onTags, onUnidades, onRelacion, onClear, extra, propios, terminados }: {
   type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[]; unidades: string[]; relacion?: string[];
   onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onUnidades: (u: string[]) => void;
-  onRelacion?: (r: string[]) => void; onClear: () => void; extra?: boolean;
+  onRelacion?: (r: string[]) => void; onClear: () => void; extra?: boolean; propios?: ReactNode; terminados?: ReactNode;
 }) {
   const { meta } = useMeta();
   const name = (v: string) => (v === 'me' ? 'Yo' : v === 'none' ? 'Sin asignar' : meta.users.find((u) => String(u.id) === v)?.name ?? v);
@@ -191,7 +195,6 @@ export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, 
   const tagName = (v: string) => typeTags.find((t) => String(t.id) === v)?.name ?? v;
   return (
     <>
-      {conRelacion(type) && onRelacion && <RelacionFilter value={rel} onChange={onRelacion} />}
       <UnidadFilter value={unidades} onChange={onUnidades} />
       <Pop label={ownerLabel} on={owners.length > 0}>
         {() => (
@@ -203,6 +206,8 @@ export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, 
           </div>
         )}
       </Pop>
+      {conRelacion(type) && onRelacion && <RelacionFilter value={rel} onChange={onRelacion} />}
+      {propios}
       {dateChipsFor(type).map((prop) => {
         const chip = DATE_CHIPS[prop];
         const cur = chip.presets.find((p) => p.key === dates[prop]);
@@ -233,6 +238,7 @@ export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, 
           )}
         </Pop>
       )}
+      {terminados}
       {any && <button className="btn ghost qf-clear" onClick={onClear}>Borrar todo</button>}
     </>
   );

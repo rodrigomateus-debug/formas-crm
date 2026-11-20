@@ -177,14 +177,15 @@ export default function Tasks() {
       <div className="page-head">
         <h1>Tareas {total != null && <span className="muted small num">{total.toLocaleString('es-AR')}</span>}</h1>
         <div className="seg" role="group" aria-label="Vista">
+          <button type="button" className={vista === 'lista' ? 'on' : ''} aria-pressed={vista === 'lista'} onClick={() => { setVista('lista'); guardarLocal('crm.tasks.vista', 'lista'); }}><Icon name="table" size={14} />Tabla</button>
           <button type="button" className={vista === 'tablero' ? 'on' : ''} aria-pressed={vista === 'tablero'} onClick={() => { setVista('tablero'); guardarLocal('crm.tasks.vista', 'tablero'); }}><Icon name="board" size={14} />Tablero</button>
-          <button type="button" className={vista === 'lista' ? 'on' : ''} aria-pressed={vista === 'lista'} onClick={() => { setVista('lista'); guardarLocal('crm.tasks.vista', 'lista'); }}><Icon name="table" size={14} />Lista</button>
         </div>
         <button className="btn primary" onClick={() => setNueva(true)}><Icon name="plus" size={16} />Nueva tarea</button>
       </div>
       {vista === 'lista' && <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={`tab ${tab === k ? 'on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div>}
       <div className="toolbar">
         <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar en título o detalle…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar" /></div>
+        <UnidadFilter value={unidades} onChange={setUnidades} />
         <div className="bar-select">
           <Select className={`input${owner !== String(meta.me.id) ? ' on' : ''}`} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="De quién">
             <option value={String(meta.me.id)}>Mis tareas</option>
@@ -197,15 +198,17 @@ export default function Tasks() {
             {OBJETO.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </Select>
         </div>
-        <UnidadFilter value={unidades} onChange={setUnidades} />
-        {vista === 'tablero' && (
+      </div>
+      {/* Los controles de vista, en su propia fila (como en el resto de los módulos). */}
+      {vista === 'tablero' && <div className="toolbar vista">
+        {(
           <label className="row small tarea-agrupar">Agrupar por
             <Select className="input" value={agrupar} onChange={(e) => { setAgrupar(e.target.value as Agrupar); guardarLocal('crm.tasks.agrupar', e.target.value); }} aria-label="Agrupar por">
               {AGRUPAR.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </Select>
           </label>
         )}
-      </div>
+      </div>}
 
       {vista === 'tablero' ? (
         <div className={`board tareas${list.loading && list.data ? ' cargando' : ''}`} aria-busy={list.loading}>

@@ -727,6 +727,16 @@ async function boardOrder(meta: Meta, type: ObjectType, q: Record<string, string
   return `(${expr} IS NULL), ${expr} ${q.dir === 'asc' ? 'ASC' : 'DESC'}, r.id DESC`;
 }
 
+// Negocios activos (en una etapa que no es de cierre) de cada pipeline, para el selector de pipeline de Negocios (pedido de
+// Rodrigo del 20/11/2026). Cuenta lo mismo que ve cada uno en la lista: sus pipelines y, en el perfil Ventas, lo suyo.
+api.get('/deals/activos', async (c) => {
+  const db = c.env.DB;
+  const { whereSql, binds } = await buildWhere(new Meta(db), c.get('ctx'), 'deal', {});
+  const { results } = await db.prepare(`SELECT r.pipeline_id, COUNT(*) AS n FROM records r JOIN stages s ON s.id = r.stage_id
+    WHERE ${whereSql} AND s.is_closed = 0 GROUP BY r.pipeline_id`).bind(...binds).all<{ pipeline_id: string; n: number }>();
+  return c.json(Object.fromEntries(results.map((r) => [r.pipeline_id, r.n])));
+});
+
 api.get('/board', async (c) => {
   const q = c.req.query();
   const db = c.env.DB;

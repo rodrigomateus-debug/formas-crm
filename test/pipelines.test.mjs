@@ -184,6 +184,22 @@ test('sin equipo, Negocios arranca en el pipeline donde tiene más negocios', as
   asUser = null;
 });
 
+test('el selector de pipeline cuenta los negocios activos: sin los cerrados y, en Ventas, solo lo que ve', async () => {
+  const activos = async (como = null) => { asUser = como; const r = await api('GET', '/deals/activos'); asUser = null; return r.data.default ?? 0; };
+  const ana = `activos.${RUN}@formas.ar`;
+  await api('POST', '/users', { email: ana, name: `Activos ${RUN}`, profile: 'comercial', role: 'member' });
+  const otra = (await api('POST', '/users', { email: `otra.activos.${RUN}@formas.ar`, name: `Otra ${RUN}`, profile: 'comercial', role: 'member' })).data;
+  const [todos, deAna] = [await activos(), await activos(ana)];
+  const negocio = async (owner) => (await api('POST', '/records/deal', { props: { dealname: `Activo ${RUN}`, pipeline: 'default', dealstage: 'appointmentscheduled', owner_id: owner } })).data;
+  const suyo = await negocio((await api('GET', '/meta')).data.users.find((u) => u.email === ana).id);
+  await negocio(otra.id);
+  assert.equal(await activos(), todos + 2);
+  assert.equal(await activos(ana), deAna + 1, 'el de otra vendedora no se cuenta');
+  const ganado = await api('PATCH', `/records/deal/${suyo.id}`, { props: { dealstage: 'closedwon' } });
+  assert.equal(ganado.status, 200, JSON.stringify(ganado.data));
+  assert.equal(await activos(), todos + 1, 'cierre ganado ya no es activo');
+});
+
 test('acciones masivas: todos los filtrados, tareas en lote y errores parciales sin cortar la tanda', async () => {
   asUser = null;
   const tag = `Masivo ${RUN}`;

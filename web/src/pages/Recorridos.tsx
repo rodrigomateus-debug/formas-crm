@@ -24,6 +24,7 @@ export interface Encargo {
   record_id: number | null; llevar: ItemEnc[]; retirar: ItemEnc[]; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
   notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
   origen: string; created_at: string; chofer?: string | null; parada?: string; hora?: string | null;
+  junto_a?: string | null;   // a mano (Logística): la parada con la que va ese día, o «aparte»; sin nada, lo decide el Hub
   anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (NotasLogistica.tsx)
   bultos?: Bultos | null;   // los bultos que anotó Logística en su tarjeta del cronograma, por medida
 }
@@ -111,7 +112,7 @@ export default function RecorridosPage() {
       </div>
       {tab === 'destinos' && <div className="rc-tab-acciones" ref={setSlot} />}
       </div>
-      {tab === 'agenda' && <Agenda version={version} puede={puede} onNuevo={(destino, fecha) => setNuevo({ destino, fecha })} onAbrir={(id) => ir({ encargo: String(id) })} />}
+      {tab === 'agenda' && <Agenda version={version} puede={puede} onCambio={cambio} onNuevo={(destino, fecha) => setNuevo({ destino, fecha })} onAbrir={(id) => ir({ encargo: String(id) })} />}
       {tab === 'encargos' && <ListaEncargos version={version} onAbrir={(id) => ir({ encargo: String(id) })} />}
       {tab === 'destinos' && <DestinosTab slot={slot} admin={meta.me.role === 'admin' ? <AdminRecorridos abierto /> : null} />}
       {nuevo && <EncargoModal inicial={nuevo} onClose={() => { setNuevo(null); ir({ nuevo: null }); }} onListo={() => { setNuevo(null); ir({ nuevo: null }); cambio(); }} />}
@@ -152,21 +153,37 @@ const ZonaTxt = ({ zona, localidad }: { zona?: Zona | null; localidad?: string |
 // ---------- Próximos días ----------
 
 interface ParadaAgenda { clave: string; nombre: string; localidad: string | null; direccion: string | null; tipos: Record<string, number>; detalle: string[]; encargos: Encargo[];
-  anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; zona: Zona | null; dominio: string | null }
+  anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; zona: Zona | null; dominio: string | null;
+  juntar?: SitioJuntar[] }
+// Una parada de ese día que puede ser el mismo lugar (la misma empresa o el mismo nombre, en otra dirección): «Juntar».
+export interface SitioJuntar { clave: string; nombre: string; direccion: string | null }
 interface DiaAgenda { fecha: string; feriado: string | null; armado: boolean; paradas: ParadaAgenda[] }
 const TIPOS: Array<[string, string, string]> = [['entrega', 'entrega', 'entregas'], ['retiro', 'retiro', 'retiros'], ['egreso', 'egreso', 'egresos'], ['encargo', 'encargo', 'encargos']];
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const movimientosTxt = (t: Record<string, number>) => TIPOS.filter(([k]) => t[k]).map(([k, uno, varios]) => (t[k] > 1 ? `${t[k]} ${varios}` : uno)).join(' · ');
 const ORDEN_ZONA = (z: Zona | null) => (z ? ZONAS.indexOf(z) : ZONAS.length);
 
-function Agenda({ version, puede, onNuevo, onAbrir }: { version: number; puede: boolean; onNuevo: (d: DestinoOpcion | null, fecha: string) => void; onAbrir: (id: number) => void }) {
+function Agenda({ version, puede, onNuevo, onAbrir, onCambio }: { version: number; puede: boolean; onNuevo: (d: DestinoOpcion | null, fecha: string) => void; onAbrir: (id: number) => void; onCambio: () => void }) {
+  const toast = useToast();
   const [datos, setDatos] = useState<{ hoy: string; dias: DiaAgenda[] } | null>(null);
+  const [juntando, setJuntando] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [buscar, setBuscar] = useState('');
   const [zona, setZona] = useState<Zona | 'otros' | null>(null);
   useEffect(() => { http<{ hoy: string; dias: DiaAgenda[] }>('GET', `/recorridos/agenda${qs({ dias: 8 })}`).then((d) => { setDatos(d); setError(''); }, (e) => setError((e as Error).message)); }, [version]);
   if (error) return <div className="aviso warn small">{error}</div>;
   if (!datos) return <div className="empty plain">Cargando los próximos días…</div>;
+  // «¿Es el mismo lugar?»: sus encargos van a la parada elegida, o quedan aparte y no se vuelve a preguntar.
+  async function juntar(fecha: string, p: ParadaAgenda, con: SitioJuntar | null) {
+    setJuntando(`${fecha}|${p.clave}`);
+    try {
+      await juntarEncargos(p.encargos, con ? con.clave : APARTE);
+      toast(con ? `${lindo(p.nombre)} va junto con ${lindo(con.nombre)}.` : `${lindo(p.nombre)} queda como otra parada.`, false,
+        { label: 'Deshacer', onClick: () => { void juntarEncargos(p.encargos, null).then(onCambio, (e) => toast((e as Error).message, true)); } });
+    } catch (e) { toast((e as Error).message, true); }
+    setJuntando(null);
+    onCambio();
+  }
   const q = buscar.trim().toLowerCase();
   const filtra = (p: ParadaAgenda) => (!q || [p.nombre, p.localidad, p.direccion, p.zona && nombreZona(p.zona), ...p.detalle].some((x) => (x ?? '').toLowerCase().includes(q)))
     && (!zona || (zona === 'otros' ? !p.zona : p.zona === zona));
@@ -235,6 +252,18 @@ function Agenda({ version, puede, onNuevo, onAbrir }: { version: number; puede: 
                               <span className="rc-talon-que">{resumen(e)}</span>
                             </button>
                           ))}
+                          {p.juntar?.length ? (
+                            <div className="rc-juntar" role="group" aria-label={`¿${lindo(p.nombre)} es el mismo lugar que otra parada?`}>
+                              <span><b>¿Es el mismo lugar?</b> Ese día también van a{p.juntar.length > 1 ? ':' : ''}</span>
+                              {p.juntar.map((j) => (
+                                <div key={j.clave} className="rc-juntar-op">
+                                  <span><b>{lindo(j.nombre)}</b>{j.direccion ? ` · ${j.direccion}` : ''}</span>
+                                  <button type="button" className="btn sm" disabled={juntando != null} onClick={() => juntar(d.fecha, p, j)}>Juntar</button>
+                                </div>
+                              ))}
+                              <button type="button" className="cr-link" disabled={juntando != null} onClick={() => juntar(d.fecha, p, null)}>No, son lugares distintos</button>
+                            </div>
+                          ) : null}
                         </li>
                       );
                     })}
@@ -250,6 +279,13 @@ function Agenda({ version, puede, onNuevo, onAbrir }: { version: number; puede: 
     </>
   );
 }
+// Juntar paradas (pedido de Rodrigo del 20/11/2026): los encargos de una parada van con la de otro lugar ese día (la clave
+// de esa parada), quedan aparte aunque el Hub los juntaría (APARTE), o lo vuelve a decidir el Hub (null). Lo hace Logística.
+export const APARTE = 'aparte';
+export async function juntarEncargos(encs: Array<Pick<Encargo, 'id'>>, con: string | null) {
+  for (const e of encs) await http('PATCH', `/recorridos/encargos/${e.id}`, { junto_a: con });
+}
+
 export const resumen = (e: Pick<Encargo, 'llevar' | 'retirar' | 'notas'>) => [
   e.llevar.length ? `Lleva ${e.llevar.map(itemTexto).join(', ')}` : '', e.retirar.length ? `Retira ${e.retirar.map(itemTexto).join(', ')}` : '',
 ].filter(Boolean).join(' · ') || e.notas || '';

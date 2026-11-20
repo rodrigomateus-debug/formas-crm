@@ -1241,7 +1241,11 @@ export interface Parada {
   observaciones_por?: string | null;   // quién la escribió
   sitio?: string | null;           // en un pedido que va a varias direcciones, cómo se llama este lugar («Central», «Sucursal Santa Fe»)
   repartida?: boolean;             // sus cantidades son las de esta dirección (el reparto del pedido), no las del pedido entero
+  // Una parada que es solo de encargos y que puede ser el mismo lugar que otra de ese día (la misma empresa o el mismo
+  // nombre, con otra dirección): se ofrece «Juntar» (`parecidas`).
+  juntar?: SitioJuntar[];
 }
+export interface SitioJuntar { clave: string; nombre: string; direccion: string | null }
 export interface LugarInfo { nombre: string; horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null; coordinacion: string | null }
 export interface Visita { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string }
 // `a_mano`: alguien ordenó sus paradas en la Ruta del día. Si no, se ordena solo por el recorrido más corto.
@@ -1397,6 +1401,14 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
     }
     p.encargos.push(e);
     if (!p.horario && ventanaDe(e.horario)) { p.horario = ventanaDe(e.horario); p.horario_texto = e.horario; }
+  }
+  // Las paradas que son solo de encargos (que nadie juntó ni separó a mano) y pueden ser el mismo lugar que otra: «Juntar».
+  for (const p of lista_) {
+    if (p.movimientos.length || p.expreso || !p.encargos.length || p.encargos.some((e) => e.junto_a)) continue;
+    // Entre dos paradas solo de encargos pregunta una: la que tiene menos (con los mismos, la de clave mayor).
+    const otras = parecidas(p, lista_.filter((x) => !x.expreso && (x.movimientos.length > 0 || x.encargos.length > p.encargos.length
+      || (x.encargos.length === p.encargos.length && x.clave < p.clave))));
+    if (otras.length) p.juntar = otras.slice(0, 3).map((x) => ({ clave: x.clave, nombre: x.nombre, direccion: x.direccion }));
   }
   // Lo que dice la libreta del lugar al que se va (horario, contacto, observaciones), reconocido por calle y altura.
   const porDir = await lugaresPorDireccion(db, lista_.filter((p) => p.direccion && !p.lugar).map((p) => p.direccion!));
@@ -1721,6 +1733,9 @@ export interface EncargoDia {
   record_id: number | null; llevar: ItemEnc[]; retirar: ItemEnc[]; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
   notas: string | null; urgente: boolean; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null;
   origen: string; created_at: string;
+  // A mano (Logística): la clave de la parada con la que va ese día, o «aparte» (su propia parada aunque el Hub la
+  // juntaría). Sin nada, lo decide el Hub (`anfitrion`). Migración 0104.
+  junto_a?: string | null;
   quien_foto?: string | null;   // la foto de Google de quien lo pidió: para la app del chofer, que no tiene la lista de usuarios
   chofer?: string | null;   // en la semana: el chofer del recorrido en el que cae su parada
   parada?: string;          // en la semana: la parada en la que cae
@@ -1732,6 +1747,7 @@ export interface EncargoFila {
   id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; quien_foto?: string | null; destino: string; direccion: string | null; lugar_id: number | null;
   company_id: number | null; record_id: number | null; llevar: string; retirar: string; desde: string | null; hacia: string | null; horario: string | null; contacto: string | null;
   notas: string | null; urgente: number; estado: EstadoEnc; motivo: string | null; remito: number | null; hecho_chofer: string | null; hecho_por: number | null; origen: string; created_at: string;
+  junto_a?: string | null;
 }
 export const SELECT_ENC = 'SELECT e.*, COALESCE(u.name, e.pedido_por) AS quien, u.photo_url AS quien_foto FROM encargos e LEFT JOIN users u ON u.id = e.user_id';
 const itemsDe = (s: string): ItemEnc[] => (lista(s) as ItemEnc[]).filter((x) => x && typeof x.que === 'string');
@@ -1739,12 +1755,15 @@ export const aEncargo = (r: EncargoFila): EncargoDia => ({
   id: r.id, fecha: r.fecha, user_id: r.user_id, quien: r.quien, destino: r.destino, direccion: r.direccion, lugar_id: r.lugar_id, company_id: r.company_id, record_id: r.record_id,
   llevar: itemsDe(r.llevar), retirar: itemsDe(r.retirar), desde: r.desde, hacia: r.hacia, horario: r.horario, contacto: r.contacto, notas: r.notas, urgente: !!r.urgente,
   estado: r.estado, motivo: r.motivo, remito: r.remito, hecho_chofer: r.hecho_chofer, hecho_por: r.hecho_por, origen: r.origen, created_at: r.created_at,
-  quien_foto: r.quien_foto ?? null,
+  quien_foto: r.quien_foto ?? null, junto_a: r.junto_a ?? null,
 });
 // Los de esos días, sin los cancelados ni el historial de la planilla.
 export async function encargosEntre(db: D1Database, desde: string, hasta: string) {
   // El historial que se trajo de la planilla vieja (origen «planilla») no va: lo de esos días ya está en ClickUp.
-  const { results } = await db.prepare(`${SELECT_ENC} WHERE e.fecha BETWEEN ? AND ? AND e.estado <> 'cancelado' AND e.origen = 'hub' ORDER BY e.id`).bind(desde, hasta).all<EncargoFila>();
+  // Los que se juntaron a mano con otra parada, al final: cuando se los ubica, esa parada ya tiene que estar (puede ser la
+  // de otro encargo).
+  const { results } = await db.prepare(`${SELECT_ENC} WHERE e.fecha BETWEEN ? AND ? AND e.estado <> 'cancelado' AND e.origen = 'hub'
+    ORDER BY (COALESCE(e.junto_a, '${APARTE}') <> '${APARTE}'), e.id`).bind(desde, hasta).all<EncargoFila>();
   const encs = results.map(aEncargo);
   // Las anotaciones de logística de siempre del lugar al que va cada encargo (por su empresa, su lugar de la libreta o su nombre).
   const notas = await notasPara(db, encs.map((e) => ({ destino: { company_id: e.company_id, lugar_id: e.lugar_id, nombre: e.destino } })));
@@ -1768,21 +1787,69 @@ function localidad(d: string | null | undefined) {
   const l = p[0] ?? '';
   return /^(caba|c a b a|capital federal|ciudad autonoma.*)$/.test(l) ? 'caba' : l;
 }
+const localidadesCompatibles = (a: string | null | undefined, b: string | null | undefined) => {
+  const la = localidad(a), lb = localidad(b);
+  return !la || !lb || la === lb || la.includes(lb) || lb.includes(la);
+};
+const nombresIguales = (a: string, b: string) => { const kb = new Set(clavesDeNombre(b)); return clavesDeNombre(a).some((k) => kb.has(k)); };
+// La misma empresa del CRM o el mismo nombre («IMPREFAS» de la libreta es el impresor IMPREFAS de ClickUp), sin mirar la
+// dirección.
+const mismoDueno = (a: Sitio, b: Sitio) => !!(a.company_id && a.company_id === b.company_id) || nombresIguales(a.nombre, b.nombre);
+
+// Para reconocer la misma dirección escrita distinto: la calle (sus palabras, sin «Av.», «Calle», títulos ni artículos) y
+// la altura (sin el punto de los miles, el «N°» ni el cero adelante). «Av. del Libertador 1.234», «Libertador N° 1234» y
+// «Avda. Libertador 1234 piso 3» son calle «libertador», altura «1234». Null si no tiene altura.
+const TIPO_CALLE = new Set(['av', 'avenida', 'avda', 'calle', 'boulevard', 'bulevar', 'blvd', 'bv', 'bvd', 'pasaje', 'pje', 'psje']);
+const SOBRAN = new Set(['del', 'de', 'la', 'las', 'los', 'el', 'presidente', 'pres', 'pte', 'general', 'gral', 'ingeniero', 'ing', 'doctor', 'dr', 'coronel', 'cnel',
+  'teniente', 'tte', 'gobernador', 'gdor', 'almirante', 'alte', 'comandante', 'cmdte', 'capitan', 'cap', 'sargento', 'sgto', 'intendente', 'padre', 'pbro']);
+export function calleYAltura(direccion: string): { calle: string[]; altura: string } | null {
+  const t = norm(limpiarDireccion(direccion.split(',')[0]))
+    .replace(/(\d)\.(\d{3})(?!\d)/g, '$1$2')
+    .replace(/\b(n|nro|num|numero)\s*[°º.:]*\s*(?=\d)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  // La altura es el primer número que viene después de alguna palabra y que no es parte del nombre («Calle 25 de Mayo
+  // 1234», «9 de Julio 300»: 1234 y 300).
+  const i = t.findIndex((x, k) => /^\d{1,6}$/.test(x) && t[k + 1] !== 'de' && t.slice(0, k).some((y) => /[a-z]/.test(y)));
+  if (i < 0) return null;
+  const todas = t.slice(0, i).map((x) => (x === 'sta' ? 'santa' : x === 'sto' ? 'santo' : x));
+  const calle = todas.filter((x) => !TIPO_CALLE.has(x) && !SOBRAN.has(x));
+  return { calle: calle.length ? calle : todas, altura: String(Number(t[i])) };
+}
+// La misma calle y altura aunque estén escritas distinto: la misma altura y la calle igual, que termina igual («Juan B.
+// Justo» y «Justo», «Pte. Juan D. Perón» y «Perón») o que una está entera en la otra. «San Martín» y «Martín García» no.
+export function mismaCalle(a: string, b: string) {
+  const x = calleYAltura(a), y = calleYAltura(b);
+  if (!x || !y || x.altura !== y.altura) return false;
+  if (x.calle.join(' ') === y.calle.join(' ')) return true;
+  const ux = x.calle[x.calle.length - 1], uy = y.calle[y.calle.length - 1];
+  if (ux === uy && ux.length >= 4 && /[a-z]/.test(ux)) return true;
+  const [corta, larga] = x.calle.length <= y.calle.length ? [x.calle, y.calle] : [y.calle, x.calle];
+  return corta.some((w) => w.length >= 4 && /[a-z]/.test(w)) && corta.every((w) => larga.includes(w));
+}
+
 // Son el mismo lugar si son el mismo destino de la libreta; si las dos tienen calle y altura, manda la dirección (dos
 // lugares de Nestlé son distintos, dos empresas en el mismo edificio son la misma parada), y la misma calle y altura en
 // dos localidades distintas son dos lugares; si no, la misma empresa o el mismo nombre («IMPREFAS» de la libreta es el
 // impresor IMPREFAS de ClickUp).
+// La dirección escrita distinto («Av. del Libertador 1.234» y «Libertador 1234», pedido de Rodrigo del 20/11/2026: un
+// encargo a BigSur quedaba aparte de la entrega a BS Energy) cuenta como la misma si además es la misma empresa o el mismo
+// nombre, o las dos dicen la misma localidad: sin eso, «Mitre 500» puede ser otra calle Mitre.
 export function mismoSitio(a: Sitio, b: Sitio) {
   if (a.lugar_id && a.lugar_id === b.lugar_id) return true;
   const ca = a.direccion ? claveCalle(a.direccion) : '', cb = b.direccion ? claveCalle(b.direccion) : '';
   if (ca && cb) {
-    if (ca !== cb) return false;
-    const la = localidad(a.direccion), lb = localidad(b.direccion);
-    return !la || !lb || la === lb || la.includes(lb) || lb.includes(la);
+    if (!localidadesCompatibles(a.direccion, b.direccion)) return false;
+    if (ca === cb) return true;
+    const la = localidad(a.direccion);
+    return mismaCalle(a.direccion!, b.direccion!) && (mismoDueno(a, b) || (!!la && la === localidad(b.direccion)));
   }
-  if (a.company_id && a.company_id === b.company_id) return true;
-  const kb = new Set(clavesDeNombre(b.nombre));
-  return clavesDeNombre(a.nombre).some((k) => kb.has(k));
+  return mismoDueno(a, b);
+}
+// Las paradas de ese día que pueden ser el mismo lugar que `yo` aunque la dirección no coincida: la misma empresa o el
+// mismo nombre, sin localidades distintas. Para ofrecer «Juntar» (Ruta del día, Próximos días): el Hub no las junta solo
+// porque pueden ser dos sucursales.
+export function parecidas<T extends Sitio>(yo: Sitio, sitios: T[]): T[] {
+  return sitios.filter((s) => s.clave && s.clave !== yo.clave && !mismoSitio(yo, s) && mismoDueno(yo, s) && localidadesCompatibles(yo.direccion, s.direccion));
 }
 // La parada propia de un encargo: la de su lugar de la libreta, la de su empresa (la misma que la de un retiro o un egreso
 // en ese proveedor o impresor) o la de su dirección.
@@ -1792,9 +1859,14 @@ export const claveEncargo = (e: Pick<EncargoDia, 'company_id' | 'lugar_id' | 'di
   const calle = e.direccion ? claveCalle(e.direccion) : '';
   return calle ? `d:${calle}${localidad(e.direccion) ? `|${localidad(e.direccion)}` : ''}` : `d:${claveProveedor(e.destino) || 'sin-destino'}`;
 };
-// En qué parada cae un encargo: la del mismo lugar, si ese día ya se va ahí; si no, la suya. Una parada con la misma
-// clave pero en otra dirección (otra sucursal de la misma empresa) no es la misma: el encargo va aparte.
+// «Separado a mano»: el encargo va en su propia parada aunque el Hub lo juntaría con otra (`junto_a`).
+export const APARTE = 'aparte';
+// En qué parada cae un encargo. Lo que decidió Logística a mano (`junto_a`): aparte, o con la parada que eligió si ese día
+// está. Si no, la del mismo lugar, si ese día ya se va ahí; si no, la suya. Una parada con la misma clave pero en otra
+// dirección (otra sucursal de la misma empresa) no es la misma: el encargo va aparte.
 export function anfitrion(e: EncargoDia, sitios: Sitio[]) {
+  if (e.junto_a === APARTE) return `x:${e.id}`;
+  if (e.junto_a && sitios.some((s) => s.clave === e.junto_a)) return e.junto_a;
   const propia = claveEncargo(e);
   const yo: Sitio = { nombre: e.destino, company_id: e.company_id, lugar_id: e.lugar_id, direccion: e.direccion };
   const misma = sitios.find((s) => s.clave === propia);

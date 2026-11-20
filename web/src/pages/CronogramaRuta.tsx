@@ -8,7 +8,7 @@ import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
 import { idsYLugares, lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
 import { LineaNota } from '../NotasLogistica';
-import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
+import { APARTE, EncargoModal, abrirRemitoEgreso, itemTexto, juntarEncargos, type Encargo, type SitioJuntar } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
 import { SIN_BULTOS, cargaRecorrido, desgloseBultos, fotoVehiculo, sumarBultos, textoBultos, textoCapacidad, tieneCapacidad, totalBultos, vehiculoDe, type Bultos, type Carga, type Vehiculo } from '../bultos';
 
@@ -33,6 +33,9 @@ export interface Parada {
   espera_hasta?: number | null;   // con una hora fijada «a las», hasta cuándo se espera (ruta.ts)
   sugerencia: { record_id: number; sugerida: string; motivo: string } | null;
   visita?: { resultado: 'hecho' | 'no_se_pudo' | 'salteada'; motivo: string | null; nota: string | null; chofer: string | null; at: string } | null;
+  // Solo de encargos y puede ser el mismo lugar que otra parada de ese día (la misma empresa o el mismo nombre, en otra
+  // dirección): «¿Es el mismo lugar?» con «Juntar».
+  juntar?: SitioJuntar[];
 }
 export const MOTIVO: Record<string, string> = { nadie: 'No había nadie', cerrado: 'Estaba cerrado', direccion: 'No encontró la dirección', rechazo: 'No lo quisieron recibir', no_listo: 'No estaba listo', otro: 'No se pudo' };
 const horaDe = (iso: string) => new Date(iso).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
@@ -122,6 +125,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   const [panel, setPanel] = useState<'chofer' | 'salida' | 'fin' | null>(null);
   const [expresando, setExpresando] = useState<string | null>(null);
   const [encargo, setEncargo] = useState<number | null>(null);   // el encargo que se abrió para ver o cambiar
+  const [juntando, setJuntando] = useState<string | null>(null);   // la parada que se está por juntar con otra («Juntar con…»)
+  const [ocupadoJuntar, setOcupadoJuntar] = useState(false);
   const arrastre = useRef<string | null>(null);
   // Sobre qué parada se está soltando la que se arrastra; `abajo`: queda después de ella (se arrastra hacia abajo).
   const [sobre, setSobre] = useState<{ clave: string; abajo: boolean } | null>(null);
@@ -221,6 +226,11 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
   }, [armadas, reales]);
 
   const act = armadas[Math.min(activa, armadas.length - 1)];
+  // El número de una parada en su recorrido («3»; con varios recorridos, «R2 · 3»), para elegirla en «Juntar con…».
+  const numeroDe = (clave: string) => {
+    for (const a of armadas) { const k = a.paradas.findIndex((x) => x.clave === clave); if (k >= 0) return armadas.length > 1 ? `R${a.i + 1} · ${k + 1}` : String(k + 1); }
+    return null;
+  };
   // Guarda ya y vuelve a pedir la ruta: hace falta cuando el cambio necesita algo del servidor (ubicar en el mapa el lugar
   // de salida que se eligió).
   // Fijar (o sacar) la hora de una parada: lo que estaba sin guardar se guarda primero, y el recorrido vuelve del servidor
@@ -279,8 +289,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     toast(`${mejor ? `Recorrido reordenado: unos ${duracion(antes - despues)} menos.` : 'Ya era el recorrido más corto.'} Desde ahora se ordena solo.`);
   };
   // Un panel abierto por vez en toda la lista: la hora, la dirección, el expreso o el punto en el mapa.
-  const abrirPanel = (que: 'hora' | 'direccion' | 'expreso' | 'ubicar' | null, clave: string) => {
+  const abrirPanel = (que: 'hora' | 'direccion' | 'expreso' | 'ubicar' | 'juntar' | null, clave: string) => {
     setFijando(que === 'hora' ? clave : null); setEditando(que === 'direccion' ? clave : null); setExpresando(que === 'expreso' ? clave : null);
+    setJuntando(que === 'juntar' ? clave : null);
     setUbicando(que === 'ubicar' ? { clave } : null);
     if (que === 'ubicar') { setCaliente(clave); requestAnimationFrame(() => document.querySelector('.cr-mapa')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })); }
   };
@@ -321,6 +332,27 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     try { await http('DELETE', `/cronograma/punto${qs({ direccion: p.direccion })}`); toast(`${p.nombre}: se vuelve a buscar en el mapa por su dirección.`); } catch (e) { toast((e as Error).message, true); }
     setUbicando(null);
     void cargar();
+  }
+  // Juntar paradas (pedido de Rodrigo del 20/11/2026): los encargos de una parada van en otra de ese día (su clave) o
+  // quedan como otra parada (APARTE). Lo que estaba sin guardar del orden se guarda primero; la ruta vuelve del servidor
+  // ya armada. El aviso trae «Deshacer» (cada encargo vuelve a como estaba).
+  async function juntar(encs: Encargo[], con: string, texto: string) {
+    if (ocupadoJuntar || !encs.length) return;
+    const antes = encs.map((e) => ({ id: e.id, junto_a: e.junto_a ?? null }));
+    setOcupadoJuntar(true);
+    try {
+      const pend = porGuardar.current;
+      if (sucio.current && pend) { sucio.current = false; porGuardar.current = null; await http('PUT', '/cronograma/ruta', pend); }
+      await juntarEncargos(encs, con);
+      const deshacer = async () => {
+        try { for (const a of antes) await http('PATCH', `/recorridos/encargos/${a.id}`, { junto_a: a.junto_a }); } catch (e) { toast((e as Error).message, true); }
+        void cargar(); onCambio();
+      };
+      toast(texto, false, { label: 'Deshacer', onClick: () => { void deshacer(); } });
+      setJuntando(null);
+    } catch (e) { toast((e as Error).message, true); }
+    setOcupadoJuntar(false);
+    void cargar(); onCambio();
   }
   async function sugerencia(p: Parada, aceptar: boolean) {
     try { await http('POST', '/cronograma/sugerencia', { record_id: p.sugerencia!.record_id, aceptar }); toast(aceptar ? 'Dirección de entrega actualizada en el pedido.' : 'Queda la dirección del pedido.'); } catch (e) { toast((e as Error).message, true); }
@@ -430,7 +462,12 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
           {act.paradas.map((p, i) => {
             const s = act.sim.paradas[i], todo = hechaParada(p), nombre = lindo(p.nombre);
             const entregas = [...new Set(p.movimientos.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))];
-            const abierto = fijando === p.clave || editando === p.clave || expresando === p.clave || ubicando?.clave === p.clave;
+            const abierto = fijando === p.clave || editando === p.clave || expresando === p.clave || ubicando?.clave === p.clave || juntando === p.clave;
+            // Una parada que es solo de encargos se puede juntar con otra de ese día; un encargo que comparte la parada con
+            // otra cosa se puede separar.
+            const encs = p.encargos ?? [];
+            const puedeJuntar = puede && encs.length > 0 && !p.movimientos.length && !p.expreso && datos.paradas.length > 1;
+            const separables = puede && (p.movimientos.length > 0 || encs.length > 1) ? encs : [];
             const buscando = p.lat == null && !!p.direccion && datos.buscando > 0 && !agotado;
             const puedeDireccion = puede && !p.expreso && (!!p.company_id || entregas.length > 0);
             const egreso = p.movimientos.some((m) => m.tipo === 'egreso');
@@ -445,6 +482,9 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
               ...(puede && /^p:/.test(p.clave) ? [{ label: p.expreso ? (p.expreso.guia ? 'Cambiar expreso o guía' : 'Cargar la guía') : 'Mandar por expreso', icon: 'truck', onClick: () => abrirPanel('expreso', p.clave) }] : []),
               ...(p.lat != null ? [{ label: 'Cómo llegar (Google Maps)', icon: 'external', onClick: () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, '_blank', 'noopener') }] : []),
               ...(puede ? armadas.filter((a) => a.i !== act.i).map((a, k) => ({ label: `Recorrido ${a.i + 1} · ${a.r.chofer ?? 'sin chofer'}`, icon: 'route', grupo: k === 0 ? 'Pasar a otro recorrido' : undefined, onClick: () => pasar(p, a.i) })) : []),
+              ...(puedeJuntar ? [{ label: 'Juntar con otra parada…', icon: 'merge', nota: 'Si es el mismo lugar que otra de este día', onClick: () => abrirPanel('juntar', p.clave) }] : []),
+              ...separables.map((e, k) => ({ label: `Separar el encargo de ${e.quien?.split(' ')[0] ?? 'alguien'}`, icon: 'merge', grupo: k === 0 ? 'Es otro lugar' : undefined,
+                nota: 'Va como otra parada', onClick: () => void juntar([e], APARTE, `El encargo de ${e.quien?.split(' ')[0] ?? 'alguien'} va como otra parada.`) })),
             ];
             const bp = act.porParada[i];
             const tags = [
@@ -526,6 +566,20 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                       </div>
                     </div>
                   )}
+                  {puede && p.juntar?.length && !abierto ? (
+                    <div className="cr-sugerencia cr-juntar">
+                      <Icon name="merge" size={14} />
+                      <div><b>¿Es el mismo lugar?</b> Este día también van a{p.juntar.length > 1 ? ':' : ''}
+                        {p.juntar.map((j) => (
+                          <div key={j.clave} className="cr-juntar-op">
+                            <span><b>{lindo(j.nombre)}</b>{j.direccion ? ` · ${lindaDireccion(j.direccion)}` : ''}</span>
+                            <button type="button" className="btn sm primary" disabled={ocupadoJuntar} onClick={() => juntar(encs, j.clave, `${nombre} va junto con ${lindo(j.nombre)}.`)}>Juntar</button>
+                          </div>
+                        ))}
+                        <button type="button" className="cr-link" disabled={ocupadoJuntar} onClick={() => juntar(encs, APARTE, `${nombre} queda como otra parada.`)}>No, son lugares distintos</button>
+                      </div>
+                    </div>
+                  ) : null}
                   {p.visita && p.visita.resultado !== 'hecho' && (
                     <div className={`cr-visita ${p.visita.resultado}`}><Icon name="alert" size={14} />
                       <span><b>{p.visita.resultado === 'salteada' ? 'El chofer la dejó para después' : MOTIVO[p.visita.motivo ?? 'otro'] ?? 'No se pudo'}</b>{p.visita.nota ? `: ${p.visita.nota}` : ''} · {p.visita.chofer ?? 'Chofer'}, {horaDe(p.visita.at)}</span></div>
@@ -558,6 +612,8 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                       </div>
                     </div>
                   )}
+                  {juntando === p.clave && <JuntarCon p={p} paradas={datos.paradas} numero={numeroDe} ocupado={ocupadoJuntar} onCancelar={() => setJuntando(null)}
+                    onElegir={(c) => juntar(encs, c.clave, `${nombre} va junto con ${lindo(c.nombre)}.`)} />}
                   {expresando === p.clave && <PorExpreso p={p} expresos={datos.expresos ?? []} onListo={() => { setExpresando(null); void cargar(); onCambio(); }} />}
                   {editando === p.clave && <EditarDireccion p={p} pedidos={entregas} onListo={() => { setEditando(null); void cargar(); }} />}
                   {fijando === p.clave && <FijarHora p={p} llega={s.tramo.sinUbicar ? null : s.llega} aMano={!!act.r.a_mano} onGuardar={(modo, hora, hasta) => fijarHora(p, modo, hora, hasta)} onCancelar={() => setFijando(null)} />}
@@ -675,6 +731,34 @@ function OtroLugar({ titulo = 'De dónde sale este recorrido', onElegir, onCance
 }
 
 // Una entrega que no va directo al cliente: se lleva a un expreso. La guía se puede cargar después, cuando se despacha.
+// «Juntar con otra parada…»: los encargos de esta parada van en la que se elige (de cualquier recorrido de ese día).
+// Primero las que pueden ser el mismo lugar (la misma empresa o el mismo nombre); después las demás, por nombre.
+function JuntarCon({ p, paradas, numero, ocupado, onElegir, onCancelar }: {
+  p: Parada; paradas: Parada[]; numero: (clave: string) => string | null; ocupado: boolean; onElegir: (p: Parada) => void; onCancelar: () => void;
+}) {
+  const [q, setQ] = useState('');
+  const sugeridas = new Set((p.juntar ?? []).map((j) => j.clave));
+  const t = q.trim().toLowerCase();
+  const lista = paradas.filter((x) => x.clave !== p.clave && !x.expreso && (!t || [x.nombre, x.direccion].some((v) => (v ?? '').toLowerCase().includes(t))))
+    .sort((a, b) => Number(sugeridas.has(b.clave)) - Number(sugeridas.has(a.clave)) || lindo(a.nombre).localeCompare(lindo(b.nombre)));
+  return (
+    <div className="cr-editar" onKeyDown={alEsc(onCancelar)}>
+      <span className="muted small">Si {lindo(p.nombre)} es el mismo lugar que otra parada de este día, su encargo va ahí y el chofer los hace juntos.</span>
+      {paradas.length > 8 && <input className="input sm" placeholder="Buscar una parada" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar una parada" autoFocus />}
+      <ul className="cr-lugares">
+        {lista.map((x) => (
+          <li key={x.clave}><button type="button" disabled={ocupado} onClick={() => onElegir(x)}>
+            <b>{numero(x.clave) ? `${numero(x.clave)} · ` : ''}{lindo(x.nombre)}{sugeridas.has(x.clave) ? ' · puede ser el mismo lugar' : ''}</b>
+            <span>{x.direccion ? lindaDireccion(x.direccion) : 'Sin dirección'}{x.movimientos.length ? ` · ${x.movimientos.length === 1 ? carrilDe(x.movimientos[0].tipo).uno.toLowerCase() : `${x.movimientos.length} movimientos`}` : ''}</span>
+          </button></li>
+        ))}
+        {!lista.length && <li className="muted small" style={{ padding: '6px 9px' }}>Ninguna parada coincide.</li>}
+      </ul>
+      <div className="acciones"><button type="button" className="btn sm ghost" onClick={onCancelar}>Cancelar</button></div>
+    </div>
+  );
+}
+
 function PorExpreso({ p, expresos, onListo }: { p: Parada; expresos: Array<{ id: number; nombre: string; direccion: string | null }>; onListo: () => void }) {
   const toast = useToast();
   const [expreso, setExpreso] = useState(p.expreso?.nombre ?? '');

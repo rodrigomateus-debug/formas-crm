@@ -6,8 +6,8 @@ import { CERRADOS } from './produccion';
 import { serviceToken } from './google';
 import {
   SELECT_ENC, aEncargo, actualizarLugares, anfitrion, avisarEncargo, claveCalle, claveEncargo, claveParada, cronogramaConfig, diaSemana, direccionLugar, encargosEntre,
-  esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, llega, ubicar, lugaresPara, lugaresPorId, mismoSitio, movimientos, puedeEditarCronograma, reindexarLugares, sumarDias, unicoLugar,
-  type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio,
+  esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, llega, ubicar, lugaresPara, lugaresPorId, mismaCalle, mismoSitio, movimientos, parecidas, puedeEditarCronograma, reindexarLugares,
+  sumarDias, unicoLugar, APARTE, type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio, type SitioJuntar,
 } from './cronograma';
 import { direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
 import { esTipo } from './destinos';
@@ -87,9 +87,9 @@ async function resolverDestino(env: Env, ctx: Ctx, d: DestinoInput) {
       .bind(companyId).first<{ id: number; name: string; address: string | null; city: string | null }>();
     if (!c) throw new HttpError(400, 'Esa empresa no está (o no la ves).');
     const dir = texto(d.direccion, 300) ?? ([c.address, c.city].filter(Boolean).join(', ') || null);
-    // Si ya hay un destino de esa empresa en esa dirección, ese; si no, se suma a la libreta.
+    // Si ya hay un destino de esa empresa en esa dirección (aunque esté escrita distinto), ese; si no, se suma a la libreta.
     const ya = (await db.prepare('SELECT * FROM lugares WHERE company_id = ? AND activo = 1').bind(c.id).all<Lugar>()).results
-      .find((l) => !dir || !l.direccion || claveCalle(l.direccion) === claveCalle(dir));
+      .find((l) => !dir || !l.direccion || claveCalle(l.direccion) === claveCalle(dir) || mismaCalle(l.direccion, dir));
     if (ya) return { lugar_id: ya.id, company_id: c.id, destino: ya.nombre, direccion: dir ?? (ya.direccion ? direccionLugar(ya) : null) };
     const nuevo = dir ? await crearLugar(db, ctx, { nombre: c.name, direccion: dir, company_id: c.id }) : null;
     return { lugar_id: nuevo, company_id: c.id, destino: c.name, direccion: dir };
@@ -111,6 +111,7 @@ async function crearLugar(db: D1Database, ctx: Ctx, l: { nombre: string; direcci
 export interface EncargoInput extends DestinoInput {
   fecha?: unknown; llevar?: unknown; retirar?: unknown; desde?: unknown; hacia?: unknown; horario?: unknown; contacto?: unknown; notas?: unknown;
   urgente?: unknown; record_id?: unknown; destino?: DestinoInput;
+  junto_a?: unknown;   // la parada con la que va ese día, «aparte» o null (lo decide el Hub): solo quien organiza
 }
 async function base(db: D1Database, v: unknown) {
   if (v == null || v === '') return null;
@@ -171,6 +172,14 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
     if (b.fecha < hoyBsAs() && !org) throw new HttpError(400, 'Ese día ya pasó.');
   }
   const recordN = b.record_id !== undefined && (Number(b.record_id) || null) !== e.record_id ? await registroValido(db, ctx.user, b.record_id) : undefined;
+  // Juntarlo con otra parada de ese día o separarlo (Ruta del día, Próximos días): es de Logística.
+  let juntoN: string | null | undefined;
+  if (b.junto_a !== undefined) {
+    if (!org) throw new HttpError(403, 'Juntar o separar paradas es de Logística.');
+    juntoN = b.junto_a == null || b.junto_a === '' ? null : String(b.junto_a).trim();
+    if (juntoN && juntoN !== APARTE && !/^[a-z]+:\S/.test(juntoN)) throw new HttpError(400, 'Esa parada no está.');
+    if (juntoN && juntoN.length > 300) throw new HttpError(400, 'Esa parada no está.');
+  }
   const sets: string[] = [], vals: unknown[] = [];
   const set = (col: string, v: unknown) => { sets.push(`${col} = ?`); vals.push(v); };
   const cambios: string[] = [];
@@ -208,6 +217,11 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
   if (b.notas !== undefined) set('notas', notasN);
   if (b.urgente !== undefined) set('urgente', b.urgente ? 1 : 0);
   if (recordN !== undefined) set('record_id', recordN);
+  // Lo juntado o separado a mano vale para ese día y ese destino: si cambia alguno de los dos, lo vuelve a decidir el Hub.
+  const otroDia = b.fecha !== undefined && b.fecha !== e.fecha;
+  const otroDestino = b.destino !== undefined || b.lugar_id !== undefined || b.company_id !== undefined || b.nombre !== undefined;
+  if (juntoN !== undefined && juntoN !== (e.junto_a ?? null)) set('junto_a', juntoN);
+  else if (juntoN === undefined && e.junto_a && (otroDia || otroDestino)) set('junto_a', null);
   if (!sets.length) return e;
   set('updated_at', now()); set('updated_by', ctx.user.id);
   await db.prepare(`UPDATE encargos SET ${sets.join(', ')} WHERE id = ?`).bind(...vals, id).run();
@@ -743,7 +757,7 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
     db.prepare('SELECT fecha, chofer, orden FROM cronograma_rutas WHERE fecha BETWEEN ? AND ? ORDER BY fecha, n').bind(desde, hasta).all<{ fecha: string; chofer: string | null; orden: string }>(),
     db.prepare('SELECT fecha, nombre FROM feriados WHERE fecha BETWEEN ? AND ?').bind(desde, hasta).all<{ fecha: string; nombre: string }>(),
   ]);
-  const ventas = esVentas(user);
+  const ventas = esVentas(user), org = organiza(user);
   const [lugares, dirDe] = await Promise.all([lugaresPorId(db, encs.map((e) => e.lugar_id)), direccionesDeViajes(db, viajes)]);
   // Los días hábiles y, si tienen algo, el sábado y el domingo.
   const fechas: string[] = [];
@@ -751,21 +765,18 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
   const out = fechas.map((fecha) => {
     const paradas: Array<{ clave: string; nombre: string; localidad: string | null; direccion: string | null; tipos: Record<string, number>; detalle: string[];
       encargos: EncargoDia[]; anonima: boolean; chofer: string | null; company_id: number | null; lugar_id: number | null; propio?: { nombre: string; direccion: string | null };
-      zona: Zona | null; dominio: string | null; zona_libreta?: string | null }> = [];
+      zona: Zona | null; dominio: string | null; zona_libreta?: string | null; juntar?: SitioJuntar[] }> = [];
     const delDia = viajes.filter((v) => v.fecha === fecha);
     // Primero lo de ClickUp (cada parada con su clave) y después los encargos, en la parada del mismo lugar o en una propia.
+    // Un encargo, en la parada que le toca (la que se eligió a mano, la del mismo lugar o la suya), como en la ruta del día.
     for (const v of [...delDia.filter((x) => x.tipo !== 'encargo'), ...delDia.filter((x) => x.tipo === 'encargo')]) {
-      let p = paradas.find((x) => x.clave === v.clave);
-      if (!p && v.tipo === 'encargo') {
-        const e = encs.find((x) => x.id === v.encargo_id)!;
-        const host = anfitrion(e, paradas.map((x) => ({ clave: x.clave, nombre: x.nombre, company_id: x.company_id, lugar_id: x.lugar_id, direccion: x.direccion })));
-        p = paradas.find((x) => x.clave === host);
-      }
+      const clave = v.tipo === 'encargo' ? anfitrion(encs.find((x) => x.id === v.encargo_id)!, paradas) : v.clave!;
+      let p = paradas.find((x) => x.clave === clave);
       if (!p) {
         const l = v.lugar_id ? lugares.get(v.lugar_id) : null;
         const otra = dirDe.get(v);
         // Se ve el nombre si la arma algo propio o un proveedor o impresor (o, fuera del perfil Ventas, siempre).
-        p = { clave: v.clave!, nombre: v.nombre, localidad: l?.localidad ?? otra?.localidad ?? localidadDe(v.direccion ?? otra?.direccion), direccion: v.direccion ?? otra?.direccion ?? null,
+        p = { clave, nombre: v.nombre, localidad: l?.localidad ?? otra?.localidad ?? localidadDe(v.direccion ?? otra?.direccion), direccion: v.direccion ?? otra?.direccion ?? null,
           tipos: {}, detalle: [], encargos: [], anonima: ventas && !v.propio && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null,
           lugar_id: v.lugar_id ?? null, zona: null, dominio: null, zona_libreta: l?.zona ?? otra?.zona ?? null };
         paradas.push(p);
@@ -780,6 +791,15 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
       if (!p.localidad && v.direccion) p.localidad = localidadDe(v.direccion);
     }
     for (const p of paradas) { p.zona = zonaDe({ zona: p.zona_libreta, localidad: p.localidad, direccion: p.direccion }); delete p.zona_libreta; }
+    // Quien organiza ve «¿Es el mismo lugar?» en una parada que es solo de encargos (que nadie juntó ni separó a mano) si ese
+    // día se va a la misma empresa (o a un lugar con el mismo nombre) en otra dirección.
+    if (org && !ventas) for (const p of paradas) {
+      if (Object.keys(p.tipos).some((t) => t !== 'encargo') || !p.encargos.length || p.encargos.some((e) => e.junto_a)) continue;
+      // Entre dos paradas solo de encargos pregunta una: la que tiene menos (con los mismos, la de clave mayor).
+      const otras = parecidas(p, paradas.filter((x) => Object.keys(x.tipos).some((t) => t !== 'encargo') || x.encargos.length > p.encargos.length
+        || (x.encargos.length === p.encargos.length && x.clave < p.clave)));
+      if (otras.length) p.juntar = otras.slice(0, 3).map((x) => ({ clave: x.clave, nombre: x.nombre, direccion: x.direccion }));
+    }
     const delDiaRutas = rutas.results.filter((r) => r.fecha === fecha).map((r) => ({ chofer: r.chofer, orden: (JSON.parse(r.orden || '[]') as string[]).map(String) }));
     for (const [i, p] of paradas.entries()) {
       if (delDiaRutas.length) p.chofer = (delDiaRutas.find((r) => r.orden.some((c) => esDeLaParada(c, p.clave))) ?? delDiaRutas[0]).chofer;

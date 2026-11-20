@@ -734,12 +734,15 @@ export function EstadoEntrega({ value, title }: { value: unknown; title?: string
 }
 
 // Unidad de negocio con su ícono y su color.
+// Cada unidad con su logo (pedido de Rodrigo del 20/11/2026): formas.shop, «formas corporate» y No Estrés, en
+// web/public/unidades, con una versión para fondo claro y otra para el tema oscuro (styles.css, .unidad-logo).
 export function UnidadBadge({ k, compact }: { k: UnidadKey; compact?: boolean }) {
   const u = UNIDADES.find((x) => x.key === k);
   if (!u) return null;
   return (
-    <span className={`unidad u-${u.key}${compact ? ' compact' : ''}`} title={u.label}>
-      <Icon name={u.icon} size={compact ? 12 : 13} />{!compact && u.label}
+    <span className={`unidad u-${u.key}${compact ? ' compact' : ''}`} title={u.label} role="img" aria-label={u.label}>
+      <img className="unidad-logo claro" src={`/unidades/${u.key}-claro.png`} alt="" draggable={false} />
+      <img className="unidad-logo oscuro" src={`/unidades/${u.key}-oscuro.png`} alt="" draggable={false} />
     </span>
   );
 }

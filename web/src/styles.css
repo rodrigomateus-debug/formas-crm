@@ -3100,6 +3100,41 @@ body:has(#barra-vista > *) .chispin-panel { max-height: min(680px, calc(100vh - 
 @keyframes cam-polvo { 0%, 60% { opacity: 0; transform: scale(.3); } 63% { opacity: .9; transform: translate(-8px, -3px) scale(.8); } 78%, 100% { opacity: 0; transform: translate(var(--px, -34px), var(--py, -14px)) scale(2); } }
 @keyframes cam-anda { 0%, 3% { opacity: 0; } 8%, 30% { opacity: 1; } 38%, 63% { opacity: 0; } 70%, 100% { opacity: 1; } }
 @keyframes cam-viento { 0% { opacity: 0; transform: translateX(10px) scaleX(.4); } 30% { opacity: .75; } 100% { opacity: 0; transform: translateX(-44px) scaleX(1); } }
+/* Cierre ganado al estilo «Steamboat Willie» (steamboat en Chispin.tsx, por ahora solo para Mili): Mickey (los cuadros reales del
+   corto, recortados) sube desde abajo con un rebote, los silbatos del barco aparecen al lado, el cartel de cine mudo flota
+   arriba y el iris se cierra sobre su cara y se abre de vuelta al Hub. */
+@property --sb-r { syntax: '<length>'; inherits: false; initial-value: 0px; }
+.chispin-steamboat { position: fixed; inset: 0; z-index: 305; pointer-events: none; }
+.sb-mickey { position: fixed; left: 50%; bottom: 0; width: min(380px, 64vw); transform: translate(-50%, 112%); filter: drop-shadow(0 14px 18px rgba(18, 20, 58, .35));
+  transition: transform .75s cubic-bezier(.2, 1.35, .4, 1); }
+.chispin-steamboat.on .sb-mickey { transform: translate(-50%, 3%); }
+.chispin-steamboat.sale .sb-mickey { transition: transform .6s cubic-bezier(.5, 0, .8, .4); transform: translate(-50%, 115%); }
+.sb-silbatos { position: fixed; left: calc(50% + 140px); bottom: 210px; width: min(300px, 56vw); opacity: 0; transform: scale(.4) rotate(-8deg); transform-origin: 50% 100%;
+  filter: drop-shadow(0 10px 14px rgba(18, 20, 58, .3)); transition: transform .55s cubic-bezier(.2, 1.5, .4, 1), opacity .2s; }
+.sb-silbatos.on { opacity: 1; transform: none; }
+.chispin-steamboat.sale .sb-silbatos { transition: transform .5s ease-in, opacity .5s; transform: translateY(60px) scale(.6); opacity: 0; }
+@media (max-width: 640px) { .sb-silbatos { left: 50%; bottom: 230px; margin-left: calc(min(300px, 56vw) / -2); } }
+body.movil .sb-mickey { bottom: calc(58px + env(safe-area-inset-bottom)); }   /* arriba de la barra de abajo */
+.sb-nota { position: fixed; z-index: 306; font: 700 26px/1 Georgia, serif; color: #111; text-shadow: 0 0 2px #fff, 0 0 4px #fff, 0 0 6px #fff; pointer-events: none; animation: sb-nota 1.7s ease-out forwards; }
+@keyframes sb-nota { 0% { opacity: 0; transform: translate(0, 0) scale(.5) rotate(-10deg); } 15% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), -120px) scale(1.15) rotate(12deg); } }
+.sb-cartel { position: fixed; left: 50%; top: 13vh; width: min(560px, 88vw); box-sizing: border-box; padding: 30px 26px 28px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: #0d0d0d; color: #efece2; text-align: center; border-radius: 6px; font-family: Georgia, 'Times New Roman', serif; box-shadow: 0 24px 50px -12px rgba(0, 0, 0, .55);
+  opacity: 0; transform: translateX(-50%) scale(.6) rotate(-4deg); transition: transform .6s cubic-bezier(.2, 1.45, .4, 1), opacity .25s; }
+.sb-cartel.on { opacity: 1; transform: translateX(-50%) scale(1) rotate(0); }
+.sb-cartel::before { content: ''; position: absolute; inset: 10px; border: 3px double #e9e6dc; outline: 1px solid #e9e6dc; outline-offset: 5px; border-radius: 3px; pointer-events: none; }
+.sb-cartel::after { content: ''; position: absolute; inset: 0; border-radius: 6px; pointer-events: none; opacity: .22; mix-blend-mode: screen; animation: sb-grano .25s steps(2) infinite;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E"); }
+@keyframes sb-grano { 0% { background-position: 0 0; } 50% { background-position: -40px 30px; } 100% { background-position: 20px -50px; } }
+.sb-cartel b { font-size: clamp(30px, 6vw, 46px); letter-spacing: 2px; animation: sb-titila 1.8s steps(6) infinite; }
+@keyframes sb-titila { 0%, 100% { opacity: 1; } 40% { opacity: .86; } 55% { opacity: 1; } 80% { opacity: .92; } }
+.sb-linea { width: 60%; height: 2px; margin: 6px 0 10px; background: #efece2; position: relative; }
+.sb-linea::after { content: '◆ ◆ ◆'; position: absolute; left: 50%; top: -9px; transform: translateX(-50%); background: #0d0d0d; padding: 0 10px; font-size: 11px; letter-spacing: 5px; }
+.sb-cartel span:not(.sb-linea) { font-size: clamp(15px, 3.2vw, 20px); }
+.sb-cartel i { margin-top: 8px; font-size: clamp(18px, 3.8vw, 24px); }
+.sb-iris { position: fixed; inset: 0; --sb-r: 200vmax; --x: 50%; --y: 70%; opacity: 0; background: radial-gradient(circle at var(--x) var(--y), transparent calc(var(--sb-r) - 1px), #000 var(--sb-r)); }
+.sb-iris.cierra { opacity: 1; animation: sb-iris 1.15s cubic-bezier(.55, 0, .75, .35) forwards; }
+@keyframes sb-iris { from { --sb-r: 150vmax; } to { --sb-r: 0px; } }
+.sb-iris.abre { opacity: 0; transition: opacity .45s ease; }
 @keyframes chispin-cae { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--x), 105vh) rotate(var(--r)); } }
 @keyframes chispin-papel { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 130px)) rotate(var(--r)); } }
 @media (prefers-reduced-motion: reduce) {

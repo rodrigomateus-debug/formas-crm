@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, useAsync, useDebounced, fmtDate, Icon, uni
 import { ColumnWidths, UnidadBadge, useColumnResize, userOption } from '../components';
 import { UnidadFilter } from './QuickFilters';
 import { Select } from '../Select';
+import { ElegirColumnas } from '../vistaControles';
 import { ChipRelacion, ESTADOS, EquipoTarea, EstadoTarea, NuevaTarea, PRIORIDADES, TIPOS, TareaPanel, pasosDe } from '../TareaPanel';
 
 // Tareas, como en ClickUp y Asana (pedido de Rodrigo del 18/11/2026): una lista por vencimiento (la de siempre) y un
@@ -121,6 +122,8 @@ export default function Tasks() {
   const abrir = (id: number | null) => setParams((p) => { const n = new URLSearchParams(p); if (id) n.set('tarea', String(id)); else n.delete('tarea'); return n; }, { replace: !id });
   const [vista, setVista] = useState<Vista>(() => leer('crm.tasks.vista', 'tablero', ['lista', 'tablero'] as const));
   const [agrupar, setAgrupar] = useState<Agrupar>(() => leer('crm.tasks.agrupar', 'estado', ['estado', 'vence', 'prioridad', 'responsable'] as const));
+  // Las columnas que se sacaron de la tabla (pedido de Rodrigo del 20/11/2026: todas las tablas con «Columnas»).
+  const [ocultas, setOcultas] = useState<string[]>(() => { try { return (localStorage.getItem('crm.tasks.ocultas') ?? '').split(',').filter(Boolean); } catch { return []; } });
   const [tab, setTab] = useState('today');
   const [owner, setOwner] = useState<string>(String(meta.me.id));
   const [objeto, setObjeto] = useState('');
@@ -170,7 +173,9 @@ export default function Tasks() {
       if (t && patch) cambiar(t, patch);
     },
   });
-  const listCols: Array<[string, string]> = [['tarea', 'Tarea'], ['asociada', 'Relacionada con'], ['vence', 'Vence'], ['estado', 'Estado'], ['prioridad', 'Prioridad'], ['equipo', 'Equipo'], ['unidad', 'Unidad']];
+  const todasCols: Array<[string, string]> = [['tarea', 'Tarea'], ['asociada', 'Relacionada con'], ['vence', 'Vence'], ['estado', 'Estado'], ['prioridad', 'Prioridad'], ['equipo', 'Equipo'], ['unidad', 'Unidad']];
+  const listCols = todasCols.filter(([k]) => !ocultas.includes(k));
+  const ver = (k: string) => !ocultas.includes(k);
   const total = list.data?.total;
   return (
     <div className={`content${vista === 'lista' ? ' list-fixed' : ' tareas-tablero'}`}>
@@ -200,15 +205,16 @@ export default function Tasks() {
         </div>
       </div>
       {/* Los controles de vista, en su propia fila (como en el resto de los módulos). */}
-      {vista === 'tablero' && <div className="toolbar vista">
-        {(
+      <div className="toolbar vista">
+        {vista === 'tablero' && (
           <label className="row small tarea-agrupar">Agrupar por
             <Select className="input" value={agrupar} onChange={(e) => { setAgrupar(e.target.value as Agrupar); guardarLocal('crm.tasks.agrupar', e.target.value); }} aria-label="Agrupar por">
               {AGRUPAR.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             </Select>
           </label>
         )}
-      </div>}
+        {vista === 'lista' && <ElegirColumnas columnas={todasCols} ocultas={ocultas} fijas={['tarea']} onChange={(x) => { setOcultas(x); guardarLocal('crm.tasks.ocultas', x.join(',')); }} />}
+      </div>
 
       {vista === 'tablero' ? (
         <div className={`board tareas${list.loading && list.data ? ' cargando' : ''}`} aria-busy={list.loading}>
@@ -243,12 +249,12 @@ export default function Tasks() {
                       {!!a.comentarios && <span className={`tarea-cuenta${a.sin_leer ? ' sin-leer' : ' muted small'}`} title={a.sin_leer ? `${a.sin_leer} sin leer` : 'Comentarios'}><Icon name="chat" size={12} />{a.comentarios}</span>}
                       {a.body && <div className="small muted ellipsis" style={{ maxWidth: resize.widths.tarea ? '100%' : 400 }}>{a.body.split('\n')[0]}</div>}
                     </td>
-                    <td><span className="tarea-card-rels">{a.links.slice(0, 2).map((l) => <ChipRelacion key={l.id} l={l} />)}</span></td>
-                    <td className={overdue ? 'overdue' : ''}>{fmtDate(a.due_at, true)}<div className="small muted">{TIPOS[a.task_type ?? 'todo'] ?? a.task_type}</div></td>
-                    <td><EstadoTarea status={a.status} /></td>
-                    <td>{prio ? <span className={`tag ${prio.cls}`}>{prio.label}</span> : <span className="muted">—</span>}</td>
-                    <td><EquipoTarea owner={a.owner_id} colaboradores={a.colaboradores} max={4} /></td>
-                    <td><span className="unidades">{unidadesDe(meta, 'task', { owner_id: a.owner_id }).map((k) => <UnidadBadge key={k} k={k} compact />)}</span></td>
+                    {ver('asociada') && <td><span className="tarea-card-rels">{a.links.slice(0, 2).map((l) => <ChipRelacion key={l.id} l={l} />)}</span></td>}
+                    {ver('vence') && <td className={overdue ? 'overdue' : ''}>{fmtDate(a.due_at, true)}<div className="small muted">{TIPOS[a.task_type ?? 'todo'] ?? a.task_type}</div></td>}
+                    {ver('estado') && <td><EstadoTarea status={a.status} /></td>}
+                    {ver('prioridad') && <td>{prio ? <span className={`tag ${prio.cls}`}>{prio.label}</span> : <span className="muted">—</span>}</td>}
+                    {ver('equipo') && <td><EquipoTarea owner={a.owner_id} colaboradores={a.colaboradores} max={4} /></td>}
+                    {ver('unidad') && <td><span className="unidades">{unidadesDe(meta, 'task', { owner_id: a.owner_id }).map((k) => <UnidadBadge key={k} k={k} compact />)}</span></td>}
                     <td>{a.status !== 'COMPLETED' && <span className="row"><button className="btn sm ghost" onClick={() => postpone(a, 1)}>+1 día</button><button className="btn sm ghost" onClick={() => postpone(a, 7)}>+1 semana</button></span>}</td>
                   </tr>
                 );

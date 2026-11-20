@@ -15,6 +15,7 @@ import { ColumnWidths, EstadoCliente, EstadoEntrega, EtapaPedido, UnidadBadge, U
 import { BulkBar } from './Bulk';
 import { CobroFilter, cobroDe, conCobro, QuickFilterBar, quickFilters, relacionDe } from './QuickFilters';
 import { Select } from '../Select';
+import { BotonColapsar } from '../vistaControles';
 import { siFestejaPedido } from '../Chispin';
 import { BarraVista, PestanaNombre, ViewMenu, type CrearVista } from '../vistas';
 import { CeldaOc, CeldaProduccion, CeldaResponsable, FilasProductos, FlechaPedido, PREF_PRODUCTOS, productosCerradosAca, recordarProductosAca, urlArticulos, useEsperaCorta, useProduccionPedidos, useProductosAbiertos } from './PedidosProductos';
@@ -629,13 +630,9 @@ function IndexFor({ type }: { type: ObjectType }) {
         </div>
         {/* Los controles de vista, en su propia fila: no se mezclan con los filtros. */}
         <div className="toolbar vista">
-            {type === 'order' && (
-              <button type="button" className="btn ghost" onClick={() => productos.todos(productos.cerrados)} aria-pressed={productos.cerrados}
-                title={productos.cerrados ? 'Mostrar los productos de cada pedido' : 'Ver solo los pedidos, sin sus productos'}>
-                <span className={`flecha${productos.cerrados ? ' cerrada' : ''}`}><Icon name="down" size={14} /></span>{productos.cerrados ? 'Expandir productos' : 'Colapsar productos'}
-              </button>
-            )}
-            <button className="btn ghost" onClick={() => setShow('columns')}><Icon name="columns" size={15} />Columnas</button>
+            {type === 'order' && <BotonColapsar on={productos.cerrados} onChange={(v) => productos.todos(!v)} label="Colapsar productos"
+              title={productos.cerrados ? 'Mostrar los productos de cada pedido' : 'Ver solo los pedidos, sin sus productos'} />}
+            <button type="button" className="btn qf-btn" onClick={() => setShow('columns')} title="Agregar o sacar columnas de la tabla"><Icon name="columns" size={14} />Columnas</button>
         </div>
 
         <div className={`table-wrap${list.fresh && !esperaProductos ? '' : ' cargando'}`} aria-busy={list.loading || esperaProductos}>

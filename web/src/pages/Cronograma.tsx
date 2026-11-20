@@ -4,7 +4,7 @@ import { http, qs, useToast, Icon, unidadDeTexto } from '../lib';
 import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, EditarEnLinea, Modal, QuienPidio, UnidadBadge, UserChip, alEsc } from '../components';
-import { UnidadFilter } from './QuickFilters';
+import { Pop, UnidadFilter } from './QuickFilters';
 import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
@@ -145,7 +145,10 @@ export default function CronogramaPage() {
   const [unidades, setUnidades] = useState<string[]>([]);   // filtro por unidad de negocio (claves: shop, corporate, noestres)
   const deUnidad = (u: string | null) => !unidades.length || unidades.includes(unidadDeTexto(u) ?? '');
   const [pendientes, setPendientes] = useState(false);
-  const [toca, setToca] = useState<Rol | ''>('');   // «Le toca a»: solo las tarjetas de Producción, Ventas, el proveedor o Logística
+  const [toca, setToca] = useState<Rol[]>([]);   // «Le toca a»: solo las tarjetas de Producción, Ventas, el proveedor o Logística
+  // Qué movimientos se ven (pedido de Rodrigo del 20/11/2026): las claves de CARRILES y «X», los encargos. Vacío, todos.
+  const [tipos, setTipos] = useState<string[]>([]);
+  const deTipo = (t: Tipo) => !tipos.length || tipos.includes(carrilDe(t).k);
   const [preview, setPreview] = useState<number | null>(null);
   const [previewT, setPreviewT] = useState<Tarjeta | null>(null);   // la tarjeta desde la que se abrió (su despacho va arriba)
   const abrirTarjeta = (t: Tarjeta) => { if (t.record_id) { setPreview(t.record_id); setPreviewT(t); } };
@@ -197,17 +200,27 @@ export default function CronogramaPage() {
 
   const v = datos && datos.desde === semana ? datos : null;
   const q = buscar.trim().toLowerCase();
-  const movs = useMemo(() => (v?.movimientos ?? []).filter((m) => coincide(m, q) && deUnidad(m.unidad) && (!pendientes || !m.hecho)), [v, q, unidades, pendientes]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Lo de la semana con todos los filtros menos el del tipo (para contar cuántos hay de cada tipo) y con ese también.
+  const sinTipo = useMemo(() => (v?.movimientos ?? []).filter((m) => coincide(m, q) && deUnidad(m.unidad) && (!pendientes || !m.hecho)), [v, q, unidades, pendientes]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const movs = useMemo(() => sinTipo.filter((m) => deTipo(m.tipo)), [sinTipo, tipos]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Los encargos no son de una unidad de negocio: con ese filtro no se ven.
-  const encs = useMemo(() => (v?.encargos ?? []).filter((e) => coincideEnc(e, q) && !unidades.length && (!pendientes || e.estado !== 'hecho')), [v, q, unidades, pendientes]);
+  const encsSinTipo = useMemo(() => (v?.encargos ?? []).filter((e) => coincideEnc(e, q) && !unidades.length && (!pendientes || e.estado !== 'hecho')), [v, q, unidades, pendientes]);
+  const encs = !tipos.length || tipos.includes('X') ? encsSinTipo : [];
   // Sábado y domingo se ven si tienen algo: un movimiento, un encargo, una nota o un feriado.
   const finDeSemana = [5, 6].filter((i) => { const d = sumar(semana, i); return movs.some((m) => m.fecha === d) || encs.some((e) => e.fecha === d) || !!v?.notas.some((n) => n.fecha === d); });
   const dias = [0, 1, 2, 3, 4, ...finDeSemana].map((i) => sumar(semana, i));
   const puede = !!v?.puede_editar;
-  const colg = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && deUnidad(m.unidad)), [v, q, unidades]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const colgSinTipo = useMemo(() => (v?.colgados ?? []).filter((m) => coincide(m, q) && deUnidad(m.unidad)), [v, q, unidades]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const colg = useMemo(() => colgSinTipo.filter((m) => deTipo(m.tipo)), [colgSinTipo, tipos]);   // eslint-disable-line react-hooks/exhaustive-deps
   // Estados de despacho: la dirección de la parada de una tarjeta (llega aparte) y a quién le toca cada una.
   const dirDe = (t: Tarjeta) => (t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined);
-  const pasaToca = (t: Tarjeta) => !toca || despachoTarjeta(t, dirDe(t))?.quien === toca;
+  const pasaToca = (t: Tarjeta) => { const r = despachoTarjeta(t, dirDe(t))?.quien; return !toca.length || (!!r && toca.includes(r)); };
+  // Cuántas tarjetas hay de cada tipo (de la semana y colgadas), con los demás filtros puestos.
+  const porTipo = useMemo(() => {
+    const n: Record<string, number> = { X: encsSinTipo.length };
+    for (const t of [...tarjetas(sinTipo), ...tarjetas(colgSinTipo).map((x) => ({ ...x, parada: false }))]) if (pasaToca(t)) { const k = carrilDe(t.tipo).k; n[k] = (n[k] ?? 0) + 1; }
+    return n;
+  }, [sinTipo, colgSinTipo, encsSinTipo, toca, dirs]);   // eslint-disable-line react-hooks/exhaustive-deps
   const porRol = useMemo(() => {
     const n: Partial<Record<Rol, number>> = {};
     for (const t of [...tarjetas(movs), ...tarjetas(colg).map((x) => ({ ...x, parada: false }))]) {
@@ -322,12 +335,12 @@ export default function CronogramaPage() {
             </div>
             {/* El mismo desplegable de unidades de negocio (con sus logos) que en Pedidos, Negocios, Empresas y Contactos. */}
             <UnidadFilter value={unidades} onChange={setUnidades} />
-            {/* Lo propio del cronograma (a quién le toca) y después lo terminado, como en el resto de los módulos. */}
-            <div className="row cr-toca" style={{ gap: 6, flexWrap: 'wrap' }} role="group" aria-label="Le toca a">
-              <span className="small muted">Le toca a</span>
-              {(Object.keys(NOMBRE_ROL) as Rol[]).map((r) => <button key={r} type="button" className={`chip${toca === r ? ' on' : ''}`} aria-pressed={toca === r} onClick={() => setToca(toca === r ? '' : r)}
-                title={`Solo lo que le toca a ${NOMBRE_ROL[r]}`}>{NOMBRE_ROL[r]} <span className="num">{porRol[r] ?? 0}</span></button>)}
-            </div>
+            {/* Lo propio del cronograma (qué movimientos y a quién le toca) y después lo terminado, como en el resto de los módulos. */}
+            <FiltroCr nombre="Tipo de movimiento" value={tipos} onChange={setTipos}
+              opciones={[...CARRILES.map((c) => ({ k: c.k, nombre: c.nombre, ayuda: c.ayuda })), { k: 'X', nombre: 'Encargos', ayuda: 'Lo que alguien pidió en Recorridos' }]
+                .map((o) => ({ ...o, n: porTipo[o.k] ?? 0, punto: `cr-k-${o.k}` }))} />
+            <FiltroCr nombre="Le toca a" conNombre value={toca} onChange={(x) => setToca(x as Rol[])}
+              opciones={(Object.keys(NOMBRE_ROL) as Rol[]).map((r) => ({ k: r, nombre: NOMBRE_ROL[r], ayuda: `Lo que le toca a ${NOMBRE_ROL[r]}`, n: porRol[r] ?? 0 }))} />
             <button type="button" className={`btn qf-btn${pendientes ? ' on' : ''}`} aria-pressed={pendientes} onClick={() => setPendientes(!pendientes)}
               title="Oculta lo que ya está hecho">Solo lo pendiente</button>
           </div>
@@ -339,7 +352,8 @@ export default function CronogramaPage() {
           {!v && !error && <div className="empty plain">Cargando la semana…</div>}
           {v && (
             <div className="cr-scroll">
-              <div className="cr-semana" style={{ gridTemplateColumns: `repeat(${dias.length}, minmax(214px, 1fr)) minmax(226px, 1fr)` }}>
+              {/* Colgados es una columna más de la grilla, al final y del mismo ancho que los días. */}
+              <div className="cr-semana" style={{ gridTemplateColumns: `repeat(${dias.length + 1}, minmax(214px, 1fr))` }}>
                 {dias.map((d) => {
                   const delDia = movs.filter((m) => m.fecha === d), notas = v.notas.filter((n) => n.fecha === d), encDia = encs.filter((e) => e.fecha === d);
                   const pend = delDia.filter((m) => !m.hecho).length + encDia.filter((e) => e.estado !== 'hecho').length, cuantos = delDia.length + encDia.length;
@@ -432,7 +446,7 @@ export default function CronogramaPage() {
           )}
           {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
           {enviando && <ModalEnviado m={enviando} onCerrar={() => setEnviando(null)} onListo={() => { setEnviando(null); void cargar(); }} />}
-          {v && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && deUnidad(s.unidad))} puede={puede}
+          {v && deTipo('entrega') && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && deUnidad(s.unidad))} puede={puede}
             onArrastrar={(a) => { arrastre.current = a; if (!a) setSobre(null); }} onMover={(ids, f, pdv) => mover(ids, 'entrega', f, pdv)} onAbrir={setPreview} />}
         </>
       )}
@@ -463,6 +477,31 @@ export default function CronogramaPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+// Un filtro del cronograma (qué movimientos, a quién le toca): el mismo desplegable con casillas que «Unidad de negocio»,
+// con cuántas tarjetas hay de cada opción. Sin nada elegido, todo.
+function FiltroCr({ nombre, opciones, value, onChange, conNombre }: {
+  nombre: string; value: string[]; onChange: (v: string[]) => void; conNombre?: boolean;
+  opciones: Array<{ k: string; nombre: string; ayuda: string; n: number; punto?: string }>;
+}) {
+  const sel = opciones.filter((o) => value.includes(o.k));
+  const elegidos = sel.length > 2 ? `${sel.length} elegidos` : sel.map((o) => o.nombre).join(', ');
+  return (
+    <Pop label={sel.length ? (conNombre ? `${nombre}: ${elegidos}` : elegidos) : nombre} on={sel.length > 0}>
+      {() => (
+        <div className="stack" style={{ gap: 0 }}>
+          {opciones.map((o) => (
+            <label key={o.k} className="opt cr-op" title={o.ayuda}>
+              <input type="checkbox" checked={value.includes(o.k)} onChange={() => onChange(value.includes(o.k) ? value.filter((x) => x !== o.k) : [...value, o.k])} />
+              {o.punto && <i className={o.punto} aria-hidden />}<span className="grow">{o.nombre}</span><span className="num">{o.n}</span>
+            </label>
+          ))}
+          {value.length > 0 && <button className="btn sm ghost" style={{ alignSelf: 'flex-start', marginTop: 4 }} onClick={() => onChange([])}>Todos</button>}
+        </div>
+      )}
+    </Pop>
   );
 }
 

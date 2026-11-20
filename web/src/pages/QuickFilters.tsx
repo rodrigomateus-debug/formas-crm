@@ -75,7 +75,8 @@ export function quickFilters(owners: string[] | undefined, dates: Record<string,
   return out;
 }
 
-function Pop({ label, on, children }: { label: ReactNode; on: boolean; children: (close: () => void) => ReactNode }) {
+// El botón de un filtro rápido con su desplegable (también lo usan los filtros propios del Cronograma).
+export function Pop({ label, on, children }: { label: ReactNode; on: boolean; children: (close: () => void) => ReactNode }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {

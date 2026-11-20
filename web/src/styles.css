@@ -1595,7 +1595,9 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-punto.medio { background: var(--d-cola-bg); color: var(--d-cola); }
 /* El pago: rojo no pagó nada, naranja pagó una parte, verde pagó (como en Pedidos). */
 .cr-punto.parcial { background: var(--d-remitido-bg); color: var(--d-remitido); }
-.cr-toca .chip .num { color: var(--text-3); font-weight: 500; } .cr-toca .chip.on .num { color: inherit; }
+/* Filtros del cronograma (tipo de movimiento, le toca a): el color de cada tipo y cuántas tarjetas hay. */
+.cr-op i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--k); }
+.cr-op .num { color: var(--text-3); font-size: 12px; }
 /* Si llega a tiempo: solo cuando hay riesgo. */
 .cr-desp-reloj { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--ui-warning-ink); }
 .cr-desp-reloj.atrasado { color: var(--d-info); }
@@ -1668,7 +1670,6 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-dia.feriado { background: var(--ui-surface-sunken); }
 /* Colgados: lo que no se pudo hacer. No es un día: borde punteado y cabecera rayada, del color de los avisos. */
 .cr-dia.cr-colgados { border: 2px dashed var(--ui-warning); background: color-mix(in srgb, var(--ui-warning-soft) 45%, var(--ui-surface)); }
-@media (min-width: 1200px) { .cr-dia.cr-colgados { position: sticky; right: 0; z-index: 2; box-shadow: -8px 0 12px -10px rgba(0, 0, 0, .25); } }
 .cr-colgados .cr-dia-cab { border-bottom-color: var(--ui-warning); border-radius: calc(var(--r-panel) - 2px) calc(var(--r-panel) - 2px) 0 0;
   background: repeating-linear-gradient(-45deg, var(--ui-warning-soft) 0 10px, color-mix(in srgb, var(--ui-warning) 22%, var(--ui-warning-soft)) 10px 20px); }
 .cr-colgados .cr-dia-tit { align-items: center; color: var(--ui-warning-ink); } .cr-colgados .cr-dia-tit b { color: var(--ui-warning-ink); text-transform: uppercase; letter-spacing: .05em; font-size: 13px; }

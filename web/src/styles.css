@@ -1984,6 +1984,13 @@ button.cr-bultos { cursor: pointer; } button.cr-bultos:hover { border-color: var
 .cr-p-movs .cr-pdv .cr-link { font-weight: 500; }
 .cr-sugerencia { grid-column: 2 / 4; display: flex; gap: 8px; margin-top: 6px; padding: 8px 10px; border-radius: var(--r-control); background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 12px; line-height: 1.45; }
 .cr-sugerencia svg { flex: none; margin-top: 2px; } .cr-sugerencia .btn { white-space: normal; height: auto; min-height: var(--control-h-sm); text-align: left; padding: 4px 10px; }
+/* «¿Es el mismo lugar?» (juntar paradas): una fila por parada parecida, con su botón. */
+.cr-juntar > div { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.cr-juntar-op { align-self: stretch; display: flex; align-items: center; gap: 8px; color: var(--ui-ink); }
+.cr-juntar-op > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cr-juntar-op .btn { flex: none; }
+.cr-juntar .cr-link { font-size: 11.5px; }
+.cr-lugares button:disabled { cursor: default; opacity: .6; }
 .cr-libreta { grid-column: 2 / 4; display: flex; flex-direction: column; gap: 2px; margin-top: 4px; padding: 6px 9px; border-radius: var(--r-control); background: var(--ui-surface-sunken); font-size: 11.5px; color: var(--ui-ink-2); overflow-wrap: anywhere; }
 .cr-libreta b { font-weight: 600; color: var(--ui-ink); margin-right: 6px; }
 .cr-libreta summary { cursor: pointer; color: var(--accent-ink); font-weight: 500; }
@@ -2261,6 +2268,13 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .rc-talon.ok .rc-talon-cab { color: var(--ui-positive-ink); } .rc-talon.mal .rc-talon-cab { color: var(--ui-negative-ink); } .rc-talon.off .rc-talon-cab { color: var(--text-3); }
 .rc-talon.off .rc-talon-que { text-decoration: line-through; color: var(--ui-ink-3); }
 .rc-talon-que { font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
+/* «¿Es el mismo lugar?»: una parada solo de encargos que puede ser la de otra empresa o nombre igual ese día (Logística). */
+.rc-juntar { grid-column: 2 / -1; display: flex; flex-direction: column; gap: 5px; padding: 7px 10px 8px; border-radius: 8px; background: var(--ui-warning-soft); color: var(--ui-warning-ink); font-size: 12px; line-height: 1.35; }
+.rc-juntar b { font-weight: 600; }
+.rc-juntar-op { display: flex; align-items: center; gap: 8px; color: var(--ui-ink); }
+.rc-juntar-op > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rc-juntar-op .btn { flex: none; }
+.rc-juntar .cr-link { align-self: flex-start; font-size: 11.5px; }
 .rc-vacio { margin: 2px 10px 6px; font-size: 12px; color: var(--ui-ink-3); }
 .rc-agregar { margin: 6px 4px 0; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--ui-line-strong);
   background: none; border-radius: 10px; padding: 7px; font: inherit; font-size: 12px; color: var(--ui-ink-2); cursor: pointer; }

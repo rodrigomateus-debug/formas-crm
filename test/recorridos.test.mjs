@@ -300,6 +300,52 @@ test('recorridos: destinos, encargos, cronograma, chofer, avisos, remito e histo
   const ps1 = r.paradas.find((p) => p.encargos.some((e) => e.id === s1.id)), ps2 = r.paradas.find((p) => p.encargos.some((e) => e.id === s2b.id));
   assert.notEqual(ps1.clave, ps2.clave, 'cada sucursal es su parada');
   assert.match(ps2.direccion, /San Martín/);
+  assert.ok(![...(ps1.juntar ?? []), ...(ps2.juntar ?? [])].some((j) => [ps1.clave, ps2.clave].includes(j.clave)), 'sucursales en localidades distintas: no pregunta si son el mismo lugar');
+
+  // ---------- Juntar paradas (pedido de Rodrigo del 20/11/2026) ----------
+  // La misma dirección escrita distinto, de la misma empresa: una sola parada. Otra dirección de esa empresa: aparte, con
+  // «¿Es el mismo lugar?» para Logística.
+  const big = (await api('POST', '/records/company', { props: { name: `BigSur ${RUN}` } })).data;
+  const libreta = async (nombre, direccion, localidad) => (await api('POST', '/recorridos/libreta', { nombre, direccion, localidad, company_id: big.id })).data.id;
+  const lBig = await libreta(`BigSur ${RUN}`, `Av. del Libertador ${N + 5}`, 'San Fernando');
+  const lBs = await libreta(`BS Energy ${RUN}`, `Libertador N° ${N + 5}`, null);
+  const lPlanta = await libreta(`BigSur Planta ${RUN}`, `Uruguay ${N + 6}`, null);
+  const j1 = (await api('POST', '/recorridos/encargos', { fecha: PASADO, lugar_id: lBig, llevar: [{ que: 'Mochilas de muestra' }] })).data;
+  const j2 = (await api('POST', '/recorridos/encargos', { fecha: PASADO, lugar_id: lBs, retirar: [{ que: 'Sobre' }] })).data;
+  const j3 = (await api('POST', '/recorridos/encargos', { fecha: PASADO, lugar_id: lPlanta, llevar: [{ que: 'Catálogo' }] })).data;
+  const ruta = async () => (await api('GET', `/cronograma/ruta?fecha=${PASADO}`)).data.paradas;
+  const de = (ps, e) => ps.find((p) => p.encargos.some((x) => x.id === e.id));
+  let ps = await ruta();
+  assert.equal(de(ps, j1).clave, de(ps, j2).clave, '«Av. del Libertador» y «Libertador N°», la misma altura y la misma empresa: una parada');
+  assert.notEqual(de(ps, j3).clave, de(ps, j1).clave, 'otra dirección: otra parada');
+  assert.deepEqual(de(ps, j3).juntar?.map((j) => j.clave), [de(ps, j1).clave], 'pregunta si es el mismo lugar que la de BigSur');
+  assert.ok(!de(ps, j1).juntar, 'la que ya tiene dos encargos juntos no pregunta');
+  let ag = (await api('GET', `/recorridos/agenda?desde=${PASADO}&dias=1`)).data.dias[0].paradas;
+  assert.ok(de(ag, j3).juntar?.length, 'también en Próximos días, para Logística');
+  ag = (await api('GET', `/recorridos/agenda?desde=${PASADO}&dias=1`, undefined, vera.email)).data.dias[0].paradas;
+  assert.ok(!ag.some((p) => p.juntar), 'la vendedora no');
+  // Juntar es de Logística.
+  const destinoBig = de(ps, j1).clave;
+  assert.equal((await api('PATCH', `/recorridos/encargos/${deVera.id}`, { junto_a: destinoBig }, vera.email)).status, 403);
+  assert.equal((await api('PATCH', `/recorridos/encargos/${j3.id}`, { junto_a: 'cualquier cosa' })).status, 400);
+  // «Juntar»: va en esa parada en la ruta, en la semana y en Próximos días, y ya no pregunta.
+  assert.equal((await api('PATCH', `/recorridos/encargos/${j3.id}`, { junto_a: destinoBig })).data.junto_a, destinoBig);
+  ps = await ruta();
+  assert.equal(de(ps, j3).clave, destinoBig, 'va junto con BigSur');
+  assert.equal(de(ps, j3).encargos.length, 3);
+  assert.ok(!ps.some((p) => p.juntar && p.encargos.some((x) => [j1.id, j2.id, j3.id].includes(x.id))));
+  const sem = (await api('GET', `/cronograma?desde=${PASADO}&hasta=${PASADO}`)).data;
+  assert.equal(sem.encargos.find((e) => e.id === j3.id).parada, destinoBig, 'en la semana, la misma parada (y el mismo chofer)');
+  ag = (await api('GET', `/recorridos/agenda?desde=${PASADO}&dias=1`)).data.dias[0].paradas;
+  assert.equal(de(ag, j3).clave, de(ag, j1).clave, 'en Próximos días, juntos');
+  // «Separar»: el que el Hub había juntado va como otra parada.
+  assert.equal((await api('PATCH', `/recorridos/encargos/${j2.id}`, { junto_a: 'aparte' })).status, 200);
+  ps = await ruta();
+  assert.notEqual(de(ps, j2).clave, destinoBig, 'separado');
+  assert.ok(!de(ps, j2).juntar, 'separado a mano: no vuelve a preguntar');
+  assert.equal(de(ps, j1).clave, de(ps, j3).clave);
+  // Pasarlo a otro día lo vuelve a decidir el Hub.
+  assert.equal((await api('PATCH', `/recorridos/encargos/${j3.id}`, { fecha: MANANA })).data.junto_a, null);
   // Lo que Logística sacó de la libreta no vuelve con la copia de la planilla.
   assert.equal((await api('PATCH', `/recorridos/libreta/${mad.lugar_id}`, { activo: false })).status, 200);
   await api('POST', '/cronograma/lugares/actualizar');

@@ -118,11 +118,49 @@ la foto no carga (sin señal), quedan las iniciales.
   libreta, la misma calle y altura, o la misma empresa o el mismo nombre si alguno no tiene altura: «IMPREFAS» de la
   libreta es el impresor IMPREFAS de ClickUp); si no, es una parada propia. Se ordena, se pasa de recorrido y se marca como
   cualquier parada; «Marcar hecho» marca también sus encargos. Dos sucursales de la misma empresa (o la misma calle y
-  altura en dos localidades) son dos paradas.
+  altura en dos localidades) son dos paradas. Si no los juntó y es el mismo lugar (o los juntó y no lo es), Logística lo
+  arregla a mano: ver [Juntar paradas](#juntar-paradas).
 - **App del chofer**: en la parada, «Dejar …» y «Retirar …» de cada encargo, dónde buscar lo que lleva si no está en el
   depósito, a quién preguntar, el horario y si es urgente. «Listo» lo deja hecho y «No se pudo» lo deja así con el motivo
   (se le avisa a quien lo pidió); «Deshacer» o «Para después» lo vuelven a como estaba, salvo que Logística lo haya
   cambiado después.
+
+## Juntar paradas
+
+Pedido de Rodrigo del 20/11/2026: cargaron un encargo a BigSur Energy (San Fernando) el día que ya iban a entregarle a
+BS Energy S.A. (la misma empresa del CRM), y quedaron como dos paradas. La regla sigue siendo la misma: **la misma
+dirección, una parada; otra dirección, otra parada**. Lo que cambió:
+
+- **La misma dirección escrita distinto** ahora se reconoce: «Av. del Libertador 1.234, San Fernando», «Libertador N°
+  1234» y «Avda. Libertador 1234 piso 3» son la misma. Se compara la calle sin «Av.», «Calle», títulos («Pte.», «Gral.»,
+  «Ing.», «Dr.»…) ni artículos, y la altura sin el punto de los miles, el «N°» ni el cero adelante; la calle cuenta como
+  la misma si es igual, si termina igual («Juan B. Justo» y «Justo») o si una está entera en la otra («San Martín» y
+  «Martín García» no). Escrita distinto vale solo si además es la misma empresa o el mismo nombre, o las dos dicen la
+  misma localidad: sin eso, «Mitre 500» puede ser otra calle Mitre. Lo mismo se usa para «Ya van mañana» al cargar el
+  encargo y para no duplicar un destino de la empresa en la libreta.
+- **«¿Es el mismo lugar?»**: si una parada que es solo de encargos va a la misma empresa (o a un lugar con el mismo
+  nombre) que otra parada de ese día, pero con otra dirección y sin localidades distintas, Logística ve en esa parada
+  «Este día también van a *BS Energy S.A. · dirección*» con **Juntar** y **No, son lugares distintos**. En la Ruta del día
+  y en Próximos días (no la ven las vendedoras). Entre dos paradas solo de encargos pregunta una sola, la que tiene menos;
+  una parada de ClickUp nunca se mueve. Dos sucursales en localidades distintas no preguntan.
+- **«Juntar con otra parada…»** en el menú ⋯ de una parada que es solo de encargos (Ruta del día): se elige cualquier
+  parada de ese día, de cualquier recorrido (primero las que pueden ser el mismo lugar; con muchas, un buscador). Sus
+  encargos pasan a esa parada: el mismo chofer, el mismo horario y el chofer los ve juntos en su app.
+- **«Separar el encargo de …»** en el menú ⋯ de una parada donde un encargo comparte lugar con otra cosa: va como otra
+  parada aunque el Hub lo juntaría (dos sucursales que el Hub tomó por una).
+- Todo trae «Deshacer». Lo decidido a mano vale para **ese día y ese destino**: si el encargo pasa a otro día o cambia de
+  destino, lo vuelve a decidir el Hub; si la parada elegida ese día ya no está (la entrega se movió), también.
+
+Lo de ClickUp (dos PDV a la misma dirección) sigue siendo una parada por PDV.
+
+Cómo está hecho: columna `junto_a` de `encargos` (migración `0104_encargo_junto_a.sql`): vacía (lo decide el Hub),
+`aparte` o la clave de la parada con la que va. La usa `anfitrion` (`src/worker/cronograma.ts`), que es lo que ubica cada
+encargo en la ruta del día, en la semana (chofer de la tarjeta) y en Próximos días, así que los tres coinciden; los
+encargos juntados a mano se ubican al final, cuando su parada ya existe. La dirección escrita distinto: `calleYAltura` y
+`mismaCalle`, dentro de `mismoSitio`; la pregunta: `parecidas` (campo `juntar` de la parada). Se cambia con `PATCH
+/api/recorridos/encargos/:id` y `{ junto_a: "<clave>" | "aparte" | null }`, solo quien organiza (Logística, Producción y
+administradores). Pantallas: `CronogramaRuta.tsx` (aviso, menú y panel `JuntarCon`) y `Recorridos.tsx` (Próximos días).
+Prueba: «Juntar paradas» en `test/recorridos.test.mjs`.
 
 ## Remito de traslado
 
@@ -175,6 +213,7 @@ API (todo con la sesión del Hub):
 | `POST /api/recorridos/encargos/:id/remito`, `GET …/remito` | Numerar e imprimir el remito de traslado |
 | `GET/PUT /api/recorridos/config`, `POST /api/recorridos/historial` | Número del remito e historial (administradores) |
 | `PUT /api/cronograma/chofer` con `ids: ["enc:<id>"]` | El chofer de un encargo (toda su parada) |
+| `PATCH /api/recorridos/encargos/:id` con `junto_a` | Juntarlo con otra parada de ese día o separarlo (Logística) |
 
 ## Para revisar con datos reales
 

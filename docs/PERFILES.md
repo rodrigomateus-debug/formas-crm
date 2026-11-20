@@ -71,7 +71,7 @@ Acá, en la ventana «Qué ve» de cada vendedora:
 | **Lo de todos** | Todos los contactos, empresas, negocios y pedidos, con sus tareas. |
 | **Y además, lo de estas personas** | Suma lo de las personas elegidas (las reglas para compartir de Salesforce). Con «Lo de todos» no hace falta. |
 
-Carmen Donoso arranca con «Solo lo suyo» y, además, lo de Mili Formosa y Sonia Andersen (migración `0104_que_ve.sql`).
+Carmen Donoso arranca con «Solo lo suyo» y, además, lo de Mili Formosa y Sonia Andersen (migración `0105_que_ve.sql`).
 
 **Ver lo de otra persona** es ver sus registros como si fueran suyos: sus contactos, empresas, negocios y pedidos, lo
 asociado a ellos y sus tareas (aunque no estén en ningún registro), en las listas, los tableros, el buscador, la bandeja de

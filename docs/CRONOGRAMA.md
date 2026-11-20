@@ -274,7 +274,8 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   lleva o se trae (primero qué y cuánto, abajo el PDV) y la hora. Debajo, una fila con los estados (hora fijada, sin
   ubicar, foto del remito) y otra con las acciones: **Marcar hecha** (cambia ClickUp; el aviso trae «Deshacer»),
   **Remito** en los egresos, **Fijar hora**, el menú **⋯** (corregir la dirección, diciendo si se cambia en el pedido o
-  en la ficha de la empresa; corregir el punto en el mapa; mandar por expreso; cómo llegar; pasar a otro recorrido) y
+  en la ficha de la empresa; corregir el punto en el mapa; mandar por expreso; cómo llegar; pasar a otro recorrido; juntar
+  una parada de encargos con otra o separar un encargo, ver [Juntar paradas](RECORRIDOS.md#juntar-paradas)) y
   las flechas. Se abre un panel por vez. «Pasar a otro recorrido» entra donde menos lo alarga si ese recorrido está
   ordenado a mano (la misma cuenta que el servidor, `dondeEntra` en `ruta.ts`) y el aviso trae «Deshacer».
 

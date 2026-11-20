@@ -343,6 +343,29 @@ export function facturasParaCrm(docs, asignadas, origenes = new Map()) {
   }
   return out;
 }
+// Lo cobrado de cada pedido, sin IVA: de cada comprobante del pedido, su neto menos lo que falta cobrar de él (el saldo del
+// informe, con IVA, pasado a sin IVA con el total/neto de ese comprobante). Con esto el CRM dice si el cliente ya pagó algo,
+// en vez de restar el saldo del total del pedido: si la factura no coincide con el pedido (otro precio, el IVA incluido en
+// el precio), esa diferencia no aparece como un pago (aviso de Rodrigo del 20/11/2026: el PDV 31748 figuraba con el 17 %
+// pagado, que era justo el IVA). Las notas de crédito restan. Una cobranza sin aplicar no es de ningún comprobante: no cuenta
+// hasta que se aplica. Va para todos los pedidos leídos, en 0 si no tienen nada facturado o nada cobrado.
+export function cobradoDe(resumen, docs, asignadas, filasSaldo) {
+  const saldoDoc = new Map();
+  for (const f of filasSaldo) {
+    const d = claveDoc(f.doc);
+    if (d) saldoDoc.set(`${f.emp || 'EMPRE01'}|${d}`, (saldoDoc.get(`${f.emp || 'EMPRE01'}|${d}`) ?? 0) + Number(f.importe));
+  }
+  const out = {};
+  for (const k of resumen.keys()) out[k] = 0;
+  for (const [k, d] of docs) {
+    const p = asignadas.get(k);
+    if (!p || !(p in out)) continue;
+    const r = d.neto ? d.total / d.neto : 0;
+    out[p] += d.neto - (saldoDoc.get(k) ?? 0) / (r >= 1 && r < 2 ? r : 1.21);
+  }
+  for (const [k, v] of Object.entries(out)) out[k] = v >= 0.01 ? Math.round(v * 100) / 100 : 0;
+  return out;
+}
 // Total con IVA / neto de cada pedido: si una factura con saldo es anterior a lo que se leyó, se usa el de su pedido.
 export function factoresDe(resumen) {
   const out = {};
@@ -436,7 +459,8 @@ async function main() {
   const porFacturar = porFacturarDe(resumen, pend.porPedido, anticiposDe(docs, asignadas), netoFacturado(docs, asignadas));
   const rs = await fetch(`${base}/hooks/pedidos/saldos`, { method: 'POST', redirect: 'manual',
     headers: { authorization: `Bearer ${process.env.CRM_TOKEN}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ filas: filasSaldo, porFacturar, factores: factoresDe(resumen), facturas: facturasParaCrm(docs, asignadas, orig), completo: true }) });
+    body: JSON.stringify({ filas: filasSaldo, porFacturar, cobrado: cobradoDe(resumen, docs, asignadas, filasSaldo), factores: factoresDe(resumen),
+      facturas: facturasParaCrm(docs, asignadas, orig), completo: true }) });
   if (!rs.ok) throw new Error(`CRM /hooks/pedidos/saldos: HTTP ${rs.status}`);
   const s = await rs.json();
   const sinFacturar = Object.values(porFacturar).filter((v) => v > 0);

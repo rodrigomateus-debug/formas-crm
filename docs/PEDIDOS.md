@@ -134,13 +134,21 @@ Mercado Libre no cuentan. Cada hora se recalculan los pedidos de los últimos 12
 cobranzas sin aplicar (un pago que todavía no se imputó a ninguna factura) son del cliente, no de un pedido. Si un
 informe falla, no se manda nada. Es solo lectura: en Finnegans no se escribe.
 
-**Total o parcial** (pedido de Rodrigo del 13/11/2026: que el saldo aclare si ya pagó algo, el anticipo). Lo pagado es el
-total del pedido menos el saldo, los dos sin IVA de Finnegans (`cobroPedido` en `web/src/lib.tsx`). En la tarjeta del
-tablero: «Saldo pendiente $ 3,5 M · total» en rojo si no pagó nada, «· parcial» en ámbar si ya pagó algo (al pasar el
-mouse, cuánto y qué porcentaje), «Pagado» en verde si no queda nada. En la vista previa: «$ 1,8 M · parcial: ya pagó
-$ 1,7 M (49 %)». Una diferencia de menos del 1 % del total cuenta como que no pagó nada (redondeos, percepciones). Sin
-total del pedido no se puede saber y se muestra solo el saldo. Un pago que todavía no se imputó a ninguna factura
-(cobranza sin aplicar) no baja el saldo del pedido, así que hasta que se aplica el pedido sigue diciendo «total».
+**Total o parcial** (pedido de Rodrigo del 13/11/2026: que el saldo aclare si ya pagó algo, el anticipo). Lo pagado es lo
+**cobrado de sus facturas** («Cobrado», `importe_cobrado`): de cada comprobante del pedido, su neto menos lo que falta
+cobrar de él (el saldo del informe, pasado a sin IVA con el total/neto de ese comprobante); las notas de crédito restan.
+Lo calcula `scripts/pedidos-totales.mjs` (`cobradoDe`) con los mismos comprobantes y saldos, y el CRM lo guarda como el
+por facturar: los pedidos que no vienen en la corrida conservan el último. El porcentaje es sobre lo cobrado más el saldo,
+todo sin IVA (`cobroPedido` en `web/src/lib.tsx`; el cronograma usa lo mismo). En la tarjeta del tablero: «Saldo
+pendiente $ 3,5 M · total» en rojo si no pagó nada, «· parcial» en ámbar si ya pagó algo (al pasar el mouse, cuánto y qué
+porcentaje), «Pagado» en verde si no queda nada. En la vista previa: «$ 1,8 M · parcial: ya pagó $ 1,7 M (49 %)». Menos
+del 1 % cuenta como que no pagó nada (redondeos, percepciones). Un pago que todavía no se imputó a ninguna factura
+(cobranza sin aplicar) no es de ningún comprobante, así que hasta que se aplica el pedido sigue diciendo «total».
+
+Antes lo pagado era el total del pedido menos el saldo, y si la factura no coincidía con el pedido la diferencia parecía un
+pago (aviso de Rodrigo del 20/11/2026: el PDV 31748, de $ 432.361,80 sin IVA, no había pagado nada y figuraba con «ya pagó
+$ 75.038 (17 %)»: su factura debía $ 432.361,80 con IVA, o sea $ 357.323,80 sin IVA, y la diferencia era justo el IVA). Esa resta queda solo para los pedidos a los que
+todavía no les llegó lo cobrado; sin eso ni total del pedido, se muestra solo el saldo.
 
 ## Los productos de cada pedido en la lista
 

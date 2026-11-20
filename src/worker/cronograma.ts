@@ -123,7 +123,7 @@ const pos = (estado: string) => POS.get(estado) ?? -1;
 const EN_DEPOSITO = pos('en control de depósito'), DE_VUELTA = pos('articulo con logo');
 const LISTOS_DESP = ['listo para entergar', 'listo para entregar', 'parcial entregado', 'entregados'];
 const plata = (n: number) => `$ ${Math.round(n).toLocaleString('es-AR')}`;
-type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; total?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
+type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; total?: number | string | null; cobrado?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
 type Check = Despacho['checks'][number];
 
 export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolean, hechos: Map<string, unknown>, hoy: string,
@@ -150,11 +150,14 @@ export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolea
     return { estado: extra.traslado ? 'remitido' : 'listo', checks, quien: 'logistica', owner_id, lugar: null };
   }
   // Entrega.
-  // El pago, como en Pedidos (cobroPedido): no pagó nada, pagó una parte (lo pagado pasa el 1 % del total) o pagó. El saldo
-  // y el total son sin IVA, de Finnegans.
-  const saldo = Number(f.saldo) || 0, total = Number(f.total) || 0;
+  // El pago, como en Pedidos (cobroPedido): no pagó nada, pagó una parte (lo cobrado de sus facturas pasa el 1 % de lo cobrado
+  // más el saldo) o pagó. Todo sin IVA, de Finnegans. Mientras no llegó lo cobrado, el total del pedido menos el saldo.
+  const saldo = Number(f.saldo) || 0;
+  const cobrado = f.cobrado == null || f.cobrado === '' ? null : Number(f.cobrado) || 0;
+  const total = cobrado != null ? cobrado + saldo : Number(f.total) || 0;
+  const pagado = cobrado ?? total - saldo;
   const pago: Check = f.etapa === ORDER_ANTICIPO ? { k: 'pago', v: 'no', t: 'No pagó nada: pendiente de anticipo' }
-    : saldo > 0.5 && total > 0 && total - saldo > total * 0.01 ? { k: 'pago', v: 'parcial', t: `Pagó una parte: falta ${plata(saldo)} de ${plata(total)} en Finnegans` }
+    : saldo > 0.5 && total > 0 && pagado > total * 0.01 ? { k: 'pago', v: 'parcial', t: `Pagó una parte: falta ${plata(saldo)} de ${plata(total)} en Finnegans` }
     : saldo > 0.5 ? { k: 'pago', v: 'no', t: `No pagó nada: falta ${plata(saldo)} en Finnegans` } : { k: 'pago', v: 'ok', t: 'Pagó' };
   const listo = LISTOS_DESP.includes(f.estado);
   const noVino = !listo && (noVinoProv || noVinoImp);
@@ -187,6 +190,7 @@ const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stoc
 const SELECT_MOV = `SELECT a.*, p.npdv AS pdv_npdv, p.cliente AS pdv_cliente, p.unidad AS pdv_unidad, p.record_id AS pdv_record, p.entrega_real AS pdv_entrega,
     json_extract(r.props, '$.tipo_de_pedido') AS evento, json_extract(r.props, '$.fecha_de_entrega') AS pactada,
     json_extract(r.props, '$.hs_pipeline_stage') AS etapa, json_extract(r.props, '$.saldo_pendiente_de_pago_mxn') AS saldo, json_extract(r.props, '$.hs_total_price') AS total,
+    json_extract(r.props, '$.importe_cobrado') AS cobrado,
     json_extract(r.props, '$.remito_finnegans') AS remito_fin, r.owner_id AS owner_id
   FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0
   WHERE (a.es_pdv = 0 OR NOT EXISTS (SELECT 1 FROM produccion h WHERE h.pdv_task = a.task_id AND h.es_pdv = 0))

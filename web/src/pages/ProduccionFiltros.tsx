@@ -244,7 +244,7 @@ export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onC
               <button type="button" onClick={() => onChange({ ...f, [c]: undefined })} aria-label={`Quitar el filtro de ${NOMBRE_COL[c]}`}><Icon name="x" size={12} /></button>
             </span>
           ))}
-          <button type="button" className="btn ghost" onClick={() => onChange({})}>Borrar filtros</button>
+          <button type="button" className="btn ghost qf-clear" onClick={() => onChange({})}>Borrar filtros</button>
         </div>
       )}
       {menu && createPortal(

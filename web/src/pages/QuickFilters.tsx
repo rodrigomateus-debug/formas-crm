@@ -179,12 +179,14 @@ export function RelacionFilter({ value, onChange }: { value: string[]; onChange:
 
 // La fila de filtros, en el mismo orden en todos los módulos (pedido de Rodrigo del 20/11/2026: «las mismas cosas en los
 // mismos lugares»): unidad de negocio, la persona (propietario), los filtros propios del módulo (`propios`), las fechas, la
-// etiqueta y ver lo terminado (`terminados`); después, «Filtros» y «Borrar todo». Los controles de vista (agrupar, ordenar,
+// etiqueta y ver lo terminado (`terminados`); después, «Filtros» (`filtros`). Los controles de vista (agrupar, ordenar,
 // colapsar, columnas) no van acá: van en su propia fila, abajo (.toolbar.vista).
-export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, onOwners, onDates, onTags, onUnidades, onRelacion, onClear, extra, propios, terminados }: {
+// Los filtros avanzados en uso (`chips`) van en un renglón propio, abajo, y «Borrar todo» al final de ese renglón; si no hay
+// ninguno, «Borrar todo» va pegado a «Filtros» (pedido de Rodrigo del 20/11/2026: que no quede suelto en un renglón propio).
+export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, onOwners, onDates, onTags, onUnidades, onRelacion, onClear, extra, propios, terminados, filtros, chips }: {
   type: ObjectType; owners: string[]; dates: Record<string, string>; tags: string[]; unidades: string[]; relacion?: string[];
   onOwners: (o: string[]) => void; onDates: (d: Record<string, string>) => void; onTags: (t: string[]) => void; onUnidades: (u: string[]) => void;
-  onRelacion?: (r: string[]) => void; onClear: () => void; extra?: boolean; propios?: ReactNode; terminados?: ReactNode;
+  onRelacion?: (r: string[]) => void; onClear: () => void; extra?: boolean; propios?: ReactNode; terminados?: ReactNode; filtros?: ReactNode; chips?: ReactNode[];
 }) {
   const { meta } = useMeta();
   const name = (v: string) => (v === 'me' ? 'Yo' : v === 'none' ? 'Sin asignar' : meta.users.find((u) => String(u.id) === v)?.name ?? v);
@@ -194,6 +196,7 @@ export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, 
   const any = owners.length > 0 || Object.keys(dates).length > 0 || tags.length > 0 || unidades.length > 0 || extra || (conRelacion(type) && !relacionDefault(rel));
   const typeTags = meta.tags?.filter((t) => t.object_type === type) ?? [];
   const tagName = (v: string) => typeTags.find((t) => String(t.id) === v)?.name ?? v;
+  const borrar = <button type="button" className="btn ghost qf-clear" onClick={onClear} title="Saca todos los filtros">Borrar todo</button>;
   return (
     <>
       <UnidadFilter value={unidades} onChange={onUnidades} />
@@ -240,7 +243,8 @@ export function QuickFilterBar({ type, owners, dates, tags, unidades, relacion, 
         </Pop>
       )}
       {terminados}
-      {any && <button className="btn ghost qf-clear" onClick={onClear}>Borrar todo</button>}
+      {(filtros || (any && !chips?.length)) && <span className="qf-fin">{filtros}{any && !chips?.length && borrar}</span>}
+      {!!chips?.length && <div className="bar-chips" role="group" aria-label="Filtros activos">{chips}{borrar}</div>}
     </>
   );
 }

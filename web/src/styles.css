@@ -3168,3 +3168,8 @@ body.movil .sb-mickey { bottom: calc(58px + env(safe-area-inset-bottom)); }   /*
   background: var(--ui-surface); color: var(--ui-ink); cursor: pointer; opacity: 0; transition: opacity .12s; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
 .msg-img-caja:hover .msg-img-cargar, .msg-img-cargar:focus-visible { opacity: 1; }
 @media (hover: none) { .msg-img-cargar { opacity: 1; } }
+
+/* Producción agrupada (por unidad, vendedor, estado o cliente): el grupo es un nivel más del árbol, arriba de los PDV. */
+.prod-grupo td { background: var(--sunken); border-top: 1px solid var(--line); padding: 6px 8px !important; }
+.prod-grupo td > * { vertical-align: middle; }
+.prod-grupo-t { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; margin: 0 10px 0 4px; }

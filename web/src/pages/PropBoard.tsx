@@ -4,6 +4,7 @@ import { http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtMon
 import { AREAS_PEDIDO, EtapaIcono, MultiPick, QuienProduce, UnidadBadge, UserAvatar, areaPedido, etapaPedidoSlug, type AreaPedido, type PersonaProduccion } from '../components';
 import { BotonVacias, SortPick, useColapso, type CardActions } from './Board';
 import { Select } from '../Select';
+import { BotonColapsar } from '../vistaControles';
 import { siFestejaPedido } from '../Chispin';
 import { ChatChip } from './Conversacion';
 import { hayResumen, PREF_PRODUCTOS, ProductosTarjeta, ResumenProduccion, useEsperaCorta, useProduccionPedidos, useProductosAbiertos, type ProduccionPedido, type ProductosAbiertos } from './PedidosProductos';
@@ -338,13 +339,9 @@ export default function PropBoard({ type, prop: propIn, onProp, cardProps, onCar
           </Select>
         </label>
         <SortPick type={type} sort={sort} dir={dir} onSort={onSort} />
+        {esPedidos && <BotonColapsar on={productos.cerrados} onChange={(v) => productos.todos(!v)} label="Colapsar productos"
+          title={productos.cerrados ? 'Mostrar en cada tarjeta sus productos, con su estado, quién los tiene y la fecha real' : 'Tarjetas compactas, sin el detalle de cada producto'} />}
         <BotonVacias value={vacias} onChange={onVacias} />
-        {esPedidos && (
-          <button type="button" className={`btn qf-btn${productos.cerrados ? '' : ' on'}`} onClick={() => productos.todos(productos.cerrados)} aria-pressed={!productos.cerrados}
-            title={productos.cerrados ? 'Mostrar en cada tarjeta sus productos, con su estado, quién los tiene y la fecha real' : 'Tarjetas compactas, sin el detalle de cada producto'}>
-            <span className={`flecha${productos.cerrados ? ' cerrada' : ''}`}><Icon name="down" size={14} /></span>{productos.cerrados ? 'Expandir productos' : 'Colapsar productos'}
-          </button>
-        )}
         <div className="row small bar-label" title="Datos que muestra cada tarjeta (se guarda en la vista)">
           <span>Tarjeta</span>
           <MultiPick small options={propsOf(meta, type).filter((p) => !['name', 'hs_order_name'].includes(p.name)).map((p) => ({ value: p.name, label: p.label }))}

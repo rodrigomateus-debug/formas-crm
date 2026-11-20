@@ -12,6 +12,7 @@ import { RecordPreview } from './RecordPage';
 import { BotonVacias, useColapso } from './Board';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
 import { revisarFestejos } from '../Chispin';
+import { BotonColapsar, ElegirColumnas } from '../vistaControles';
 
 // Un clic en un renglón o una tarjeta abre la vista previa del pedido, salvo que sea en algo que se usa ahí mismo (un
 // desplegable, una fecha, un link, los asignados…).
@@ -62,9 +63,22 @@ const CERRADOS = ['entregados', 'anulado'];
 // También los filtros por columna (ProduccionFiltros.tsx: estado, cantidad, fechas, proveedor, impresor).
 interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?: string; cliente?: string; cerrados: boolean; modo: 'lista' | 'tablero'; columnas?: FiltrosCol;
   vacias?: boolean;   // tablero: colapsar las columnas vacías (Board.tsx, useColapso)
+  agrupar?: AgruparProd;   // agrupar los PDV (en la tabla, un nivel más del árbol; en el tablero, las columnas)
   orden?: Orden }     // cómo se ordenan los PDV (si no está, los más nuevos primero)
+// Agrupar los PDV (pedido de Rodrigo del 20/11/2026): por unidad de negocio, vendedor, estado del PDV o cliente. En la
+// tabla es un nivel más del árbol (el grupo, sus PDV y los artículos de cada uno); en el tablero, las columnas (por
+// defecto, el estado).
+type AgruparProd = '' | 'etapa' | 'unidad' | 'vendedor' | 'cliente';
+const AGRUPAR_PROD: Array<[AgruparProd, string]> = [['etapa', 'Estado del PDV'], ['unidad', 'Unidad de negocio'], ['vendedor', 'Vendedor'], ['cliente', 'Cliente']];
+// Las columnas de la tabla que se pueden sacar o agregar («Columnas»), en orden. «PDV / artículo» va siempre.
+const COLUMNAS_PROD: Array<[string, string]> = [['creado', 'Creado'], ['estado', 'Estado'], ['asignado', 'Asignado'], ['cantidad', 'Cantidad'], ['pactada', 'Pactada'],
+  ['real', 'Real'], ['oc', 'OC'], ['proveedor', 'Proveedor'], ['impresor', 'Impresor'], ['ingreso_proveedor', 'Ingreso prov.'], ['retiro_proveedor', 'Retiro prov.'],
+  ['egreso_impresor', 'Egreso imp.'], ['retiro_impresor', 'Retiro imp.'], ['ingreso_impresor', 'Ingreso imp.']];
+// Las del artículo (en la fila del PDV van juntas, en una sola celda).
+const DEL_ARTICULO = ['proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
+const verCol = (ocultas: string) => { const o = ocultas.split(','); return (k: string) => !o.includes(k); };
 const normCols = (f?: FiltrosCol) => JSON.stringify(Object.entries(limpiar(f ?? {})).map(([k, x]) => [k, Array.isArray(x) ? [...x].sort() : x]));
-const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista', normCols(c.columnas), !!c.vacias, c.orden ?? ORDEN_BASE]);
+const normConfig = (c: Partial<ConfigProd>) => JSON.stringify([(c.q ?? '').trim(), [...(c.unidades ?? [])].sort(), c.persona ?? '', c.vendedor ?? '', c.cliente ?? '', !!c.cerrados, c.modo ?? 'lista', normCols(c.columnas), !!c.vacias, c.orden ?? ORDEN_BASE, c.agrupar ?? '']);
 
 // Cómo se ordenan los PDV (pedido de Rodrigo del 19/11/2026): por defecto, por fecha de creación, los más nuevos primero
 // (los que no tienen fecha, al final). Un clic en el encabezado «Creado» lo da vuelta; en «Real», por fecha de entrega
@@ -107,7 +121,7 @@ function Vendedor({ p }: { p: ConVendedor }) {
 // Preferencias de cada uno en este navegador (lista o tablero, colapsado). Si el navegador no deja guardar, no pasa nada.
 const PREF = 'produccion:pref';
 // `creado`: si se ve la columna de la fecha de creación (por defecto, sí).
-function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean; vacias?: boolean; creado?: boolean } {
+function leerPref(): { modo?: 'lista' | 'tablero'; unidades?: string[]; persona?: string; colapsado?: boolean; vacias?: boolean; creado?: boolean; ocultas?: string[] } {
   try { return JSON.parse(localStorage.getItem(PREF) ?? '{}'); } catch { return {}; }
 }
 function guardarPref(p: object) { try { localStorage.setItem(PREF, JSON.stringify({ ...leerPref(), ...p })); } catch { /* sin almacenamiento */ } }
@@ -145,9 +159,10 @@ export default function ProduccionPage() {
   const [cliente, setCliente] = useState('');
   const [columnas, setColumnas] = useState<FiltrosCol>({});
   const [orden, setOrden] = useState<Orden>(ORDEN_BASE);
-  // La columna «Creado» de la lista: se saca o se agrega desde «Columnas» (queda en este navegador).
-  const [colCreado, setColCreado] = useState(pref.creado !== false);
-  const cambiarColCreado = (x: boolean) => { setColCreado(x); guardarPref({ creado: x }); };
+  // Las columnas que se sacaron de la tabla («Columnas»; quedan en este navegador). Antes solo se elegía «Creado».
+  const [ocultas, setOcultas] = useState<string[]>(pref.ocultas ?? (pref.creado === false ? ['creado'] : []));
+  const cambiarOcultas = (x: string[]) => { setOcultas(x); guardarPref({ ocultas: x }); };
+  const [agrupar, setAgrupar] = useState<AgruparProd>('');
   const [cerrados, setCerrados] = useState(false);
   // Solo los PDV con la entrega real (la del PDV o la de algún artículo abierto) después de la pactada.
   const [pasadas, setPasadas] = useState(false);
@@ -272,11 +287,11 @@ export default function ProduccionPage() {
     setActiva(k);
     setParams((p) => { if (k === pestanas[0]) p.delete('v'); else p.set('v', k); return p; }, { replace: true });
     const vista = vistaDe(k);
-    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setVendedor(''); setCliente(''); setColumnas({}); setCerrados(false); setBuscar(''); setOrden(ORDEN_BASE); }
+    if (esFija(k)) { setUnidades(base); setPersona(k === 'mine' ? 'yo' : ''); setVendedor(''); setCliente(''); setColumnas({}); setCerrados(false); setBuscar(''); setOrden(ORDEN_BASE); setAgrupar(''); }
     else if (vista) {
       const c = vista.config;
       setUnidades(c.unidades?.length ? c.unidades : base); setPersona(c.persona ?? ''); setVendedor(c.vendedor ?? ''); setCliente(c.cliente ?? '');
-      setCerrados(!!c.cerrados); setBuscar(c.q ?? ''); setColumnas(c.columnas ?? {}); setOrden(c.orden ?? ORDEN_BASE);
+      setCerrados(!!c.cerrados); setBuscar(c.q ?? ''); setColumnas(c.columnas ?? {}); setOrden(c.orden ?? ORDEN_BASE); setAgrupar(c.agrupar ?? '');
       if (c.modo) setModo(c.modo);
       setVacias(!!c.vacias);
     }
@@ -291,8 +306,8 @@ export default function ProduccionPage() {
     if (!esFija(activa)) { if (vistaDe(activa)) elegir(activa); else elegir(pestanas[0]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vistas.data]);
-  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}), ...(vacias ? { vacias: true } : {}), ...(orden !== ORDEN_BASE ? { orden } : {}) };
-  const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista', vacias: false })
+  const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}), ...(vacias ? { vacias: true } : {}), ...(orden !== ORDEN_BASE ? { orden } : {}), ...(agrupar ? { agrupar } : {}) };
+  const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista', vacias: false, agrupar: '' })
     !== normConfig({ q: '', unidades: base, persona: activa === 'mine' ? 'yo' : '', cerrados: false, modo: 'lista' });
   const articulos = filtrados.reduce((n, p) => n + p.articulos.length, 0);
   const soloLectura = v && !v.puede_editar;
@@ -350,15 +365,17 @@ export default function ProduccionPage() {
       </div>
       {/* Los controles de vista, en su propia fila (como en Pedidos y Negocios); a la derecha, qué se edita acá. */}
       <div className="toolbar vista">
-          {modo === 'tablero' && <BotonVacias value={vacias} onChange={cambiarVacias} />}
-          {modo === 'lista' && <ElegirColumnas creado={colCreado} onCreado={cambiarColCreado} />}
-          {modo === 'lista' && (
-            <button type="button" className="btn ghost" onClick={() => cambiarColapsado(!colapsado)} aria-pressed={colapsado}
-              title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'}>
-              <Flecha abierto={!colapsado} />{colapsado ? 'Expandir todo' : 'Colapsar todo'}
-            </button>
-          )}
-          {meta.me.role === 'admin' && v && <span className="vista-fin"><ConfigUnidades config={v.config} onGuardado={cargar} /></span>}
+        <label className="row small bar-label">Agrupar por
+          <Select className={`input${agrupar ? ' on' : ''}`} style={{ width: 190 }} value={agrupar} onChange={(e) => setAgrupar(e.target.value as AgruparProd)} aria-label="Agrupar por">
+            <option value="">{modo === 'tablero' ? 'Estado del PDV' : 'Sin agrupar'}</option>
+            {AGRUPAR_PROD.filter(([k]) => !(modo === 'tablero' && k === 'etapa')).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </Select>
+        </label>
+        {modo === 'lista' && <BotonColapsar on={colapsado} onChange={cambiarColapsado} label="Colapsar productos"
+          title={colapsado ? 'Mostrar los artículos de cada PDV' : 'Ver solo los PDV, sin sus artículos'} />}
+        {modo === 'tablero' && <BotonVacias value={vacias} onChange={cambiarVacias} />}
+        {modo === 'lista' && <ElegirColumnas columnas={COLUMNAS_PROD} ocultas={ocultas} onChange={cambiarOcultas} />}
+        {meta.me.role === 'admin' && v && <span className="vista-fin"><ConfigUnidades config={v.config} onGuardado={cargar} /></span>}
       </div>
       {v && <AvisoUnidades v={v} unidades={unidades ?? []} />}
       {soloLectura && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves la producción para saber cómo vienen los pedidos. La editan las usuarias con perfil Producción.</div>}
@@ -368,10 +385,10 @@ export default function ProduccionPage() {
         <div className="empty plain">{v.pdvs.length ? 'Ningún PDV con esos filtros.' : 'No hay PDV en producción para estas unidades. Si recién se instaló, la primera lectura de ClickUp tarda unas corridas (cada 10 minutos).'}</div>
       )}
       {v && filtrados.length > 0 && (modo === 'lista'
-        ? <Lista pdvs={filtrados} v={v} editar={editar} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} orden={orden} onOrden={setOrden} colCreado={colCreado} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
+        ? <Lista pdvs={filtrados} v={v} editar={editar} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} orden={orden} onOrden={setOrden} ocultas={ocultas.join(',')} agrupar={agrupar} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
             onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onTodos={(abrir) => cambiarColapsado(!abrir)} />
-        : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} vacias={vacias} />)}
+        : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} vacias={vacias} agrupar={agrupar} />)}
       {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
     </div>
   );
@@ -432,28 +449,6 @@ function ConfigUnidades({ config, onGuardado }: { config: { unidades: string[] }
 }
 
 // Las columnas opcionales de la lista: por ahora, la fecha de creación del PDV.
-function ElegirColumnas({ creado, onCreado }: { creado: boolean; onCreado: (x: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [open]);
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" className="btn ghost" onClick={() => setOpen(!open)} aria-expanded={open} title="Agregar o sacar columnas de la lista"><Icon name="table" size={15} />Columnas</button>
-      {open && (
-        <div className="popover" style={{ right: 0, top: 36, minWidth: 220 }}>
-          <div className="grp">Columnas</div>
-          <label className="opt small"><input type="checkbox" checked={creado} onChange={(e) => onCreado(e.target.checked)} />Fecha de creación del PDV</label>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------- Gente ----------
 
 function PersonaAvatar({ p, size = 'sm' }: { p: Persona; size?: 'sm' | 'xs' }) {
@@ -613,13 +608,47 @@ function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
 // La flecha de abrir y cerrar, como en ClickUp: para abajo si está abierto, para la derecha si está cerrado.
 export const Flecha = ({ abierto }: { abierto: boolean }) => <span className={`flecha${abierto ? '' : ' cerrada'}`}><Icon name="down" size={14} /></span>;
 
-function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filtros, orden, onOrden, colCreado }: {
-  filtros: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: CtxFiltros }; orden: Orden; onOrden: (o: Orden) => void; colCreado: boolean;
+// El grupo de un PDV según cómo se agrupa: la clave, cómo se muestra y el orden de los grupos.
+function grupoDe(meta: Meta, p: Pdv, agrupar: AgruparProd): { k: string; label: ReactNode; orden: string } {
+  if (agrupar === 'unidad') {
+    const u = unidadDeTexto(p.unidad);
+    return u ? { k: u, label: <UnidadBadge k={u} />, orden: String(['shop', 'corporate', 'noestres'].indexOf(u)) } : { k: '', label: 'Sin unidad', orden: '9' };
+  }
+  if (agrupar === 'vendedor') {
+    const nombre = usuarioVendedor(meta, p)?.name ?? p.vendedor;
+    return nombre ? { k: claveVendedor(meta, p), label: <Vendedor p={p} />, orden: normNombre(nombre) } : { k: '', label: 'Sin vendedor', orden: '\uffff' };
+  }
+  if (agrupar === 'cliente') return p.cliente ? { k: p.cliente, label: p.cliente, orden: normNombre(p.cliente) } : { k: '', label: 'Sin cliente', orden: '\uffff' };
+  // Estado del PDV: el de la etapa del pedido, en el orden de las etapas.
+  const etapas = propOf(meta, 'order', 'hs_pipeline_stage')?.options ?? [];
+  if (!p.etapa) return { k: SIN_ETAPA, label: 'Sin arrancar', orden: '000' };
+  const i = etapas.findIndex((o) => o.value === p.etapa);
+  return { k: p.etapa, label: <EtapaPedido value={p.etapa} label={formatValue(meta, 'order', 'hs_pipeline_stage', p.etapa)} />, orden: String(i < 0 ? 999 : i + 1).padStart(3, '0') };
+}
+function agruparPdvs(meta: Meta, pdvs: Pdv[], agrupar: AgruparProd) {
+  const m = new Map<string, { k: string; label: ReactNode; orden: string; pdvs: Pdv[] }>();
+  for (const p of pdvs) {
+    const g = grupoDe(meta, p, agrupar);
+    const x = m.get(g.k) ?? { ...g, pdvs: [] };
+    x.pdvs.push(p); m.set(g.k, x);
+  }
+  return [...m.values()].sort((a, b) => a.orden.localeCompare(b.orden, 'es'));
+}
+
+function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filtros, orden, onOrden, ocultas, agrupar }: {
+  filtros: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: CtxFiltros }; orden: Orden; onOrden: (o: Orden) => void; ocultas: string; agrupar: AgruparProd;
   pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void; onAbrir: (p: Pdv) => void; sel: number | null;
 }) {
   const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
   const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
   const todosAbiertos = pdvs.every((p) => abierto(p.task_id));
+  const { meta } = useMeta();
+  const ver = verCol(ocultas);
+  const nCols = 2 + COLUMNAS_PROD.filter(([k]) => ver(k)).length;   // «PDV / artículo», las que se ven y ClickUp
+  // Los grupos cerrados (mientras se está en la pantalla).
+  const [cerradosG, setCerradosG] = useState<Set<string>>(new Set());
+  const grupos = useMemo(() => (agrupar ? agruparPdvs(meta, pdvs, agrupar) : []), [meta, pdvs, agrupar]);
+  const fila = (p: Pdv) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} ocultas={ocultas} />;
   // El embudo de cada columna (ProduccionFiltros.tsx).
   // En un encabezado que ordena, el clic en el embudo (y en su ventana, que sube por React) no cambia el orden.
   const fil = (c: ColFiltro) => <span onClick={(e) => e.stopPropagation()}><FiltroEncabezado col={c} f={filtros.f} onChange={filtros.onChange} ctx={filtros.ctx} /></span>;
@@ -633,38 +662,57 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
               <button type="button" className="btn ghost xs" onClick={() => onTodos(!todosAbiertos)} aria-label={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'} title={todosAbiertos ? 'Cerrar todos' : 'Abrir todos'}>
                 <Flecha abierto={todosAbiertos} /></button>
               PDV / artículo</th>
-            {colCreado && <th className="prod-creado-th" onClick={() => onOrden(orden === 'creado_desc' ? 'creado_asc' : 'creado_desc')}
+            {ver('creado') && <th className="prod-creado-th" onClick={() => onOrden(orden === 'creado_desc' ? 'creado_asc' : 'creado_desc')}
               aria-sort={orden === 'creado_desc' ? 'descending' : orden === 'creado_asc' ? 'ascending' : 'none'}
               title="Fecha de creación del PDV: la del pedido de venta en Finnegans (o el alta en ClickUp, si todavía no la tiene). Clic para ordenar.">
-              <span className="th-f">Creado{flecha(orden !== 'entrega', orden === 'creado_asc')}{fil('creado')}</span></th>}            <th className="nosort"><span className="th-f">Estado{fil('estado')}</span></th>
-            <th className="nosort">Asignado</th>
-            <th className="nosort numcol"><span className="th-f">Cantidad{fil('cantidad')}</span></th>
-            <th className="nosort" title="La fecha de entrega que puso el comercial en el pedido de Finnegans">Pactada</th>
-            <th onClick={() => onOrden('entrega')} aria-sort={orden === 'entrega' ? 'ascending' : 'none'} title="La fecha de producción: ENTREGAS (FECHA REAL) en ClickUp. Clic para ordenar por fecha de entrega.">
-              <span className="th-f">Real{flecha(orden === 'entrega', true)}{fil('entrega_real')}</span></th>
-            <th className="nosort" title="La orden de compra al proveedor en Finnegans (clic para abrirla)">OC</th>
-            <th className="nosort"><span className="th-f">Proveedor{fil('proveedor')}</span></th>
-            <th className="nosort"><span className="th-f">Impresor{fil('impresor')}</span></th>
-            <th className="nosort" title="Llega del proveedor"><span className="th-f">Ingreso prov.{fil('ingreso_proveedor')}</span></th>
-            <th className="nosort" title="Se retira del proveedor"><span className="th-f">Retiro prov.{fil('retiro_proveedor')}</span></th>
-            <th className="nosort" title="Va al impresor"><span className="th-f">Egreso imp.{fil('egreso_impresor')}</span></th>
-            <th className="nosort" title="Se retira del impresor"><span className="th-f">Retiro imp.{fil('retiro_impresor')}</span></th>
-            <th className="nosort" title="Lo trae el impresor al depósito (en vez de ir a retirarlo)"><span className="th-f">Ingreso imp.{fil('ingreso_impresor')}</span></th>
+              <span className="th-f">Creado{flecha(orden !== 'entrega', orden === 'creado_asc')}{fil('creado')}</span></th>}
+            {ver('estado') && <th className="nosort"><span className="th-f">Estado{fil('estado')}</span></th>}
+            {ver('asignado') && <th className="nosort">Asignado</th>}
+            {ver('cantidad') && <th className="nosort numcol"><span className="th-f">Cantidad{fil('cantidad')}</span></th>}
+            {ver('pactada') && <th className="nosort" title="La fecha de entrega que puso el comercial en el pedido de Finnegans">Pactada</th>}
+            {ver('real') && <th onClick={() => onOrden('entrega')} aria-sort={orden === 'entrega' ? 'ascending' : 'none'} title="La fecha de producción: ENTREGAS (FECHA REAL) en ClickUp. Clic para ordenar por fecha de entrega.">
+              <span className="th-f">Real{flecha(orden === 'entrega', true)}{fil('entrega_real')}</span></th>}
+            {ver('oc') && <th className="nosort" title="La orden de compra al proveedor en Finnegans (clic para abrirla)">OC</th>}
+            {ver('proveedor') && <th className="nosort"><span className="th-f">Proveedor{fil('proveedor')}</span></th>}
+            {ver('impresor') && <th className="nosort"><span className="th-f">Impresor{fil('impresor')}</span></th>}
+            {ver('ingreso_proveedor') && <th className="nosort" title="Llega del proveedor"><span className="th-f">Ingreso prov.{fil('ingreso_proveedor')}</span></th>}
+            {ver('retiro_proveedor') && <th className="nosort" title="Se retira del proveedor"><span className="th-f">Retiro prov.{fil('retiro_proveedor')}</span></th>}
+            {ver('egreso_impresor') && <th className="nosort" title="Va al impresor"><span className="th-f">Egreso imp.{fil('egreso_impresor')}</span></th>}
+            {ver('retiro_impresor') && <th className="nosort" title="Se retira del impresor"><span className="th-f">Retiro imp.{fil('retiro_impresor')}</span></th>}
+            {ver('ingreso_impresor') && <th className="nosort" title="Lo trae el impresor al depósito (en vez de ir a retirarlo)"><span className="th-f">Ingreso imp.{fil('ingreso_impresor')}</span></th>}
             <th className="nosort" aria-label="ClickUp" />
           </tr>
         </thead>
         <tbody>
-          {pdvs.map((p) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} colCreado={colCreado} />)}
+          {!agrupar ? pdvs.map(fila) : grupos.map((g) => {
+            const abiertoG = !cerradosG.has(g.k);
+            const art = g.pdvs.reduce((n, p) => n + p.articulos.length, 0);
+            return (
+              <Fragment key={`g-${g.k}`}>
+                <tr className="prod-grupo">
+                  <td colSpan={nCols}>
+                    <button type="button" className="btn ghost xs" aria-expanded={abiertoG} aria-label={`${abiertoG ? 'Cerrar' : 'Abrir'} el grupo`}
+                      onClick={() => setCerradosG((x) => { const n = new Set(x); if (n.has(g.k)) n.delete(g.k); else n.add(g.k); return n; })}><Flecha abierto={abiertoG} /></button>
+                    <span className="prod-grupo-t">{g.label}</span>
+                    <span className="small muted">{g.pdvs.length} PDV · {art} artículos</span>
+                  </td>
+                </tr>
+                {abiertoG && g.pdvs.map(fila)}
+              </Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps, onAbrir, elegido, colCreado }: {
+const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps, onAbrir, elegido, ocultas }: {
   p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: boolean; onToggle: (id: string) => void; provs: ReactNode; imps: ReactNode;
-  onAbrir: (p: Pdv) => void; elegido: boolean; colCreado: boolean;
+  onAbrir: (p: Pdv) => void; elegido: boolean; ocultas: string;
 }) {
+  const ver = verCol(ocultas);
+  const nArt = DEL_ARTICULO.filter(ver).length;   // las columnas del artículo, juntas en la fila del PDV
   const clic = p.record_id ? (e: React.MouseEvent) => { if (!clicAdentro(e)) onAbrir(p); } : undefined;
   const cls = `${p.record_id ? ' abre' : ''}${elegido ? ' sel' : ''}`;
   const { meta } = useMeta();
@@ -696,40 +744,41 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
             </div>
           </div>
         </td>
-        {colCreado && <td className="prod-creado">{p.creado ? dia(p.creado) : <span className="muted">—</span>}</td>}
-        <td>
+        {ver('creado') && <td className="prod-creado">{p.creado ? dia(p.creado) : <span className="muted">—</span>}</td>}
+        {ver('estado') && <td>
           <div className="row" style={{ gap: 6 }}>
             {etapa ? <EtapaPedido value={p.etapa} label={etapa} /> : <span className="muted small">Sin arrancar</span>}
             {p.total > 0 && <span className={`prod-avance${listo ? ' ok' : ''}`} title={`${p.listos} de ${p.total} artículos listos`}>{p.listos}/{p.total}</span>}
           </div>
-        </td>
+        </td>}
         {/* Quién tiene el PDV (editable ahí mismo); si algún artículo lo tiene otra persona, se aclara al lado. */}
-        <td>{v.puede_editar ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+        {ver('asignado') && <td>{v.puede_editar ? <span className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
           <Asignados ids={p.asignados} personas={v.personas} editable label={`PDV ${p.npdv}`} nota={NOTA_PDV} onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} />
           <OtrosEnArticulos p={p} personas={v.personas} />
-        </span> : <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />}</td>
-        <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>
-        <td className="prod-pactada" title="Entrega pactada: la que puso el comercial en Finnegans">{pactada ? dia(pactada) : <span className="muted">—</span>}</td>
-        <td><span className="prod-real"><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega real del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /><Corrida pactada={pactada} real={p.entrega_real} /></span></td>
+        </span> : <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />}</td>}
+        {ver('cantidad') && <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>}
+        {ver('pactada') && <td className="prod-pactada" title="Entrega pactada: la que puso el comercial en Finnegans">{pactada ? dia(pactada) : <span className="muted">—</span>}</td>}
+        {ver('real') && <td><span className="prod-real"><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega real del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /><Corrida pactada={pactada} real={p.entrega_real} /></span></td>}
         {/* Las OC del pedido que no quedaron en ningún artículo (o todas, si el pedido no muestra artículos). */}
-        <td><OcLinks ocs={ocsSueltas(p)} /></td>
-        <td colSpan={7} className="small muted">
+        {ver('oc') && <td><OcLinks ocs={ocsSueltas(p)} /></td>}
+        {nArt > 0 && <td colSpan={nArt} className="small muted">
           {!ed && !p.editable && <span>Se trabaja en ClickUp</span>}
-        </td>
+        </td>}
         <td>{p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir PDV ${p.npdv} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
       </tr>
       {abierto && p.articulos.map((a) => (
-        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} colCreado={colCreado} />
+        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} ocultas={ocultas} />
       ))}
-      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={colCreado ? 16 : 15} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
+      {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={2 + COLUMNAS_PROD.filter(([k]) => ver(k)).length} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
 
-function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, colCreado }: {
+function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, ocultas }: {
   a: Articulo; p: Pdv; v: Vista; ed: boolean; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; provs: ReactNode; imps: ReactNode; listo: boolean;
-  clic?: (e: React.MouseEvent) => void; cls: string; colCreado: boolean;
+  clic?: (e: React.MouseEvent) => void; cls: string; ocultas: string;
 }) {
+  const ver = verCol(ocultas);
   const set = (c: Campo) => (x: unknown) => editar(p, a.task_id, c, x);
   const artListo = ['listo para entergar', 'entregados'].includes(a.estado);
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
@@ -738,20 +787,20 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, colC
       <td className="prod-nombre"><div className="prod-art-t"><FotoProducto url={a.foto} nombre={a.nombre} />
         {/* El nombre con todo el ancho y, abajo, los avisos (logo, costo del logo, notas): antes iban al lado y lo tapaban. */}
         <div className="prod-art-txt"><span className="ellipsis" title={a.nombre}>{a.nombre}</span><ChipsArticulo a={a} p={p} v={v} /></div></div></td>
-      {colCreado && <td />}
-      <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>
-      <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>
-      <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>
-      <td />
-      <td><span className="prod-real"><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega real de ${a.nombre}`} alerta={atras(a.entrega_real)} /><Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={a.entrega_real} /></span></td>
-      <td><OcLinks ocs={a.oc} vacio={<span className="muted">—</span>} /></td>
-      <td className="opcion-cell" title={a.proveedor_sku ? `Por el SKU ${a.proveedor_sku}` : undefined}><OpcionCelda v={v} campo="proveedor" valor={a.proveedor} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${a.nombre}`} /></td>
-      <td className="opcion-cell"><OpcionCelda v={v} campo="impresor" valor={a.impresor} editable={ed} onChange={set('impresor')} opciones={imps} label={`Impresor de ${a.nombre}`} /></td>
-      <td><FechaCelda valor={a.ingreso_proveedor} editable={ed} onChange={set('ingreso_proveedor')} label={`Ingreso del proveedor de ${a.nombre}`} /></td>
-      <td><FechaCelda valor={a.retiro_proveedor} editable={ed} onChange={set('retiro_proveedor')} label={`Retiro del proveedor de ${a.nombre}`} /></td>
-      <td><FechaCelda valor={a.egreso_impresor} editable={ed} onChange={set('egreso_impresor')} label={`Egreso al impresor de ${a.nombre}`} /></td>
-      <td><FechaCelda valor={a.retiro_impresor} editable={ed} onChange={set('retiro_impresor')} label={`Retiro del impresor de ${a.nombre}`} /></td>
-      <td><FechaCelda valor={a.ingreso_impresor} editable={ed} onChange={set('ingreso_impresor')} label={`Ingreso del impresor de ${a.nombre}`} /></td>
+      {ver('creado') && <td />}
+      {ver('estado') && <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>}
+      {ver('asignado') && <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>}
+      {ver('cantidad') && <td className="numcell">{a.cantidad != null ? a.cantidad.toLocaleString('es-AR') : <span className="muted">—</span>}</td>}
+      {ver('pactada') && <td />}
+      {ver('real') && <td><span className="prod-real"><FechaCelda valor={a.entrega_real} editable={ed} onChange={set('entrega_real')} label={`Entrega real de ${a.nombre}`} alerta={atras(a.entrega_real)} /><Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={a.entrega_real} /></span></td>}
+      {ver('oc') && <td><OcLinks ocs={a.oc} vacio={<span className="muted">—</span>} /></td>}
+      {ver('proveedor') && <td className="opcion-cell" title={a.proveedor_sku ? `Por el SKU ${a.proveedor_sku}` : undefined}><OpcionCelda v={v} campo="proveedor" valor={a.proveedor} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${a.nombre}`} /></td>}
+      {ver('impresor') && <td className="opcion-cell"><OpcionCelda v={v} campo="impresor" valor={a.impresor} editable={ed} onChange={set('impresor')} opciones={imps} label={`Impresor de ${a.nombre}`} /></td>}
+      {ver('ingreso_proveedor') && <td><FechaCelda valor={a.ingreso_proveedor} editable={ed} onChange={set('ingreso_proveedor')} label={`Ingreso del proveedor de ${a.nombre}`} /></td>}
+      {ver('retiro_proveedor') && <td><FechaCelda valor={a.retiro_proveedor} editable={ed} onChange={set('retiro_proveedor')} label={`Retiro del proveedor de ${a.nombre}`} /></td>}
+      {ver('egreso_impresor') && <td><FechaCelda valor={a.egreso_impresor} editable={ed} onChange={set('egreso_impresor')} label={`Egreso al impresor de ${a.nombre}`} /></td>}
+      {ver('retiro_impresor') && <td><FechaCelda valor={a.retiro_impresor} editable={ed} onChange={set('retiro_impresor')} label={`Retiro del impresor de ${a.nombre}`} /></td>}
+      {ver('ingreso_impresor') && <td><FechaCelda valor={a.ingreso_impresor} editable={ed} onChange={set('ingreso_impresor')} label={`Ingreso del impresor de ${a.nombre}`} /></td>}
       <td>{a.url && <a href={a.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir ${a.nombre} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
     </tr>
   );
@@ -826,10 +875,11 @@ const SIN_ETAPA = '__sin_etapa';
 const SIEMPRE = ['esperando_boceto', '1237498994', '1237498996'];
 const MAX_ARTICULOS = 4;
 
-function Tablero({ pdvs, v, editar, onAbrir, sel, vacias }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean;
+function Tablero({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean; agrupar: AgruparProd;
 }) {
   const { meta } = useMeta();
+  if (agrupar && agrupar !== 'etapa') return <TableroAgrupado pdvs={pdvs} v={v} editar={editar} onAbrir={onAbrir} sel={sel} vacias={vacias} agrupar={agrupar} />;
   // Columnas angostas: a mano (la flechita) o, con «Colapsar vacías», las que no tienen nada (se abren solas).
   const colapso = useColapso('crm.board.collapsed.produccion', vacias);
   const etapas = propOf(meta, 'order', 'hs_pipeline_stage')?.options ?? [];
@@ -863,6 +913,37 @@ function Tablero({ pdvs, v, editar, onAbrir, sel, vacias }: {
             <div className="col-body">
               {lista.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
               {!lista.length && <div className="small muted" style={{ padding: '4px 4px 8px' }}>—</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// El tablero con columnas por unidad, vendedor o cliente (por estado es el de arriba, con los colores de cada etapa).
+function TableroAgrupado({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean; agrupar: AgruparProd;
+}) {
+  const { meta } = useMeta();
+  const colapso = useColapso(`crm.board.collapsed.produccion.${agrupar}`, vacias);
+  const grupos = useMemo(() => agruparPdvs(meta, pdvs, agrupar), [meta, pdvs, agrupar]);
+  return (
+    <div className="board prod-board">
+      {grupos.map((g) => {
+        if (colapso.cerrada(g.k, g.pdvs.length)) return (
+          <div key={g.k} className="col collapsed" onClick={() => colapso.alternar(g.k, g.pdvs.length)} role="button" title="Clic para mostrar">
+            <Icon name="chevron" size={14} /><span className="n num">{g.pdvs.length}</span><span className="vlabel">{g.label}</span>
+          </div>
+        );
+        return (
+          <div key={g.k} className="col">
+            <div className="col-head">
+              <div className="t"><span className="prod-grupo-t">{g.label}</span><span className="n">{g.pdvs.length}</span>
+                <button className="col-fold" title="Achicar la columna" aria-label="Achicar la columna" onClick={() => colapso.alternar(g.k, g.pdvs.length)}><Icon name="chevron" size={14} /></button></div>
+            </div>
+            <div className="col-body">
+              {g.pdvs.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
             </div>
           </div>
         );

@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { BotonColapsar } from '../vistaControles';
 import { Link } from 'react-router-dom';
 import {
   http, qs, useMeta, useToast, useAsync, olvidarMemoria, fmtMoney, fmtDate, fmtRelative, recordUrl, userName, Icon, Cargando, missingFor, faltaDato, formatValue, propOf, safeUrl, ACTIVITY_LABEL, TagChips,
@@ -53,12 +54,8 @@ export function useColapso(key: string, vacias: boolean) {
 
 // El botón del tablero para prenderlo o apagarlo.
 export function BotonVacias({ value, onChange }: { value: boolean; onChange?: (v: boolean) => void }) {
-  if (!onChange) return null;
-  return (
-    <button type="button" className={`btn qf-btn${value ? ' on' : ''}`} aria-pressed={value} onClick={() => onChange(!value)}
-      title={value ? 'Las columnas con 0 se ven angostas y las que tienen algo, abiertas; se acomodan solas. Clic para volver a como estaban.' : 'Achicar las columnas con 0 y abrir las que tienen algo (se acomodan solas). Se guarda con la vista.'}>
-      <Icon name="columns" size={14} />Colapsar vacías</button>
-  );
+  return <BotonColapsar on={value} onChange={onChange} label="Colapsar vacías" icon="columns"
+    title={value ? 'Las columnas con 0 se ven angostas y las que tienen algo, abiertas; se acomodan solas. Clic para volver a como estaban.' : 'Achicar las columnas con 0 y abrir las que tienen algo (se acomodan solas). Se guarda con la vista.'} />;
 }
 
 export function SortPick({ type, sort, dir, onSort }: { type: 'deal' | 'contact' | 'company' | 'order'; sort?: string; dir?: 'asc' | 'desc'; onSort: (sort: string, dir: 'asc' | 'desc') => void }) {

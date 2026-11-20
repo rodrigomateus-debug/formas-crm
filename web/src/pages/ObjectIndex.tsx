@@ -520,18 +520,14 @@ function IndexFor({ type }: { type: ObjectType }) {
     <QuickFilterBar type={type} propios={propios} terminados={terminados} owners={cfg.owners ?? []} dates={cfg.dates ?? {}} tags={cfg.tags ?? []} unidades={cfg.unidades ?? []} relacion={cfg.relacion} extra={cfg.groups.length > 0}
       onOwners={(owners) => setCfg((c) => ({ ...c, owners }))} onDates={(dates) => setCfg((c) => ({ ...c, dates }))} onTags={(tags) => setCfg((c) => ({ ...c, tags }))}
       onUnidades={(unidades) => setCfg((c) => ({ ...c, unidades }))} onRelacion={(relacion) => setCfg((c) => ({ ...c, relacion }))}
-      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [], relacion: undefined }))} />
-    </>
-  );
-  const filterButton = <button className={`btn qf-btn${nFilters ? ' on' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>;
-  const filterChips = cfg.groups.length > 0 && (
-    <div className="bar-chips" role="group" aria-label="Filtros activos">
-      {cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
+      onClear={() => setCfg((c) => ({ ...c, owners: [], dates: {}, tags: [], unidades: [], groups: [], relacion: undefined }))}
+      filtros={<button className={`btn qf-btn${nFilters ? ' on' : ''}`} onClick={() => setShow('filters')}><Icon name="filter" size={16} />Filtros{nFilters ? ` (${nFilters})` : ''}</button>}
+      chips={cfg.groups.flatMap((g, gi) => g.map((f, fi) => (
         <span key={`${gi}-${fi}`} className="chip on">{gi > 0 && fi === 0 ? 'o ' : ''}{describeFilter(meta, type, f)}
           <button aria-label="Quitar" onClick={() => setCfg((c) => ({ ...c, groups: c.groups.map((gg, i) => i === gi ? gg.filter((_, j) => j !== fi) : gg).filter((gg) => gg.length) }))}>×</button>
         </span>
-      )))}
-    </div>
+      )))} />
+    </>
   );
 
   // La barra de abajo (BarraVista): cuántos hay, el paginado de la tabla, y el nombre de la vista nueva o duplicada.
@@ -617,16 +613,14 @@ function IndexFor({ type }: { type: ObjectType }) {
           onDone={() => { setSelected(new Set()); list.reload(); setBoardKey((k) => k + 1); }} />
       )}
       {sinVista ? <Cargando /> : mode === 'board' && type === 'deal' ? <Board closedDays={closedDays} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} pipelineId={boardPipeline} openId={preview?.id} onOpen={setPreview} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} reloadKey={boardKey} q={dq} groups={viewGroups}
-        sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} />
+        sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))} tools={<>{quickBar}</>} onSearch={setQ} search={q} />
         : mode === 'board' ? <PropBoard productos={type === 'order' ? productos : undefined} vacias={!!cfg.vacias} onVacias={(vacias) => setCfg((c) => ({ ...c, vacias }))} type={type} selected={selected} onSelect={toggleSel} onTotal={setBoardTotal} onCreate={createIn} prop={cfg.boardProp}
           cardProps={cfg.cardProps} onCardProps={(cardProps) => setCfg((c) => ({ ...c, cardProps }))} onProp={(boardProp) => setCfg((c) => ({ ...c, boardProp }))} openId={preview?.id} onOpen={setPreview}
           reloadKey={boardKey} q={dq} groups={viewGroups} sort={cfg.sort} dir={cfg.dir} onSort={(sort, dir) => setCfg((c) => ({ ...c, sort, dir }))}
-          tools={<>{quickBar}{filterButton}{filterChips}</>} onSearch={setQ} search={q} /> : <>
+          tools={<>{quickBar}</>} onSearch={setQ} search={q} /> : <>
         <div className="toolbar">
           <div className="search"><Icon name="search" /><input className="input" placeholder="Buscar nombre, mail, teléfono…" aria-label="Buscar" value={q} onChange={(e) => setQ(e.target.value)} /></div>
           {quickBar}
-          {filterButton}
-          {filterChips}
         </div>
         {/* Los controles de vista, en su propia fila: no se mezclan con los filtros. */}
         <div className="toolbar vista">

@@ -343,7 +343,9 @@ body:has(.barra-vista) .toast { bottom: 76px; }
 .toolbar .bar-select { flex: 0 1 auto; min-width: 170px; max-width: 260px; }
 .toolbar .bar-label { font-weight: 500; color: var(--ui-ink-2); white-space: nowrap; }
 .toolbar .input.select-like.on { border-color: var(--accent-ink); background: var(--accent-soft); color: var(--accent-ink); font-weight: 500; }
-.toolbar .qf-clear { order: 1; }
+/* «Filtros» y, si no hay filtros avanzados en uso, «Borrar todo»: juntos, para que al bajar de renglón no quede suelto. */
+.qf-fin { display: inline-flex; align-items: center; gap: 4px; }
+.toolbar .qf-clear { color: var(--ui-ink-2); }
 .toolbar .bar-end { order: 2; margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .toolbar .board-sum { order: 2; }
 .toolbar .bar-chips { order: 10; flex: 0 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

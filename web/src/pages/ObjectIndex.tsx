@@ -905,6 +905,16 @@ function PipelineSwitcher({ value, onChange, allowAll }: { value: string; onChan
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+  // Negocios activos de cada pipeline (los que no están en cierre ganado ni perdido): se leen cada vez que se abre.
+  const [activos, setActivos] = useState<Record<string, number>>();
+  useEffect(() => {
+    if (!open) return;
+    let vivo = true;
+    http<Record<string, number>>('GET', '/deals/activos').then((r) => { if (vivo) setActivos(r); }).catch(() => {});
+    return () => { vivo = false; };
+  }, [open]);
+  const cuenta = (n: number | undefined) => (activos ? <span className="small muted" title={`${n ?? 0} ${n === 1 ? 'negocio activo' : 'negocios activos'} (sin contar cierre ganado ni perdido)`}>
+    {n ?? 0} {n === 1 ? 'activo' : 'activos'}</span> : null);
   const team = (id: number | null) => meta.teams.find((t) => t.id === id)?.name;
   const cur = meta.pipelines.find((p) => p.id === value);
   const groups = [...new Set(meta.pipelines.map((p) => p.team_id))];
@@ -919,13 +929,14 @@ function PipelineSwitcher({ value, onChange, allowAll }: { value: string; onChan
       </button>
       {open && (
         <div className="popover pipe-menu" role="listbox" style={{ top: 48, left: 0 }}>
-          {allowAll && <div className={`opt${value === 'all' ? ' on' : ''}`} role="option" aria-selected={value === 'all'} onClick={() => pick('all')}><b>Todos los pipelines</b></div>}
+          {allowAll && <div className={`opt${value === 'all' ? ' on' : ''}`} role="option" aria-selected={value === 'all'} onClick={() => pick('all')}>
+            <b className="grow">Todos los pipelines</b>{cuenta(activos && meta.pipelines.reduce((s, p) => s + (activos[p.id] ?? 0), 0))}</div>}
           {groups.map((g) => (
             <div key={String(g)}>
               <div className="grp">{unidadDeEquipo(g) ? <UnidadBadge k={unidadDeEquipo(g)!} /> : team(g) ?? 'Sin equipo'}</div>
               {meta.pipelines.filter((p) => p.team_id === g).map((p) => (
                 <div key={p.id} className={`opt${p.id === value ? ' on' : ''}`} role="option" aria-selected={p.id === value} onClick={() => pick(p.id)}>
-                  <span className="grow">{p.label}</span><span className="small muted">{p.stages.length} etapas</span>
+                  <span className="grow">{p.label}</span>{cuenta(activos?.[p.id])}
                 </div>
               ))}
             </div>

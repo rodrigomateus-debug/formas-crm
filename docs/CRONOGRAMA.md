@@ -172,6 +172,10 @@ los colgados que no se olvidan y la corrección a mano (la maqueta con las ideas
   dirección · remito; en los egresos, mercadería en el depósito · dirección · remito de traslado; en los retiros, la
   dirección. Los ingresos no tienen (llegan o no). Verde sí, rojo no, violeta en parte (2 de 3 productos listos), gris
   pendiente. El de pago: rojo no pagó nada, naranja pagó una parte, verde pagó. Al lado, lo que falta en pocas palabras; con el mouse encima, el detalle («Saldo de $ 1.240.000 en Finnegans»).
+  Cada uno con su dibujito, para saber de un pantallazo cuál falta (pedido de Rodrigo del 20/11/2026): impresora la
+  producción (como en el menú), caja la mercadería en el depósito, $ el pago, pin la dirección, hoja el remito y lápiz una
+  anotación que traba. El estado va en el color y en la marquita de la esquina (✓, ✗ o –), para no depender solo del
+  color (`ICONO_CONTROL` y `PuntoControl` en `Cronograma.tsx`).
 - **Si llega a tiempo** (el reloj): solo cuando algo traba (no pagó, falta información, no llegó, en cola). Cuenta días
   hábiles hasta el día del movimiento (sin fines de semana ni feriados): «Atrasado · es mañana» (o hoy, o ya pasó) en rojo,
   «Justo · en 2 días hábiles» en ámbar. Lo listo, remitido o programado no lo lleva.

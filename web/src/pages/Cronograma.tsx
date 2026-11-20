@@ -5,7 +5,7 @@ import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, EditarEnLinea, Modal, QuienPidio, UnidadBadge, UserChip, alEsc } from '../components';
 import { Pop, UnidadFilter } from './QuickFilters';
-import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
+import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type Control, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
 import { BarraPie } from '../vistas';
 import { seguimientoExpreso } from '../expresos';
@@ -811,6 +811,29 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
 // El estado de despacho de una tarjeta: el estado, a quién le toca y los puntitos del checklist con lo que falta.
 const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend' | 'parcial', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8', parcial: 'M4 8h8' };
 const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente', parcial: 'una parte' } as const;
+// Cada control con su dibujito (pedido de Rodrigo del 20/11/2026), para saber de un pantallazo qué es lo que falta: la
+// impresora es la producción (como en el menú), la caja la mercadería en el depósito, el $ el pago, el pin la dirección,
+// la hoja el remito y el lápiz una anotación que traba. Dibujados para 16 px, así se leen chiquitos. El estado va en el
+// color y en la marquita de la esquina (✓, ✗ o –), para no depender solo del color.
+const ICONO_CONTROL: Record<Control['k'], string> = {
+  prod: 'M4.5 6V2.5h7V6M4.5 11.5H3V6h10v5.5h-1.5M5 9.5h6V14H5z',
+  dep: 'M2.5 5 8 2.5 13.5 5v6.5L8 14l-5.5-2.5zM2.5 5 8 7.5 13.5 5M8 7.5V14',
+  pago: 'M10.6 5C10.1 4 9.1 3.4 8 3.4c-1.5 0-2.6.8-2.6 2s1.1 1.7 2.6 2.1 2.7.9 2.7 2.2-1.2 2.1-2.7 2.1c-1.2 0-2.2-.6-2.7-1.6M8 1.8v12.4',
+  dir: 'M8 14.5s4.5-4 4.5-7.6a4.5 4.5 0 0 0-9 0C3.5 10.5 8 14.5 8 14.5zM8 8.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z',
+  remito: 'M4 1.8h5.5l3 3v9.4H4zM9.5 1.8v3h3M6.2 8h4.1M6.2 10.6h4.1',
+  nota: 'M3 13l.9-3.1 6.9-6.9a1.4 1.4 0 0 1 2 2L5.9 12.1zM9.8 4l2.2 2.2',
+};
+function PuntoControl({ c, solo }: { c: Control; solo?: boolean }) {
+  // `solo`: en una lista que ya dice el nombre y el detalle al lado (la vista previa del pedido), es solo el dibujo.
+  const dicho = `${c.nombre}: ${V_TXT[c.v]}`;
+  return (
+    <i role={solo ? undefined : 'listitem'} className={`cr-punto ${c.v}`} aria-hidden={solo || undefined}
+      title={solo ? undefined : `${dicho}${c.t ? ` · ${c.t}` : ''}`} aria-label={solo ? undefined : dicho}>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d={ICONO_CONTROL[c.k]} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <svg className="cr-punto-marca" viewBox="0 0 16 16" aria-hidden="true"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </i>
+  );
+}
 function Quien({ d }: { d: DespachoTarjeta }) {
   if (!d.quien) return null;
   return d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>;
@@ -829,9 +852,7 @@ function FilaDespacho({ d, tipo, reloj, reprogramar }: { d: DespachoTarjeta; tip
       {d.checks.length > 0 && (
         <div className="cr-t-desp-l2">
           <span className="cr-puntos" role="list" aria-label="Checklist de salida">
-            {d.checks.map((c) => <i key={c.k} role="listitem" className={`cr-punto ${c.v}`} title={`${c.nombre}: ${V_TXT[c.v]}${c.t ? ` · ${c.t}` : ''}`} aria-label={`${c.nombre}: ${V_TXT[c.v]}`}>
-              <svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </i>)}
+            {d.checks.map((c) => <PuntoControl key={c.k} c={c} />)}
           </span>
           {falta && <small title={d.checks.filter((c) => c.t && c.v !== 'ok').map((c) => `${c.nombre}: ${c.t}`).join(' · ') || undefined}>{falta}</small>}
         </div>
@@ -859,7 +880,7 @@ function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada;
         {colgado && <div className="cr-t-motivo"><p>{colgado.motivo}</p><span className="small">Colgado · era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por}` : ''}</span></div>}
         {d.checks.length > 0 && (
           <ul className="cr-pv-checks">
-            {d.checks.map((c) => <li key={c.k}><i className={`cr-punto ${c.v}`} aria-hidden="true"><svg viewBox="0 0 16 16" width="9" height="9"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></i>
+            {d.checks.map((c) => <li key={c.k}><PuntoControl c={c} solo />
               <span><b>{c.nombre}</b> <span className="muted">{c.t ?? V_LARGO[c.v]}</span></span></li>)}
           </ul>
         )}

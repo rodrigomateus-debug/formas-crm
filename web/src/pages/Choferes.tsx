@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { http, useAsync, useToast, Icon, fmtDate, Cargando } from '../lib';
+import { http, useAsync, useToast, Icon, fmtDate, Cargando, achicarImagen } from '../lib';
+import { fotoVehiculo, normNombre, textoCapacidad, type Vehiculo } from '../bultos';
 
 // Choferes (pedido de Rodrigo del 16/11/2026): el acceso de cada chofer a su app (remitos y recorrido del día), a mano en
 // la barra lateral del perfil Logística (los administradores lo tienen en Entregas → Choferes). Crear el código es un
@@ -22,6 +23,9 @@ export default function ChoferesPage() {
 export function ChoferesPanel() {
   const toast = useToast();
   const res = useAsync(() => http<Chofer[]>('GET', '/choferes'), []);
+  // La camioneta de cada uno (pedido de Rodrigo del 20/11/2026), por su nombre.
+  const veh = useAsync(() => http<Vehiculo[]>('GET', '/choferes/vehiculos').catch(() => [] as Vehiculo[]), []);
+  const [camioneta, setCamioneta] = useState<number | null>(null);   // la fila con el formulario de la camioneta abierto
   const sug = useAsync(() => http<{ nombres: string[] }>('GET', '/choferes/sugeridos').catch(() => ({ nombres: [] as string[] })), []);
   const [nombre, setNombre] = useState('');
   const [ocupado, setOcupado] = useState(false);
@@ -78,6 +82,8 @@ export function ChoferesPanel() {
                 <button className="btn sm" onClick={() => ver(c)} aria-expanded={!!a}>{a ? 'Ocultar código' : 'Ver código'}</button>
                 <button className="btn sm ghost" onClick={() => revocar(c)}>Dar de baja</button>
               </div>
+              <Camioneta nombre={c.name} v={(veh.data ?? []).find((x) => x.chofer === normNombre(c.name)) ?? null} abierta={camioneta === c.id}
+                onAbrir={(si) => setCamioneta(si ? c.id : null)} onCambio={veh.reload} />
               {a && (
                 <div className="ch-acceso">
                   <div className="codigo-chofer num" aria-label={`Código ${a.codigo.split('').join(' ')}`}>{lindo(a.codigo)}</div>
@@ -101,6 +107,74 @@ export function ChoferesPanel() {
             {bajas.map((c) => <div key={c.id} className="assoc-item muted"><div className="grow">{c.name}</div><span className="small">{c.remitos} remitos</span></div>)}
           </div>
         </details>
+      )}
+    </div>
+  );
+}
+
+// La camioneta del chofer (pedido de Rodrigo del 20/11/2026): modelo, tamaño, foto y cuántas cajas entran de 40×30 y de
+// 60×40 (las que más se usan). Con eso la Ruta del día avisa si los bultos de un recorrido no entran (cajas combinadas).
+// La foto se sube apenas se elige (achicada en el navegador); lo demás, con «Guardar».
+const TAMANOS = ['Chica (utilitario)', 'Mediana (furgón chico)', 'Grande (furgón)', 'Camión'];
+function Camioneta({ nombre, v, abierta, onAbrir, onCambio }: { nombre: string; v: Vehiculo | null; abierta: boolean; onAbrir: (si: boolean) => void; onCambio: () => void }) {
+  const toast = useToast();
+  const [f, setF] = useState({ modelo: '', tamano: '', cap_c40: '', cap_c60: '' });
+  const [ocupado, setOcupado] = useState(false);
+  const foto = v ? fotoVehiculo(v) : null;
+  const abrir = () => {
+    setF({ modelo: v?.modelo ?? '', tamano: v?.tamano ?? '', cap_c40: v?.cap_c40 ? String(v.cap_c40) : '', cap_c60: v?.cap_c60 ? String(v.cap_c60) : '' });
+    onAbrir(true);
+  };
+  const guardar = async () => {
+    setOcupado(true);
+    try { await http('PUT', '/choferes/vehiculo', { nombre, ...f }); toast(`Camioneta de ${nombre} guardada.`); onAbrir(false); onCambio(); }
+    catch (err) { toast((err as Error).message, true); }
+    setOcupado(false);
+  };
+  const subir = async (archivo: File | undefined) => {
+    if (!archivo) return;
+    setOcupado(true);
+    try {
+      const fd = new FormData();
+      fd.append('nombre', nombre);
+      fd.append('foto', await achicarImagen(archivo, 1280, 850_000));
+      await http('POST', '/choferes/vehiculo/foto', fd);
+      toast('Foto de la camioneta subida.'); onCambio();
+    } catch (err) { toast((err as Error).message, true); }
+    setOcupado(false);
+  };
+  const sacarFoto = async () => {
+    try { await http('DELETE', `/choferes/vehiculo/foto?nombre=${encodeURIComponent(nombre)}`); onCambio(); } catch (err) { toast((err as Error).message, true); }
+  };
+  const datos = v ? [v.modelo, v.tamano].filter(Boolean).join(' · ') : '';
+  const cap = v ? textoCapacidad(v) : '';
+  return (
+    <div className="ch-camioneta">
+      {foto ? <a className="ch-cam-foto" href={foto} target="_blank" rel="noreferrer" title="Ver la foto de la camioneta"><img src={foto} alt={`Camioneta de ${nombre}`} /></a>
+        : <span className="ch-cam-foto vacia" aria-hidden="true"><Icon name="truck" size={18} /></span>}
+      <div className="grow" style={{ minWidth: 0 }}>
+        {datos || cap ? <><div className="ch-cam-tit">{datos || 'Camioneta'}</div>{cap ? <div className="small muted">{cap}</div> : <div className="small warn-text">Falta cuántas cajas entran</div>}</>
+          : <div className="small muted">{v ? 'Falta el modelo y cuántas cajas entran' : 'Sin la camioneta cargada'}</div>}
+      </div>
+      {!abierta && <button type="button" className="btn sm" onClick={abrir}><Icon name="edit" size={14} />{v ? 'Camioneta' : 'Cargar camioneta'}</button>}
+      {abierta && (
+        <form className="ch-cam-form" onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
+          <label>Modelo<input className="input" value={f.modelo} onChange={(e) => setF({ ...f, modelo: e.target.value })} placeholder="Renault Kangoo" maxLength={80} autoFocus /></label>
+          <label>Tamaño<input className="input" list="ch-tamanos" value={f.tamano} onChange={(e) => setF({ ...f, tamano: e.target.value })} placeholder="Mediana (furgón chico)" maxLength={60} /></label>
+          <datalist id="ch-tamanos">{TAMANOS.map((t) => <option key={t} value={t} />)}</datalist>
+          <label>Cajas de 40×30 que entran<input className="input num" type="number" inputMode="numeric" min={1} max={9999} step={1} value={f.cap_c40} onChange={(e) => setF({ ...f, cap_c40: e.target.value })} placeholder="Ej.: 80" /></label>
+          <label>Cajas de 60×40 que entran<input className="input num" type="number" inputMode="numeric" min={1} max={9999} step={1} value={f.cap_c60} onChange={(e) => setF({ ...f, cap_c60: e.target.value })} placeholder="Ej.: 40" /></label>
+          <p className="small muted ch-cam-ayuda">Cuántas entran si va cargada solo con esa medida. Con las dos, la Ruta del día hace la cuenta de las cajas combinadas y avisa si la carga de un recorrido no entra.</p>
+          <div className="ch-cam-fotoform">
+            <label className="btn sm"><Icon name="image" size={14} />{foto ? 'Cambiar la foto' : 'Subir una foto'}
+              <input type="file" accept="image/*" hidden disabled={ocupado} onChange={(e) => { void subir(e.target.files?.[0]); e.target.value = ''; }} /></label>
+            {foto && <button type="button" className="btn sm ghost" disabled={ocupado} onClick={sacarFoto}>Sacar la foto</button>}
+          </div>
+          <div className="ch-cam-acc">
+            <button type="button" className="btn sm ghost" onClick={() => onAbrir(false)}>Cancelar</button>
+            <button className="btn sm primary" disabled={ocupado}>Guardar</button>
+          </div>
+        </form>
       )}
     </div>
   );

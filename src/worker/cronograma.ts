@@ -10,6 +10,8 @@ import { clavesDeTareas, direccionDesdeRuta, direccionesDePedidos, lugar as luga
 import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
 import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
+import { fotosDeArticulos } from './productos';
+import { vehiculos } from './vehiculos';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
@@ -95,6 +97,8 @@ export interface Movimiento {
   dir?: number | null; dir_n?: number; sitio?: string | null; repartida?: boolean;
   notas?: NotaLogistica[];   // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar (logistica.ts)
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó, si no es la cantidad del pedido (demasía)
+  bultos?: Bultos | null;    // los bultos que anotó Logística (cronograma_bultos); la tarjeta muestra la suma de los suyos
+  foto?: string | null;      // la foto del producto, la misma que en el pedido y en Producción (fotosDeArticulos)
   despacho?: Despacho;       // si está listo para salir, qué falta y a quién le toca (ver «Estados de despacho» en docs/CRONOGRAMA.md)
 }
 
@@ -303,24 +307,83 @@ async function repartirEntregas(db: D1Database, movs: Movimiento[], feriados: Ma
   return out;
 }
 
-// Lo que cada movimiento tiene anotado: las anotaciones de logística (logistica.ts) y la cantidad que realmente se mandó o
-// llegó cuando no es la del pedido (la demasía).
+// Lo que cada movimiento tiene anotado: las anotaciones de logística (logistica.ts), la cantidad que realmente se mandó o
+// llegó cuando no es la del pedido (la demasía) y los bultos; y la foto de su producto.
 async function ponerExtras(db: D1Database, movs: Movimiento[]) {
   if (!movs.length) return;
   const deEntregas = await empresaDePedidos(db, [...new Set(movs.filter((m) => m.tipo === 'entrega' && m.record_id).map((m) => m.record_id!))]);
   // A dónde va cada uno: en las entregas, la empresa del pedido y el cliente del PDV; en lo demás, el proveedor o el impresor.
   const destino = (m: Movimiento) => (m.tipo === 'entrega' ? { company_id: deEntregas.get(m.record_id ?? -1)?.id ?? null, nombre: m.cliente } : { company_id: m.company_id, nombre: m.lugar });
-  const [notas, env] = await Promise.all([
+  // La foto, una vez por artículo (un artículo tiene varios movimientos: el ingreso, el egreso, la entrega…).
+  const arts = [...new Map(movs.filter((m) => m.record_id).map((m) => [m.task_id, { task_id: m.task_id, record_id: m.record_id, nombre: m.articulo, cantidad: m.cantidad }])).values()];
+  const [notas, env, bul, fotos] = await Promise.all([
     notasPara(db, movs.map((m) => ({ record_id: m.record_id, tipo: m.tipo, destino: destino(m) }))),
     db.prepare(`SELECT e.task_id, e.tipo, e.cantidad, e.motivo, u.name AS por FROM cronograma_enviados e LEFT JOIN users u ON u.id = e.user_id`)
       .all<{ task_id: string; tipo: string; cantidad: number; motivo: string | null; por: string | null }>(),
+    bultosDe(db, movs.map((m) => m.id)),
+    fotosDeArticulos(db, arts).catch((e) => { console.error('cronograma: fotos', (e as Error).message); return new Map<string, string>(); }),
   ]);
   const enviados = new Map(env.results.map((e) => [`${e.task_id}:${e.tipo}`, e]));
   movs.forEach((m, i) => {
     if (notas[i].length) m.notas = notas[i];
     const e = enviados.get(m.id);
     if (e) m.enviado = { cantidad: e.cantidad, motivo: e.motivo, por: e.por };
+    const b = bul.get(m.id);
+    if (b) m.bultos = b;
+    const f = fotos.get(m.task_id);
+    if (f) m.foto = f;
   });
+}
+
+// ---------- Bultos ----------
+// Cuántos bultos lleva cada tarjeta (pedido de Rodrigo del 20/11/2026). Por ahora a mano, los anota Logística, en
+// cualquier tarjeta: entregas, ingresos, retiros, egresos y encargos. Por medida: las cajas que más se usan (40x30 y
+// 60x40), con las que se calcula si la carga entra en la camioneta (cargaDeRecorrido), y las de otra medida. Se guarda
+// por movimiento («task_id:tipo», o «task_id:tipo@dir») o por encargo («enc:id»): lo de una tarjeta queda en su primer
+// movimiento y la tarjeta muestra la suma de los suyos, así sigue a la tarjeta si se pasa a otro día y, si dos tarjetas
+// se juntan, se suman.
+export interface Bultos { c40: number; c60: number; otros: number }
+export const sinBultos = (): Bultos => ({ c40: 0, c60: 0, otros: 0 });
+export const sumarBultos = (a: Bultos, b?: Bultos | null): Bultos => (b ? { c40: a.c40 + b.c40, c60: a.c60 + b.c60, otros: a.otros + b.otros } : a);
+const CLAVE_BULTOS = /^(?:([^:@\s]{1,40}):(entrega|ingreso|retiro_proveedor|egreso|retiro_impresor|ingreso_impresor)(?:@(\d{1,12}))?|enc:(\d{1,12}))$/;
+async function bultosDe(db: D1Database, claves: string[]) {
+  const ks = [...new Set(claves)];
+  if (!ks.length) return new Map<string, Bultos>();
+  const { results } = await db.prepare('SELECT clave, c40, c60, otros FROM cronograma_bultos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ks))
+    .all<Bultos & { clave: string }>();
+  return new Map(results.map((r) => [r.clave, { c40: r.c40, c60: r.c60, otros: r.otros }]));
+}
+// Guarda los bultos de una tarjeta: `claves` son las de sus movimientos (o la de su encargo); `c40`, `c60` y `otros`, cuántas
+// cajas de cada medida. Todo en 0 (o vacío), se sacan.
+export async function guardarBultos(env: Env, ctx: Ctx, b: { claves?: unknown; c40?: unknown; c60?: unknown; otros?: unknown }) {
+  exigir(ctx);
+  const claves = Array.isArray(b.claves) ? [...new Set(b.claves.map(String))] : [];
+  if (!claves.length || claves.length > 200) throw new HttpError(400, 'Faltan los movimientos de la tarjeta.');
+  const partes = claves.map((k) => CLAVE_BULTOS.exec(k));
+  if (partes.some((x) => !x)) throw new HttpError(400, 'Esa tarjeta no se reconoce.');
+  const cant = (v: unknown) => {
+    if (v == null || v === '') return 0;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0 || n > 9999) throw new HttpError(400, 'Los bultos son números enteros (de 0 a 9999).');
+    return n;
+  };
+  const nuevo: Bultos = { c40: cant(b.c40), c60: cant(b.c60), otros: cant(b.otros) };
+  const db = env.DB;
+  // Que existan: los artículos en producción y los encargos.
+  const tareas = [...new Set(partes.map((x) => x![1]).filter(Boolean))], encargos = [...new Set(partes.map((x) => x![4]).filter(Boolean).map(Number))];
+  const [ts, es] = await Promise.all([
+    tareas.length ? db.prepare('SELECT COUNT(*) AS n FROM produccion WHERE task_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(tareas)).first<{ n: number }>() : { n: 0 },
+    encargos.length ? db.prepare('SELECT COUNT(*) AS n FROM encargos WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(encargos)).first<{ n: number }>() : { n: 0 },
+  ]);
+  if ((ts?.n ?? 0) !== tareas.length || (es?.n ?? 0) !== encargos.length) throw new HttpError(404, 'No está esa tarjeta (puede que la hayan cambiado): actualizá la pantalla.');
+  const vacio = !nuevo.c40 && !nuevo.c60 && !nuevo.otros;
+  const primera = [...claves].sort()[0];
+  await db.batch([
+    db.prepare('DELETE FROM cronograma_bultos WHERE clave IN (SELECT value FROM json_each(?))').bind(JSON.stringify(claves)),
+    ...(vacio ? [] : [db.prepare('INSERT INTO cronograma_bultos (clave, c40, c60, otros, user_id, at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(primera, nuevo.c40, nuevo.c60, nuevo.otros, ctx.user.id, now())]),
+  ]);
+  return { bultos: vacio ? null : nuevo, clave: vacio ? null : primera };
 }
 
 // La cantidad que realmente se mandó (o llegó) en un egreso, un ingreso o un retiro (pedido de Producción del 19/11/2026):
@@ -1415,6 +1478,8 @@ export async function rutaDelDia(env: Env, user: User, fecha: string, opts: { bu
   return {
     fecha, paradas: lista_, llegan, retiran, rutas, guardada: guardadas.length > 0, choferes, con_link, expresos, bases,
     buscando: pendientes + fin.pendientes, puede_editar: puedeEditarCronograma(user),
+    // La camioneta de cada chofer (vehiculos.ts): con los bultos, la pantalla avisa si la carga de un recorrido no entra.
+    vehiculos: await vehiculos(db),
   };
 }
 
@@ -1661,6 +1726,7 @@ export interface EncargoDia {
   parada?: string;          // en la semana: la parada en la que cae
   hora?: string | null;     // en la semana: la hora fijada a mano en esa parada
   anotaciones?: NotaLogistica[];   // las anotaciones de logística de siempre de ese destino (logistica.ts)
+  bultos?: Bultos | null;   // los bultos que anotó Logística (cronograma_bultos, «enc:id»)
 }
 export interface EncargoFila {
   id: number; fecha: string; user_id: number | null; pedido_por: string | null; quien: string | null; quien_foto?: string | null; destino: string; direccion: string | null; lugar_id: number | null;
@@ -1682,7 +1748,8 @@ export async function encargosEntre(db: D1Database, desde: string, hasta: string
   const encs = results.map(aEncargo);
   // Las anotaciones de logística de siempre del lugar al que va cada encargo (por su empresa, su lugar de la libreta o su nombre).
   const notas = await notasPara(db, encs.map((e) => ({ destino: { company_id: e.company_id, lugar_id: e.lugar_id, nombre: e.destino } })));
-  encs.forEach((e, i) => { if (notas[i].length) e.anotaciones = notas[i]; });
+  const bultos = await bultosDe(db, encs.map((e) => `enc:${e.id}`));
+  encs.forEach((e, i) => { if (notas[i].length) e.anotaciones = notas[i]; const b = bultos.get(`enc:${e.id}`); if (b) e.bultos = b; });
   return encs;
 }
 export async function lugaresPorId(db: D1Database, ids: Array<number | null>) {

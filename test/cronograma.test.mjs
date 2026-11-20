@@ -1096,3 +1096,106 @@ test('cronograma: un colgado destrabado avisa a Logística, y una anotación «s
   // Se le da fecha: sale de Colgados.
   assert.equal((await api('POST', '/cronograma/mover', { ids: [caja.task_id], tipo: 'entrega', fecha: '2026-11-25' })).status, 200);
 });
+
+test('cronograma: los bultos de una tarjeta, por medida, los anota Logística y siguen a la tarjeta', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  const rango = '/cronograma?desde=2026-11-16&hasta=2026-11-22&rd=2026-10-12&rh=2026-12-20';
+  const semana = async () => (await api('GET', rango)).data;
+  let v = await semana();
+  // Una tarjeta: los artículos de un PDV con el mismo movimiento, el mismo día y en el mismo lugar (mejor si tiene varios).
+  const deLaTarjeta = (x) => v.movimientos.filter((y) => y.npdv === x.npdv && y.tipo === x.tipo && y.fecha === x.fecha && y.lugar === x.lugar);
+  const m0 = v.movimientos.find((x) => x.npdv === PDV && deLaTarjeta(x).length > 1) ?? v.movimientos.find((x) => x.npdv === PDV);
+  assert.ok(m0, 'hay una tarjeta del PDV de la prueba');
+  const tarjeta = deLaTarjeta(m0), claves = tarjeta.map((x) => x.id);
+  const suma = (vv) => vv.movimientos.filter((x) => claves.includes(x.id)).reduce((a, x) => ({ c40: a.c40 + (x.bultos?.c40 ?? 0), c60: a.c60 + (x.bultos?.c60 ?? 0), otros: a.otros + (x.bultos?.otros ?? 0) }), { c40: 0, c60: 0, otros: 0 });
+  const bultos = (b, como) => { asUser = como ?? null; return api('POST', '/cronograma/bultos', b).finally(() => { asUser = null; }); };
+
+  // Se anotan por medida: quedan en el primer movimiento de la tarjeta.
+  const r = await bultos({ claves, c40: 2, c60: 1 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data, { bultos: { c40: 2, c60: 1, otros: 0 }, clave: [...claves].sort()[0] });
+  v = await semana();
+  assert.deepEqual(suma(v), { c40: 2, c60: 1, otros: 0 });
+  assert.equal(v.movimientos.filter((x) => claves.includes(x.id) && x.bultos).length, 1, 'en un solo movimiento');
+  // Se cambian (no se suman a lo de antes).
+  assert.equal((await bultos({ claves, c40: 0, c60: 3, otros: 1 })).status, 200);
+  assert.deepEqual(suma(await semana()), { c40: 0, c60: 3, otros: 1 });
+  // Si la tarjeta pasa a otro día, los bultos van con ella.
+  const mover = (fecha) => api('POST', '/cronograma/mover', { ids: tarjeta.map((x) => x.task_id), dirs: tarjeta.map((x) => x.dir ?? null), tipo: m0.tipo, fecha });
+  assert.equal((await mover('2026-11-21')).status, 200);
+  v = await semana();
+  assert.ok(v.movimientos.filter((x) => claves.includes(x.id)).every((x) => x.fecha === '2026-11-21'));
+  assert.deepEqual(suma(v), { c40: 0, c60: 3, otros: 1 });
+  assert.equal((await mover(m0.fecha)).status, 200);
+  // Todo en 0 (o vacío) los saca.
+  assert.equal((await bultos({ claves, c40: 0, c60: '', otros: null })).status, 200);
+  assert.deepEqual(suma(await semana()), { c40: 0, c60: 0, otros: 0 });
+
+  // Lo que no vale.
+  assert.equal((await bultos({ claves, c40: 2.5 })).status, 400, 'enteros');
+  assert.equal((await bultos({ claves, c60: -1 })).status, 400);
+  assert.equal((await bultos({ claves, otros: 10000 })).status, 400);
+  assert.equal((await bultos({ claves: [], c40: 1 })).status, 400);
+  assert.equal((await bultos({ claves: ['cualquier cosa'], c40: 1 })).status, 400);
+  assert.equal((await bultos({ claves: [`no-existe-${RUN}:entrega`], c40: 1 })).status, 404);
+  // Quien no edita el cronograma no los anota.
+  await api('POST', '/users', { email: `mira.bultos.${RUN}@formas.ar`, name: `Mira ${RUN}`, role: 'member' });
+  assert.equal((await bultos({ claves, c40: 1 }, `mira.bultos.${RUN}@formas.ar`)).status, 403);
+
+  // Un encargo también.
+  const enc = (v.encargos ?? [])[0];
+  if (enc) {
+    assert.equal((await bultos({ claves: [`enc:${enc.id}`], c40: 2 })).status, 200);
+    assert.deepEqual((await semana()).encargos.find((e) => e.id === enc.id).bultos, { c40: 2, c60: 0, otros: 0 });
+    assert.equal((await bultos({ claves: [`enc:${enc.id}`] })).status, 200);
+    assert.equal((await semana()).encargos.find((e) => e.id === enc.id).bultos ?? null, null);
+  }
+});
+
+test('choferes: la camioneta de cada uno, con su foto y cuántas cajas entran, llega a la ruta del día', async () => {
+  asUser = null;
+  const nombre = `Camión ${RUN}`;
+  // Logística (y los administradores) la cargan.
+  let r = await api('PUT', '/choferes/vehiculo', { nombre, modelo: 'Renault Kangoo', tamano: 'Mediana', cap_c40: 80, cap_c60: '40' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual([r.data.chofer, r.data.modelo, r.data.tamano, r.data.cap_c40, r.data.cap_c60, r.data.foto_at], [`camion ${RUN}`, 'Renault Kangoo', 'Mediana', 80, 40, null]);
+  assert.equal((await api('PUT', '/choferes/vehiculo', { nombre, cap_c40: 2.5 })).status, 400, 'enteros');
+  assert.equal((await api('PUT', '/choferes/vehiculo', { nombre, cap_c60: 0 })).status, 400, 'al menos una');
+  assert.equal((await api('PUT', '/choferes/vehiculo', { nombre: ' ' })).status, 400, 'falta el nombre');
+  // Va por el nombre sin mayúsculas ni tildes: el mismo chofer escrito de otra forma es la misma camioneta.
+  r = await api('PUT', '/choferes/vehiculo', { nombre: `camion  ${RUN.toUpperCase()}`, modelo: 'Renault Kangoo', tamano: 'Mediana', cap_c40: 80, cap_c60: 40 });
+  assert.equal(r.data.chofer, `camion ${RUN}`);
+  assert.equal((await api('GET', '/choferes/vehiculos')).data.filter((v) => v.chofer === `camion ${RUN}`).length, 1);
+
+  // La foto: tiene que ser una imagen de verdad.
+  const subir = (bytes, como) => { const fd = new FormData(); fd.append('nombre', nombre); fd.append('foto', new Blob([bytes], { type: 'image/jpeg' }), 'camioneta.jpg'); asUser = como ?? null; return api('POST', '/choferes/vehiculo/foto', fd).finally(() => { asUser = null; }); };
+  assert.equal((await subir(new TextEncoder().encode('no es una foto'))).status, 415);
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, ...new TextEncoder().encode(`camioneta ${RUN}`)]);
+  r = await subir(jpeg);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.ok(r.data.foto_at);
+  const foto = await fetch(`${BASE}/api/choferes/vehiculo/foto?nombre=${encodeURIComponent(nombre)}&v=${encodeURIComponent(r.data.foto_at)}`);
+  assert.equal(foto.status, 200);
+  assert.equal(foto.headers.get('content-type'), 'image/jpeg');
+  assert.deepEqual(new Uint8Array(await foto.arrayBuffer()), jpeg);
+
+  // Quien no es de Logística (ni administrador) no la cambia.
+  await api('POST', '/users', { email: `prod.cam.${RUN}@formas.ar`, name: `Prod Cam ${RUN}`, profile: 'produccion', role: 'member' });
+  asUser = `prod.cam.${RUN}@formas.ar`;
+  assert.equal((await api('PUT', '/choferes/vehiculo', { nombre, cap_c40: 1 })).status, 403);
+  asUser = null;
+  assert.equal((await subir(jpeg, `prod.cam.${RUN}@formas.ar`)).status, 403);
+
+  // La Ruta del día la trae, para avisar si la carga no entra.
+  const ruta = (await api('GET', '/cronograma/ruta?fecha=2026-11-18')).data;
+  const v = (ruta.vehiculos ?? []).find((x) => x.chofer === `camion ${RUN}`);
+  assert.deepEqual([v?.cap_c40, v?.cap_c60, !!v?.foto_at], [80, 40, true]);
+  assert.equal(JSON.stringify(ruta).includes('"foto":{'), false, 'la foto no viaja en la ruta, solo cuándo se subió');
+
+  // Sacar la foto y vaciar los datos la saca de la lista.
+  assert.equal((await api('DELETE', `/choferes/vehiculo/foto?nombre=${encodeURIComponent(nombre)}`)).status, 200);
+  assert.equal((await fetch(`${BASE}/api/choferes/vehiculo/foto?nombre=${encodeURIComponent(nombre)}`)).status, 404);
+  assert.equal((await api('PUT', '/choferes/vehiculo', { nombre })).data, null);
+  assert.equal((await api('GET', '/choferes/vehiculos')).data.some((x) => x.chofer === `camion ${RUN}`), false);
+});

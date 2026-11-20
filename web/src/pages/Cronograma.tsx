@@ -7,6 +7,8 @@ import { Avatar, EditarEnLinea, Modal, QuienPidio, UnidadBadge, UserChip, alEsc 
 import { Pop, UnidadFilter } from './QuickFilters';
 import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type Control, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
+import { FotoProducto } from './Produccion';
+import { MEDIDAS, SIN_BULTOS, desgloseBultos, sumarBultos, textoBultos, totalBultos, type Bultos } from '../bultos';
 import { BarraPie } from '../vistas';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
@@ -41,6 +43,8 @@ export interface Mov {
   notas?: NotaLogistica[];    // las anotaciones de logística: las de este movimiento y las de siempre de ese lugar
   enviado?: { cantidad: number; motivo: string | null; por: string | null } | null;   // lo que realmente se mandó o llegó (demasía)
   despacho?: DespachoMov;     // si está listo para salir, qué falta y a quién le toca (despacho.ts)
+  bultos?: Bultos | null;     // los bultos que anotó Logística, por medida; la tarjeta muestra la suma de los suyos (cronograma.ts, guardarBultos)
+  foto?: string | null;       // la foto del producto, la misma que en el pedido y en Producción
 }
 export interface Nota { id: number; fecha: string; texto: string; hecho: number }
 export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
@@ -331,22 +335,33 @@ export default function CronogramaPage() {
     }
   };
 
-  // Cada tarjeta, igual en la semana y en el día expandido.
-  const tarjetaMov = (t: Tarjeta) => (
+  // Los bultos de una tarjeta (sus movimientos o su encargo), por medida: quedan en la primera clave, como en el servidor.
+  async function guardarBultos(claves: string[], b: Bultos | null, que: string) {
+    const primera = [...claves].sort()[0], de = (id: string) => (claves.includes(id) ? (id === primera ? b : null) : undefined);
+    const conBultos = (m: Mov) => { const x = de(m.id); return x === undefined ? m : { ...m, bultos: x }; };
+    setDatos((d) => d && { ...d, movimientos: d.movimientos.map(conBultos), colgados: (d.colgados ?? []).map(conBultos),
+      encargos: (d.encargos ?? []).map((e) => (claves.includes(`enc:${e.id}`) ? { ...e, bultos: b } : e)) });
+    try {
+      await http('POST', '/cronograma/bultos', { claves, ...(b ?? SIN_BULTOS) });
+      toast(b ? `${que}: ${textoBultos(totalBultos(b))} (${desgloseBultos(b)}).` : `${que}: sin bultos anotados.`);
+    } catch (e) { toast((e as Error).message, true); void cargar(); }
+  }
+  // Cada tarjeta, igual en la semana y en el día expandido (`expandida`: con las fotos y todos los productos a la vista).
+  const tarjetaMov = (t: Tarjeta, expandida = false) => (
     <TarjetaMov key={t.key} t={t} hoy={v?.hoy ?? ''} puede={puede} choferes={v?.choferes ?? []} expresos={v?.expresos ?? []} onChofer={(c) => asignar(t, c)}
       dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
       onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined} feriados={v?.feriados}
       onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
       onAnotar={t.record_id ? () => setAnotando(t) : undefined} onHora={t.parada && t.movs[0]?.parada && !t.hecho ? () => setHoraDe(t) : undefined}
-      onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined}
+      onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined} expandida={expandida} onBultos={(b) => guardarBultos(t.movs.map((m) => m.id), b, t.pdv)}
       onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
       onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />
   );
-  const tarjetaEnc = (e: Encargo) => (
+  const tarjetaEnc = (e: Encargo, expandida = false) => (
     <TarjetaEncargo key={e.id} e={e} hoy={v?.hoy ?? ''} puede={puede} choferes={v?.choferes ?? []} expresos={v?.expresos ?? []}
       dir={e.parada ? dirs[`${e.fecha}|${e.parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
       onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })} onAnotar={() => setAnotandoEnc(e)}
-      onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
+      onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })} onBultos={(b) => guardarBultos([`enc:${e.id}`], b, `Encargo a ${lindo(e.destino)}`)} expandida={expandida}
       onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />
   );
   const verDia = (d: string) => ir({ vista: 'dia', dia: d });
@@ -456,7 +471,7 @@ export default function CronogramaPage() {
                         <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
                           <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
                           {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy="" puede={puede} choferes={[]} expresos={[]} onChofer={() => undefined} buscando={false} onDir={() => undefined}
-                            onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined}
+                            onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined} onBultos={(b) => guardarBultos(t.movs.map((m) => m.id), b, t.pdv)}
                             onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
                             onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: COLGADOS, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
                         </div>
@@ -497,6 +512,8 @@ export default function CronogramaPage() {
                       <h2>{diaLargo(dia)}</h2>
                       {dia === v.hoy && <span className="cr-hoy">Hoy</span>}
                       <span className={`num${r.atrasado ? ' overdue' : ''}`}>{r.texto}</span>
+                      {(() => { const b = [...r.movs.map((m) => m.bultos), ...r.encs.map((e) => e.bultos)].reduce<Bultos>((a, x) => sumarBultos(a, x), SIN_BULTOS), n = totalBultos(b);
+                        return n > 0 && <span className="cr-bultos solo" title={`Los bultos anotados en las tarjetas del día: ${desgloseBultos(b)}`}>{ICONO_BULTOS}{textoBultos(n)}</span>; })()}
                       <Feriado dia={dia} nombre={v.feriados[dia]} puede={puede} onCambio={cargar} />
                       <span className="cr-diax-links">
                         {(r.movs.some((m) => !llega(m.tipo)) || r.encs.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia })}><Icon name="route" size={12} />Ruta del día</button>}
@@ -509,13 +526,13 @@ export default function CronogramaPage() {
                     {carriles.map(({ c, ts }) => (
                       <section key={c.k} className={`cr-diax-carril cr-k-${c.k}`} aria-label={c.nombre}>
                         <h3>{c.nombre} <span className="num">{ts.length}</span><small>{c.ayuda}</small></h3>
-                        <div className="cr-diax-grilla">{ts.map((t) => tarjetaMov(t))}</div>
+                        <div className="cr-diax-grilla">{ts.map((t) => tarjetaMov(t, true))}</div>
                       </section>
                     ))}
                     {r.encs.length > 0 && (
                       <section className="cr-diax-carril cr-k-X" aria-label="Encargos">
                         <h3>Encargos <span className="num">{r.encs.length}</span><small>Lo que alguien pidió en Recorridos</small></h3>
-                        <div className="cr-diax-grilla">{r.encs.map((e) => tarjetaEnc(e))}</div>
+                        <div className="cr-diax-grilla">{r.encs.map((e) => tarjetaEnc(e, true))}</div>
                       </section>
                     )}
                     {!carriles.length && !r.encs.length && <div className="empty plain">{r.cuantos ? 'Con estos filtros no queda nada en este día.' : 'Nada para este día.'}</div>}
@@ -689,7 +706,7 @@ const ROL: Record<Tipo, { nombre: string; icono: string }> = {
 };
 const TOPE = 3;
 
-function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar, onAnotar, onHora, onEnviado }: {
+function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando, onDir, onChofer, onMarcar, onAbrir, onMover, onArrastrar, onColgar, onAnotar, onHora, onEnviado, onBultos, expandida }: {
   t: Tarjeta; hoy: string; feriados?: Record<string, string>; puede: boolean; choferes: string[]; expresos: string[]; onChofer: (chofer: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onAbrir?: () => void; onMover: (fecha: string) => void; onArrastrar: (on: boolean) => void;
@@ -697,6 +714,8 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
   onAnotar?: () => void;   // las anotaciones de logística de esta tarjeta
   onHora?: () => void;     // fijar la hora o el rango horario de su parada
   onEnviado?: (m: Mov) => void;   // anotar la cantidad que realmente se mandó o llegó (no en las entregas)
+  onBultos?: (b: Bultos | null) => void;   // anotar los bultos por medida (Logística, a mano)
+  expandida?: boolean;     // en el día expandido: la foto de cada producto y todos a la vista
 }) {
   // Las anotaciones de logística de sus movimientos, sin repetir (las de siempre son las mismas en todos).
   const notas = [...new Map(t.movs.flatMap((m) => m.notas ?? []).map((n) => [n.id, n])).values()];
@@ -708,7 +727,8 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
   // Hasta tres productos a la vista; el resto se abre con «+ N productos más», así un pedido largo no estira la columna.
   const [todo, setTodo] = useState(false);
   const prods = t.movs.filter((m) => m.articulo);
-  const ver = todo ? prods : prods.slice(0, TOPE);
+  const ver = todo || expandida ? prods : prods.slice(0, TOPE);
+  const bultos = t.movs.reduce<Bultos>((a, m) => sumarBultos(a, m.bultos), SIN_BULTOS);
   const marca = t.tipo === 'entrega' ? null : marcaProveedor(t.crudo);
   const desp = t.hecho ? null : despachoTarjeta(t, dir);
   const reloj = desp && hoy ? riesgo(desp, t.fecha, hoy, feriados) : null;
@@ -761,20 +781,21 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
       )}
       {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
       {prods.length > 0 && (
-        <div className="cr-t-prods">
+        <div className={`cr-t-prods${expandida ? ' con-foto' : ''}`}>
           {ver.map((m) => {
             // Con demasía: lo que realmente va («510», y al lado cuánto de más o de menos respecto del pedido).
             const dif = m.enviado && m.cantidad != null ? m.enviado.cantidad - m.cantidad : 0;
             const cant = <>{m.enviado ? num.format(m.enviado.cantidad) : m.cantidad != null ? num.format(m.cantidad) : ''}</>;
             return (
               <div key={m.id} className={m.hecho && !t.hecho ? 'ok' : ''}>
+                {expandida && <FotoProducto url={m.foto} nombre={m.articulo} />}
                 {puede && onEnviado ? <button type="button" className="cr-t-cant num" title={m.enviado ? `Se ${t.tipo === 'egreso' ? 'mandan' : 'reciben'} ${num.format(m.enviado.cantidad)} (el pedido es de ${m.cantidad != null ? num.format(m.cantidad) : '—'})${m.enviado.motivo ? `: ${m.enviado.motivo}` : ''}${m.enviado.por ? ` · ${m.enviado.por.split(' ')[0]}` : ''}. Clic para cambiarlo.` : 'Anotar la cantidad que realmente va (demasía)'}
                   onClick={() => onEnviado(m)}>{cant}</button> : <b className="num">{cant}</b>}
                 <span>{m.articulo}{m.dir != null && <em className="cr-t-lugar" title="Va a este lugar del pedido">{m.sitio ?? 'Otra dirección'}</em>}{m.enviado && dif !== 0 && <em className="cr-t-demasia">{dif > 0 ? `+${num.format(dif)} de más` : `${num.format(dif)}`}</em>}</span>
               </div>
             );
           })}
-          {prods.length > TOPE && <button type="button" className="cr-t-mas" aria-expanded={todo} onClick={() => setTodo(!todo)}>{todo ? 'Ver menos' : `+ ${prods.length - TOPE} producto${prods.length - TOPE === 1 ? '' : 's'} más`}</button>}
+          {!expandida && prods.length > TOPE && <button type="button" className="cr-t-mas" aria-expanded={todo} onClick={() => setTodo(!todo)}>{todo ? 'Ver menos' : `+ ${prods.length - TOPE} producto${prods.length - TOPE === 1 ? '' : 's'} más`}</button>}
         </div>
       )}
       {notas.length > 0 && <div className="cr-t-notas">{notas.map((n) => <LineaNota key={n.id} n={n} />)}</div>}
@@ -783,14 +804,20 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
           {t.avisos.map((a) => <span key={a} className="cr-tag riesgo"><Icon name="alert" size={11} />{a}</span>)}
         </div>
       )}
-      {t.parada && (puede && !t.hecho ? (
-        <div className="cr-t-chofer">
-          <Select className={`input cr-chofer${t.chofer ? '' : ' vacio'}`} value={t.chofer ?? ''} aria-label="Chofer" title={t.chofer ? `Chofer: ${t.chofer}` : 'Elegir el chofer'}
-            onChange={(e) => onChofer(e.target.value)}>
-            {opcionesChofer({ choferes, expresos, actual: t.chofer, vacio: 'Sin chofer', agregar: 'Agregar chofer o expreso…' })}
-          </Select>
+      {/* Al pie: el chofer (en lo que es parada de un recorrido) y los bultos. */}
+      {((t.parada && (puede && !t.hecho || t.chofer)) || (onBultos && (puede || totalBultos(bultos) > 0))) && (
+        <div className="cr-t-pie">
+          {t.parada && (puede && !t.hecho ? (
+            <div className="cr-t-chofer">
+              <Select className={`input cr-chofer${t.chofer ? '' : ' vacio'}`} value={t.chofer ?? ''} aria-label="Chofer" title={t.chofer ? `Chofer: ${t.chofer}` : 'Elegir el chofer'}
+                onChange={(e) => onChofer(e.target.value)}>
+                {opcionesChofer({ choferes, expresos, actual: t.chofer, vacio: 'Sin chofer', agregar: 'Agregar chofer o expreso…' })}
+              </Select>
+            </div>
+          ) : t.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{t.chofer}</div>)}
+          {onBultos && <BultosTarjeta b={bultos} puede={puede} detalle={expandida} onGuardar={onBultos} />}
         </div>
-      ) : t.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{t.chofer}</div>)}
+      )}
       {puede && (
         <div className="cr-t-acc">
           {/* Un egreso: el remito de traslado de lo que se le lleva al impresor ese día (todos sus PDV), para imprimir. */}
@@ -1000,11 +1027,13 @@ function ModalColgar({ a, onCerrar, onColgar }: { a: { ids: string[]; tipo: Tipo
 
 // Un encargo (Recorridos): a dónde, quién lo pidió y qué se deja o se retira. Se arrastra a otro día, se le elige el
 // chofer y se marca hecho como las demás tarjetas; un clic lo abre.
-function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar, onAnotar }: {
+function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDir, onAbrir, onChofer, onMover, onMarcar, onArrastrar, onAnotar, onBultos, expandida }: {
   e: Encargo; hoy: string; puede: boolean; choferes: string[]; expresos: string[]; onAbrir: () => void; onChofer: (c: string) => void; onMover: (f: string) => void;
   dir?: DirParada; buscando: boolean; onDir: (k: string, d: DirParada) => void;
   onMarcar: () => void; onArrastrar: (on: boolean) => void;
   onAnotar?: () => void;   // las anotaciones de logística de siempre de ese destino
+  onBultos?: (b: Bultos | null) => void;   // anotar los bultos por medida (Logística, a mano)
+  expandida?: boolean;
 }) {
   const hecho = e.estado === 'hecho', atrasado = !hecho && e.fecha < hoy;
   const lineas = [...e.llevar.map((i) => ['Deja', i] as const), ...e.retirar.map((i) => ['Retira', i] as const)];
@@ -1033,13 +1062,18 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDi
           {e.horario && <span className="cr-tag">{e.horario}</span>}
         </div>
       )}
-      {puede && !hecho ? (
-        <div className="cr-t-chofer">
-          <Select className={`input cr-chofer${e.chofer ? '' : ' vacio'}`} value={e.chofer ?? ''} aria-label="Chofer" title={e.chofer ? `Chofer: ${e.chofer}` : 'Elegir el chofer'} onChange={(ev) => onChofer(ev.target.value)}>
-            {opcionesChofer({ choferes, expresos, actual: e.chofer, vacio: 'Sin chofer', agregar: 'Agregar chofer o expreso…' })}
-          </Select>
+      {((puede && !hecho) || e.chofer || (onBultos && (puede || totalBultos(e.bultos) > 0))) && (
+        <div className="cr-t-pie">
+          {puede && !hecho ? (
+            <div className="cr-t-chofer">
+              <Select className={`input cr-chofer${e.chofer ? '' : ' vacio'}`} value={e.chofer ?? ''} aria-label="Chofer" title={e.chofer ? `Chofer: ${e.chofer}` : 'Elegir el chofer'} onChange={(ev) => onChofer(ev.target.value)}>
+                {opcionesChofer({ choferes, expresos, actual: e.chofer, vacio: 'Sin chofer', agregar: 'Agregar chofer o expreso…' })}
+              </Select>
+            </div>
+          ) : e.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{e.chofer}</div>}
+          {onBultos && <BultosTarjeta b={e.bultos ?? SIN_BULTOS} puede={puede} detalle={expandida} onGuardar={onBultos} />}
         </div>
-      ) : e.chofer && <div className="cr-t-chofer solo" title="Chofer"><Icon name="truck" size={12} />{e.chofer}</div>}
+      )}
       {puede && (
         <div className="cr-t-acc">
           {onAnotar && <button type="button" className="cr-mini" aria-label="Anotaciones de logística del destino" title="Anotaciones de logística: lo que hay que saber cada vez que se va a este lugar" onClick={onAnotar}><Icon name="note" size={13} /></button>}
@@ -1049,6 +1083,44 @@ function TarjetaEncargo({ e, hoy, puede, choferes, expresos, dir, buscando, onDi
       )}
       {!puede && hecho && <span className="cr-check on solo" aria-label="Hecho"><Icon name="check" size={12} /></span>}
     </article>
+  );
+}
+
+// Los bultos de la tarjeta (pedido de Rodrigo del 20/11/2026): por ahora los anota Logística a mano, en cualquier tarjeta,
+// por medida: cajas de 40×30, de 60×40 (con esas se calcula si entra en la camioneta) y de otra medida. Sin anotar, quien
+// edita ve «+ Bultos»; anotados, «5 bultos» (con el desglose al pasar el mouse y, en el día expandido, a la vista); un clic
+// los cambia y todo en 0 los saca. Quien solo mira los ve si están. El dibujo son cajas apiladas (la caja sola es
+// «mercadería en el depósito», en el checklist).
+const ICONO_BULTOS = <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 8.5h5v5h-5zM8.5 8.5h5v5h-5zM5.5 2.5h5v6h-5z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>;
+function BultosTarjeta({ b, puede, detalle, onGuardar }: { b: Bultos; puede: boolean; detalle?: boolean; onGuardar: (b: Bultos | null) => void }) {
+  const [editando, setEditando] = useState(false);
+  const [valor, setValor] = useState<Record<keyof Bultos, string>>({ c40: '', c60: '', otros: '' });
+  const n = totalBultos(b);
+  if (!n && !puede) return null;
+  const desglose = desgloseBultos(b);
+  const contenido = <>{ICONO_BULTOS}{n ? textoBultos(n) : '+ Bultos'}{detalle && n > 0 && <small className="cr-bultos-des">{desglose}</small>}</>;
+  if (!puede) return <span className="cr-bultos solo" title={`Bultos: ${desglose}`}>{contenido}</span>;
+  if (editando) {
+    const leer = (k: keyof Bultos) => (valor[k].trim() === '' ? 0 : Number(valor[k]));
+    const nuevo: Bultos = { c40: leer('c40'), c60: leer('c60'), otros: leer('otros') };
+    const valido = MEDIDAS.every((m) => Number.isInteger(nuevo[m.k]) && nuevo[m.k] >= 0 && nuevo[m.k] <= 9999);
+    const igual = MEDIDAS.every((m) => nuevo[m.k] === b[m.k]);
+    return (
+      <EditarEnLinea className="cr-bultos-form" confirmar="Guardar los bultos" sucio={!igual} onCancelar={() => setEditando(false)}
+        onGuardar={() => { if (!valido) return; setEditando(false); if (!igual) onGuardar(totalBultos(nuevo) ? nuevo : null); }}>
+        {MEDIDAS.map((m, i) => (
+          <label key={m.k} className="cr-bultos-med" title={m.ayuda}>
+            <span>{m.nombre}</span>
+            <input className="input sm num" type="number" inputMode="numeric" min={0} max={9999} step={1} autoFocus={i === 0} value={valor[m.k]} placeholder="0"
+              onChange={(e) => setValor((v) => ({ ...v, [m.k]: e.target.value }))} aria-label={m.ayuda} aria-invalid={!(Number.isInteger(nuevo[m.k]) && nuevo[m.k] >= 0) || undefined} />
+          </label>
+        ))}
+      </EditarEnLinea>
+    );
+  }
+  return (
+    <button type="button" className={`cr-bultos${n ? '' : ' vacio'}`} title={n ? `${desglose}. Clic para cambiarlo` : 'Anotar cuántos bultos son (cajas de 40×30, de 60×40 u otras)'}
+      onClick={() => { setValor({ c40: b.c40 ? String(b.c40) : '', c60: b.c60 ? String(b.c60) : '', otros: b.otros ? String(b.otros) : '' }); setEditando(true); }}>{contenido}</button>
   );
 }
 

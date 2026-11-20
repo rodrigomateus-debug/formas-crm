@@ -10,6 +10,7 @@ import { idsYLugares, lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, Nuev
 import { LineaNota } from '../NotasLogistica';
 import { EncargoModal, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
+import { SIN_BULTOS, cargaRecorrido, desgloseBultos, fotoVehiculo, sumarBultos, textoBultos, textoCapacidad, tieneCapacidad, totalBultos, vehiculoDe, type Bultos, type Carga, type Vehiculo } from '../bultos';
 
 // Ruta del día (Cronograma): las paradas del día en el mapa, una por lugar (tres retiros en el mismo impresor son una
 // parada), con la hora aproximada de llegada a cada una. Se reordenan arrastrando, con las flechas o con «Ordenar por el
@@ -44,7 +45,22 @@ export interface Recorrido { n: number; chofer: string | null; base: string; sal
 interface BaseGeo { id: string; nombre: string; direccion: string; lat: number | null; lng: number | null }
 // `retiran`: las entregas que retira el cliente en Formas (tarjeta «Entrega» del pedido); `parcial`: el resto del pedido se envía.
 export interface Datos { fecha: string; paradas: Parada[]; llegan: Mov[]; retiran?: Array<Mov & { retira_en: string; parcial: boolean }>; rutas: Recorrido[]; guardada: boolean;
-  choferes: string[]; con_link?: string[]; expresos?: Array<{ id: number; nombre: string; direccion: string | null }>; bases: BaseGeo[]; buscando: number; puede_editar: boolean }
+  choferes: string[]; con_link?: string[]; expresos?: Array<{ id: number; nombre: string; direccion: string | null }>; bases: BaseGeo[]; buscando: number; puede_editar: boolean;
+  vehiculos?: Vehiculo[];   // la camioneta de cada chofer (pantalla Choferes): para avisar si la carga no entra
+}
+
+// Los bultos que se dejan y los que se retiran en una parada (los que anotó Logística en las tarjetas): las entregas y los
+// egresos se dejan, los retiros se suben; un encargo que solo retira se sube y si no, se deja.
+const SE_DEJA: Tipo[] = ['entrega', 'egreso'];
+function bultosDeParada(p: Parada): { deja: Bultos; levanta: Bultos } {
+  let deja = SIN_BULTOS, levanta = SIN_BULTOS;
+  for (const m of p.movimientos) if (m.bultos) { if (SE_DEJA.includes(m.tipo)) deja = sumarBultos(deja, m.bultos); else levanta = sumarBultos(levanta, m.bultos); }
+  for (const e of p.encargos ?? []) if (e.bultos) { if (e.retirar.length && !e.llevar.length) levanta = sumarBultos(levanta, e.bultos); else deja = sumarBultos(deja, e.bultos); }
+  return { deja, levanta };
+}
+// Si la carga entra: pasada (más de lo que entra), casi llena (más del 90 %) o bien. Sin la camioneta, null.
+const estadoCarga = (c: Carga) => (c.ocupacion == null ? null : c.ocupacion > 1.0001 ? 'excede' : c.ocupacion > 0.9 ? 'casi' : 'ok');
+const porciento = (x: number) => `${Math.round(x * 100)} %`;
 interface Real extends TramosReales { linea: Array<[number, number]> }
 
 // Con el número en blanco encima: todos pasan 4,5:1.
@@ -169,7 +185,11 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
     const clave = claveOrden(punto(base), paradas, destino);
     const real = reales[clave];
     // `vuelve`: termina donde sale.
-    return { r, i, base, fin, vuelve: !!fin && fin.id === base?.id, paradas, clave, real, sim: simular(punto(base), paradas, r.salida, real, destino), color: COLORES[i % COLORES.length] };
+    // La carga a lo largo del recorrido, contra la camioneta de su chofer (cajas combinadas: bultos.ts).
+    const vehiculo = vehiculoDe(datos?.vehiculos, r.chofer), porParada = paradas.map(bultosDeParada);
+    const carga = cargaRecorrido(porParada, vehiculo);
+    return { r, i, base, fin, vuelve: !!fin && fin.id === base?.id, paradas, clave, real, sim: simular(punto(base), paradas, r.salida, real, destino), color: COLORES[i % COLORES.length],
+      vehiculo, carga, porParada };
   }), [rutas, datos, porClave, reales]);
 
   // El recorrido por calles (distancia y tiempo de cada tramo, y el dibujo). Si el servicio no contesta, queda la
@@ -328,8 +348,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
       {cab}
       <div className="cr-recorridos">
         {armadas.map((a) => (
-          <button key={a.i} type="button" className={`cr-rec${a.i === act.i ? ' on' : ''}`} aria-pressed={a.i === act.i} onClick={() => setActiva(a.i)} style={{ '--c': a.color } as React.CSSProperties}>
+          <button key={a.i} type="button" className={`cr-rec${a.i === act.i ? ' on' : ''}${estadoCarga(a.carga) === 'excede' ? ' excede' : ''}`} aria-pressed={a.i === act.i} onClick={() => setActiva(a.i)} style={{ '--c': a.color } as React.CSSProperties}
+            title={estadoCarga(a.carga) === 'excede' ? `La carga no entra en la camioneta: ${porciento(a.carga.ocupacion!)} de lo que entra` : undefined}>
             <i />Recorrido {a.i + 1}<span className="muted">{a.r.chofer ?? 'Sin chofer'} · {a.paradas.length} parada{a.paradas.length === 1 ? '' : 's'}</span>
+            {estadoCarga(a.carga) === 'excede' && <span className="cr-rec-excede"><Icon name="alert" size={12} />{porciento(a.carga.ocupacion!)}</span>}
           </button>
         ))}
         {puede && rutas.length < 8 && <button type="button" className="cr-agregar" onClick={() => { cambiar((rs) => [...rs, { n: rs.length + 1, chofer: null, base: rs[0].base, salida: rs[0].salida, orden: [], a_mano: false }]); setActiva(rutas.length); }}><Icon name="plus" size={12} />Otro recorrido</button>}
@@ -342,6 +364,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
             {opcionesChofer({ choferes: datos.choferes, expresos: (datos.expresos ?? []).map((x) => x.nombre), actual: act.r.chofer, vacio: 'Sin asignar', agregar: 'Agregar chofer o expreso…' })}
           </Select>
         </label>
+        {act.vehiculo && <VehiculoChip v={act.vehiculo} />}
         <label className="cr-campo">Sale de
           <Select className="input sm cr-sel" value={act.r.base} disabled={!puede} aria-label="Sale de"
             onChange={(e) => { if (e.target.value === 'otro') { setPanel('salida'); return; } setPanel(null); cambiar((rs) => rs.map((r, i) => (i === act.i ? { ...r, base: e.target.value, base_otro: null } : r))); }}>
@@ -378,6 +401,14 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
 
       <div className="cr-kpis">
         <div><span>Paradas</span><b className="num">{act.paradas.length}<small>{movs.length} {movs.length === 1 ? 'cosa' : 'cosas'} para hacer</small></b></div>
+        {totalBultos(act.carga.total) > 0 && (
+          <div title={`En el momento más cargado: ${desgloseBultos(act.carga.pico) || 'nada'}${act.vehiculo && tieneCapacidad(act.vehiculo) ? `. ${textoCapacidad(act.vehiculo)}.` : ''}`}>
+            <span>Carga</span>
+            {act.carga.ocupacion != null
+              ? <b className={`num ${estadoCarga(act.carga) === 'excede' ? 'danger-text' : estadoCarga(act.carga) === 'casi' ? 'warn-text' : ''}`}>{porciento(act.carga.ocupacion)}<small>de la camioneta</small></b>
+              : <b className="num">{totalBultos(act.carga.pico)}<small>bultos a la vez</small></b>}
+          </div>
+        )}
         <div><span>Recorrido</span><b className="num">{incierto ? '≈' : ''}{act.sim.km.toFixed(0)}<small>km{act.real && !incierto ? '' : ' aprox.'}</small></b></div>
         <div><span>En la calle</span><b className="num">{act.sim.vuelta.sinUbicar ? '—' : `${incierto ? '≈' : ''}${duracion(act.sim.fin - act.r.salida)}`}</b></div>
         <div><span>{act.vuelve ? 'Vuelve' : 'Termina'}</span><b className="num">{act.sim.vuelta.sinUbicar ? '—' : `${incierto ? '≈' : ''}${hhmm(act.sim.fin)}`}</b></div>
@@ -385,6 +416,7 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
         <div><span>Fuera de horario</span><b className={`num ${tarde ? 'danger-text' : ''}`}>{tarde || '—'}</b></div>
         {act.sim.sinUbicar + (sinFin ? 1 : 0) + (sinBase ? 1 : 0) > 0 && <div><span>Sin ubicar</span><b className="num warn-text">{act.sim.sinUbicar + (sinFin ? 1 : 0) + (sinBase ? 1 : 0)}</b></div>}
       </div>
+      <AvisoCarga a={act} />
       {datos.buscando > 0 && (agotado
         ? <div className="aviso warn small">Todavía faltan ubicar en el mapa {datos.buscando} dirección{datos.buscando === 1 ? '' : 'es'}. <button type="button" className="cr-link" onClick={() => { setAgotado(false); void cargar(); }}>Volver a fijarse</button></div>
         : <div className="aviso info small">Buscando en el mapa {datos.buscando} dirección{datos.buscando === 1 ? '' : 'es'}…</div>)}
@@ -414,7 +446,10 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
               ...(p.lat != null ? [{ label: 'Cómo llegar (Google Maps)', icon: 'external', onClick: () => window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, '_blank', 'noopener') }] : []),
               ...(puede ? armadas.filter((a) => a.i !== act.i).map((a, k) => ({ label: `Recorrido ${a.i + 1} · ${a.r.chofer ?? 'sin chofer'}`, icon: 'route', grupo: k === 0 ? 'Pasar a otro recorrido' : undefined, onClick: () => pasar(p, a.i) })) : []),
             ];
+            const bp = act.porParada[i];
             const tags = [
+              totalBultos(bp.deja) > 0 && <span key="bd" className="cr-tag" title={`Se dejan: ${desgloseBultos(bp.deja)}`}>Deja {textoBultos(totalBultos(bp.deja))}</span>,
+              totalBultos(bp.levanta) > 0 && <span key="bl" className="cr-tag" title={`Se suben: ${desgloseBultos(bp.levanta)}`}>Sube {textoBultos(totalBultos(bp.levanta))}</span>,
               p.pactada ? <span key="h" className={`cr-tag fija${s.tarde ? ' late' : ''}`} title="Hora fijada a mano: el recorrido se ordena para cumplirla"><Icon name="timer" size={11} />{p.pactada.texto}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>
                 : (p.horario || s.espera > 1) && <span key="h" className={`cr-tag${s.tarde ? ' late' : ''}`}>{p.horario ? `Recibe de ${hhmm(p.horario[0])} a ${hhmm(p.horario[1])}` : ''}{s.tarde ? ` · llega ${duracion(s.tarde)} tarde` : s.espera > 1 ? ` · espera ${duracion(s.espera)}` : ''}</span>,
               p.lat == null && (buscando ? <span key="u" className="cr-tag">Buscando en el mapa…</span>
@@ -788,4 +823,36 @@ function Mapa({ armadas, activa, bases, caliente, puede, onPin, ubicando, onUbic
   }, [caliente, armadas, activa]);
 
   return <div ref={caja} className="cr-mapa" role="application" aria-label="Mapa del recorrido" />;
+}
+
+// La camioneta del chofer elegido, al lado del desplegable: la foto, el modelo y cuánto entra (pantalla Choferes).
+function VehiculoChip({ v }: { v: Vehiculo }) {
+  const foto = fotoVehiculo(v), cap = textoCapacidad(v);
+  return (
+    <span className="cr-vehiculo" title={[v.modelo, v.tamano, cap].filter(Boolean).join(' · ') || 'Camioneta'}>
+      {foto ? <img src={foto} alt="" /> : <Icon name="truck" size={14} />}
+      <span>{v.modelo || v.tamano || 'Camioneta'}{!tieneCapacidad(v) && <em> · sin capacidad</em>}</span>
+    </span>
+  );
+}
+
+// El aviso de la carga (pedido de Rodrigo del 20/11/2026): si en algún momento del recorrido lleva más de lo que entra en la
+// camioneta de su chofer (cajas combinadas de 40×30 y 60×40), o casi. Si hay bultos pero la camioneta no tiene cargado
+// cuánto entra, lo dice para que la carguen en Choferes. Los bultos de otra medida no entran en la cuenta.
+function AvisoCarga({ a }: { a: { r: Recorrido; paradas: Parada[]; vehiculo: Vehiculo | null; carga: Carga } }) {
+  const c = a.carga, estado = estadoCarga(c), quien = a.r.chofer;
+  if (!totalBultos(c.total) || !quien) return null;
+  const otros = c.pico.otros === 1 ? ' Además va 1 bulto de otra medida, que no entra en la cuenta.'
+    : c.pico.otros > 1 ? ` Además van ${textoBultos(c.pico.otros)} de otra medida, que no entran en la cuenta.` : '';
+  if (estado == null) {
+    return <div className="aviso info small">Hay bultos anotados en este recorrido. Para saber si entran, cargá en Choferes cuántas cajas entran en la camioneta de {quien}.</div>;
+  }
+  if (estado === 'ok') return null;
+  const cuando = c.donde < 0 ? 'al salir' : `después de ${lindo(a.paradas[c.donde]?.nombre ?? 'una parada')}`;
+  // «56 de 40×30 y 20 de 60×40».
+  const cajas = desgloseBultos({ ...c.pico, otros: 0 }).replace(' · ', ' y ');
+  const camioneta = `la camioneta de ${quien}${a.vehiculo?.modelo ? ` (${a.vehiculo.modelo})` : ''}`;
+  return estado === 'excede'
+    ? <div className="aviso bad small"><b>No entra en {camioneta}.</b> {cuando[0].toUpperCase() + cuando.slice(1)} lleva {cajas}: el {porciento(c.ocupacion!)} de lo que entra ({textoCapacidad(a.vehiculo!).replace(/^Entran/, 'entran')}). Pasá alguna parada a otro recorrido o revisá los bultos.{otros}</div>
+    : <div className="aviso warn small">Va casi llena: {cuando} lleva {cajas}, el {porciento(c.ocupacion!)} de lo que entra en {camioneta}.{otros}</div>;
 }

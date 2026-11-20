@@ -37,6 +37,8 @@ parada del mismo lugar en la ruta del día.
   franja (entregas, ingresos, retiros, egresos y encargos) con las tarjetas en grilla, y las notas del día. Las tarjetas
   son las mismas de la semana (marcar, chofer, mover, colgar, anotaciones…) y los filtros de arriba también valen. Para
   pasar una tarjeta a otro día de la semana se suelta en su pestaña. Link: `/cronograma?vista=dia&dia=AAAA-MM-DD`.
+  En el día, cada producto con **su foto** (la misma del pedido y de Producción, por el SKU: `fotosDeArticulos`) y todos
+  a la vista (en la semana siguen los tres primeros), y arriba el total de bultos del día.
 - **Mover**: arrastrar la tarjeta a otro día (o el ícono de calendario, para el celular) escribe la fecha en ClickUp en
   el momento. Si ClickUp no lo acepta, no cambia nada. En las entregas la fecha queda en cada artículo que se movió; la
   del PDV se mueve solo si se movieron todos sus artículos abiertos (pasar uno a otro día no arrastra a los demás). Lo que
@@ -144,6 +146,13 @@ parada del mismo lugar en la ruta del día.
   producto se toca para anotar la que realmente va o llega («110», con «+10 de más» al lado) y por qué. La cantidad del PDV
   no cambia. El remito de traslado del egreso y la app del chofer salen con esa cantidad. Tabla `cronograma_enviados`,
   `POST /api/cronograma/enviado` con `{ id, tipo, cantidad, motivo }`; la misma cantidad del pedido (o vacío) lo saca.
+- **Bultos** (pedido de Rodrigo del 20/11/2026): por ahora los anota Logística a mano, en cualquier tarjeta (entregas,
+  ingresos, retiros, egresos y encargos), por medida: **cajas de 40×30, de 60×40** (las que más se usan) **y otros**. Al
+  pie de la tarjeta, al lado del chofer: «+ Bultos» (punteado) o «5 bultos», con el desglose al pasar el mouse y, en el día
+  expandido, a la vista. Un clic los cambia; todo en 0 los saca. Se guardan en el primer movimiento de la tarjeta y la
+  tarjeta suma los suyos: si se pasa a otro día van con ella y, si dos tarjetas se juntan, se suman. Tabla
+  `cronograma_bultos` (clave `task_id:tipo`, `task_id:tipo@dir` o `enc:id`), `POST /api/cronograma/bultos` con
+  `{ claves, c40, c60, otros }`. La Ruta del día los usa para avisar si la carga no entra en la camioneta.
 - **Notas** del día (lo que no es de un artículo: un sobre, una muestra, un trámite) y **feriados** (se marcan en la
   cabecera del día; vienen cargados los de fin de 2026 y los de fecha fija de 2027).
 - **Quién edita**: Logística, Producción y los administradores, en todas las unidades (también Corporate, aunque
@@ -267,6 +276,21 @@ que marcó el chofer. Lo que se pasa a un día después de armar sus recorridos 
   ordenado a mano (la misma cuenta que el servidor, `dondeEntra` en `ruta.ts`) y el aviso trae «Deshacer».
 
 ### Choferes, expresos y de dónde sale
+
+- **La camioneta de cada chofer** (pedido de Rodrigo del 20/11/2026), en la pantalla Choferes (Logística y los
+  administradores): modelo, tamaño, una foto (se achica en el navegador) y **cuántas cajas entran de 40×30 y de 60×40**
+  si va cargada solo con esa medida. Va por el nombre del chofer, igual que los recorridos (sirve aunque se le cree otro
+  código). Al lado del desplegable «Chofer» de la ruta se ve su camioneta. Tabla `cronograma_vehiculos`
+  (`src/worker/vehiculos.ts`); `GET /api/choferes/vehiculos`, `PUT /api/choferes/vehiculo`, `POST|DELETE|GET
+  /api/choferes/vehiculo/foto`.
+- **Si la carga entra** (cajas combinadas): con los bultos de las tarjetas, cada recorrido sale con todo lo que va a dejar
+  (entregas, egresos y encargos que llevan algo) y en cada parada baja lo que deja y sube lo que retira; se compara el
+  momento más cargado con la camioneta de su chofer. Cada caja ocupa la parte que le toca de su medida (con 80 de 40×30 o
+  40 de 60×40, 20 de 40×30 y 10 de 60×40 son la mitad); si se sabe una sola capacidad, la otra medida se pasa por
+  superficie (una de 60×40 son dos de 40×30). Los de otra medida no cuentan. Se ve en «Carga» (el % de la camioneta), en
+  la pestaña del recorrido (en rojo si no entra) y en un aviso: **no entra** (más del 100 %) o **casi llena** (más del
+  90 %), con cuándo va más cargada. Con bultos y sin la capacidad de la camioneta, pide cargarla en Choferes. Cada parada
+  dice cuántos bultos deja y cuántos sube. La cuenta está en `web/src/bultos.ts` (`cargaRecorrido`, `ocupacion`).
 
 - **El link del chofer** (pedido de Rodrigo del 18/11/2026): abajo de la barra del recorrido, cuando tiene un chofer (no
   un expreso), su link y su código, con «Copiar link» y «Mandar por WhatsApp» (el mensaje ya dice de qué día es el
@@ -393,6 +417,8 @@ vuelve, como siempre.
 | Pantalla: semana y barra de semanas / ruta y mapa | `web/src/pages/Cronograma.tsx`, `web/src/pages/CronogramaRuta.tsx` |
 | Cálculo del recorrido (lo usan el CRM y la app del chofer) | `web/src/ruta.ts` |
 | El recorrido en la app del chofer | `web/chofer/src/Ruta.tsx` |
+| Bultos por medida (`cronograma_bultos`) y la camioneta de cada chofer (`cronograma_vehiculos`) | `migrations/0102_bultos.sql`, `migrations/0103_vehiculos.sql`, `src/worker/vehiculos.ts` |
+| Cajas combinadas y la carga de un recorrido | `web/src/bultos.ts` |
 | Prueba de punta a punta (ClickUp, Finnegans, Claude y el buscador de direcciones simulados) | `test/cronograma.test.mjs` |
 
 ## Para revisar con datos reales

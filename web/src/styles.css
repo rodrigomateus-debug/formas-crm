@@ -1693,6 +1693,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-diax-links { margin-left: auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .cr-diax-cab .cr-dia-mezcla { height: 8px; }
 .cr-diax-tit .cr-feriado { align-self: center; }
+.cr-diax-tit > .cr-bultos.solo { font-size: 13px; font-weight: 500; color: var(--text-3); } .cr-diax-tit > .cr-bultos.solo svg { color: var(--text-3); }
 .cr-diax-cuerpo { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 20px; }
 .cr-diax-carril h3 { margin: 0 0 8px; padding: 0 2px; display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--k); }
 .cr-diax-carril h3 .num { color: var(--text-3); font-weight: 500; }
@@ -1806,6 +1807,10 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-t-prods b { font-weight: 600; color: var(--ui-ink); text-align: right; }
 .cr-t-prods span { overflow-wrap: anywhere; }
 .cr-t-prods .ok span { text-decoration: line-through; opacity: .7; }
+/* En el día expandido, cada producto con su foto (la misma del pedido y de Producción). */
+.cr-t-prods.con-foto { gap: 5px; }
+.cr-t-prods.con-foto > div { grid-template-columns: 30px minmax(26px, auto) minmax(0, 1fr); align-items: center; }
+.cr-t-prods.con-foto .ok .prod-foto { opacity: .6; }
 .cr-t-mas { align-self: flex-start; border: 0; background: none; padding: 1px 0; font: inherit; font-size: 11px; font-weight: 600; color: var(--k); cursor: pointer; }
 .cr-t-mas:hover { text-decoration: underline; }
 .cr-t-pdv { font-size: 10.5px; font-weight: 600; color: var(--k); background: var(--ui-surface); border-radius: 5px; padding: 0 6px; white-space: nowrap; }
@@ -1870,6 +1875,24 @@ button.cr-t-dir:focus-visible { outline: 2px solid var(--k, var(--ui-ink)); outl
 .input.select-like.cr-chofer.vacio::before { background: var(--text-3); }
 .cr-t-chofer.solo { align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--ui-ink-2); }
 .cr-t-chofer.solo svg { flex: none; color: var(--k); }
+/* Al pie de la tarjeta: el chofer y los bultos, en la misma fila (si no entran, los bultos bajan). */
+.cr-t-pie { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; min-width: 0; }
+.cr-t-pie > .cr-t-chofer { margin-top: 0; }
+/* Los bultos: como el desplegable del chofer (24 px, el color del tipo de movimiento); sin anotar, punteado. */
+.cr-bultos { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border: 1px solid transparent; border-radius: 6px;
+  background: var(--ui-surface); font: inherit; font-size: 11.5px; font-weight: 600; color: var(--ui-ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cr-bultos svg { flex: none; color: var(--k, var(--ui-ink-2)); }
+button.cr-bultos { cursor: pointer; } button.cr-bultos:hover { border-color: var(--ui-ink-3); }
+.cr-bultos.vacio { font-weight: 500; color: var(--text-3); background: transparent; border: 1px dashed color-mix(in srgb, var(--k, var(--ui-ink-3)) 45%, transparent); }
+.cr-bultos.vacio svg { color: var(--text-3); }
+.cr-bultos.solo { padding: 0; height: auto; background: none; color: var(--ui-ink-2); }
+/* Al anotarlos: una cajita por medida (40×30, 60×40, otros) y, si no entran al lado, los botones abajo. */
+.en-linea.cr-bultos-form { flex: 1 1 100%; flex-wrap: wrap; gap: 6px; align-items: flex-end; }
+.cr-bultos-form .en-linea-campo { display: flex; gap: 6px; flex: 0 1 auto; min-width: 0; }
+.cr-bultos-med { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; font-weight: 600; color: var(--ui-ink-2); }
+.cr-bultos-med .input { width: 54px; height: 26px; padding: 0 6px; }
+.cr-bultos-des { font-size: 11px; font-weight: 500; color: var(--ui-ink-2); margin-left: 2px; }
+.cr-bultos:has(.cr-bultos-des) { height: auto; min-height: 24px; padding: 3px 8px; max-width: 100%; white-space: normal; flex-wrap: wrap; column-gap: 5px; row-gap: 0; text-align: left; }
 .cr-agregar { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; padding: 3px 6px; border-radius: var(--r-control); font: inherit; font-size: 11.5px; font-weight: 500; color: var(--text-3); cursor: pointer; }
 .cr-agregar:hover { background: var(--ui-surface-sunken); color: var(--ui-ink); }
 .cr-agregar.feriado { padding: 0; font-size: 11px; opacity: 0; } .cr-dia-cab:hover .cr-agregar.feriado, .cr-diax-cab:hover .cr-agregar.feriado, .cr-agregar.feriado:focus-visible { opacity: 1; }
@@ -1888,6 +1911,15 @@ button.cr-t-dir:focus-visible { outline: 2px solid var(--k, var(--ui-ink)); outl
 .cr-rec { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border-radius: var(--r-control); border: 1px solid var(--ui-line); background: var(--ui-surface); font: inherit; font-weight: 600; color: var(--ui-ink); cursor: pointer; }
 .cr-rec i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); } .cr-rec .muted { font-weight: 400; font-size: 12px; }
 .cr-rec.on { border-color: var(--accent-ink); background: var(--accent-soft); }
+/* Un recorrido cuya carga no entra en la camioneta de su chofer (pedido de Rodrigo del 20/11/2026). */
+.cr-rec.excede { border-color: color-mix(in srgb, var(--ui-negative) 55%, var(--ui-line)); }
+.cr-rec-excede { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--ui-negative-ink); background: var(--ui-negative-soft); border-radius: var(--r-pill); padding: 1px 7px; }
+/* La camioneta del chofer elegido, al lado del desplegable. */
+.cr-vehiculo { display: inline-flex; align-items: center; gap: 6px; align-self: center; height: 30px; padding: 0 8px 0 3px; border-radius: var(--r-control); background: var(--ui-surface-sunken); font-size: 12px; font-weight: 600; color: var(--ui-ink-2); max-width: 240px; }
+.cr-vehiculo img { width: 36px; height: 24px; border-radius: 4px; object-fit: cover; flex: none; }
+.cr-vehiculo > svg { margin-left: 5px; color: var(--ui-ink-3); }
+.cr-vehiculo > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-vehiculo em { font-style: normal; font-weight: 500; color: var(--warn); }
 .cr-ruta-barra { margin-bottom: 0; }
 .cr-campo { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); white-space: nowrap; } .cr-campo .input { min-width: 0; }
 .cr-campo .input.select-like.cr-sel { width: auto; min-width: 168px; max-width: 260px; color: var(--ui-ink); font-size: 13px; }
@@ -2335,6 +2367,19 @@ a.cr-tag.exp { text-decoration: none; } a.cr-tag.exp:hover { text-decoration: un
 .ch-fila.abierta { background: var(--ui-surface-sunken); }
 .ch-bajas summary { cursor: pointer; margin-bottom: 6px; }
 @media (max-width: 640px) { .ch-acceso { padding-left: 14px; } }
+/* La camioneta de cada chofer (pedido de Rodrigo del 20/11/2026). */
+.ch-camioneta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 14px 12px 56px; }
+.ch-cam-foto { flex: none; width: 56px; height: 42px; border-radius: 8px; overflow: hidden; display: grid; place-items: center; background: var(--ui-surface-sunken); color: var(--ui-ink-3); border: 1px solid var(--ui-line); }
+.ch-cam-foto img { width: 100%; height: 100%; object-fit: cover; }
+a.ch-cam-foto:hover { border-color: var(--accent-ink); }
+.ch-cam-tit { font-weight: 600; font-size: 13.5px; }
+.ch-cam-form { flex: 1 1 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding: 12px; border: 1px solid var(--ui-line); border-radius: var(--r-panel); background: var(--ui-surface); }
+.ch-cam-form > label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ui-ink-2); }
+.ch-cam-ayuda, .ch-cam-fotoform, .ch-cam-acc { grid-column: 1 / -1; margin: 0; }
+.ch-cam-fotoform { display: flex; flex-wrap: wrap; gap: 8px; }
+.ch-cam-fotoform label.btn { cursor: pointer; }
+.ch-cam-acc { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 640px) { .ch-camioneta { padding-left: 14px; } .ch-cam-form { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Pedidos: los productos de cada pedido abajo (pages/PedidosProductos.tsx), como Producción pero simplificado ---------- */
 .ped-nombre { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; vertical-align: middle; }

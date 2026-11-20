@@ -5,8 +5,9 @@ import { SelectorFecha } from '../Fecha';
 import { RecordPreview } from './RecordPage';
 import { Avatar, EditarEnLinea, Modal, QuienPidio, UnidadBadge, UserChip, alEsc } from '../components';
 import { Pop, UnidadFilter } from './QuickFilters';
-import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
+import { ICONO_ESTADO, NOMBRE_ROL, despachoTarjeta, etiquetaEstado, faltaTexto, nombreEstado, riesgo, type Control, type DespachoMov, type DespachoTarjeta, type EstadoDespacho, type Riesgo, type Rol } from '../despacho';
 import { Select } from '../Select';
+import { BarraPie } from '../vistas';
 import { seguimientoExpreso } from '../expresos';
 import { LogoProveedor, marcaProveedor } from '../proveedores';
 import { EncargoModal, ESTADO as ESTADO_ENC, abrirRemitoEgreso, itemTexto, type Encargo } from './Recorridos';
@@ -137,7 +138,8 @@ export default function CronogramaPage() {
   const [sp, setSp] = useSearchParams();
   const toast = useToast();
   const semana = lunesDe(/^\d{4}-\d{2}-\d{2}$/.test(sp.get('semana') ?? '') ? sp.get('semana')! : hoyIso());
-  const vista = sp.get('vista') === 'ruta' ? 'ruta' : 'semana';
+  // Semana, un día expandido (pedido de Rodrigo del 20/11/2026) o la ruta del día en el mapa.
+  const vista: 'semana' | 'dia' | 'ruta' = sp.get('vista') === 'ruta' ? 'ruta' : sp.get('vista') === 'dia' ? 'dia' : 'semana';
   const [centro, setCentro] = useState(semana);   // la semana del medio de la barra
   const [datos, setDatos] = useState<Vista | null>(null);
   const [error, setError] = useState('');
@@ -193,8 +195,17 @@ export default function CronogramaPage() {
     } catch { /* sin direcciones: las tarjetas se ven igual */ }
   }, [semana]);
   // Se piden cuando llega (o cambia) la semana: un chofer, un día o una dirección nuevos cambian las paradas.
-  useEffect(() => { if (datos?.desde === semana && vista === 'semana') void cargarDirs(); }, [datos, semana, vista, cargarDirs]);
+  useEffect(() => { if (datos?.desde === semana && vista !== 'ruta') void cargarDirs(); }, [datos, semana, vista, cargarDirs]);
   useEffect(() => () => { pedidoDirs.current++; window.clearTimeout(sondeoDirs.current); }, []);
+  // El día expandido: si las pestañas de los días no entran (en el celular), la del día elegido queda a la vista. Se corre
+  // solo la fila de pestañas, no la página.
+  useEffect(() => {
+    if (vista !== 'dia') return;
+    const nav = document.querySelector<HTMLElement>('.cr-diax-dias'), on = nav?.querySelector<HTMLElement>('.cr-diax-tab.on');
+    if (!nav || !on) return;
+    const n = nav.getBoundingClientRect(), o = on.getBoundingClientRect();
+    if (o.left < n.left || o.right > n.right) nav.scrollLeft += o.left - n.left - (n.width - o.width) / 2;
+  }, [vista, dia, datos]);
   // Lo que cambian en ClickUp llega cada 10 minutos: la pantalla se pone al día sola.
   useEffect(() => { const t = window.setInterval(() => { if (!document.hidden && !arrastre.current) void cargar(); }, 120_000); return () => window.clearInterval(t); }, [cargar]);
 
@@ -229,6 +240,15 @@ export default function CronogramaPage() {
     }
     return n;
   }, [movs, colg, dirs]);
+
+  // Lo de un día, con los filtros puestos: sus movimientos, encargos y notas, y cuántos faltan (en la semana y en el día).
+  const delDiaDe = (d: string) => {
+    const movsDia = movs.filter((m) => m.fecha === d), encDia = encs.filter((e) => e.fecha === d), notas = v?.notas.filter((n) => n.fecha === d) ?? [];
+    const pend = movsDia.filter((m) => !m.hecho).length + encDia.filter((e) => e.estado !== 'hecho').length, cuantos = movsDia.length + encDia.length;
+    const atrasado = pend > 0 && d < (v?.hoy ?? '');
+    const texto = cuantos ? (pend ? `${pend} ${atrasado ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${cuantos}` : `${cuantos} hechos`) : 'Sin movimientos';
+    return { movs: movsDia, encs: encDia, notas, pend, cuantos, atrasado, texto };
+  };
 
   async function mover(ids: string[], tipo: Tipo, fecha: string, pdv: string, dirs?: Array<number | null>) {
     // Es este movimiento: el del artículo o, en un pedido que va a varios lugares, la entrega de ese lugar.
@@ -311,6 +331,28 @@ export default function CronogramaPage() {
     }
   };
 
+  // Cada tarjeta, igual en la semana y en el día expandido.
+  const tarjetaMov = (t: Tarjeta) => (
+    <TarjetaMov key={t.key} t={t} hoy={v?.hoy ?? ''} puede={puede} choferes={v?.choferes ?? []} expresos={v?.expresos ?? []} onChofer={(c) => asignar(t, c)}
+      dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
+      onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined} feriados={v?.feriados}
+      onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
+      onAnotar={t.record_id ? () => setAnotando(t) : undefined} onHora={t.parada && t.movs[0]?.parada && !t.hecho ? () => setHoraDe(t) : undefined}
+      onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined}
+      onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
+      onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />
+  );
+  const tarjetaEnc = (e: Encargo) => (
+    <TarjetaEncargo key={e.id} e={e} hoy={v?.hoy ?? ''} puede={puede} choferes={v?.choferes ?? []} expresos={v?.expresos ?? []}
+      dir={e.parada ? dirs[`${e.fecha}|${e.parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
+      onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })} onAnotar={() => setAnotandoEnc(e)}
+      onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
+      onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />
+  );
+  const verDia = (d: string) => ir({ vista: 'dia', dia: d });
+  const totalesTexto = (m: Mov[], e: Encargo[]) => { const h = m.filter((x) => x.hecho).length;
+    return `${m.length} movimiento${m.length === 1 ? '' : 's'} · ${h} hecho${h === 1 ? '' : 's'} · ${e.length} encargo${e.length === 1 ? '' : 's'}`; };
+
   const total = movs.length, hechos = movs.filter((m) => m.hecho).length;
   return (
     <div className="content cr-page">
@@ -318,6 +360,7 @@ export default function CronogramaPage() {
         <h1>Cronograma {v && <span className="muted small">{total} movimientos · {hechos} hechos{encs.length ? ` · ${encs.length} encargo${encs.length === 1 ? '' : 's'}` : ''}</span>}</h1>
         <div className="row" role="group" aria-label="Vista">
           <button type="button" className={`btn sm${vista === 'semana' ? ' primary' : ''}`} aria-pressed={vista === 'semana'} onClick={() => ir({ vista: null })}><Icon name="calendar" size={14} />Semana</button>
+          <button type="button" className={`btn sm${vista === 'dia' ? ' primary' : ''}`} aria-pressed={vista === 'dia'} onClick={() => verDia(dia)} title="Un día expandido, con todo ordenado"><Icon name="board" size={14} />Día</button>
           <button type="button" className={`btn sm${vista === 'ruta' ? ' primary' : ''}`} aria-pressed={vista === 'ruta'} onClick={() => ir({ vista: 'ruta', dia })}><Icon name="route" size={14} />Ruta del día</button>
         </div>
       </div>
@@ -327,7 +370,7 @@ export default function CronogramaPage() {
 
       {error && <div className="aviso warn small" style={{ marginBottom: 12 }}>{error}</div>}
 
-      {vista === 'semana' && (
+      {vista !== 'ruta' && (
         <>
           <div className="toolbar">
             <div className="search" style={{ minWidth: 220, flex: '0 1 280px' }}><Icon name="search" />
@@ -350,22 +393,25 @@ export default function CronogramaPage() {
           </div>
           {v && !puede && <div className="aviso info small" style={{ marginBottom: 12 }}>Ves el cronograma para saber cuándo sale cada cosa. Lo editan Logística, Producción y los administradores.</div>}
           {!v && !error && <div className="empty plain">Cargando la semana…</div>}
-          {v && (
+          {v && vista === 'semana' && (
             <div className="cr-scroll">
               {/* Colgados es una columna más de la grilla, al final y del mismo ancho que los días. */}
               <div className="cr-semana" style={{ gridTemplateColumns: `repeat(${dias.length + 1}, minmax(214px, 1fr))` }}>
                 {dias.map((d) => {
-                  const delDia = movs.filter((m) => m.fecha === d), notas = v.notas.filter((n) => n.fecha === d), encDia = encs.filter((e) => e.fecha === d);
-                  const pend = delDia.filter((m) => !m.hecho).length + encDia.filter((e) => e.estado !== 'hecho').length, cuantos = delDia.length + encDia.length;
+                  const r = delDiaDe(d), delDia = r.movs, notas = r.notas, encDia = r.encs;
                   return (
                     <section key={d} className={`cr-dia${d === v.hoy ? ' hoy' : ''}${v.feriados[d] ? ' feriado' : ''}${sobre === d ? ' sobre' : ''}`}
                       onDragOver={(e) => { if (arrastre.current && puede) { e.preventDefault(); if (sobre !== d) setSobre(d); } }}
                       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setSobre((s) => (s === d ? null : s)); }}
                       onDrop={(e) => { e.preventDefault(); soltar(d); }}>
                       <header className="cr-dia-cab">
-                        <div className="cr-dia-tit"><b>{DIAS[D(d).getDay()]}</b><span className="num">{D(d).getDate()}/{D(d).getMonth() + 1}</span>{d === v.hoy && <span className="cr-hoy">Hoy</span>}</div>
+                        {/* El nombre del día abre el día expandido. */}
+                        <div className="cr-dia-tit">
+                          <button type="button" className="cr-dia-ver" onClick={() => verDia(d)} title="Ver el día expandido"><b>{DIAS[D(d).getDay()]}</b><span className="num">{D(d).getDate()}/{D(d).getMonth() + 1}</span><Icon name="board" size={13} /></button>
+                          {d === v.hoy && <span className="cr-hoy">Hoy</span>}
+                        </div>
                         <div className="cr-dia-sub">
-                          <span className={`num${pend && d < v.hoy ? ' overdue' : ''}`}>{cuantos ? (pend ? `${pend} ${d < v.hoy ? `atrasado${pend === 1 ? '' : 's'}` : `pendiente${pend === 1 ? '' : 's'}`} de ${cuantos}` : `${cuantos} hechos`) : 'Sin movimientos'}</span>
+                          <span className={`num${r.atrasado ? ' overdue' : ''}`}>{r.texto}</span>
                           {(delDia.some((m) => !llega(m.tipo)) || encDia.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia: d })}><Icon name="route" size={12} />Ruta</button>}
                         </div>
                         <MezclaDia estados={tarjetas(delDia).map((t) => (t.hecho ? 'hecho' : despachoTarjeta(t, dirDe(t))?.estado ?? 'listo'))} />
@@ -378,25 +424,14 @@ export default function CronogramaPage() {
                           return (
                             <div key={c.k} className={`cr-carril cr-k-${c.k}`}>
                               <h3>{c.nombre} <span className="num">{ts.length}</span></h3>
-                              {ts.map((t) => <TarjetaMov key={t.key} t={t} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []} onChofer={(c) => asignar(t, c)}
-                                dir={t.parada && t.movs[0]?.parada ? dirs[`${t.fecha}|${t.movs[0].parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
-                                onMarcar={() => marcar(t)} onAbrir={t.record_id ? () => abrirTarjeta(t) : undefined} feriados={v.feriados}
-                                onColgar={t.hecho ? undefined : () => setColgando({ ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, pdv: `PDV ${t.movs[0].npdv ?? ''}` })}
-                                onAnotar={t.record_id ? () => setAnotando(t) : undefined} onHora={t.parada && t.movs[0]?.parada && !t.hecho ? () => setHoraDe(t) : undefined}
-                                onEnviado={t.tipo !== 'entrega' ? setEnviando : undefined}
-                                onMover={(f) => mover(t.movs.map((m) => m.task_id), t.tipo, f, `PDV ${t.movs[0].npdv ?? ''}`, t.movs.map((m) => m.dir ?? null))}
-                                onArrastrar={(on) => { arrastre.current = on ? { ids: t.movs.map((m) => m.task_id), dirs: t.movs.map((m) => m.dir ?? null), tipo: t.tipo, de: t.fecha, pdv: `PDV ${t.movs[0].npdv ?? ''}` } : null; if (!on) setSobre(null); }} />)}
+                              {ts.map((t) => tarjetaMov(t))}
                             </div>
                           );
                         })}
                         {encDia.length > 0 && (
                           <div className="cr-carril cr-k-X">
                             <h3>Encargos <span className="num">{encDia.length}</span></h3>
-                            {encDia.map((e) => <TarjetaEncargo key={e.id} e={e} hoy={v.hoy} puede={puede} choferes={v.choferes ?? []} expresos={v.expresos ?? []}
-                              dir={e.parada ? dirs[`${e.fecha}|${e.parada}`] : undefined} buscando={buscandoDirs} onDir={(k, d) => setCorrigiendo({ k, d })}
-                              onAbrir={() => setEncargo(e.id)} onChofer={(c) => choferEnc(e, c)} onMover={(f) => encargoA(e, { fecha: f })} onAnotar={() => setAnotandoEnc(e)}
-                              onMarcar={() => encargoA(e, { estado: e.estado === 'hecho' ? 'pendiente' : 'hecho' })}
-                              onArrastrar={(on) => { arrastre.current = on ? { ids: [String(e.id)], tipo: 'encargo', de: e.fecha, pdv: '' } : null; if (!on) setSobre(null); }} />)}
+                            {encDia.map((e) => tarjetaEnc(e))}
                           </div>
                         )}
                         <Notas dia={d} notas={notas} puede={puede} onCambio={cargar} />
@@ -433,6 +468,65 @@ export default function CronogramaPage() {
               </div>
             </div>
           )}
+          {v && vista === 'dia' && (() => {
+            // El día expandido (pedido de Rodrigo del 20/11/2026): lo mismo que la columna de ese día en la semana, con lugar.
+            // Arriba los días de la semana (se elige otro o se suelta una tarjeta ahí para pasarla a ese día); abajo, cada
+            // tipo de movimiento con sus tarjetas en grilla, los encargos y las notas.
+            const r = delDiaDe(dia);
+            const pestanas = dias.includes(dia) ? dias : [...dias, dia].sort();
+            const carriles = CARRILES.map((c) => ({ c, ts: tarjetas(r.movs.filter((m) => c.tipos.includes(m.tipo))).filter(pasaToca) })).filter((x) => x.ts.length);
+            return (
+              <div className="cr-diax">
+                <nav className="cr-diax-dias" aria-label="Días de la semana">
+                  {pestanas.map((d) => { const x = delDiaDe(d); return (
+                    <button key={d} type="button" aria-current={d === dia ? 'date' : undefined} onClick={() => ir({ dia: d })}
+                      className={`cr-diax-tab${d === dia ? ' on' : ''}${d === v.hoy ? ' hoy' : ''}${v.feriados[d] ? ' feriado' : ''}${sobre === d ? ' sobre' : ''}`}
+                      title={d === dia ? undefined : puede ? 'Ver ese día (o soltá acá una tarjeta para pasarla a ese día)' : 'Ver ese día'}
+                      onDragOver={(e) => { if (arrastre.current && puede && d !== dia) { e.preventDefault(); if (sobre !== d) setSobre(d); } }}
+                      onDragLeave={() => setSobre((o) => (o === d ? null : o))}
+                      onDrop={(e) => { e.preventDefault(); soltar(d); }}>
+                      {/* Hoy, en el color de la marca (como en la semana): el cartelito «Hoy» está en el encabezado del día. */}
+                      <b title={d === v.hoy ? 'Hoy' : undefined}>{DIAS[D(d).getDay()].slice(0, 3)} {D(d).getDate()}/{D(d).getMonth() + 1}</b>
+                      <span className={`num${x.atrasado ? ' overdue' : ''}`}>{x.texto}</span>
+                    </button>
+                  ); })}
+                </nav>
+                <section className={`cr-diax-panel${v.feriados[dia] ? ' feriado' : ''}`} aria-label={diaLargo(dia)}>
+                  <header className="cr-diax-cab">
+                    <div className="cr-diax-tit">
+                      <h2>{diaLargo(dia)}</h2>
+                      {dia === v.hoy && <span className="cr-hoy">Hoy</span>}
+                      <span className={`num${r.atrasado ? ' overdue' : ''}`}>{r.texto}</span>
+                      <Feriado dia={dia} nombre={v.feriados[dia]} puede={puede} onCambio={cargar} />
+                      <span className="cr-diax-links">
+                        {(r.movs.some((m) => !llega(m.tipo)) || r.encs.length > 0) && <button type="button" className="cr-link" onClick={() => ir({ vista: 'ruta', dia })}><Icon name="route" size={12} />Ruta del día</button>}
+                        <button type="button" className="cr-link" onClick={() => ir({ vista: null })}><Icon name="calendar" size={12} />Volver a la semana</button>
+                      </span>
+                    </div>
+                    <MezclaDia estados={tarjetas(r.movs).map((t) => (t.hecho ? 'hecho' : despachoTarjeta(t, dirDe(t))?.estado ?? 'listo'))} />
+                  </header>
+                  <div className="cr-diax-cuerpo">
+                    {carriles.map(({ c, ts }) => (
+                      <section key={c.k} className={`cr-diax-carril cr-k-${c.k}`} aria-label={c.nombre}>
+                        <h3>{c.nombre} <span className="num">{ts.length}</span><small>{c.ayuda}</small></h3>
+                        <div className="cr-diax-grilla">{ts.map((t) => tarjetaMov(t))}</div>
+                      </section>
+                    ))}
+                    {r.encs.length > 0 && (
+                      <section className="cr-diax-carril cr-k-X" aria-label="Encargos">
+                        <h3>Encargos <span className="num">{r.encs.length}</span><small>Lo que alguien pidió en Recorridos</small></h3>
+                        <div className="cr-diax-grilla">{r.encs.map((e) => tarjetaEnc(e))}</div>
+                      </section>
+                    )}
+                    {!carriles.length && !r.encs.length && <div className="empty plain">{r.cuantos ? 'Con estos filtros no queda nada en este día.' : 'Nada para este día.'}</div>}
+                    <div className="cr-diax-notas"><Notas dia={dia} notas={r.notas} puede={puede} onCambio={cargar} /></div>
+                  </div>
+                </section>
+              </div>
+            );
+          })()}
+          {/* Abajo a la izquierda, como en Pedidos y Producción: cuánto hay en la semana o en el día (con lo que se ve filtrado). */}
+          {v && <BarraPie onRecargar={cargar} total={vista === 'dia' ? totalesTexto(delDiaDe(dia).movs, delDiaDe(dia).encs) : totalesTexto(movs, encs)} />}
           {colgando && <ModalColgar a={colgando} onCerrar={() => setColgando(null)} onColgar={(m) => colgar(colgando, m)} />}
           {anotando && anotando.record_id && (
             <Modal title={`Anotaciones de logística · ${anotando.titulo} (${anotando.pdv})`} onClose={() => setAnotando(null)}>
@@ -446,7 +540,7 @@ export default function CronogramaPage() {
           )}
           {horaDe && <ModalHora t={horaDe} onCerrar={() => setHoraDe(null)} onListo={() => { setHoraDe(null); void cargar(); }} />}
           {enviando && <ModalEnviado m={enviando} onCerrar={() => setEnviando(null)} onListo={() => { setEnviando(null); void cargar(); }} />}
-          {v && deTipo('entrega') && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && deUnidad(s.unidad))} puede={puede}
+          {v && vista === 'semana' && deTipo('entrega') && <SinFecha items={v.sin_fecha.filter((s) => coincide(s, q) && deUnidad(s.unidad))} puede={puede}
             onArrastrar={(a) => { arrastre.current = a; if (!a) setSobre(null); }} onMover={(ids, f, pdv) => mover(ids, 'entrega', f, pdv)} onAbrir={setPreview} />}
         </>
       )}
@@ -717,6 +811,29 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
 // El estado de despacho de una tarjeta: el estado, a quién le toca y los puntitos del checklist con lo que falta.
 const PUNTO: Record<'ok' | 'no' | 'medio' | 'pend' | 'parcial', string> = { ok: 'M3.5 8.5l3 3 6-7', no: 'M4.5 4.5l7 7M11.5 4.5l-7 7', medio: 'M4 8h8', pend: 'M4 8h8', parcial: 'M4 8h8' };
 const V_TXT = { ok: 'sí', no: 'no', medio: 'en parte', pend: 'pendiente', parcial: 'una parte' } as const;
+// Cada control con su dibujito (pedido de Rodrigo del 20/11/2026), para saber de un pantallazo qué es lo que falta: la
+// impresora es la producción (como en el menú), la caja la mercadería en el depósito, el $ el pago, el pin la dirección,
+// la hoja el remito y el lápiz una anotación que traba. Dibujados para 16 px, así se leen chiquitos. El estado va en el
+// color y en la marquita de la esquina (✓, ✗ o –), para no depender solo del color.
+const ICONO_CONTROL: Record<Control['k'], string> = {
+  prod: 'M4.5 6V2.5h7V6M4.5 11.5H3V6h10v5.5h-1.5M5 9.5h6V14H5z',
+  dep: 'M2.5 5 8 2.5 13.5 5v6.5L8 14l-5.5-2.5zM2.5 5 8 7.5 13.5 5M8 7.5V14',
+  pago: 'M10.6 5C10.1 4 9.1 3.4 8 3.4c-1.5 0-2.6.8-2.6 2s1.1 1.7 2.6 2.1 2.7.9 2.7 2.2-1.2 2.1-2.7 2.1c-1.2 0-2.2-.6-2.7-1.6M8 1.8v12.4',
+  dir: 'M8 14.5s4.5-4 4.5-7.6a4.5 4.5 0 0 0-9 0C3.5 10.5 8 14.5 8 14.5zM8 8.6a1.6 1.6 0 1 0 0-3.2 1.6 1.6 0 0 0 0 3.2z',
+  remito: 'M4 1.8h5.5l3 3v9.4H4zM9.5 1.8v3h3M6.2 8h4.1M6.2 10.6h4.1',
+  nota: 'M3 13l.9-3.1 6.9-6.9a1.4 1.4 0 0 1 2 2L5.9 12.1zM9.8 4l2.2 2.2',
+};
+function PuntoControl({ c, solo }: { c: Control; solo?: boolean }) {
+  // `solo`: en una lista que ya dice el nombre y el detalle al lado (la vista previa del pedido), es solo el dibujo.
+  const dicho = `${c.nombre}: ${V_TXT[c.v]}`;
+  return (
+    <i role={solo ? undefined : 'listitem'} className={`cr-punto ${c.v}`} aria-hidden={solo || undefined}
+      title={solo ? undefined : `${dicho}${c.t ? ` · ${c.t}` : ''}`} aria-label={solo ? undefined : dicho}>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d={ICONO_CONTROL[c.k]} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      <svg className="cr-punto-marca" viewBox="0 0 16 16" aria-hidden="true"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </i>
+  );
+}
 function Quien({ d }: { d: DespachoTarjeta }) {
   if (!d.quien) return null;
   return d.quien === 'ventas' && d.owner_id ? <UserChip id={d.owner_id} size="xs" /> : <>{NOMBRE_ROL[d.quien]}{d.lugar ? ` · ${lindo(d.lugar)}` : ''}</>;
@@ -735,9 +852,7 @@ function FilaDespacho({ d, tipo, reloj, reprogramar }: { d: DespachoTarjeta; tip
       {d.checks.length > 0 && (
         <div className="cr-t-desp-l2">
           <span className="cr-puntos" role="list" aria-label="Checklist de salida">
-            {d.checks.map((c) => <i key={c.k} role="listitem" className={`cr-punto ${c.v}`} title={`${c.nombre}: ${V_TXT[c.v]}${c.t ? ` · ${c.t}` : ''}`} aria-label={`${c.nombre}: ${V_TXT[c.v]}`}>
-              <svg viewBox="0 0 16 16" width="9" height="9" aria-hidden="true"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-            </i>)}
+            {d.checks.map((c) => <PuntoControl key={c.k} c={c} />)}
           </span>
           {falta && <small title={d.checks.filter((c) => c.t && c.v !== 'ok').map((c) => `${c.nombre}: ${c.t}`).join(' · ') || undefined}>{falta}</small>}
         </div>
@@ -765,7 +880,7 @@ function PanelDespacho({ t, dir, hoy, feriados }: { t: Tarjeta; dir?: DirParada;
         {colgado && <div className="cr-t-motivo"><p>{colgado.motivo}</p><span className="small">Colgado · era del {diaCorto(colgado.fecha)}{colgado.por ? ` · ${colgado.por}` : ''}</span></div>}
         {d.checks.length > 0 && (
           <ul className="cr-pv-checks">
-            {d.checks.map((c) => <li key={c.k}><i className={`cr-punto ${c.v}`} aria-hidden="true"><svg viewBox="0 0 16 16" width="9" height="9"><path d={PUNTO[c.v]} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></i>
+            {d.checks.map((c) => <li key={c.k}><PuntoControl c={c} solo />
               <span><b>{c.nombre}</b> <span className="muted">{c.t ?? V_LARGO[c.v]}</span></span></li>)}
           </ul>
         )}

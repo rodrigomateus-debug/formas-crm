@@ -29,7 +29,14 @@ parada del mismo lugar en la ruta del día.
   un mes y un clic elige la semana. Cada semana muestra cuánto tiene cada día y cuánto falta; en rojo, lo que ya pasó y
   no se hizo. «Hoy» vuelve a la semana actual.
 - **Cada día** con sus cuatro carriles. Una tarjeta junta los artículos de un PDV con el mismo movimiento, el mismo día
-  y en el mismo lugar. Un clic abre la vista previa del pedido.
+  y en el mismo lugar. Un clic abre la vista previa del pedido. En la computadora la semana ocupa el alto de la ventana:
+  cada día (y Colgados) se desplaza adentro con su encabezado fijo, y la barra para los costados queda al pie. Abajo a la
+  izquierda, como en Pedidos y Producción, cuántos movimientos, hechos y encargos hay (con lo que se ve filtrado).
+- **El día expandido** (botón «Día», o el nombre del día en la semana; pedido de Rodrigo del 20/11/2026): un solo día con
+  lugar. Arriba, los días de esa semana como pestañas, con cuánto falta en cada uno; abajo, cada tipo de movimiento en su
+  franja (entregas, ingresos, retiros, egresos y encargos) con las tarjetas en grilla, y las notas del día. Las tarjetas
+  son las mismas de la semana (marcar, chofer, mover, colgar, anotaciones…) y los filtros de arriba también valen. Para
+  pasar una tarjeta a otro día de la semana se suelta en su pestaña. Link: `/cronograma?vista=dia&dia=AAAA-MM-DD`.
 - **Mover**: arrastrar la tarjeta a otro día (o el ícono de calendario, para el celular) escribe la fecha en ClickUp en
   el momento. Si ClickUp no lo acepta, no cambia nada. En las entregas la fecha queda en cada artículo que se movió; la
   del PDV se mueve solo si se movieron todos sus artículos abiertos (pasar uno a otro día no arrastra a los demás). Lo que
@@ -165,6 +172,10 @@ los colgados que no se olvidan y la corrección a mano (la maqueta con las ideas
   dirección · remito; en los egresos, mercadería en el depósito · dirección · remito de traslado; en los retiros, la
   dirección. Los ingresos no tienen (llegan o no). Verde sí, rojo no, violeta en parte (2 de 3 productos listos), gris
   pendiente. El de pago: rojo no pagó nada, naranja pagó una parte, verde pagó. Al lado, lo que falta en pocas palabras; con el mouse encima, el detalle («Saldo de $ 1.240.000 en Finnegans»).
+  Cada uno con su dibujito, para saber de un pantallazo cuál falta (pedido de Rodrigo del 20/11/2026): impresora la
+  producción (como en el menú), caja la mercadería en el depósito, $ el pago, pin la dirección, hoja el remito y lápiz una
+  anotación que traba. El estado va en el color y en la marquita de la esquina (✓, ✗ o –), para no depender solo del
+  color (`ICONO_CONTROL` y `PuntoControl` en `Cronograma.tsx`).
 - **Si llega a tiempo** (el reloj): solo cuando algo traba (no pagó, falta información, no llegó, en cola). Cuenta días
   hábiles hasta el día del movimiento (sin fines de semana ni feriados): «Atrasado · es mañana» (o hoy, o ya pasó) en rojo,
   «Justo · en 2 días hábiles» en ámbar. Lo listo, remitido o programado no lo lleva.

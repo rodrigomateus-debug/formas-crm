@@ -1589,14 +1589,17 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-desp-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; line-height: 1.5; padding: 0 7px 0 5px; border-radius: var(--r-pill); color: var(--d); background: var(--db); max-width: 100%; }
 .cr-desp-quien { font-size: 11.5px; color: var(--ui-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cr-desp-quien .user-inline { font-size: 11.5px; }
-.cr-t-desp-l2 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cr-t-desp-l2 { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .cr-t-desp-l2 small { font-size: 11px; color: var(--ui-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cr-puntos { display: inline-flex; gap: 3px; flex: none; }
-.cr-punto { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; background: var(--ui-surface); color: var(--text-3); }
-.cr-punto.ok { background: var(--d-hecho-bg); color: var(--d-hecho); } .cr-punto.no { background: var(--d-info-bg); color: var(--d-info); }
-.cr-punto.medio { background: var(--d-cola-bg); color: var(--d-cola); }
+/* El checklist: cada control con su dibujito (Cronograma.tsx, ICONO_CONTROL), en el color de su estado, y la marquita de
+   la esquina (✓, ✗ o –) para no depender solo del color. */
+.cr-puntos { display: inline-flex; gap: 5px; flex: none; padding-top: 3px; }
+.cr-punto { --pc: var(--text-3); position: relative; flex: none; width: 20px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: var(--ui-surface); color: var(--pc); }
+.cr-punto-marca { position: absolute; top: -3px; right: -4px; width: 10px; height: 10px; padding: 1.5px; border-radius: 50%; background: var(--pc); color: var(--ui-surface); box-shadow: 0 0 0 1.5px var(--ui-surface); }
+.cr-punto.ok { --pc: var(--d-hecho); background: var(--d-hecho-bg); } .cr-punto.no { --pc: var(--d-info); background: var(--d-info-bg); }
+.cr-punto.medio { --pc: var(--d-cola); background: var(--d-cola-bg); }
 /* El pago: rojo no pagó nada, naranja pagó una parte, verde pagó (como en Pedidos). */
-.cr-punto.parcial { background: var(--d-remitido-bg); color: var(--d-remitido); }
+.cr-punto.parcial { --pc: var(--d-remitido); background: var(--d-remitido-bg); }
 /* Filtros del cronograma (tipo de movimiento, le toca a): el color de cada tipo y cuántas tarjetas hay. */
 .cr-op i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--k); }
 .cr-op .num { color: var(--text-3); font-size: 12px; }
@@ -1620,7 +1623,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-pv-desp .panel-head .small { margin-left: auto; }
 .cr-pv-desp-body { padding: 12px 20px 14px; display: flex; flex-direction: column; gap: 10px; }
 .cr-pv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
-.cr-pv-checks li { display: grid; grid-template-columns: 15px minmax(0, 1fr); gap: 8px; align-items: start; }
+.cr-pv-checks li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
 .cr-pv-checks .cr-punto { margin-top: 2px; background: var(--ui-surface-sunken); }
 .cr-pv-checks .cr-punto.ok { background: var(--d-hecho-bg); } .cr-pv-checks .cr-punto.no { background: var(--d-info-bg); } .cr-pv-checks .cr-punto.medio { background: var(--d-cola-bg); } .cr-pv-checks .cr-punto.parcial { background: var(--d-remitido-bg); }
 .cr-page .page-head { margin-bottom: 12px; }
@@ -1667,6 +1670,62 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 /* La semana */
 .cr-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px 6px; }
 .cr-semana { display: grid; gap: 10px; align-items: start; }
+/* El día expandido (pedido de Rodrigo del 20/11/2026): los días de la semana arriba, como pestañas (también se suelta una
+   tarjeta en otro día para pasarla), y el día con cada tipo de movimiento en su franja, las tarjetas en grilla. */
+.cr-diax { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cr-diax-dias { display: flex; gap: 8px; overflow-x: auto; padding: 2px; }
+.cr-diax-tab { flex: 1 1 0; min-width: 128px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 8px 12px; text-align: left;
+  border: 1px solid var(--ui-line); border-radius: var(--r-panel); background: var(--ui-surface); font: inherit; color: inherit; cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.cr-diax-tab b { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; }
+.cr-diax-tab .num { font-size: 12px; color: var(--text-3); } .cr-diax-tab .num.overdue { color: var(--bad); }
+.cr-diax-tab:hover { border-color: var(--ui-line-strong); }
+.cr-diax-tab.hoy b { color: var(--accent-ink); }
+.cr-diax-tab.feriado { background: var(--ui-surface-sunken); }
+.cr-diax-tab.on { border-color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-ink); background: var(--accent-soft); cursor: default; }
+.cr-diax-tab.sobre { border-color: var(--accent-ink); box-shadow: var(--ui-focus-ring); }
+.cr-diax-panel { min-width: 0; display: flex; flex-direction: column; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); }
+.cr-diax-panel.feriado { background: var(--ui-surface-sunken); }
+.cr-diax-cab { padding: 14px 16px 12px; border-bottom: 1px solid var(--ui-line); display: flex; flex-direction: column; gap: 6px; }
+.cr-diax-tit { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.cr-diax-tit h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.cr-diax-tit > .num { font-size: 13px; color: var(--text-3); } .cr-diax-tit > .num.overdue { color: var(--bad); }
+.cr-diax-links { margin-left: auto; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.cr-diax-cab .cr-dia-mezcla { height: 8px; }
+.cr-diax-tit .cr-feriado { align-self: center; }
+.cr-diax-cuerpo { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 20px; }
+.cr-diax-carril h3 { margin: 0 0 8px; padding: 0 2px; display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--k); }
+.cr-diax-carril h3 .num { color: var(--text-3); font-weight: 500; }
+.cr-diax-carril h3 small { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--text-3); }
+.cr-diax-grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; align-items: start; }
+.cr-diax-notas .cr-carril { max-width: 520px; }
+@media (prefers-reduced-motion: reduce) { .cr-diax-tab, .cr-dia-ver > svg { transition: none; } }
+
+/* La semana, como los tableros (pedido de Rodrigo del 20/11/2026): la página no se desplaza para abajo. La grilla ocupa el
+   alto que queda en la ventana; cada día (y Colgados) se desplaza adentro con su encabezado fijo arriba, y la barra para
+   los costados queda siempre a la vista, al pie. En el celular la página se desplaza entera, como antes. */
+@media (min-width: 861px) {
+  .content.cr-page:has(> .cr-scroll), .content.cr-page:has(> .cr-diax) { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 12px; }
+  .content.cr-page:has(> .cr-scroll) > *, .content.cr-page:has(> .cr-diax) > * { flex: none; }
+  /* El día expandido: las pestañas y el encabezado del día quedan fijos; se desplaza lo de adentro. */
+  .content.cr-page > .cr-diax { flex: 1 1 0; min-height: 240px; }
+  .cr-page > .cr-diax > .cr-diax-panel { flex: 1 1 0; min-height: 0; }
+  .cr-page > .cr-diax .cr-diax-cuerpo { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .cr-page > .cr-diax .cr-diax-cuerpo::-webkit-scrollbar { width: 10px; }
+  .cr-page > .cr-diax .cr-diax-cuerpo::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 2px solid var(--ui-surface); }
+  .content.cr-page > .cr-scroll { flex: 1 1 0; min-height: 240px; overflow-y: hidden; display: flex; flex-direction: column; }
+  .cr-page > .cr-scroll > .cr-semana { flex: 1 1 auto; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .cr-page > .cr-scroll .cr-dia { min-height: 0; overflow: hidden; }
+  .cr-page > .cr-scroll .cr-carriles { flex: 1 1 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* Las barras a la vista (en Mac se esconden si no se fuerzan): la de los costados, como la de las tablas; la de cada día, finita. */
+  .cr-page > .cr-scroll::-webkit-scrollbar { height: 12px; }
+  .cr-page > .cr-scroll::-webkit-scrollbar-track { background: var(--ui-surface-sunken); border-radius: 8px; }
+  .cr-page > .cr-scroll::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 3px solid var(--ui-surface-sunken); }
+  .cr-page > .cr-scroll::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+  .cr-page > .cr-scroll .cr-carriles::-webkit-scrollbar { width: 8px; }
+  .cr-page > .cr-scroll .cr-carriles::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 8px; border: 2px solid var(--ui-surface); }
+  .cr-page > .cr-scroll .cr-carriles::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+}
 .cr-dia { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); min-width: 0; display: flex; flex-direction: column; min-height: 220px; transition: box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .cr-dia.sobre { border-color: var(--accent-ink); box-shadow: var(--ui-focus-ring); }
 .cr-dia.feriado { background: var(--ui-surface-sunken); }
@@ -1712,7 +1771,13 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-dia-tit { display: flex; align-items: baseline; gap: 8px; }
 .cr-dia-tit b { font-size: 15px; font-weight: 600; } .cr-dia-tit span { color: var(--text-3); }
 .cr-dia.hoy .cr-dia-tit b { color: var(--accent-ink); }
-.cr-dia-tit .cr-hoy { margin-left: auto; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--on-accent); background: var(--accent); padding: 2px 7px; border-radius: var(--r-pill); }
+.cr-hoy { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--on-accent); background: var(--accent); padding: 2px 7px; border-radius: var(--r-pill); }
+.cr-dia-tit .cr-hoy { margin-left: auto; }
+/* El nombre del día abre el día expandido. */
+.cr-dia-ver { display: inline-flex; align-items: baseline; gap: 8px; border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; border-radius: 4px; }
+.cr-dia-ver > svg { align-self: center; color: var(--text-3); opacity: .55; transition: opacity var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.cr-dia-ver:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.cr-dia-ver:hover > svg, .cr-dia-ver:focus-visible > svg { opacity: 1; color: var(--accent-ink); }
 .cr-dia-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-3); }
 .cr-feriado { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--ui-warning-ink); background: var(--ui-warning-soft); border-radius: var(--r-pill); padding: 2px 4px 2px 9px; align-self: flex-start; }
 .cr-carriles { padding: 8px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
@@ -1807,7 +1872,7 @@ button.cr-t-dir:focus-visible { outline: 2px solid var(--k, var(--ui-ink)); outl
 .cr-t-chofer.solo svg { flex: none; color: var(--k); }
 .cr-agregar { align-self: flex-start; display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; padding: 3px 6px; border-radius: var(--r-control); font: inherit; font-size: 11.5px; font-weight: 500; color: var(--text-3); cursor: pointer; }
 .cr-agregar:hover { background: var(--ui-surface-sunken); color: var(--ui-ink); }
-.cr-agregar.feriado { padding: 0; font-size: 11px; opacity: 0; } .cr-dia-cab:hover .cr-agregar.feriado, .cr-agregar.feriado:focus-visible { opacity: 1; }
+.cr-agregar.feriado { padding: 0; font-size: 11px; opacity: 0; } .cr-dia-cab:hover .cr-agregar.feriado, .cr-diax-cab:hover .cr-agregar.feriado, .cr-agregar.feriado:focus-visible { opacity: 1; }
 .cr-nota-form { display: flex; gap: 6px; } .cr-nota-form .input { flex: 1; min-width: 0; }
 .cr-bandeja { margin-top: 12px; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
 .cr-bandeja-tit { flex: 0 0 200px; }

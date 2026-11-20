@@ -179,6 +179,21 @@ export function BarraVista({ total, centro, abierta, cambiada, filtrosCambiados,
   return slot ? createPortal(barra, slot) : null;
 }
 
+// La misma barra de abajo para una pantalla sin vistas guardadas (Cronograma): cuántos hay a la izquierda y actualizar a la
+// derecha, sin guardar ni duplicar.
+export function BarraPie({ total, onRecargar }: { total: ReactNode; onRecargar?: () => void }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => { setSlot(document.getElementById('barra-vista')); }, []);
+  const barra = (
+    <div className="barra-vista" role="region" aria-label="Totales">
+      <span className="bv-total">{total}</span>
+      <span className="bv-estado" />
+      {onRecargar && <div className="bv-acciones"><button type="button" className="btn sm icon" title="Actualizar" aria-label="Actualizar" onClick={onRecargar}><Icon name="refresh" size={15} /></button></div>}
+    </div>
+  );
+  return slot ? createPortal(barra, slot) : null;
+}
+
 // ---------- Pestañas de vistas (Producción; la lista de Pedidos y los demás objetos tienen las suyas en ObjectIndex) ----------
 
 // Pestañas: «all» (Todos), «mine» (Míos) y el id de cada vista guardada, en el orden de cada uno (se arrastran; la

@@ -1626,22 +1626,28 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-pv-checks li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
 .cr-pv-checks .cr-punto { margin-top: 2px; background: var(--ui-surface-sunken); }
 .cr-pv-checks .cr-punto.ok { background: var(--d-hecho-bg); } .cr-pv-checks .cr-punto.no { background: var(--d-info-bg); } .cr-pv-checks .cr-punto.medio { background: var(--d-cola-bg); } .cr-pv-checks .cr-punto.parcial { background: var(--d-remitido-bg); }
-.cr-page .page-head { margin-bottom: 12px; }
+.cr-page .page-head { margin-bottom: 8px; }
 .cr-leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ui-ink-2); }
+/* En la fila del título, al lado de los botones de la vista; en el celular no va (la fila ya se apila). */
+.page-head .cr-leyenda { margin-right: 10px; }
+@media (max-width: 860px) { .page-head .cr-leyenda { display: none; } }
 .cr-leyenda i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--k); margin-right: 6px; }
 .cr-link { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; font-weight: 500; color: var(--accent-ink); cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .cr-link:hover { text-decoration: underline; }
 
 /* La barra de semanas */
-.cr-barra { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); padding: 8px; }
+.cr-barra { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: var(--r-panel); padding: 4px 6px; }
 .cr-barra .cr-der svg { transform: rotate(180deg); }
 .cr-barra-caja { flex: 1; min-width: 0; display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; cursor: grab; user-select: none; scroll-behavior: auto; padding: 2px;
   mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
 .cr-barra-caja::-webkit-scrollbar { display: none; }
 .cr-barra-caja.tirando { cursor: grabbing; }
 .cr-barra-caja.tirando .cr-sem { pointer-events: none; }
-.cr-mes { flex: none; display: flex; flex-direction: column; gap: 4px; }
-.cr-mes-nombre { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-3); padding-left: 4px; }
+/* Cada mes: su nombre corto a la izquierda de sus semanas, en vez de un renglón arriba (pedido de Rodrigo del 20/11/2026). */
+.cr-mes { flex: none; display: flex; align-items: stretch; gap: 4px; }
+.cr-mes-nombre { display: flex; flex-direction: column; justify-content: center; align-items: center; min-width: 26px; font-size: 10.5px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-3); line-height: 1.1; }
+.cr-mes-nombre small { font-size: 9px; font-weight: 600; letter-spacing: .02em; }
 .cr-mes-semanas { display: flex; gap: 4px; flex: 1; }
 /* El botón fijo de la semana actual: siempre a la vista, en verde, con sus fechas. */
 .cr-ir-hoy { gap: 7px; font-weight: 600; white-space: nowrap; }
@@ -1650,7 +1656,7 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
 .cr-ir-hoy span { font-weight: 500; color: var(--ui-ink-2); }
 
 @media (max-width: 700px) { .cr-ir-hoy span { display: none; } }
-.cr-sem { flex: none; width: 116px; display: grid; grid-template-columns: 1fr auto; grid-auto-rows: auto; align-content: end; gap: 2px 6px; align-items: end; text-align: left; padding: 7px 9px; border-radius: 8px;
+.cr-sem { flex: none; width: 110px; display: grid; grid-template-columns: 1fr auto; grid-auto-rows: auto; align-content: center; gap: 0 6px; align-items: end; text-align: left; padding: 4px 8px; border-radius: 8px;
   border: 1px solid transparent; background: var(--ui-surface-sunken); color: var(--ui-ink); cursor: pointer; font: inherit; transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .cr-sem:hover { border-color: var(--ui-line-strong); }
 .cr-sem.on { background: var(--accent-soft); border-color: var(--accent-ink); }
@@ -1660,8 +1666,8 @@ th:hover .fcol-btn, .fcol-btn:focus-visible, .fcol-btn[aria-expanded="true"] { o
    franjas de color: el color va en el fondo y en el nombre. */
 .cr-sem.actual { background: color-mix(in srgb, var(--formas-green) 18%, var(--ui-surface)); }
 .cr-sem.actual.on { border-color: var(--accent-ink); }
-.cr-sem-actual { grid-column: 1 / 3; font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ui-positive-ink); white-space: nowrap; }
-.cr-sem-barras { display: flex; align-items: flex-end; gap: 2px; height: 20px; grid-column: 2; }
+.cr-sem-punto { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--formas-green); margin-right: 5px; vertical-align: 1px; }
+.cr-sem-barras { display: flex; align-items: flex-end; gap: 2px; height: 14px; grid-column: 2; }
 .cr-sem-barras i { width: 5px; min-height: 2px; border-radius: 2px; background: var(--ui-line-strong); }
 .cr-sem-barras i.ok { background: var(--ui-positive); } .cr-sem-barras i.pend { background: var(--accent-ink); } .cr-sem-barras i.atr { background: var(--ui-negative); }
 .cr-sem-pie { grid-column: 1 / 3; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -25,9 +25,12 @@ parada del mismo lugar en la ruta del día.
 
 ## Semana
 
-- **Barra de semanas**, arriba: trece semanas agrupadas por mes. Se arrastra para los costados, las flechas la corren
-  un mes y un clic elige la semana. Cada semana muestra cuánto tiene cada día y cuánto falta; en rojo, lo que ya pasó y
-  no se hizo. «Hoy» vuelve a la semana actual.
+- **Barra de semanas**, arriba: trece semanas agrupadas por mes (el mes, corto, a la izquierda de sus semanas). Se
+  arrastra para los costados, las flechas la corren un mes y un clic elige la semana. Cada semana muestra cuánto tiene
+  cada día y cuánto falta; en rojo, lo que ya pasó y no se hizo. La actual tiene el fondo verde y un puntito; «Esta
+  semana» vuelve a ella. Para que la cabecera ocupe poco (pedido de Rodrigo del 20/11/2026), la barra es de un solo
+  renglón de tarjetas y la leyenda de colores va en la fila del título (en el celular no va: los colores están en el
+  filtro «Tipo de movimiento»).
 - **Cada día** con sus cuatro carriles. Una tarjeta junta los artículos de un PDV con el mismo movimiento, el mismo día
   y en el mismo lugar. Un clic abre la vista previa del pedido. En la computadora la semana ocupa el alto de la ventana:
   cada día (y Colgados) se desplaza adentro con su encabezado fijo, y la barra para los costados queda al pie. Abajo a la

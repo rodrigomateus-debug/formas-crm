@@ -9,7 +9,8 @@ const RUN = Date.now().toString(36);
 const PDV = String(40000 + Math.floor(Math.random() * 20000));
 const PDV_C = String(Number(PDV) + 1);   // de Corporate: se ve, pero se sigue trabajando en ClickUp
 const PDV_Z = String(Number(PDV) + 2);
-const PDV_R = String(Number(PDV) + 3);   // de Formas Shop: sus renglones de Finnegans se atan a los artículos por el nombre   // de Formas Shop, con artículos sin proveedor: sale del SKU
+const PDV_R = String(Number(PDV) + 3);
+const PDV_T = String(Number(PDV) + 4);   // de Formas Shop, con una prenda en varios talles (talles.ts)   // de Formas Shop: sus renglones de Finnegans se atan a los artículos por el nombre   // de Formas Shop, con artículos sin proveedor: sale del SKU
 let asUser = null;
 async function api(method, path, body) {
   const res = await fetch(`${BASE}/api${path}`, {
@@ -95,8 +96,16 @@ function pdvTask(id, npdv, unidad, arts) {
 const ARTS_R = [{ nombre: `Gorro Sidney ${RUN} - Naranja`, codigo: `GOR_R${RUN}`, cantidad: 50, status: 'en el impresor', updated: 0 },
   { nombre: `Mochila Lisa ${RUN} - Azul Francia`, codigo: `MOC_R${RUN}`, cantidad: 50, status: 'en el impresor', updated: 0 }];
 const sinDescripcion = (t) => ({ ...t, subtasks: t.subtasks.map(({ text_content: _t, ...s }) => s) });
+// Productos con talle (pedido de Rodrigo del 20/11/2026, PDV 31725): la Campera Stone negra en 5 talles (cargados
+// desordenados, como vienen), la misma en azul en 2 talles (otro color: otro producto) y el Gorro Trucker amarillo (su
+// SKU tiene D01, que en Zecat es el talle S y también el amarillo: sin talle en el nombre, no es un talle).
+const STONE = (talle, d, q, color = 'Negro', cc = 'D62') => ({ nombre: `Campera Stone ${talle} - ${color} - Algodon 100%`, codigo: `ZEC_99030777273${d}${cc}D54`, cantidad: q,
+  status: 'en revision', updated: 0 });
+const ARTS_T = [STONE('Large', 'D03', 12), STONE('X Small', 'D00', 3), STONE('Small', 'D01', 4), STONE('Medium', 'D02', 8), STONE('X Large', 'D04', 3),
+  STONE('Small', 'D01', 2, 'Azul', 'D09'), STONE('Medium', 'D02', 2, 'Azul', 'D09'),
+  { nombre: 'Gorro Trucker Fluo Amarillo - Amarillo - .', codigo: 'ZEC_99030777198D01D01D63', cantidad: 50, status: 'en revision', updated: 0 }];
 const PDVS = () => [pdvTask(`pa${RUN}`, PDV, 'FORMAS SHOP', ARTS.shop), pdvTask(`pc${RUN}`, PDV_C, 'CORPORATE', ARTS.corp), pdvTask(`pz${RUN}`, PDV_Z, 'FORMAS SHOP', ARTS.sku),
-  sinDescripcion(pdvTask(`pr${RUN}`, PDV_R, 'FORMAS SHOP', ARTS_R))];
+  sinDescripcion(pdvTask(`pr${RUN}`, PDV_R, 'FORMAS SHOP', ARTS_R)), pdvTask(`pt${RUN}`, PDV_T, 'FORMAS SHOP', ARTS_T)];
 
 let server;
 let sinSubtareas = false;
@@ -141,7 +150,12 @@ before(async () => {
         { ProductoCodigo: `MOC_R${RUN}`, Cantidad: 50, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '' },
         { ProductoCodigo: `GOR_R${RUN}`, Cantidad: 50, Precio: 100, Descuento1: 0, Descuento2: 0, Descripcion: '' },
       ] });
+      // El de los talles: un renglón por talle, sin descripción; el nombre (con el talle) sale de la ficha del producto.
+      if (p === `/fin/pedidoVenta/PEDVTASTP - ${PDV_T.padStart(8, '0')}`) return send({ Cliente: 'C1', MonedaCodigo: 'PES', Items: ARTS_T.map((a) => (
+        { ProductoCodigo: a.codigo, Cantidad: a.cantidad, Precio: a.codigo.includes('77198') ? 1433.73 : 54244.62, Descuento1: 0, Descuento2: 0, Descripcion: '' })) });
       if (p.startsWith('/fin/pedidoVenta/')) return send({ Items: [] });
+      const deTalles = ARTS_T.find((a) => p === `/fin/producto/${a.codigo}`);
+      if (deTalles) return send({ Nombre: deTalles.nombre });
       if (p === `/fin/producto/GOR_R${RUN}`) return send({ Nombre: `Gorro Sidney ${RUN} - Naranja` });
       if (p === `/fin/producto/MOC_R${RUN}`) return send({ Nombre: `Mochila Lisa ${RUN} - Azul Francia` });
       // La ficha del Necessaire tiene foto: es la que se ve en el pedido y en Producción.
@@ -553,3 +567,98 @@ test('producción: lo que no arrancó de un pedido en «$ Pendiente de Anticipo�
   assert.equal((await api('PATCH', `/records/order/${antes.record_id}`, { props: { hs_pipeline_stage: '3725360f-519b-4b18-a593-494d60a29c9f' } })).status, 200);
   assert.ok(pdvDe(await vista(), PDV_Z).articulos.every((a) => a.estado !== 'pendiente de anticipo'));
 });
+
+// Productos con talle (pedido de Rodrigo del 20/11/2026; talles.ts): una prenda en varios talles es un solo producto, con
+// el desglose de talles en orden, un costo de logo y un estado. SOLO talles: otro color es otro producto, y lo que no tiene
+// talle (el gorro) queda como está.
+test('talles: la prenda en varios talles es un producto; otro color, otro producto', async (t) => {
+  asUser = null;
+  if (!(await api('GET', '/integrations/pedidos')).data.clickup.configured) { t.skip('wrangler dev sin CLICKUP_TOKEN de prueba'); return; }
+  await sync();
+  const p = pdvDe(await vista(), PDV_T);
+  assert.ok(p, 'está el PDV');
+  const negros = p.articulos.filter((a) => a.nombre.includes('Negro'));
+  const azules = p.articulos.filter((a) => a.nombre.includes('Azul'));
+  const gorro = p.articulos.find((a) => a.nombre.startsWith('Gorro'));
+  assert.deepEqual(negros.map((a) => a.talle), ['XS', 'S', 'M', 'L', 'XL'], 'en el orden de los talles');
+  assert.ok(negros.every((a) => a.grupo && a.grupo === negros[0].grupo), 'un solo producto');
+  assert.deepEqual(azules.map((a) => a.talle), ['S', 'M']);
+  assert.ok(azules[0].grupo && azules[0].grupo === azules[1].grupo);
+  assert.notEqual(azules[0].grupo, negros[0].grupo, 'otro color: otro producto');
+  assert.equal(gorro.grupo, null, 'el gorro no tiene talle (D01 ahí es el amarillo)');
+  assert.equal(gorro.talle, null);
+  // Los talles de cada producto, seguidos (donde iba el primero que se cargó).
+  const pos = negros.map((a) => p.articulos.indexOf(a));
+  assert.deepEqual(pos, [pos[0], pos[0] + 1, pos[0] + 2, pos[0] + 3, pos[0] + 4]);
+  assert.equal(p.grupos[negros[0].grupo].nombre, 'Campera Stone - Negro - Algodon 100% - Proveedor', 'el nombre sin el talle');
+  assert.equal(p.total, 3, 'tres productos: la campera negra, la azul y el gorro');
+
+  // El costo del logo del producto entero: el STP repite el setup ($239.998) prorrateado en cada talle; va una sola vez.
+  const tok = (await api('POST', '/tokens', { name: `Talles ${RUN}`, source: 'api' })).data.token;
+  const r = await fetch(`${BASE}/hooks/productos/costos-logo`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${tok}` },
+    body: JSON.stringify({ filas: ARTS_T.slice(0, 5).map((a) => [`PEDVTASTP - ${PDV_T}`, a.codigo, a.nombre, a.cantidad, 0, 239998 / a.cantidad, 'pedido']) }) });
+  assert.equal(r.status, 200);
+  const c = pdvDe(await vista(), PDV_T).grupos[negros[0].grupo].costo_logo;
+  assert.equal(c.cantidad, 30);
+  assert.equal(c.setup_una_vez, true);
+  assert.equal(Math.round(c.setup), 8000, '$239.998 entre las 30 unidades');
+
+  // Editar el producto entero: el cambio va a cada talle en ClickUp; la campera azul no se toca.
+  escrito.length = 0;
+  const e = await api('PATCH', '/produccion/grupo', { tareas: negros.map((a) => a.task_id), campo: 'estado', valor: 'en el impresor' });
+  assert.equal(e.status, 200, JSON.stringify(e.data));
+  assert.equal(e.data.error, null);
+  assert.deepEqual(escrito.filter((x) => x.body?.status).map((x) => x.task).sort(), negros.map((a) => a.task_id).sort());
+  const despues = e.data.pdv;
+  assert.ok(despues.articulos.filter((a) => a.grupo === negros[0].grupo).every((a) => a.estado === 'en el impresor'));
+  assert.ok(despues.articulos.filter((a) => a.grupo === azules[0].grupo).every((a) => a.estado === 'en revision'));
+  // Solo artículos del mismo PDV.
+  const otro = pdvDe(await vista(), PDV).articulos[0].task_id;
+  assert.equal((await api('PATCH', '/produccion/grupo', { tareas: [negros[0].task_id, otro], campo: 'estado', valor: 'en revision' })).status, 400);
+
+  // Los productos del pedido: los renglones de Finnegans, con el talle y el producto.
+  const prods = (await api('GET', `/records/order/${p.record_id}/products?refresh=1`)).data;
+  const conTalle = prods.items.filter((i) => i.grupo);
+  assert.equal(conTalle.length, 7, JSON.stringify(prods.items.map((i) => [i.name, i.talle, i.grupo])));
+  assert.deepEqual(prods.items.filter((i) => i.name.includes('Negro')).map((i) => i.talle), ['XS', 'S', 'M', 'L', 'XL']);
+  assert.equal(prods.grupos[conTalle[0].grupo].nombre, 'Campera Stone - Negro - Algodon 100%');
+  assert.equal(prods.items.find((i) => i.name.startsWith('Gorro')).grupo, null);
+
+  // La lista de Pedidos: un renglón por producto, con el desglose de talles.
+  // Las notas de producto valen para todos los talles: una nota en el XS se ve en los 5 talles negros, no en la azul.
+  const xs = ARTS_T.find((a) => a.nombre.includes('X Small')).codigo;
+  const nota = await api('POST', `/productos/sku/${encodeURIComponent(xs)}/notas`, { texto: `La capucha se descose ${RUN}`, tipo: 'calidad', gravedad: 'ojo' });
+  assert.equal(nota.status, 201, JSON.stringify(nota.data));
+  assert.equal(nota.data.raiz, 'ZEC_99030777273D··D62D54', 'atada a la raíz del SKU');
+  const conNota = pdvDe(await vista(), PDV_T);
+  assert.ok(conNota.articulos.filter((a) => a.grupo === negros[0].grupo).every((a) => a.notas?.gravedad === 'ojo'), 'en todos los talles negros');
+  assert.ok(conNota.articulos.filter((a) => a.grupo === azules[0].grupo).every((a) => !a.notas), 'no en la azul (otro color)');
+  const ficha = (await api('GET', `/productos/sku/${encodeURIComponent(ARTS_T[0].codigo)}`)).data;   // el L
+  assert.ok(ficha.notas.some((n) => n.texto.includes(RUN)), 'la ficha de otro talle la trae');
+  assert.equal(ficha.raiz, 'ZEC_99030777273D··D62D54');
+  assert.equal(ficha.ventas.find((v) => v.id === p.record_id)?.cantidad, 30, 'dónde se vendió: el pedido, con las 30 unidades de sus 5 talles');
+  assert.equal((await api('GET', '/productos/notas')).data.productos.filter((x) => x.raiz === 'ZEC_99030777273D··D62D54').length, 1, 'una fila por producto');
+
+  // El cronograma: cada movimiento con su talle y el producto (la tarjeta los junta).
+  const crono = (await api('GET', '/cronograma?desde=2026-11-16&hasta=2026-11-22')).data;
+  const entregas = crono.movimientos.filter((m) => m.npdv === PDV_T && m.tipo === 'entrega' && m.grupo === `pt${RUN}|${negros[0].grupo}`);
+  assert.equal(entregas.length, 5, JSON.stringify(crono.movimientos.filter((m) => m.npdv === PDV_T).map((m) => [m.articulo, m.grupo])));
+  assert.ok(entregas.every((m) => m.producto === 'Campera Stone - Negro - Algodon 100%'));
+  assert.deepEqual(entregas.map((m) => m.talle).sort(), ['L', 'M', 'S', 'XL', 'XS']);
+
+  // La conversación del pedido: el cambio de estado de los 5 talles, en un renglón.
+  const conv = (await api('GET', `/records/order/${p.record_id}/conversacion`)).data;
+  const art = conv.items.filter((i) => i.kind === 'articulo' && i.despues === 'en el impresor');
+  assert.equal(art.length, 1, JSON.stringify(art.map((i) => i.articulo)));
+  assert.match(art[0].articulo, /^Campera Stone - Negro - Algodon 100% - Proveedor \(5 talles: XS, S, M, L, XL\)$/);
+
+  const lista = (await api('GET', `/pedidos/articulos?ids=${p.record_id}&adjuntos=1`)).data;
+  const arts = lista.pedidos[p.record_id].articulos;
+  assert.equal(arts.length, 3, JSON.stringify(arts.map((a) => a.nombre)));
+  const campera = arts.find((a) => a.talles && a.nombre.includes('Negro'));
+  assert.equal(campera.cantidad, 30);
+  assert.deepEqual(campera.talles.map((x) => `${x.talle} ${x.cantidad}`), ['XS 3', 'S 4', 'M 8', 'L 12', 'XL 3']);
+  assert.equal(lista.pedidos[p.record_id].total, 3);
+  assert.equal(lista.adjuntos[p.record_id].productos, 3, 'la tarjeta cuenta tres productos');
+});
+

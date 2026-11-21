@@ -103,6 +103,14 @@ fecha que tenía el PDV al crearse y el registro del Worker anota qué campos de
 - Sin «Ver entregados» se muestran los PDV con algún artículo abierto, y en ellos los artículos que no están
   entregados ni anulados.
 
+## Productos con talle
+
+Pedido de Rodrigo del 20/11/2026: una prenda en varios talles (la Campera Stone en XS, S, M, L y XL) es **un solo
+producto**: un renglón con el nombre sin el talle, los talles con su cantidad («XS 3 · S 4 · M 8 · L 12 · XL 3»), un logo y
+un costo de logo (con el setup una sola vez), y la rama con cada talle. Desde el renglón del producto, un cambio va a todos
+sus talles; desde la rama, a cada uno. Solo junta talles de prendas: otro color o material es otro producto. Ver
+[TALLES.md](TALLES.md).
+
 ## Órdenes de compra (OC)
 
 Pedido de Rodrigo del 17/11/2026: en Producción y en Pedidos, una columna **OC** con el número de la orden de compra al

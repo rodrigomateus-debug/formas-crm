@@ -10,6 +10,7 @@ import { FilaTarea, PanelTarea, useCambiosTarea } from './TareasChatMovil';
 import { BotonConversacion } from './VentasMovil';
 import { Fallo, useCarga, usePuedeEscribir } from './base';
 import { revisarFestejos } from '../Chispin';
+import { juntarTalles, textoTalles } from '../talles';
 
 // Producción en el celular (versión celular, docs/MOVIL.md): lo que hacen Ceci y Sole con el producto en la mano, en el
 // depósito o en un proveedor. Hoy: sus PDV atrasados y los de la semana, lo que entra y sale hoy, tareas y mensajes.
@@ -21,10 +22,12 @@ interface Articulo {
   task_id: string; nombre: string; estado: string; cantidad: number | null; proveedor: string | null; impresor: string | null; entrega_real: string | null;
   ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null; asignados: number[];
   url: string | null; foto?: string | null; logo?: string | null;
+  talle?: string | null; grupo?: string | null;   // una prenda en varios talles es un producto (talles.ts)
 }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; listos: number; total: number; editable: boolean; asignados_todos: number[]; articulos: Articulo[]; cliente: string | null;
+  grupos?: Record<string, { nombre: string }>;   // el nombre sin el talle de cada producto con talles
 }
 interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null; produccion?: number }
 interface Opcion { campo: 'proveedor' | 'impresor'; option_id: string; nombre: string; company_id: number | null; empresa: string | null }
@@ -90,7 +93,21 @@ function useProduccion() {
       if (campo === 'asignados') carga.recargar();
     }
   };
-  return { ...carga, editar };
+  // Una prenda con talles: el mismo cambio en todos sus talles (PATCH /produccion/grupo). Si alguno no se pudo, se avisa.
+  const editarGrupo = async (pdv: Pdv, tareas: string[], campo: Campo, valor: unknown, aviso = 'Guardado en ClickUp, en todos los talles') => {
+    const antes = carga.datos;
+    carga.setDatos((v) => v && { ...v, pdvs: v.pdvs.map((p) => (p.task_id === pdv.task_id ? tareas.reduce((x, t) => aplicar(x, t, campo, valor), p) : p)) });
+    try {
+      const r = await http<{ pdv: Pdv | null; error: string | null }>('PATCH', '/produccion/grupo', { tareas, campo, valor });
+      revisarFestejos();
+      if (r.pdv) carga.setDatos((v) => v && { ...v, pdvs: v.pdvs.map((p) => (p.task_id === r.pdv!.task_id ? r.pdv! : p)) });
+      toast(r.error ?? aviso, !!r.error);
+    } catch (e) {
+      carga.setDatos(antes);
+      toast((e as Error).message, true);
+    }
+  };
+  return { ...carga, editar, editarGrupo };
 }
 const yoEn = (v: Vista | null, userId: number) => v?.personas.find((p) => p.user_id === userId)?.clickup_id ?? null;
 
@@ -277,7 +294,7 @@ export function FichaPdv() {
   const navigate = useNavigate();
   const prod = useProduccion();
   const hoy = hoyIso();
-  const [hoja, setHoja] = useState<null | { articulo: string } | 'real' | 'asignados'>(null);
+  const [hoja, setHoja] = useState<null | { articulo: string } | { grupo: string } | 'real' | 'asignados'>(null);
   const v = prod.datos;
   if (prod.error) return <div className="m-pag"><Fallo error={prod.error} onReintentar={prod.recargar} /></div>;
   if (!v) return <div className="m-pag"><Cargando /></div>;
@@ -290,7 +307,17 @@ export function FichaPdv() {
   const abiertos = p.articulos.filter((a) => !CERRADOS.includes(a.estado));
   const cerrados = p.articulos.filter((a) => CERRADOS.includes(a.estado));
   const vendedor = p.owner_id ? userOf(meta, p.owner_id)?.name : p.vendedor;
-  const art = hoja && typeof hoja === 'object' ? p.articulos.find((a) => a.task_id === hoja.articulo) : null;
+  const art = hoja && typeof hoja === 'object' && 'articulo' in hoja ? p.articulos.find((a) => a.task_id === hoja.articulo) : null;
+  // Una prenda en varios talles es un producto (talles.ts): un renglón, y su hoja cambia todos los talles.
+  const productos = [...juntarTalles(abiertos), ...juntarTalles(cerrados)];
+  const talles = hoja && typeof hoja === 'object' && 'grupo' in hoja ? p.articulos.filter((a) => a.grupo === hoja.grupo) : [];
+  const comun = <K extends keyof Articulo>(k: K) => (talles.every((a) => a[k] === talles[0][k]) ? talles[0][k] : null);
+  const grupoArt: Articulo | null = talles.length ? {
+    ...talles[0], nombre: p.grupos?.[talles[0].grupo!]?.nombre ?? talles[0].nombre, estado: comun('estado') ?? '', cantidad: talles.reduce((n, a) => n + (a.cantidad ?? 0), 0),
+    proveedor: comun('proveedor'), impresor: comun('impresor'), entrega_real: comun('entrega_real'), ingreso_proveedor: comun('ingreso_proveedor'),
+    retiro_proveedor: comun('retiro_proveedor'), egreso_impresor: comun('egreso_impresor'), retiro_impresor: comun('retiro_impresor'), ingreso_impresor: comun('ingreso_impresor'),
+    asignados: [...new Set(talles.flatMap((a) => a.asignados))], url: null,
+  } : null;
   return (
     <div className="m-pag m-ficha">
       <div className="m-ficha-tit">
@@ -318,8 +345,32 @@ export function FichaPdv() {
       {p.record_id && <div className="m-rapidas"><Link to={recordUrl('order', p.record_id)} className="btn"><Icon name="order" size={16} />Ver el pedido</Link></div>}
 
       <section className="m-sec" aria-label="Artículos">
-        <div className="m-sec-cab"><h2>Artículos</h2><span className="muted small">{abiertos.length}{cerrados.length ? ` · ${cerrados.length} cerrados` : ''}</span></div>
-        {[...abiertos, ...cerrados].map((a) => {
+        <div className="m-sec-cab"><h2>Artículos</h2><span className="muted small">{juntarTalles(abiertos).length}{cerrados.length ? ` · ${juntarTalles(cerrados).length} cerrados` : ''}</span></div>
+        {productos.map((e) => {
+          if (e.k === 'talles') {
+            const ts = e.xs, a = ts[0];
+            const est = ts.every((x) => x.estado === a.estado) ? v.estados.find((x) => x.status === a.estado) : null;
+            const prov = ts.every((x) => x.proveedor === a.proveedor) ? nombreOpcion(v, 'proveedor', a.proveedor) : 'varios proveedores';
+            const real = ts.every((x) => x.entrega_real === a.entrega_real) ? a.entrega_real : null;
+            const cant = ts.reduce((n, x) => n + (x.cantidad ?? 0), 0);
+            const nombre = p.grupos?.[a.grupo!]?.nombre ?? a.nombre;
+            return (
+              <button key={e.clave} type="button" className={`m-art${ts.every((x) => CERRADOS.includes(x.estado)) ? ' cerrado' : ''}`} onClick={() => setHoja({ grupo: a.grupo! })}
+                aria-label={`${nombre}, ${ts.length} talles. Editar`}>
+                {ts.find((x) => x.foto)?.foto ? <img className="m-art-img" src={ts.find((x) => x.foto)!.foto!} alt="" loading="lazy" /> : <span className="m-art-img vacia"><Icon name="bag" size={18} /></span>}
+                <span className="m-item-txt">
+                  <b className="m-art-nombre">{nombre}</b>
+                  <small className="muted">{[`${cant.toLocaleString('es-AR')} u.`, prov, nombreOpcion(v, 'impresor', a.impresor) && ts.every((x) => x.impresor === a.impresor) && `imp. ${nombreOpcion(v, 'impresor', a.impresor)}`].filter(Boolean).join(' · ')}</small>
+                  <small className="m-art-talles">{textoTalles(ts)}</small>
+                  <span className="m-art-pie">
+                    {est ? <EstadoClickup estado={a.estado} color={est.color} /> : <span className="small muted">Varios estados</span>}
+                    {real && <span className="small muted">Real {dia(real)}</span>}
+                  </span>
+                </span>
+              </button>
+            );
+          }
+          const a = e.x;
           const estado = v.estados.find((x) => x.status === a.estado);
           const atr = !!a.entrega_real && a.entrega_real.slice(0, 10) < hoy && !LISTOS.includes(a.estado) && !CERRADOS.includes(a.estado);
           const fechas = ([['Ingreso', a.ingreso_proveedor], ['Retiro prov.', a.retiro_proveedor], ['Egreso imp.', a.egreso_impresor], ['Retiro imp.', a.retiro_impresor], ['Ingreso imp.', a.ingreso_impresor]] as Array<[string, string | null]>).filter(([, f]) => f);
@@ -344,6 +395,8 @@ export function FichaPdv() {
       {hoja === 'real' && <HojaFecha titulo={`Entrega real del PDV ${p.npdv}`} valor={p.entrega_real} onClose={() => setHoja(null)} onElegir={(f) => prod.editar(p, p.task_id, 'entrega_real', f)} />}
       {hoja === 'asignados' && <HojaAsignados v={v} ids={p.asignados} nota="Pasa también a sus artículos abiertos." onClose={() => setHoja(null)} onCambio={(ids) => prod.editar(p, p.task_id, 'asignados', ids, 'Reasignado en ClickUp')} />}
       {art && <HojaArticulo a={art} v={v} ed={ed} puedeAsignar={v.puede_editar} onClose={() => setHoja(null)} editar={(campo, valor, aviso) => prod.editar(p, art.task_id, campo, valor, aviso)} />}
+      {grupoArt && <HojaArticulo a={grupoArt} v={v} ed={ed} puedeAsignar={v.puede_editar} onClose={() => setHoja(null)} talles={talles} onTalle={(id) => setHoja({ articulo: id })}
+        editar={(campo, valor) => prod.editarGrupo(p, talles.map((a) => a.task_id), campo, valor)} />}
     </div>
   );
 }
@@ -393,7 +446,9 @@ function HojaAsignados({ v, ids, nota, onCambio, onClose }: { v: Vista; ids: num
 // guarda en el momento, como en la pantalla Producción.
 const FECHAS: Array<[Campo, string]> = [['entrega_real', 'Entrega real'], ['ingreso_proveedor', 'Ingreso del proveedor'], ['retiro_proveedor', 'Retiro del proveedor'],
   ['egreso_impresor', 'Egreso al impresor'], ['retiro_impresor', 'Retiro del impresor'], ['ingreso_impresor', 'Ingreso del impresor']];
-function HojaArticulo({ a, v, ed, puedeAsignar, editar, onClose }: { a: Articulo; v: Vista; ed: boolean; puedeAsignar: boolean; editar: (c: Campo, valor: unknown, aviso?: string) => void; onClose: () => void }) {
+// `talles`: una prenda en varios talles (talles.ts): lo que se elige va a todos sus talles; abajo, cada talle para cambiarlo solo.
+function HojaArticulo({ a, v, ed, puedeAsignar, editar, onClose, talles, onTalle }: { a: Articulo; v: Vista; ed: boolean; puedeAsignar: boolean; editar: (c: Campo, valor: unknown, aviso?: string) => void; onClose: () => void;
+  talles?: Articulo[]; onTalle?: (taskId: string) => void }) {
   const [sub, setSub] = useState<null | { fecha: Campo } | { opcion: 'proveedor' | 'impresor' } | 'asignados'>(null);
   if (sub && typeof sub === 'object' && 'fecha' in sub) {
     const [, nombre] = FECHAS.find(([c]) => c === sub.fecha)!;
@@ -405,6 +460,7 @@ function HojaArticulo({ a, v, ed, puedeAsignar, editar, onClose }: { a: Articulo
   return (
     <Hoja titulo={a.nombre} onClose={onClose}>
       <div className="m-form">
+        {talles && talles.length > 0 && <small className="muted">{talles.length} talles ({talles.map((t) => t.talle).join(', ')}): lo que elijas acá va a todos.</small>}
         <div className="field">Estado
           <div className="m-estados" role="radiogroup" aria-label="Estado">
             {[...v.estados, ...(conocido ? [] : [{ status: a.estado, color: '', type: '' }])].map((e) => (
@@ -430,6 +486,18 @@ function HojaArticulo({ a, v, ed, puedeAsignar, editar, onClose }: { a: Articulo
             <span className="m-dato-et">Lo tiene</span><span className="m-dato-val"><Personas ids={a.asignados} v={v} /></span>
           </button>
         </div>
+        {talles && talles.length > 0 && (
+          <div className="field">Cada talle <small className="muted">Lo de arriba cambia todos; tocá uno para cambiarlo solo.</small>
+            <div className="m-etapas m-talles">
+              {talles.map((t) => (
+                <button key={t.task_id} type="button" onClick={() => onTalle?.(t.task_id)}>
+                  <b className="prod-talle grande">{t.talle}</b>{t.cantidad != null ? `${t.cantidad.toLocaleString('es-AR')} u.` : ''}
+                  <EstadoClickup estado={t.estado} color={v.estados.find((x) => x.status === t.estado)?.color} />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {a.url && <a className="btn ghost" href={a.url} target="_blank" rel="noreferrer"><Icon name="external" size={14} />Abrir en ClickUp</a>}
       </div>
     </Hoja>

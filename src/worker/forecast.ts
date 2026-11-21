@@ -74,7 +74,8 @@ export async function inicioVendedora(db: D1Database, ownerId: number | null) {
     db.prepare(`SELECT json_extract(r.props, '$.hs_pipeline_stage') AS etapa, COUNT(*) AS n, COALESCE(SUM(r.amount), 0) AS monto FROM records r
       WHERE r.object_type = 'order' AND r.archived = 0 ${ow}
         AND COALESCE(json_extract(r.props, '$.hs_pipeline_stage'), '') NOT IN (?, ?, ?) GROUP BY etapa`).bind(...ob, ENTREGADO, PARCIAL, ANULADO),
-    db.prepare(`SELECT COUNT(*) AS articulos, COUNT(DISTINCT p.pdv_task) AS pedidos FROM produccion p JOIN records r ON r.id = p.record_id
+    // Una prenda en varios talles cuenta una vez (talles.ts).
+    db.prepare(`SELECT COUNT(DISTINCT COALESCE(p.pdv_task || '|' || p.grupo_talle, p.task_id)) AS articulos, COUNT(DISTINCT p.pdv_task) AS pedidos FROM produccion p JOIN records r ON r.id = p.record_id
       WHERE p.es_pdv = 0 AND LOWER(p.estado) IN (SELECT value FROM json_each(?)) ${ow}`).bind(JSON.stringify(PRODUCCION_ACTIVA), ...ob),
   ]);
   const deals = abiertos.results as Array<{ id: number; name: string; owner_id: number | null; pipeline_id: string; stage_id: string; amount: number; created_at: string; entro: string; probability: number }>;

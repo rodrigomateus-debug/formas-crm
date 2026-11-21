@@ -35,15 +35,40 @@ interface Articulo {
   notas?: ResumenNotas | null;     // las notas de Producción de ese SKU (notasProducto.tsx)
   costo_logo?: CostoLogo | null;   // lo que se tomó para el logo en la cotización del STP, por unidad (costoslogo.ts)
   oc?: OcRef[];                    // sus órdenes de compra de Finnegans, con link (ordenescompra.ts)
+  talle?: string | null;           // su talle, si es una prenda con talles (talles.ts)
+  grupo?: string | null;           // los talles del mismo producto comparten la clave y vienen seguidos, en el orden de los talles
 }
+// Un producto con talles (talles.ts): el nombre sin el talle y el costo del logo del producto entero.
+interface GrupoTalles { nombre: string; costo_logo: CostoLogo | null }
 interface Pdv extends Articulo {
   npdv: string | null; unidad: string | null; vendedor: string | null; record_id: number | null; pedido: string | null; owner_id: number | null;
   entrega_prometida: string | null; etapa: string | null; etapa_auto: boolean; listos: number; total: number; editable: boolean;
   asignados_todos: number[]; articulos: Articulo[];
   ocs?: OcRef[];   // todas las órdenes de compra del pedido
   creado: string | null;   // fecha de creación del PDV: la del pedido de venta en Finnegans o el alta en ClickUp (produccion.ts)
+  grupos?: Record<string, GrupoTalles>;
 }
-interface CostoLogo { logo: number; setup: number; cantidad: number | null; fuente: 'costos' | 'pedido' }
+// `setup_una_vez`: en un producto con talles, el setup que el STP repitió en cada talle se cuenta una sola vez.
+interface CostoLogo { logo: number; setup: number; cantidad: number | null; fuente: 'costos' | 'pedido'; setup_una_vez?: boolean }
+
+// Productos con talle (pedido de Rodrigo del 20/11/2026; talles.ts, docs/TALLES.md): una prenda en varios talles es un solo
+// producto, con un renglón (o un hijo en la tarjeta) y el desglose de talles en su rama. Se edita entero desde su renglón
+// (el cambio va a cada talle) o cada talle aparte desde la rama. Solo junta talles: otro color o material es otro producto.
+type Producto = { k: 'art'; a: Articulo } | { k: 'grupo'; clave: string; nombre: string; talles: Articulo[]; costo: CostoLogo | null };
+export function productosDe(p: Pdv): Producto[] {
+  const out: Producto[] = [];
+  for (const a of p.articulos) {
+    const g = a.grupo ? p.grupos?.[a.grupo] : undefined;
+    const ult = out[out.length - 1];
+    if (!g) out.push({ k: 'art', a });
+    else if (ult?.k === 'grupo' && ult.clave === a.grupo) ult.talles.push(a);
+    else out.push({ k: 'grupo', clave: a.grupo!, nombre: g.nombre, talles: [a], costo: g.costo_logo });
+  }
+  return out;
+}
+// El valor de todos los talles, si es el mismo (si no, undefined: «Varios»).
+const comun = <T,>(xs: T[]): T | undefined => (xs.length && xs.every((x) => x === xs[0]) ? xs[0] : undefined);
+const VARIOS = '__varios';
 interface Persona { clickup_id: number; nombre: string; user_id: number | null; foto: string | null; produccion?: number }
 interface Opcion { campo: 'proveedor' | 'impresor'; option_id: string; nombre: string; color: string | null; orden: number; company_id: number | null; empresa: string | null }
 interface Estado { status: string; color: string; type: string }
@@ -217,6 +242,22 @@ export default function ProduccionPage() {
     }
   };
 
+  // Un producto con talles: el mismo cambio en todos sus talles (PATCH /produccion/grupo). Si ClickUp no acepta alguno, los
+  // otros quedan y se avisa; la pantalla muestra cómo quedó.
+  const editarGrupo = async (pdv: Pdv, tareas: string[], campo: Campo, valor: unknown) => {
+    const antes = v;
+    setV((cur) => cur && { ...cur, pdvs: cur.pdvs.map((p) => (p.task_id !== pdv.task_id ? p : tareas.reduce((x, t) => aplicar(x, t, campo, valor), p))) });
+    try {
+      const r = await http<{ pdv: Pdv | null; error: string | null }>('PATCH', '/produccion/grupo', { tareas, campo, valor });
+      revisarFestejos();
+      if (r.pdv) setV((cur) => cur && { ...cur, pdvs: cur.pdvs.map((p) => (p.task_id === r.pdv!.task_id ? r.pdv! : p)) });
+      if (r.error) toast(r.error, true);
+    } catch (e) {
+      setV(antes);
+      toast((e as Error).message, true);
+    }
+  };
+
   const personas = v?.personas ?? [];
   const yo = personas.find((p) => p.user_id === meta.me.id);
   // Lo que necesitan los filtros por columna: estados, opciones y cuántos productos hay con cada valor.
@@ -309,7 +350,8 @@ export default function ProduccionPage() {
   const actual: ConfigProd = { q: buscar, unidades: unidades ?? base ?? [], persona, vendedor, cliente, cerrados, modo, ...(hayFiltros(columnas) ? { columnas: limpiar(columnas) } : {}), ...(vacias ? { vacias: true } : {}), ...(orden !== ORDEN_BASE ? { orden } : {}), ...(agrupar ? { agrupar } : {}) };
   const filtrosCambiados = !!base && normConfig({ ...actual, q: '', modo: 'lista', vacias: false, agrupar: '' })
     !== normConfig({ q: '', unidades: base, persona: activa === 'mine' ? 'yo' : '', cerrados: false, modo: 'lista' });
-  const articulos = filtrados.reduce((n, p) => n + p.articulos.length, 0);
+  // Un producto con talles cuenta una vez.
+  const articulos = filtrados.reduce((n, p) => n + productosDe(p).length, 0);
   const soloLectura = v && !v.puede_editar;
 
   return (
@@ -385,10 +427,10 @@ export default function ProduccionPage() {
         <div className="empty plain">{v.pdvs.length ? 'Ningún PDV con esos filtros.' : 'No hay PDV en producción para estas unidades. Si recién se instaló, la primera lectura de ClickUp tarda unas corridas (cada 10 minutos).'}</div>
       )}
       {v && filtrados.length > 0 && (modo === 'lista'
-        ? <Lista pdvs={filtrados} v={v} editar={editar} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} orden={orden} onOrden={setOrden} ocultas={ocultas.join(',')} agrupar={agrupar} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
+        ? <Lista pdvs={filtrados} v={v} editar={editar} editarGrupo={editarGrupo} filtros={{ f: columnas, onChange: setColumnas, ctx: ctxFiltros }} orden={orden} onOrden={setOrden} ocultas={ocultas.join(',')} agrupar={agrupar} abierto={(id) => colapsado === excepciones.has(id)} onAbrir={abrir} sel={preview}
             onToggle={(id) => setExcepciones((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
             onTodos={(abrir) => cambiarColapsado(!abrir)} />
-        : <Tablero pdvs={filtrados} v={v} editar={editar} onAbrir={abrir} sel={preview} vacias={vacias} agrupar={agrupar} />)}
+        : <Tablero pdvs={filtrados} v={v} editar={editar} editarGrupo={editarGrupo} onAbrir={abrir} sel={preview} vacias={vacias} agrupar={agrupar} />)}
       {preview && <RecordPreview key={preview} type="order" id={preview} onClose={() => setPreview(null)} onChange={cargar} />}
     </div>
   );
@@ -551,8 +593,9 @@ export function Corrida({ pactada, real }: { pactada: string | null; real: strin
   return <span className="prod-corrida" title={`La entrega real es ${n} día${n === 1 ? '' : 's'} después de la pactada (${dia(pactada!)})`}>+{n} d</span>;
 }
 
-function FechaCelda({ valor, editable, onChange, label, alerta }: { valor: string | null; editable: boolean; onChange: (v: string) => void; label: string; alerta?: boolean }) {
-  const texto = dia(valor);
+// `varias`: en un producto con talles, los talles tienen fechas distintas («Varias»); elegir una la pone en todos.
+function FechaCelda({ valor, editable, onChange, label, alerta, varias }: { valor: string | null; editable: boolean; onChange: (v: string) => void; label: string; alerta?: boolean; varias?: boolean }) {
+  const texto = varias ? 'Varias' : dia(valor);
   if (!editable) return <span className={alerta ? 'fecha-alerta' : undefined}>{texto || <span className="muted">—</span>}</span>;
   return (
     <SelectorFecha valor={valor} onElegir={onChange} className={`fecha-btn${alerta ? ' fecha-alerta' : ''}${texto ? '' : ' vacia'}`}
@@ -583,9 +626,13 @@ const etiquetaOpcion = (v: Vista, campo: 'proveedor' | 'impresor', id: string | 
   return o ? { label: o.empresa ?? o.nombre, company: o.company_id } : { label: id, company: null };
 };
 
-function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label }: {
+function OpcionCelda({ v, campo, valor, editable, onChange, opciones, label, varios }: {
   v: Vista; campo: 'proveedor' | 'impresor'; valor: string | null; editable: boolean; onChange: (x: string) => void; opciones: ReactNode; label: string;
+  varios?: boolean;   // un producto con talles con valores distintos: «Varios»; elegir uno lo pone en todos los talles
 }) {
+  if (varios) return editable
+    ? <Select value={VARIOS} placeholder="Varios" onChange={(e) => onChange(e.target.value)} className="input sm" aria-label={label}><option value="">—</option>{opciones}</Select>
+    : <span className="prod-varios">Varios</span>;
   const et = etiquetaOpcion(v, campo, valor);
   if (!editable) {
     if (!et) return <span className="muted">—</span>;
@@ -635,9 +682,10 @@ function agruparPdvs(meta: Meta, pdvs: Pdv[], agrupar: AgruparProd) {
   return [...m.values()].sort((a, b) => a.orden.localeCompare(b.orden, 'es'));
 }
 
-function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filtros, orden, onOrden, ocultas, agrupar }: {
+type EditarGrupo = (p: Pdv, tareas: string[], c: Campo, valor: unknown) => void;
+function Lista({ pdvs, v, editar, editarGrupo, abierto, onToggle, onTodos, onAbrir, sel, filtros, orden, onOrden, ocultas, agrupar }: {
   filtros: { f: FiltrosCol; onChange: (f: FiltrosCol) => void; ctx: CtxFiltros }; orden: Orden; onOrden: (o: Orden) => void; ocultas: string; agrupar: AgruparProd;
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void; onAbrir: (p: Pdv) => void; sel: number | null;
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; editarGrupo: EditarGrupo; abierto: (id: string) => boolean; onToggle: (id: string) => void; onTodos: (abrir: boolean) => void; onAbrir: (p: Pdv) => void; sel: number | null;
 }) {
   const provs = useMemo(() => opcionesDe(v, 'proveedor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);   // eslint-disable-line react-hooks/exhaustive-deps
   const imps = useMemo(() => opcionesDe(v, 'impresor').map((o) => <option key={o.value} value={o.value}><NombreProveedor>{o.label}</NombreProveedor></option>), [v.opciones]);    // eslint-disable-line react-hooks/exhaustive-deps
@@ -648,7 +696,7 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
   // Los grupos cerrados (mientras se está en la pantalla).
   const [cerradosG, setCerradosG] = useState<Set<string>>(new Set());
   const grupos = useMemo(() => (agrupar ? agruparPdvs(meta, pdvs, agrupar) : []), [meta, pdvs, agrupar]);
-  const fila = (p: Pdv) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} ocultas={ocultas} />;
+  const fila = (p: Pdv) => <GrupoPdv key={p.task_id} p={p} v={v} editar={editar} editarGrupo={editarGrupo} abierto={abierto(p.task_id)} onToggle={onToggle} provs={provs} imps={imps} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} ocultas={ocultas} />;
   // El embudo de cada columna (ProduccionFiltros.tsx).
   // En un encabezado que ordena, el clic en el embudo (y en su ventana, que sube por React) no cambia el orden.
   const fil = (c: ColFiltro) => <span onClick={(e) => e.stopPropagation()}><FiltroEncabezado col={c} f={filtros.f} onChange={filtros.onChange} ctx={filtros.ctx} /></span>;
@@ -686,7 +734,7 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
         <tbody>
           {!agrupar ? pdvs.map(fila) : grupos.map((g) => {
             const abiertoG = !cerradosG.has(g.k);
-            const art = g.pdvs.reduce((n, p) => n + p.articulos.length, 0);
+            const art = g.pdvs.reduce((n, p) => n + productosDe(p).length, 0);
             return (
               <Fragment key={`g-${g.k}`}>
                 <tr className="prod-grupo">
@@ -707,8 +755,8 @@ function Lista({ pdvs, v, editar, abierto, onToggle, onTodos, onAbrir, sel, filt
   );
 }
 
-const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs, imps, onAbrir, elegido, ocultas }: {
-  p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; abierto: boolean; onToggle: (id: string) => void; provs: ReactNode; imps: ReactNode;
+const GrupoPdv = memo(function GrupoPdv({ p, v, editar, editarGrupo, abierto, onToggle, provs, imps, onAbrir, elegido, ocultas }: {
+  p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; editarGrupo: EditarGrupo; abierto: boolean; onToggle: (id: string) => void; provs: ReactNode; imps: ReactNode;
   onAbrir: (p: Pdv) => void; elegido: boolean; ocultas: string;
 }) {
   const ver = verCol(ocultas);
@@ -721,6 +769,10 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
   const listo = p.total > 0 && p.listos >= p.total;
   const atrasado = (f: string | null) => !!f && f < hoyIso() && !listo;
   const pactada = p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null;
+  const productos = productosDe(p);
+  // Los productos con talles abiertos (su rama con cada talle), mientras se está en la pantalla. Arrancan cerrados.
+  const [talles, setTalles] = useState<Set<string>>(new Set());
+  const alternarTalles = (k: string) => setTalles((x) => { const n = new Set(x); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   return (
     <>
       <tr className={`prod-pdv${cls}`} onClick={clic} title={p.record_id ? `Ver el pedido del PDV ${p.npdv}` : undefined}>
@@ -756,7 +808,7 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
           <Asignados ids={p.asignados} personas={v.personas} editable label={`PDV ${p.npdv}`} nota={NOTA_PDV} onChange={(ids) => editar(p, p.task_id, 'asignados', ids)} />
           <OtrosEnArticulos p={p} personas={v.personas} />
         </span> : <Asignados ids={p.asignados_todos} personas={v.personas} editable={false} label={`PDV ${p.npdv}`} />}</td>}
-        {ver('cantidad') && <td className="numcell muted">{p.articulos.length > 1 ? `${p.articulos.length} art.` : ''}</td>}
+        {ver('cantidad') && <td className="numcell muted">{productos.length > 1 ? `${productos.length} art.` : ''}</td>}
         {ver('pactada') && <td className="prod-pactada" title="Entrega pactada: la que puso el comercial en Finnegans">{pactada ? dia(pactada) : <span className="muted">—</span>}</td>}
         {ver('real') && <td><span className="prod-real"><FechaCelda valor={p.entrega_real} editable={ed} label={`Entrega real del PDV ${p.npdv}`} alerta={atrasado(p.entrega_real)} onChange={(x) => editar(p, p.task_id, 'entrega_real', x)} /><Corrida pactada={pactada} real={p.entrega_real} /></span></td>}
         {/* Las OC del pedido que no quedaron en ningún artículo (o todas, si el pedido no muestra artículos). */}
@@ -766,27 +818,37 @@ const GrupoPdv = memo(function GrupoPdv({ p, v, editar, abierto, onToggle, provs
         </td>}
         <td>{p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn ghost xs" title="Abrir en ClickUp" aria-label={`Abrir PDV ${p.npdv} en ClickUp`}><Icon name="external" size={14} /></a>}</td>
       </tr>
-      {abierto && p.articulos.map((a) => (
-        <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} ocultas={ocultas} />
-      ))}
+      {abierto && productos.map((x) => (x.k === 'art'
+        ? <FilaArticulo key={x.a.task_id} a={x.a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} ocultas={ocultas} />
+        : <Fragment key={`g-${x.clave}`}>
+          <FilaGrupoTalles g={x} p={p} v={v} ed={ed} editarGrupo={editarGrupo} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} ocultas={ocultas}
+            abierto={talles.has(x.clave)} onToggle={() => alternarTalles(x.clave)} />
+          {talles.has(x.clave) && x.talles.map((a) => (
+            <FilaArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} provs={provs} imps={imps} listo={listo} clic={clic} cls={cls} ocultas={ocultas} enGrupo />
+          ))}
+        </Fragment>))}
       {abierto && !p.articulos.length && <tr className="prod-art"><td colSpan={2 + COLUMNAS_PROD.filter(([k]) => ver(k)).length} className="small muted prod-vacio">Sin artículos abiertos.</td></tr>}
     </>
   );
 });
 
-function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, ocultas }: {
+// `enGrupo`: un talle de un producto con talles, en su rama: el talle grande y el nombre en gris (el producto ya lo dice
+// arriba); sin los avisos del producto, que van en el renglón del producto.
+function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, ocultas, enGrupo }: {
   a: Articulo; p: Pdv; v: Vista; ed: boolean; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; provs: ReactNode; imps: ReactNode; listo: boolean;
-  clic?: (e: React.MouseEvent) => void; cls: string; ocultas: string;
+  clic?: (e: React.MouseEvent) => void; cls: string; ocultas: string; enGrupo?: boolean;
 }) {
   const ver = verCol(ocultas);
   const set = (c: Campo) => (x: unknown) => editar(p, a.task_id, c, x);
   const artListo = ['listo para entergar', 'entregados'].includes(a.estado);
   const atras = (f: string | null) => !!f && f < hoyIso() && !artListo && !listo;
   return (
-    <tr className={`prod-art${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
-      <td className="prod-nombre"><div className="prod-art-t"><FotoProducto url={a.foto} nombre={a.nombre} />
-        {/* El nombre con todo el ancho y, abajo, los avisos (logo, costo del logo, notas): antes iban al lado y lo tapaban. */}
-        <div className="prod-art-txt"><span className="ellipsis" title={a.nombre}>{a.nombre}</span><ChipsArticulo a={a} p={p} v={v} /></div></div></td>
+    <tr className={`prod-art${enGrupo ? ' prod-art-talle' : ''}${CERRADOS.includes(a.estado) ? ' cerrado' : ''}${cls}`} onClick={clic}>
+      <td className="prod-nombre">{enGrupo
+        ? <div className="prod-art-t"><span className="prod-talle grande" title={`Talle ${a.talle}`}>{a.talle}</span><span className="ellipsis muted small" title={a.nombre}>{a.nombre}</span></div>
+        : <div className="prod-art-t"><FotoProducto url={a.foto} nombre={a.nombre} />
+          {/* El nombre con todo el ancho y, abajo, los avisos (logo, costo del logo, notas): antes iban al lado y lo tapaban. */}
+          <div className="prod-art-txt"><span className="ellipsis" title={a.nombre}>{a.nombre}</span><ChipsArticulo a={a} p={p} v={v} /></div></div>}</td>
       {ver('creado') && <td />}
       {ver('estado') && <td><EstadoCelda a={a} v={v} editable={ed} onChange={set('estado')} /></td>}
       {ver('asignado') && <td><Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={a.nombre} /></td>}
@@ -806,6 +868,85 @@ function FilaArticulo({ a, p, v, ed, editar, provs, imps, listo, clic, cls, ocul
   );
 }
 
+// El renglón de un producto con talles: foto, nombre sin el talle, los talles con su cantidad («XS 3 · S 4 · M 8») y lo de
+// todo el producto (logo, costo del logo, notas). Cada columna muestra el valor de los talles si es el mismo o «Varios»;
+// cambiarlo lo cambia en todos. La flecha abre la rama con cada talle.
+function FilaGrupoTalles({ g, p, v, ed, editarGrupo, provs, imps, listo, clic, cls, ocultas, abierto, onToggle }: {
+  g: Extract<Producto, { k: 'grupo' }>; p: Pdv; v: Vista; ed: boolean; editarGrupo: EditarGrupo; provs: ReactNode; imps: ReactNode; listo: boolean;
+  clic?: (e: React.MouseEvent) => void; cls: string; ocultas: string; abierto: boolean; onToggle: () => void;
+}) {
+  const ver = verCol(ocultas);
+  const ts = g.talles;
+  const set = (c: Campo) => (x: unknown) => editarGrupo(p, ts.map((a) => a.task_id), c, x);
+  const de = <K extends keyof Articulo>(k: K) => comun(ts.map((a) => a[k]));
+  const cant = ts.reduce((n, a) => n + (a.cantidad ?? 0), 0);
+  const listos = ts.every((a) => ['listo para entergar', 'entregados'].includes(a.estado));
+  const atras = (f: string | null | undefined) => !!f && f < hoyIso() && !listos && !listo;
+  // En rojo, como en un artículo, solo la entrega real que ya pasó y no está lista.
+  const fecha = (k: 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor', label: string) => {
+    const x = de(k);
+    return <FechaCelda valor={x ?? null} varias={x === undefined} editable={ed} onChange={set(k)} label={`${label} de ${g.nombre}`} alerta={k === 'entrega_real' && atras(x)} />;
+  };
+  const asignados = [...new Set(ts.flatMap((a) => a.asignados))];
+  const ocs = [...new Map(ts.flatMap((a) => a.oc ?? []).map((o) => [o.nombre ?? o.numero, o])).values()];
+  const conNotas = ts.find((a) => a.notas) ?? ts[0];
+  const cerrado = ts.every((a) => CERRADOS.includes(a.estado));
+  return (
+    <tr className={`prod-art prod-art-grupo${cerrado ? ' cerrado' : ''}${cls}`} onClick={clic}>
+      <td className="prod-nombre"><div className="prod-art-t">
+        <button type="button" className="btn ghost xs prod-talles-btn" onClick={onToggle} aria-expanded={abierto}
+          aria-label={`${abierto ? 'Cerrar' : 'Ver'} los talles de ${g.nombre}`} title={abierto ? 'Cerrar los talles' : 'Ver cada talle'}><Flecha abierto={abierto} /></button>
+        <FotoProducto url={ts.find((a) => a.foto)?.foto} nombre={g.nombre} />
+        <div className="prod-art-txt"><span className="ellipsis" title={g.nombre}>{g.nombre}</span>
+          <div className="prod-art-chips"><TallesResumen ts={ts} v={v} /><AvisoLogo estado={ts.map((a) => a.logo).find(Boolean)} />
+            <CostoLogoChip c={g.costo} cantidad={cant} talles={ts.length} /><Notas a={conNotas} p={p} v={v} /></div></div>
+      </div></td>
+      {ver('creado') && <td />}
+      {ver('estado') && <td><EstadoTalles ts={ts} v={v} editable={ed} onChange={set('estado')} nombre={g.nombre} /></td>}
+      {ver('asignado') && <td><Asignados ids={asignados} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={g.nombre} nota="Pasa a todos sus talles." /></td>}
+      {ver('cantidad') && <td className="numcell"><b>{cant.toLocaleString('es-AR')}</b></td>}
+      {ver('pactada') && <td />}
+      {ver('real') && <td><span className="prod-real">{fecha('entrega_real', 'Entrega real')}<Corrida pactada={p.entrega_prometida ? p.entrega_prometida.slice(0, 10) : null} real={de('entrega_real') ?? null} /></span></td>}
+      {ver('oc') && <td><OcLinks ocs={ocs} vacio={<span className="muted">—</span>} /></td>}
+      {ver('proveedor') && <td className="opcion-cell"><OpcionCelda v={v} campo="proveedor" valor={de('proveedor') ?? null} varios={de('proveedor') === undefined} editable={ed} onChange={set('proveedor')} opciones={provs} label={`Proveedor de ${g.nombre}`} /></td>}
+      {ver('impresor') && <td className="opcion-cell"><OpcionCelda v={v} campo="impresor" valor={de('impresor') ?? null} varios={de('impresor') === undefined} editable={ed} onChange={set('impresor')} opciones={imps} label={`Impresor de ${g.nombre}`} /></td>}
+      {ver('ingreso_proveedor') && <td>{fecha('ingreso_proveedor', 'Ingreso del proveedor')}</td>}
+      {ver('retiro_proveedor') && <td>{fecha('retiro_proveedor', 'Retiro del proveedor')}</td>}
+      {ver('egreso_impresor') && <td>{fecha('egreso_impresor', 'Egreso al impresor')}</td>}
+      {ver('retiro_impresor') && <td>{fecha('retiro_impresor', 'Retiro del impresor')}</td>}
+      {ver('ingreso_impresor') && <td>{fecha('ingreso_impresor', 'Ingreso del impresor')}</td>}
+      <td />
+    </tr>
+  );
+}
+
+// Los talles del producto con su cantidad, en orden («XS 3», «S 4», «M 8»…), cada uno con el color de su estado.
+function TallesResumen({ ts, v }: { ts: Articulo[]; v: Vista }) {
+  return (
+    <span className="prod-talles" aria-label={`Talles: ${ts.map((a) => `${a.talle} ${a.cantidad ?? ''}`.trim()).join(', ')}`}>
+      {ts.map((a) => {
+        const color = v.estados.find((e) => e.status === a.estado)?.color;
+        return <span key={a.task_id} className={`prod-talle${CERRADOS.includes(a.estado) ? ' cerrado' : ''}`} style={color ? { borderColor: color } : undefined}
+          title={`Talle ${a.talle}: ${a.cantidad != null ? `${a.cantidad.toLocaleString('es-AR')} u.` : 'sin cantidad'} · ${nombreEstado(a.estado)}`}>
+          <b>{a.talle}</b>{a.cantidad != null && <span className="num">{a.cantidad.toLocaleString('es-AR')}</span>}</span>;
+      })}
+    </span>
+  );
+}
+const nombreEstado = (e: string) => capital(e.replace('entergar', 'entregar'));
+
+// El estado de un producto con talles: el de todos, si es el mismo; si no, «Varios estados» (cuáles, al pasar el mouse).
+// Elegir uno lo pone en todos los talles.
+function EstadoTalles({ ts, v, editable, onChange, nombre }: { ts: Articulo[]; v: Vista; editable: boolean; onChange: (s: string) => void; nombre: string }) {
+  const lista = useOpcionesEstado(v.estados);
+  const e = comun(ts.map((a) => a.estado));
+  if (e !== undefined) return <EstadoCelda a={{ ...ts[0], estado: e, nombre }} v={v} editable={editable} onChange={onChange} />;
+  const cuantos = [...ts.reduce((m, a) => m.set(a.estado, (m.get(a.estado) ?? 0) + 1), new Map<string, number>())].map(([x, n]) => `${n} ${nombreEstado(x).toLowerCase()}`).join(' · ');
+  if (!editable) return <span className="prod-varios" title={cuantos}>Varios estados</span>;
+  return <span title={cuantos}><Select value={VARIOS} placeholder="Varios estados" onChange={(x) => onChange(x.target.value)} className="input sm st-select prod-varios-sel" style={estiloEstado('#87909e')}
+    aria-label={`Estado de todos los talles de ${nombre}`}>{lista}</Select></span>;
+}
+
 // Las OC del pedido que no están en ninguno de los artículos que se ven (las que no se pudieron atar a un producto).
 const ocsSueltas = (p: Pdv) => (p.ocs ?? []).filter((o) => !p.articulos.some((a) => a.oc?.some((x) => x.nombre === o.nombre)));
 
@@ -819,13 +960,16 @@ const AVISOS_LOGO: Record<string, string> = {
 // Lo que se tomó para el logo en la cotización (pedido de Rodrigo del 17/11/2026): costo del logo + setup prorrateado, por
 // unidad; al pasar el mouse, el detalle y el total por la cantidad. En $0, la cotización no tomó nada para el logo.
 const pesos = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 2 });
-function CostoLogoChip({ c, cantidad }: { c?: CostoLogo | null; cantidad: number | null }) {
+// `talles`: un producto con talles, con el costo del producto entero (talles.ts): si el STP repitió el setup en cada talle,
+// va una sola vez.
+function CostoLogoChip({ c, cantidad, talles }: { c?: CostoLogo | null; cantidad: number | null; talles?: number }) {
   if (!c) return null;
   const u = c.logo + c.setup;
   const cant = cantidad ?? c.cantidad;
   const de = c.fuente === 'costos' ? 'modo costos del STP' : 'pedido del STP';
+  const todos = talles ? ` Es de todo el producto (${talles} talles).${c.setup_una_vez ? ' El STP repitió el setup en cada talle: se cuenta una sola vez.' : ''}` : '';
   const title = u > 0
-    ? `Tomado para el logo en la cotización: logo ${pesos.format(c.logo)} + setup prorrateado ${pesos.format(c.setup)} = ${pesos.format(u)} por unidad${cant ? ` · ${pesos.format(u * cant)} por ${cant.toLocaleString('es-AR')} u.` : ''} (${de}).`
+    ? `Tomado para el logo en la cotización: logo ${pesos.format(c.logo)} + setup prorrateado ${pesos.format(c.setup)} = ${pesos.format(u)} por unidad${cant ? ` · ${pesos.format(u * cant)} por ${cant.toLocaleString('es-AR')} u.` : ''} (${de}).${todos}`
     : `La cotización no tomó costo de logo ni setup para este producto (${de}).`;
   return <span className={`prod-costo-logo${u > 0 ? '' : ' cero'}`} title={title} aria-label={title}>Logo {pesos.format(u)}/u</span>;
 }
@@ -875,11 +1019,11 @@ const SIN_ETAPA = '__sin_etapa';
 const SIEMPRE = ['esperando_boceto', '1237498994', '1237498996'];
 const MAX_ARTICULOS = 4;
 
-function Tablero({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean; agrupar: AgruparProd;
+function Tablero({ pdvs, v, editar, editarGrupo, onAbrir, sel, vacias, agrupar }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; editarGrupo: EditarGrupo; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean; agrupar: AgruparProd;
 }) {
   const { meta } = useMeta();
-  if (agrupar && agrupar !== 'etapa') return <TableroAgrupado pdvs={pdvs} v={v} editar={editar} onAbrir={onAbrir} sel={sel} vacias={vacias} agrupar={agrupar} />;
+  if (agrupar && agrupar !== 'etapa') return <TableroAgrupado pdvs={pdvs} v={v} editar={editar} editarGrupo={editarGrupo} onAbrir={onAbrir} sel={sel} vacias={vacias} agrupar={agrupar} />;
   // Columnas angostas: a mano (la flechita) o, con «Colapsar vacías», las que no tienen nada (se abren solas).
   const colapso = useColapso('crm.board.collapsed.produccion', vacias);
   const etapas = propOf(meta, 'order', 'hs_pipeline_stage')?.options ?? [];
@@ -911,7 +1055,7 @@ function Tablero({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
                 <button className="col-fold" title="Achicar la columna" aria-label={`Achicar la columna ${c.label}`} onClick={() => colapso.alternar(c.value, lista.length)}><Icon name="chevron" size={14} /></button></div>
             </div>
             <div className="col-body">
-              {lista.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
+              {lista.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} editarGrupo={editarGrupo} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
               {!lista.length && <div className="small muted" style={{ padding: '4px 4px 8px' }}>—</div>}
             </div>
           </div>
@@ -922,8 +1066,8 @@ function Tablero({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
 }
 
 // El tablero con columnas por unidad, vendedor o cliente (por estado es el de arriba, con los colores de cada etapa).
-function TableroAgrupado({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
-  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean; agrupar: AgruparProd;
+function TableroAgrupado({ pdvs, v, editar, editarGrupo, onAbrir, sel, vacias, agrupar }: {
+  pdvs: Pdv[]; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; editarGrupo: EditarGrupo; onAbrir: (p: Pdv) => void; sel: number | null; vacias: boolean; agrupar: AgruparProd;
 }) {
   const { meta } = useMeta();
   const colapso = useColapso(`crm.board.collapsed.produccion.${agrupar}`, vacias);
@@ -943,7 +1087,7 @@ function TableroAgrupado({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
                 <button className="col-fold" title="Achicar la columna" aria-label="Achicar la columna" onClick={() => colapso.alternar(g.k, g.pdvs.length)}><Icon name="chevron" size={14} /></button></div>
             </div>
             <div className="col-body">
-              {g.pdvs.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
+              {g.pdvs.map((p) => <TarjetaPdv key={p.task_id} p={p} v={v} editar={editar} editarGrupo={editarGrupo} onAbrir={onAbrir} elegido={!!p.record_id && p.record_id === sel} />)}
             </div>
           </div>
         );
@@ -952,14 +1096,16 @@ function TableroAgrupado({ pdvs, v, editar, onAbrir, sel, vacias, agrupar }: {
   );
 }
 
-const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: {
-  p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; onAbrir: (p: Pdv) => void; elegido: boolean;
+const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, editarGrupo, onAbrir, elegido }: {
+  p: Pdv; v: Vista; editar: (p: Pdv, task: string, c: Campo, valor: unknown) => void; editarGrupo: EditarGrupo; onAbrir: (p: Pdv) => void; elegido: boolean;
 }) {
   const [todos, setTodos] = useState(false);
   const ed = v.puede_editar && p.editable;
   const listo = p.total > 0 && p.listos >= p.total;
-  const arts = todos ? p.articulos : p.articulos.slice(0, MAX_ARTICULOS);
-  const resto = p.articulos.length - arts.length;
+  // Un producto con talles es un solo hijo (con sus talles adentro).
+  const productos = productosDe(p);
+  const arts = todos ? productos : productos.slice(0, MAX_ARTICULOS);
+  const resto = productos.length - arts.length;
   const atrasada = !!p.entrega_real && p.entrega_real < hoyIso() && !listo;
   return (
     <div className={`card prod-pdv-card${p.record_id ? ' abre' : ''}${elegido ? ' sel' : ''}`}
@@ -983,9 +1129,10 @@ const TarjetaPdv = memo(function TarjetaPdv({ p, v, editar, onAbrir, elegido }: 
         </div>
       </div>
       <div className="prod-hijos">
-        {arts.map((a) => <HijoArticulo key={a.task_id} a={a} p={p} v={v} ed={ed} editar={editar} />)}
+        {arts.map((x) => (x.k === 'art' ? <HijoArticulo key={x.a.task_id} a={x.a} p={p} v={v} ed={ed} editar={editar} />
+          : <HijoTalles key={`g-${x.clave}`} g={x} p={p} v={v} ed={ed} editarGrupo={editarGrupo} />))}
         {!p.articulos.length && <div className="small muted prod-hijo">Sin artículos abiertos.</div>}
-        {(resto > 0 || todos) && p.articulos.length > MAX_ARTICULOS && (
+        {(resto > 0 || todos) && productos.length > MAX_ARTICULOS && (
           <button type="button" className="btn ghost xs prod-mas" onClick={() => setTodos(!todos)}>
             {todos ? 'Ver menos' : `+ ${resto} producto${resto === 1 ? '' : 's'} más`}
           </button>
@@ -1016,6 +1163,40 @@ function HijoArticulo({ a, p, v, ed, editar }: { a: Articulo; p: Pdv; v: Vista; 
       <div className="row prod-hijo-pie">
         <EstadoCelda a={a} v={v} editable={ed} onChange={(s) => editar(p, a.task_id, 'estado', s)} />
         <Asignados ids={a.asignados} personas={v.personas} editable={v.puede_editar} onChange={(ids) => editar(p, a.task_id, 'asignados', ids)} label={a.nombre} />
+      </div>
+    </div>
+  );
+}
+
+// Un producto con talles en la tarjeta: foto, nombre sin el talle, los talles con su cantidad y, abajo, el estado y quién lo
+// tiene (de todos los talles; cambiarlo cambia todos). Cada talle aparte, en la lista.
+function HijoTalles({ g, p, v, ed, editarGrupo }: { g: Extract<Producto, { k: 'grupo' }>; p: Pdv; v: Vista; ed: boolean; editarGrupo: EditarGrupo }) {
+  const ts = g.talles;
+  const set = (c: Campo) => (x: unknown) => editarGrupo(p, ts.map((a) => a.task_id), c, x);
+  const cant = ts.reduce((n, a) => n + (a.cantidad ?? 0), 0);
+  const prov = comun(ts.map((a) => a.proveedor)), imp = comun(ts.map((a) => a.impresor));
+  const provE = prov ? etiquetaOpcion(v, 'proveedor', prov) : null, impE = imp ? etiquetaOpcion(v, 'impresor', imp) : null;
+  const ocs = [...new Map(ts.flatMap((a) => a.oc ?? []).map((o) => [o.nombre ?? o.numero, o])).values()];
+  const conNotas = ts.find((a) => a.notas) ?? ts[0];
+  return (
+    <div className={`prod-hijo${ts.every((a) => CERRADOS.includes(a.estado)) ? ' cerrado' : ''}`}>
+      <div className="row" style={{ gap: 8, minWidth: 0, alignItems: 'flex-start' }}>
+        <FotoProducto url={ts.find((a) => a.foto)?.foto} nombre={g.nombre} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="prod-hijo-t" title={g.nombre}>{g.nombre}</div>
+          <div className="prod-art-chips"><AvisoLogo estado={ts.map((a) => a.logo).find(Boolean)} /><CostoLogoChip c={g.costo} cantidad={cant} talles={ts.length} />
+            {conNotas.notas && <Notas a={conNotas} p={p} v={v} />}</div>
+          <TallesResumen ts={ts} v={v} />
+          <div className="small muted ellipsis prod-card-provs">
+            {[`${cant.toLocaleString('es-AR')} u.`, prov === undefined ? 'varios proveedores' : provE && <NombreProveedor>{provE.label}</NombreProveedor>,
+              imp === undefined ? 'varios impresores' : impE && <>imp. <NombreProveedor>{impE.label}</NombreProveedor></>, !!ocs.length && <OcLinks ocs={ocs} />]
+              .filter(Boolean).map((x, i) => <Fragment key={i}>{i > 0 && ' · '}{x}</Fragment>)}
+          </div>
+        </div>
+      </div>
+      <div className="row prod-hijo-pie">
+        <EstadoTalles ts={ts} v={v} editable={ed} onChange={set('estado')} nombre={g.nombre} />
+        <Asignados ids={[...new Set(ts.flatMap((a) => a.asignados))]} personas={v.personas} editable={v.puede_editar} onChange={set('asignados')} label={g.nombre} nota="Pasa a todos sus talles." />
       </div>
     </div>
   );

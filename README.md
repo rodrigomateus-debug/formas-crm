@@ -10,6 +10,7 @@ Claude (MCP) y una API compatible con la de HubSpot para que los tableros sigan 
 - Remitos (ClickUp, ficha del pedido y app del chofer), lectura con Claude y qué falta entregar: [docs/REMITOS.md](docs/REMITOS.md).
 - Producción (la vista de ClickUp de Ceci y Sole en el CRM, editable; arranca con Formas Shop): [docs/PRODUCCION.md](docs/PRODUCCION.md).
 - Servicios (envío, setup de logo, «Artículos varios»: renglones que se cobran pero no se producen): [docs/PRODUCCION.md](docs/PRODUCCION.md#servicios-los-renglones-que-no-se-producen).
+- Productos con talle (una prenda en varios talles es un solo producto, con el desglose de talles en su rama; solo talles de prendas, nunca colores ni materiales): [docs/TALLES.md](docs/TALLES.md).
 - Login propio con «Ingresar con Google» y el Design System de Formas, en lugar de la pantalla de Cloudflare Access, y cómo ponerlo en marcha: [docs/LOGIN.md](docs/LOGIN.md).
 - Cronograma (reemplaza la planilla semanal de Logística: entregas, ingresos, retiros y egresos por día, la ruta del día en el mapa por chofer y el recorrido en la app del chofer): [docs/CRONOGRAMA.md](docs/CRONOGRAMA.md).
 - Recorridos (reemplaza la planilla «Recorridos» de Logística: cualquiera le pide al recorrido de un día que lleve o retire algo, con una sola base de destinos, «ya van mañana a ese lugar» y el remito de traslado): [docs/RECORRIDOS.md](docs/RECORRIDOS.md).

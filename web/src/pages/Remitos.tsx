@@ -8,6 +8,7 @@ import { NotasLogistica } from '../NotasLogistica';
 import { Select } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { ChoferesPanel } from './Choferes';
+import { juntarTalles } from '../talles';
 
 // Remitos de entrega (src/worker/remitos.ts): la tarjeta de la ficha del pedido (qué se entregó, qué falta y los
 // remitos, vengan de ClickUp, del CRM o de la app del chofer) y la bandeja de Logística (lo que hay que revisar y los
@@ -35,7 +36,8 @@ export interface Remito {
   // traslado), para Producción y Logística, que no cuenta para la entrega (pedido de Rodrigo del 16/11/2026).
   tipo?: 'entrega' | 'interno'; parada?: string | null; fecha_parada?: string | null; tomada_el?: string | null;
 }
-interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
+interface Linea { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number
+  talle?: string | null; grupo?: string | null; producto?: string | null }   // una prenda en varios talles (talles.ts)
 // Un renglón de los remitos (clave: cuál es, para asignarlo a mano a productos del pedido).
 // compartido: de un remito de varios pedidos donde este no es el principal (si no se asigna acá, cuenta en ese pedido).
 interface ItemRemito { clave: string; code: string | null; description: string | null; quantity: number | null; numero: string | null; compartido?: string }
@@ -126,15 +128,26 @@ export function RemitosCard({ record, onChange }: { record: CrmRecord; onChange?
       {e?.alerta && <div className="panel-body"><div className="aviso warn" role="status">{e.alerta}</div></div>}
       {mostrarLineas && (
         <div className="entrega-lineas">
-          {e!.lineas.map((l, i) => (
-            <div key={i} className="entrega-linea">
-              <span className="entrega-nombre">{l.name}</span>
+          {/* Una prenda en varios talles: el producto con lo entregado de todos sus talles y, abajo, cada talle (talles.ts). */}
+          {juntarTalles(e!.lineas).flatMap((g) => (g.k === 'uno' ? [{ l: g.x, talle: false, cab: null as Linea[] | null }]
+            : [{ l: g.xs[0], talle: false, cab: g.xs }, ...g.xs.map((l) => ({ l, talle: true, cab: null }))])).map(({ l, talle, cab }, i) => (cab ? (() => {
+            const suma = (k: 'entregado' | 'falta' | 'excede') => cab.reduce((n, x) => n + x[k], 0), vendido = cab.reduce((n, x) => n + (x.vendido ?? 0), 0);
+            return (
+              <div key={`g${i}`} className="entrega-linea entrega-producto">
+                <span className="entrega-nombre">{l.producto ?? l.name}</span>
+                <span className="num small grow">{cant(suma('entregado'))} de {cant(vendido)}</span>
+                {suma('falta') > 0 ? <span className="tag warn">faltan {cant(suma('falta'))}</span> : suma('excede') > 0 ? <span className="tag bad">{cant(suma('excede'))} de más</span> : <span className="tag ok">completo</span>}
+              </div>
+            );
+          })() : (
+            <div key={i} className={`entrega-linea${talle ? ' entrega-talle' : ''}`}>
+              <span className="entrega-nombre" title={talle ? l.name : undefined}>{talle ? <span className="prod-talle grande">{l.talle}</span> : l.name}</span>
               <span className="num small grow">{cant(l.entregado)} de {cant(l.vendido)}</span>
               {l.falta > 0 ? <span className="tag warn">faltan {cant(l.falta)}</span>
                 : l.excede > 0 ? <span className="tag bad">{cant(l.excede)} de más</span>
                 : l.vendido != null ? <span className="tag ok">completo</span> : null}
             </div>
-          ))}
+          )))}
         </div>
       )}
       {/* Lo que el remito dice con otro nombre: se puede decir a qué producto (o productos) del pedido corresponde. */}

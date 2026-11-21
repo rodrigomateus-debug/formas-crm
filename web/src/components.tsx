@@ -917,6 +917,18 @@ export function nombreEstado(estado: string) {
   const t = NOMBRE_ESTADO[estado.toLowerCase().trim()] ?? estado.toLowerCase().trim();
   return t ? t[0].toUpperCase() + t.slice(1) : 'Sin estado';
 }
+// Los talles de un producto con talles (talles.ts), en orden, con la cantidad de cada uno: «XS 3 · S 4 · M 8».
+export function TallesProducto({ talles }: { talles: Array<{ talle?: string | null; cantidad?: number | null; quantity?: number | null }> }) {
+  return (
+    <span className="prod-talles" aria-label={`Talles: ${talles.map((t) => `${t.talle} ${t.cantidad ?? t.quantity ?? ''}`.trim()).join(', ')}`}>
+      {talles.map((t, i) => {
+        const n = t.cantidad ?? t.quantity;
+        return <span key={i} className="prod-talle" title={`Talle ${t.talle}${n != null ? `: ${n.toLocaleString('es-AR')} u.` : ''}`}><b>{t.talle}</b>{n != null && <span className="num">{n.toLocaleString('es-AR')}</span>}</span>;
+      })}
+    </span>
+  );
+}
+
 export function EstadoClickup({ estado, color }: { estado: string; color: string | null | undefined }) {
   const d = iconoEstado(estado ?? '');
   return (

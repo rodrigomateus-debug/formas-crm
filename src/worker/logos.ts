@@ -205,15 +205,23 @@ export async function logosDeArticulos(db: D1Database, arts: Array<{ task_id: st
       ORDER BY l.principal DESC, l.created_at DESC LIMIT 1) AS curvas FROM json_each(?1) r`).bind(JSON.stringify(ids)),
     db.prepare(`SELECT pl.record_id, pl.producto, l.curvas FROM producto_logos pl JOIN logos l ON l.id = pl.logo_id AND l.archived = 0
       WHERE pl.record_id IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(ids)),
-    db.prepare(`SELECT record_id, clickup_task, code FROM line_items WHERE record_id IN (SELECT value FROM json_each(?1)) AND clickup_task IS NOT NULL`).bind(JSON.stringify(ids)),
+    db.prepare(`SELECT record_id, clickup_task, code, grupo_talle FROM line_items WHERE record_id IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(ids)),
   ]);
   const principal = new Map((principales.results as Array<{ record_id: number; curvas: Curvas | null }>).map((r) => [r.record_id, r.curvas]));
   const elegido = new Map((elegidos.results as Array<{ record_id: number; producto: string; curvas: Curvas }>).map((r) => [`${r.record_id}|${r.producto}`, r.curvas]));
-  const codigo = new Map((renglones.results as Array<{ clickup_task: string; code: string | null }>).map((r) => [r.clickup_task, r.code]));
+  type Renglon = { record_id: number; clickup_task: string | null; code: string | null; grupo_talle: string | null };
+  const filas = renglones.results as Renglon[];
+  const deTarea = new Map(filas.filter((r) => r.clickup_task).map((r) => [r.clickup_task!, r]));
+  // Una prenda con talles (talles.ts) es un producto: el logo elegido para el producto (guardado con el código de uno de
+  // sus talles) vale para todos.
+  const delGrupo = new Map<string, string[]>();
+  for (const r of filas) if (r.grupo_talle && r.code) { const k = `${r.record_id}|${r.grupo_talle}`; delGrupo.set(k, [...(delGrupo.get(k) ?? []), r.code]); }
   for (const a of arts) {
     if (a.record_id == null) continue;
-    const cod = codigo.get(a.task_id);
-    const c = (cod ? elegido.get(`${a.record_id}|${cod}`) : undefined) ?? elegido.get(`${a.record_id}|${a.nombre}`) ?? principal.get(a.record_id) ?? null;
+    const r = deTarea.get(a.task_id);
+    const cod = r?.code;
+    const deTalles = r?.grupo_talle ? (delGrupo.get(`${a.record_id}|${r.grupo_talle}`) ?? []).map((x) => elegido.get(`${a.record_id}|${x}`)).find(Boolean) : undefined;
+    const c = (cod ? elegido.get(`${a.record_id}|${cod}`) : undefined) ?? deTalles ?? elegido.get(`${a.record_id}|${a.nombre}`) ?? principal.get(a.record_id) ?? null;
     out.set(a.task_id, c ?? 'falta');
   }
   return out;

@@ -2,6 +2,7 @@ import type { Ctx } from './env';
 import { HttpError, now } from './env';
 import { estadosPec } from './produccion';
 import { visibleSql } from './alcance';
+import { compararTalles, nombreSinTalle, talleCanonico } from './talles';
 
 // Conversación de un pedido (o de un negocio), como los comentarios de una tarea de ClickUp (pedido de Rodrigo del
 // 12/11/2026): un chat grupal entre el vendedor, producción y logística, con @menciones, que queda registrado. Entre los
@@ -82,6 +83,26 @@ async function registro(db: D1Database, recordId: number) {
   return r;
 }
 
+// Los cambios de estado de los talles de una prenda (talles.ts), hechos juntos (el mismo cambio, por la misma persona, en el
+// mismo par de minutos: como el cambio desde el renglón del producto en Producción), van en uno: «pasó «Campera Stone -
+// Negro» (5 talles: XS, S, M, L, XL) de … a …».
+type FilaCambio = { id: number; articulo: string; es_pdv: number; antes: string | null; despues: string | null; user_id: number | null; actor: string | null; source: string; at: string;
+  talle: string | null; grupo: string | null };
+function juntarTalles(filas: FilaCambio[]) {
+  const out: Array<FilaCambio & { talles?: FilaCambio[] }> = [];
+  for (const f of filas) {
+    const junto = f.grupo ? out.find((x) => x.grupo === f.grupo && x.antes === f.antes && x.despues === f.despues && x.user_id === f.user_id && x.actor === f.actor
+      && Math.abs(Date.parse(x.at) - Date.parse(f.at)) <= 120_000 && !(x.talles ?? [x]).some((y) => y.talle === f.talle)) : undefined;
+    if (junto) junto.talles = [...(junto.talles ?? [junto]), f];
+    else out.push({ ...f });
+  }
+  return out.map((x) => {
+    if (!x.talles) return x;
+    const ts = [...x.talles].sort((a, b) => compararTalles(talleCanonico(a.talle), talleCanonico(b.talle)));
+    return { ...x, articulo: `${nombreSinTalle(x.articulo)} (${ts.length} talles: ${ts.map((t) => t.talle).join(', ')})` };
+  });
+}
+
 // La conversación entera (los últimos `limite` de cada cosa) o, con `desde`, lo que cambió después.
 export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, opts: { desde?: string | null; limite?: number } = {}) {
   const rec = await registro(db, recordId);
@@ -95,7 +116,8 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
     db.prepare(`SELECT id, prop, old_value, new_value, changed_at, user_id, actor, source FROM changes
       WHERE record_id = ? AND changed_at > ? AND prop IN (SELECT value FROM json_each(?)) ORDER BY changed_at DESC LIMIT ?`)
       .bind(recordId, desde, JSON.stringify(PROPS_CAMBIO), lim),
-    db.prepare('SELECT * FROM produccion_cambios WHERE record_id = ? AND at > ? ORDER BY at DESC LIMIT ?').bind(recordId, desde, lim),
+    db.prepare(`SELECT c.*, pr.talle, CASE WHEN pr.grupo_talle IS NOT NULL THEN pr.pdv_task || '|' || pr.grupo_talle END AS grupo
+      FROM produccion_cambios c LEFT JOIN produccion pr ON pr.task_id = c.task_id WHERE c.record_id = ? AND c.at > ? ORDER BY c.at DESC LIMIT ?`).bind(recordId, desde, lim),
     db.prepare(`SELECT id, nombre, producto_nombre, producto, version, tipo, mime, user_id, created_at, aprobado_at, aprobado_por FROM bocetos
       WHERE record_id = ?1 AND archived = 0 AND (created_at > ?2 OR aprobado_at > ?2) ORDER BY id DESC LIMIT 200`).bind(recordId, desde),
     db.prepare(`SELECT id, numero, estado, origen, chofer, subido_por, created_at FROM remitos
@@ -125,7 +147,7 @@ export async function conversacion(db: D1Database, ctx: Ctx, recordId: number, o
   for (const c of chs.results as Array<{ id: number; prop: string; old_value: string | null; new_value: string | null; changed_at: string; user_id: number | null; actor: string | null; source: string }>) {
     items.push({ key: `c${c.id}`, kind: 'cambio', at: c.changed_at, prop: c.prop, antes: c.old_value, despues: c.new_value, user_id: c.user_id, actor: c.actor, source: c.source });
   }
-  for (const a of arts.results as Array<{ id: number; articulo: string; es_pdv: number; antes: string | null; despues: string | null; user_id: number | null; actor: string | null; source: string; at: string }>) {
+  for (const a of juntarTalles(arts.results as unknown as FilaCambio[])) {
     items.push({ key: `p${a.id}`, kind: 'articulo', at: a.at, articulo: a.articulo, es_pdv: !!a.es_pdv, antes: a.antes, despues: a.despues, user_id: a.user_id, actor: a.actor, source: a.source });
   }
   for (const b of bocs.results as Array<{ id: number; nombre: string; producto_nombre: string | null; producto: string | null; version: number; tipo: string; mime: string | null; user_id: number | null; created_at: string; aprobado_at: string | null; aprobado_por: number | null }>) {

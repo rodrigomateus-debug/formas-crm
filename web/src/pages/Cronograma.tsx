@@ -23,6 +23,7 @@ import { EditarDireccion, lindaDireccion } from './DireccionParada';
 
 import { LineaNota, NotasLogistica, type NotaLogistica } from '../NotasLogistica';
 import type { ModoHora } from '../ruta';
+import { juntarTalles, textoTalles } from '../talles';
 const CronogramaRuta = lazy(() => import('./CronogramaRuta'));
 
 export type Tipo = 'entrega' | 'ingreso' | 'retiro_proveedor' | 'egreso' | 'retiro_impresor' | 'ingreso_impresor';
@@ -45,9 +46,13 @@ export interface Mov {
   despacho?: DespachoMov;     // si está listo para salir, qué falta y a quién le toca (despacho.ts)
   bultos?: Bultos | null;     // los bultos que anotó Logística, por medida; la tarjeta muestra la suma de los suyos (cronograma.ts, guardarBultos)
   foto?: string | null;       // la foto del producto, la misma que en el pedido y en Producción
+  // Una prenda en varios talles es un producto (talles.ts): su talle, la clave del producto y el nombre sin el talle. La
+  // tarjeta los muestra en un renglón, con el desglose de talles.
+  talle?: string | null; grupo?: string | null; producto?: string | null;
 }
 export interface Nota { id: number; fecha: string; texto: string; hecho: number }
-export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null }
+export interface SinFecha { task_id: string; pdv_task: string; npdv: string | null; cliente: string | null; unidad: string | null; record_id: number | null; articulo: string; cantidad: number | null;
+  talle?: string | null; grupo?: string | null; producto?: string | null }
 interface DiaResumen { total: number; pendientes: number; atrasados: number }
 export interface Vista {
   hoy: string; desde: string; hasta: string; movimientos: Mov[]; notas: Nota[]; feriados: Record<string, string>; dias: Record<string, DiaResumen>;
@@ -729,7 +734,9 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
   // Hasta tres productos a la vista; el resto se abre con «+ N productos más», así un pedido largo no estira la columna.
   const [todo, setTodo] = useState(false);
   const prods = t.movs.filter((m) => m.articulo);
-  const ver = todo || expandida ? prods : prods.slice(0, TOPE);
+  // Una prenda en varios talles es un producto: un renglón con la suma y sus talles (talles.ts), por lugar de entrega.
+  const entradas = juntarTalles(prods, (m) => `${m.grupo}|${m.dir ?? ''}`);
+  const ver = todo || expandida ? entradas : entradas.slice(0, TOPE);
   const bultos = t.movs.reduce<Bultos>((a, m) => sumarBultos(a, m.bultos), SIN_BULTOS);
   const marca = t.tipo === 'entrega' ? null : marcaProveedor(t.crudo);
   const desp = t.hecho ? null : despachoTarjeta(t, dir);
@@ -784,7 +791,32 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
       {dir && <LineaDireccion d={dir} buscando={buscando} puede={puede && !t.hecho} onCorregir={() => onDir(`${t.fecha}|${t.movs[0].parada}`, dir)} />}
       {prods.length > 0 && (
         <div className={`cr-t-prods${expandida ? ' con-foto' : ''}`}>
-          {ver.map((m) => {
+          {ver.map((e) => {
+            if (e.k === 'talles') {
+              // Los talles: cada uno con lo que va de ese talle; un clic anota su demasía (como en un artículo suelto).
+              const ms = e.xs, va = (m: Mov) => m.enviado?.cantidad ?? m.cantidad;
+              const total = ms.some((m) => va(m) != null) ? ms.reduce((n, m) => n + (va(m) ?? 0), 0) : null;
+              const conDemasia = ms.some((m) => m.enviado && m.cantidad != null && m.enviado.cantidad !== m.cantidad);
+              return (
+                <div key={e.clave} className={ms.every((m) => m.hecho) && !t.hecho ? 'ok' : ''}>
+                  {expandida && <FotoProducto url={ms.find((m) => m.foto)?.foto} nombre={ms[0].producto ?? ms[0].articulo} />}
+                  <b className="num" title={conDemasia ? 'Con lo que realmente va de cada talle' : undefined}>{total != null ? num.format(total) : ''}</b>
+                  <span>{ms[0].producto || ms[0].articulo}{ms[0].dir != null && <em className="cr-t-lugar" title="Va a este lugar del pedido">{ms[0].sitio ?? 'Otra dirección'}</em>}
+                    <span className="cr-t-talles" aria-label={`Talles: ${textoTalles(ms.map((m) => ({ talle: m.talle, cantidad: va(m) })))}`}>
+                      {ms.map((m) => {
+                        const dif = m.enviado && m.cantidad != null ? m.enviado.cantidad - m.cantidad : 0;
+                        const txt = <><b>{m.talle}</b>{va(m) != null && num.format(va(m)!)}{dif !== 0 && <em className="cr-t-demasia">{dif > 0 ? `+${num.format(dif)}` : num.format(dif)}</em>}</>;
+                        return puede && onEnviado
+                          ? <button key={m.id} type="button" className={`cr-t-talle${m.hecho && !t.hecho ? ' ok' : ''}`} onClick={() => onEnviado(m)}
+                            title={`Talle ${m.talle}: ${m.cantidad != null ? num.format(m.cantidad) : '—'} en el pedido${m.enviado ? `, van ${num.format(m.enviado.cantidad)}` : ''}. Clic para anotar la cantidad que realmente va.`}>{txt}</button>
+                          : <span key={m.id} className={`cr-t-talle${m.hecho && !t.hecho ? ' ok' : ''}`}>{txt}</span>;
+                      })}
+                    </span>
+                  </span>
+                </div>
+              );
+            }
+            const m = e.x;
             // Con demasía: lo que realmente va («510», y al lado cuánto de más o de menos respecto del pedido).
             const dif = m.enviado && m.cantidad != null ? m.enviado.cantidad - m.cantidad : 0;
             const cant = <>{m.enviado ? num.format(m.enviado.cantidad) : m.cantidad != null ? num.format(m.cantidad) : ''}</>;
@@ -797,7 +829,7 @@ function TarjetaMov({ t, hoy, feriados, puede, choferes, expresos, dir, buscando
               </div>
             );
           })}
-          {!expandida && prods.length > TOPE && <button type="button" className="cr-t-mas" aria-expanded={todo} onClick={() => setTodo(!todo)}>{todo ? 'Ver menos' : `+ ${prods.length - TOPE} producto${prods.length - TOPE === 1 ? '' : 's'} más`}</button>}
+          {!expandida && entradas.length > TOPE && <button type="button" className="cr-t-mas" aria-expanded={todo} onClick={() => setTodo(!todo)}>{todo ? 'Ver menos' : `+ ${entradas.length - TOPE} producto${entradas.length - TOPE === 1 ? '' : 's'} más`}</button>}
         </div>
       )}
       {notas.length > 0 && <div className="cr-t-notas">{notas.map((n) => <LineaNota key={n.id} n={n} />)}</div>}
@@ -1233,8 +1265,16 @@ function SinFecha({ items, puede, onArrastrar, onMover, onAbrir }: {
             onClick={(e) => { if (g[0].record_id && !(e.target as HTMLElement).closest('button, .popover, [role="dialog"]')) onAbrir(g[0].record_id); }}>
             <div className="cr-t-quien">{lindo(g[0].cliente) || pdv}</div>
             <div className="cr-t-linea">{unidadDeTexto(g[0].unidad) && <UnidadBadge k={unidadDeTexto(g[0].unidad)!} compact />}<span className="cr-t-pdv num">{pdv}</span></div>
-            {g.filter((x) => x.articulo).slice(0, 3).map((x) => <div key={x.task_id} className="cr-t-item">{cantidad(x)}</div>)}
-            {g.length > 3 && <div className="cr-t-item muted">+ {g.length - 3} más</div>}
+            {/* Una prenda en varios talles, en un renglón con sus talles (talles.ts). */}
+            {(() => {
+              const es = juntarTalles(g.filter((x) => x.articulo));
+              return <>
+                {es.slice(0, 3).map((e) => (e.k === 'uno' ? <div key={e.x.task_id} className="cr-t-item">{cantidad(e.x)}</div>
+                  : <div key={e.clave} className="cr-t-item">{cantidad({ cantidad: e.xs.reduce((n, x) => n + (x.cantidad ?? 0), 0), articulo: e.xs[0].producto || e.xs[0].articulo })}
+                    <span className="muted"> ({textoTalles(e.xs)})</span></div>))}
+                {es.length > 3 && <div className="cr-t-item muted">+ {es.length - 3} más</div>}
+              </>;
+            })()}
             {puede && <div className="cr-t-acc"><SelectorFecha valor={null} onElegir={(f) => f && onMover(ids, f, pdv)} label="Ponerle fecha de entrega" className="cr-mini" title="Ponerle fecha de entrega"><Icon name="calendar" size={13} /></SelectorFecha></div>}
           </article>
         );

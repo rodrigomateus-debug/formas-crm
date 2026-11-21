@@ -245,7 +245,8 @@ export type ParadaChofer = {
   expreso?: { guia: string | null; cliente: string } | null;
   /** Lo que dice la libreta de direcciones de ese lugar. */
   lugar?: { horario: string | null; telefono: string | null; contacto: string | null; observaciones: string | null } | null;
-  movimientos: Array<{ id: string; tipo: string; npdv: string | null; cliente: string | null; articulo: string; cantidad: number | null; hecho: boolean }>;
+  // `talles`: una prenda en varios talles va en un renglón, con el desglose («XS 3 · S 4 · M 8»).
+  movimientos: Array<{ id: string; tipo: string; npdv: string | null; cliente: string | null; articulo: string; cantidad: number | null; hecho: boolean; talles?: string | null }>;
   /** Lo que pidió alguien para esta parada (Recorridos del Hub): qué dejar, qué retirar, a quién preguntar. */
   encargos?: EncargoChofer[];
 };

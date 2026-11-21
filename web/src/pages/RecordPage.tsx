@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { juntarTalles, textoTalles } from '../talles';
+import { juntarTalles, productosParaElegir, textoTalles } from '../talles';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
@@ -879,8 +879,7 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const cambio = () => { bo.reload(); onCambio?.(); };
   // Los servicios (envío, setup de logo, un adicional) no llevan boceto ni logo.
   const esServicio = (it: ProductRow) => it.tipo === 'servicio';
-  const productos: ProductoRef[] = entradas.flatMap((x): ProductoRef[] => (x.k === 'grupo' ? [{ key: claveProducto(x.talles[0]), nombre: x.nombre }]
-    : esServicio(x.it) ? [] : [{ key: claveProducto(x.it), nombre: x.it.name }]));
+  const productos: ProductoRef[] = useMemo(() => productosParaElegir(d?.items ?? [], d?.grupos), [d]);
   const nServicios = items.filter(esServicio).length;
   const nProductos = entradas.filter((x) => x.k === 'grupo' || !esServicio(x.it)).length;
   const me = useMeta().meta.me;

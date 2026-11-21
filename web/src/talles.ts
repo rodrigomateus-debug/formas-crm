@@ -47,3 +47,20 @@ export function lineasMovs<T extends MovTalle>(movs: T[]) {
       texto: `${[cantidad != null ? num.format(cantidad) : '', articulo].filter(Boolean).join(' ')}${talles ? ` (${talles})` : ''}` };
   });
 }
+
+// Para elegir un producto del pedido (subir un boceto o un logo, cargar un archivo de la conversación): cada producto una
+// vez, sin los servicios. El de talles va con el nombre sin el talle y con el código de su primer talle, que es donde se
+// guardan su boceto y su logo (los mismos que en la tarjeta de productos del pedido). Aviso de Rodrigo del 21/11/2026: al
+// cargar un boceto desde el chat aparecía cada talle de la Campera Stone.
+export interface RenglonPedido extends ConTalle { code: string | null; name: string; tipo?: string | null }
+export function productosParaElegir(items: RenglonPedido[], grupos?: Record<string, { nombre: string }> | null) {
+  const out: Array<{ key: string; nombre: string }> = [];
+  const vistos = new Set<string>();
+  for (const it of items) {
+    const g = it.grupo ? grupos?.[it.grupo] : undefined;
+    if (g) { if (vistos.has(it.grupo!)) continue; vistos.add(it.grupo!); }
+    else if (it.tipo === 'servicio') continue;
+    out.push({ key: it.code || it.name, nombre: g?.nombre ?? it.name });
+  }
+  return out;
+}

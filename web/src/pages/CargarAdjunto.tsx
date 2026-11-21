@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { http, useAsync, useToast, Icon, cabecerasVerComo } from '../lib';
 import { Modal } from '../components';
 import { Select } from '../Select';
 import { subir as subirBoceto } from './Bocetos';
 import { subirLogo } from './Logos';
+import { productosParaElegir, type RenglonPedido } from '../talles';
 
 // Cargar en un producto un archivo de la conversación del pedido (pedido de Rodrigo del 19/11/2026): al equipo le resulta
 // más fácil mandar el boceto o el logo por el chat del PDV que ir al producto y subirlo ahí. Desde el archivo ya mandado,
@@ -32,9 +33,10 @@ interface Producto { key: string; nombre: string }
 
 export function CargarAdjunto({ recordId, adjunto, onClose }: { recordId: number; adjunto: AdjuntoRef; onClose: () => void }) {
   const toast = useToast();
-  const res = useAsync(() => http<{ items: Array<{ code: string | null; name: string; tipo?: string }> }>('GET', `/records/order/${recordId}/products`), [recordId]);
-  // Los servicios (envío, setup…) no llevan boceto ni logo.
-  const productos: Producto[] = (res.data?.items ?? []).filter((it) => it.tipo !== 'servicio').map((it) => ({ key: it.code || it.name, nombre: it.name }));
+  const res = useAsync(() => http<{ items: RenglonPedido[]; grupos?: Record<string, { nombre: string }> }>('GET', `/records/order/${recordId}/products`), [recordId]);
+  // Cada producto una vez: una prenda en varios talles es un producto (talles.ts). Los servicios (envío, setup…) no llevan
+  // boceto ni logo.
+  const productos: Producto[] = useMemo(() => productosParaElegir(res.data?.items ?? [], res.data?.grupos), [res.data]);
   const [como, setComo] = useState<Como>(esBoceto(adjunto) && !/\.(ai|eps|cdr|svg)$/i.test(adjunto.nombre) ? 'boceto' : 'logo');
   const [producto, setProducto] = useState('');
   const [tipo, setTipo] = useState<'tecnico' | 'referencia'>(adjunto.mime.startsWith('image/') ? 'referencia' : 'tecnico');

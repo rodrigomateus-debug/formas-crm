@@ -3,6 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { agruparTalles, costoLogoDeGrupo, raizComun, talleCanonico, talleDeNombre, talleDeSku } from '../src/worker/talles.ts';
+import { productosParaElegir } from '../web/src/talles.ts';
 
 const talle = (s) => talleDeNombre(s)?.talle.talle ?? null;
 const grupos = (items) => agruparTalles(items.map(([id, nombre, sku], i) => ({ id, nombres: [nombre], sku, orden: i })));
@@ -177,4 +178,22 @@ test('el costo del logo: el setup que el STP repite en cada talle va una sola ve
   assert.equal(d.logo, 100);
   assert.equal(d.setup, 5);
   assert.equal(d.setup_una_vez, undefined);
+});
+
+test('elegir el producto (boceto o logo desde el chat): la prenda con talles aparece una vez', () => {
+  // Aviso de Rodrigo del 21/11/2026: «Cargar en un producto» listaba cada talle de la Campera Stone.
+  const items = [
+    { code: 'ZEC_99030777273D00D62D54', name: 'Campera Stone X Small - Negro - Algodon 100%', talle: 'XS', grupo: 'g1' },
+    { code: 'ZEC_99030777273D01D62D54', name: 'Campera Stone Small - Negro - Algodon 100%', talle: 'S', grupo: 'g1' },
+    { code: 'ZEC_99030777273D02D62D54', name: 'Campera Stone Medium - Negro - Algodon 100%', talle: 'M', grupo: 'g1' },
+    { code: 'GORRO1', name: 'Gorro Trucker Fluo' },
+    { code: 'ENVIO', name: 'Envío', tipo: 'servicio' },
+  ];
+  // El boceto de la prenda va con el código de su primer talle, como en la tarjeta de productos del pedido.
+  assert.deepEqual(productosParaElegir(items, { g1: { nombre: 'Campera Stone - Negro - Algodon 100%' } }), [
+    { key: 'ZEC_99030777273D00D62D54', nombre: 'Campera Stone - Negro - Algodon 100%' },
+    { key: 'GORRO1', nombre: 'Gorro Trucker Fluo' },
+  ]);
+  // Sin la lista de grupos (un servidor viejo), cada renglón como antes.
+  assert.equal(productosParaElegir(items).length, 4);
 });

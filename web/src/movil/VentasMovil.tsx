@@ -12,6 +12,7 @@ import { Hoja, TareaRapida } from './Movil';
 import { Actividad, CampoMovil, Datos, EditarDato, ElegirEmpresa, Registrar, TarjetaCliente } from './ClientesMovil';
 import { Fallo, useCarga, useCerrarConAtras, usePuedeEscribir } from './base';
 import { siGano } from '../Chispin';
+import { juntarTalles, textoTalles } from '../talles';
 
 // Ventas en el celular (versión celular, fase 3): Negocios | Pedidos. Los negocios se ven por etapa, se crean con lo
 // mínimo y se pasan de etapa (pidiendo lo que la etapa exige, como en el escritorio). Los pedidos no se crean desde acá:
@@ -428,7 +429,7 @@ function TarjetaPedido({ r }: { r: Con }) {
   );
 }
 
-interface Renglon { code: string | null; name: string; image_url: string | null; quantity: number | null; status?: string | null; status_color?: string | null; tipo?: 'producto' | 'servicio' }
+interface Renglon { code: string | null; name: string; image_url: string | null; quantity: number | null; status?: string | null; status_color?: string | null; tipo?: 'producto' | 'servicio'; talle?: string | null; grupo?: string | null }
 interface Archivo { id: number; kind: string; name: string; ready: boolean; meta: Record<string, any>; created_at: string }
 
 export function FichaPedido() {
@@ -470,23 +471,32 @@ export function FichaPedido() {
 
 function DetallePedido({ r, a, empresa }: { r: CrmRecord; a: Assoc; empresa?: CrmRecord }) {
   const { meta } = useMeta();
-  const items = useCarga(() => http<{ items: Renglon[] }>('GET', `/records/order/${r.id}/products`).then((x) => x.items), [r.id]);
+  const items = useCarga(() => http<{ items: Renglon[]; grupos?: Record<string, { nombre: string }> }>('GET', `/records/order/${r.id}/products`), [r.id]);
+  // Una prenda en varios talles es un artículo, con la cantidad de todos y el desglose (talles.ts).
+  const lineas = useMemo(() => juntarTalles(items.datos?.items ?? []).map((e) => {
+    if (e.k === 'uno') return { key: `${e.x.code}-${e.x.name}`, it: e.x, nombre: e.x.name, cantidad: e.x.quantity, talles: null as string | null, varios: false };
+    const cantidad = e.xs.some((x) => x.quantity != null) ? e.xs.reduce((n, x) => n + (x.quantity ?? 0), 0) : null;
+    return { key: e.clave, it: e.xs[0], nombre: items.datos?.grupos?.[e.clave]?.nombre ?? e.xs[0].name, cantidad,
+      talles: textoTalles(e.xs.map((x) => ({ talle: x.talle, cantidad: x.quantity }))), varios: e.xs.some((x) => x.status !== e.xs[0].status) };
+  }), [items.datos]);
   const archivos = useCarga(() => http<Archivo[]>('GET', `/records/order/${r.id}/files`), [r.id]);
   const [ver, setVer] = useState<Archivo | null>(null);
   const entrega = ['estado_entrega', 'direccion_entrega', 'falta_entregar', 'entregado_el'].map((n) => propOf(meta, 'order', n)).filter((p): p is Property => !!p && r.props[p.name] != null && r.props[p.name] !== '');
   return (
     <>
       <section className="m-sec" aria-label="Artículos">
-        <div className="m-sec-cab"><h2>Artículos</h2><span className="muted small">{items.datos?.length || ''}</span></div>
+        <div className="m-sec-cab"><h2>Artículos</h2><span className="muted small">{lineas.length || ''}</span></div>
         {items.error && <Fallo chico error={items.error} onReintentar={items.recargar} />}
         {!items.datos && !items.error && <Cargando chico />}
-        {items.datos && !items.datos.length && <div className="m-vacio">Todavía no hay artículos cargados.</div>}
-        {items.datos?.map((it, i) => (
-          <div key={`${it.code}-${i}`} className="m-item">
+        {items.datos && !lineas.length && <div className="m-vacio">Todavía no hay artículos cargados.</div>}
+        {lineas.map(({ key, it, nombre, cantidad, talles, varios }) => (
+          <div key={key} className="m-item">
             {it.image_url ? <img className="m-art-img" src={it.image_url} alt="" loading="lazy" /> : <span className="m-art-img vacia"><Icon name="bag" size={18} /></span>}
-            <div className="m-item-txt"><b className="m-art-nombre">{it.name}</b>
-              <small className="muted">{[it.quantity != null ? `${it.quantity} u.` : null, it.code].filter(Boolean).join(' · ')}</small></div>
-            {it.status && it.tipo !== 'servicio' && <span className="m-art-estado" style={it.status_color ? { ['--c' as string]: it.status_color } : undefined}>{it.status}</span>}
+            <div className="m-item-txt"><b className="m-art-nombre">{nombre}</b>
+              <small className="muted">{[cantidad != null ? `${cantidad.toLocaleString('es-AR')} u.` : null, talles ? null : it.code].filter(Boolean).join(' · ')}</small>
+              {talles && <small className="m-art-talles">{talles}</small>}</div>
+            {varios ? <span className="small muted">Varios estados</span>
+              : it.status && it.tipo !== 'servicio' && <span className="m-art-estado" style={it.status_color ? { ['--c' as string]: it.status_color } : undefined}>{it.status}</span>}
           </div>
         ))}
       </section>

@@ -2,6 +2,7 @@ import type { Ctx, Env } from './env';
 import { HttpError, now } from './env';
 import { getRow, updateRecord } from './records';
 import { claveDireccion, cronogramaConfig, type Base } from './cronograma';
+import { nombreSinTalle } from './talles';
 
 // Direcciones de entrega del pedido (pedido de Rodrigo del 12/11/2026), en la tarjeta «Entrega».
 //
@@ -80,19 +81,22 @@ export const linkMaps = (d: { direccion: string; place_id: string | null }) =>
 
 // ---------- Productos del pedido ----------
 
-export interface ProductoReparto { clave: string; nombre: string; codigo: string | null; total: number | null }
+// `talle`, `grupo`, `producto`: una prenda en varios talles (talles.ts). Se reparte talle por talle (cuántos de cada talle
+// van a cada lugar), pero la pantalla los muestra juntos bajo el nombre del producto.
+export interface ProductoReparto { clave: string; nombre: string; codigo: string | null; total: number | null; talle?: string | null; grupo?: string | null; producto?: string | null }
 
 // Los renglones del pedido, cada uno con su clave: el código (o el nombre) y, si se repite, el número de vez.
 export async function productosDelPedido(db: D1Database, orderId: number): Promise<ProductoReparto[]> {
-  const { results } = await db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity
+  const { results } = await db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity, li.talle, li.grupo_talle
     FROM line_items li LEFT JOIN products pr ON pr.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(orderId)
-    .all<{ code: string | null; name: string; quantity: number | null }>();
+    .all<{ code: string | null; name: string; quantity: number | null; talle: string | null; grupo_talle: string | null }>();
   const vistas = new Map<string, number>();
   return results.map((r) => {
     const base = (r.code?.trim() || r.name.trim()).toUpperCase();
     const n = (vistas.get(base) ?? 0) + 1;
     vistas.set(base, n);
-    return { clave: n === 1 ? base : `${base}#${n}`, nombre: r.name, codigo: r.code, total: r.quantity == null ? null : Number(r.quantity) };
+    return { clave: n === 1 ? base : `${base}#${n}`, nombre: r.name, codigo: r.code, total: r.quantity == null ? null : Number(r.quantity),
+      ...(r.grupo_talle ? { talle: r.talle, grupo: r.grupo_talle, producto: nombreSinTalle(r.name) } : {}) };
   });
 }
 

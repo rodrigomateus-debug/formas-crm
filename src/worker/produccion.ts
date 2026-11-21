@@ -10,7 +10,7 @@ import { admiteNotas, resumenNotas, skusDeArticulos, type ResumenNotas } from '.
 import { costosLogoDeArticulos, type CostoLogo } from './costoslogo';
 import { ocsDeCodigo, ocsDePedidos, sinCodigos, type OcRef } from './ordenescompra';
 import { recalcularTallesPdvs } from './tallesdb';
-import { compararTalles, costoLogoDeGrupo, nombreSinTalle, talleCanonico, TALLES_VERSION, type CostoLogoTalles } from './talles';
+import { compararTalles, costoLogoDeGrupo, nombreSinTalle, raizTalle, talleCanonico, TALLES_VERSION, type CostoLogoTalles } from './talles';
 
 // Producción en el CRM (pedido de Rodrigo del 12/11/2026). Producción (Ceci y Sole) trabaja en ClickUp con la vista «Estado
 // PDV CECI»: cada PDV con sus artículos abiertos abajo, y en cada artículo su estado, proveedor, impresor y las fechas de
@@ -581,7 +581,8 @@ interface NotasArt { skus: Map<string, string>; resumen: Map<string, ResumenNota
 const costosDe = (db: D1Database, arts: Array<FilaDb & { record_id: number | null }>, n: NotasArt) => costosLogoDeArticulos(db, arts, n.skus);
 async function notasDeArticulos(db: D1Database, arts: FilaDb[]): Promise<NotasArt> {
   const skus = await skusDeArticulos(db, arts);
-  return { skus, resumen: await resumenNotas(db, [...skus.values()]) };
+  // Con la raíz de cada talle (talles.ts): las notas de una prenda valen para todos sus talles.
+  return { skus, resumen: await resumenNotas(db, arts.map((a) => ({ sku: skus.get(a.task_id), raiz: raizTalle(skus.get(a.task_id), a.talle, a.grupo_talle) }))) };
 }
 function notasDe(n: NotasArt, taskId: string) {
   const sku = n.skus.get(taskId);
@@ -822,15 +823,17 @@ export async function refrescarPdv(env: Env, ctx: Ctx, pdvTask: string) {
 
 // Lo que está en producción con un proveedor o impresor (la ficha de su empresa).
 export async function produccionDeEmpresa(db: D1Database, companyId: number) {
+  // Con el talle y la clave del producto (talles.ts): la ficha muestra una prenda en varios talles en un renglón.
   const { results } = await db.prepare(`SELECT a.task_id, a.nombre, a.estado, a.cantidad, a.proveedor, a.impresor, a.ingreso_proveedor, a.retiro_proveedor,
+      a.talle, CASE WHEN a.grupo_talle IS NOT NULL THEN a.pdv_task || '|' || a.grupo_talle END AS grupo,
       a.egreso_impresor, a.retiro_impresor, a.ingreso_impresor, a.url, p.npdv, COALESCE(a.cliente, p.cliente) AS cliente, p.record_id, p.entrega_real,
       CASE WHEN op.company_id = ?1 THEN 'proveedor' ELSE 'impresor' END AS rol
     FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task
       LEFT JOIN produccion_opciones op ON op.campo = 'proveedor' AND op.option_id = a.proveedor
       LEFT JOIN produccion_opciones oi ON oi.campo = 'impresor' AND oi.option_id = a.impresor
     WHERE a.es_pdv = 0 AND a.estado NOT IN ('entregados', 'anulado') AND (op.company_id = ?1 OR oi.company_id = ?1)
-    ORDER BY COALESCE(p.entrega_real, '9999'), p.npdv LIMIT 200`).bind(companyId).all();
-  return { articulos: results, estados: await estadosPec(db) };
+    ORDER BY COALESCE(p.entrega_real, '9999'), p.npdv LIMIT 200`).bind(companyId).all<{ nombre: string; grupo: string | null }>();
+  return { articulos: results.map((a) => ({ ...a, producto: a.grupo ? nombreSinTalle(a.nombre) : null })), estados: await estadosPec(db) };
 }
 
 // Quién tiene asignado cada artículo del pedido y el PDV entero (los productos del pedido, en su ficha).

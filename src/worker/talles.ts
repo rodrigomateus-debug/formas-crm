@@ -207,6 +207,19 @@ export function raizComun(skus: string[], talles: Talle[]): string | null {
   return `${skus[0].slice(0, p)}*${skus[0].slice(skus[0].length - q)}`;
 }
 
+// La raíz de un SKU con talle: el SKU sin el talle («ZEC_99030777273D··D62D54», «ZZ_ST_RM_JSMC_M_NE»), la misma para todos
+// los talles del producto (y distinta para otro color o material). Con el talle del renglón (o del artículo) y, si se
+// juntó con otros talles, la clave de ese grupo (que resuelve los SKU ambiguos de Zecat y los de un proveedor que no se
+// conoce). Sin talle, null: las notas de producto se atan a la raíz (notasproducto.ts).
+export function raizTalle(sku: string | null | undefined, talle: string | null | undefined, grupo?: string | null): string | null {
+  const t = talleCanonico(talle);
+  if (!t || !skuLimpio(sku) || esGenerico(sku)) return null;
+  const g = grupo && !grupo.startsWith('n:') ? grupo.replace(/#\d+$/, '') : null;
+  const r = raicesSku(sku, t);
+  if (r.confirmado) return g && r.raices.includes(g) ? g : r.raices[0];
+  return g;
+}
+
 // ---------- Agrupar ----------
 
 export interface ItemTalle {

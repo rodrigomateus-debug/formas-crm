@@ -10,7 +10,7 @@ import { estadosSinServicios, pedirRelectura, TIPO_SQL, tipoPorDefecto } from '.
 import { admiteNotas, avisarNotasDelPedido, resumenNotas, skuDe } from './notasproducto';
 import { ocsDeCodigo, ocsDePedidos } from './ordenescompra';
 import { recalcularTallesPdvs, recalcularTallesPedidos } from './tallesdb';
-import { compararTalles, nombreSinTalle, talleCanonico, TALLES_VERSION } from './talles';
+import { compararTalles, nombreSinTalle, raizTalle, talleCanonico, TALLES_VERSION } from './talles';
 
 // Productos de un pedido (pedido de Rodrigo del 02/11/2026): los renglones del pedido de venta de Finnegans (cantidad,
 // precio y descuentos) con la ficha de cada producto (nombre, descripción y foto). Se leen de Finnegans al abrir el
@@ -209,6 +209,9 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
     else {
       sync = { fetched_at: new Date().toISOString(), error, source, talles_v: 0 };
       await db.prepare('INSERT OR REPLACE INTO line_item_sync (record_id, fetched_at, error, source) VALUES (?, ?, ?, ?)').bind(recordId, sync.fetched_at, error, source).run();
+      // El talle de cada renglón recién leído (talles.ts), antes del aviso de notas: una nota escrita en otro talle del
+      // mismo producto también avisa.
+      if (!error) { await recalcularTallesPedidos(db, [recordId]); sync.talles_v = TALLES_VERSION; }
       // Recién ahora se sabe qué artículos del PDV son un servicio: si sin ellos el pedido queda en otra etapa (un adicional
       // lo tenía en «Entregado parcial»), se pide volver a leer el PDV (servicios.ts).
       if (!error && taskId) {
@@ -242,7 +245,7 @@ export async function orderProducts(env: Env, recordId: number, props: Record<st
   // El color de cada estado, el mismo que en ClickUp.
   const estados = results.some((r) => r.status) ? await estadosPec(db) : [];
   // Las notas de Producción de cada SKU (notasproducto.ts): qué pasó con este producto en otras ventas.
-  const notas = await resumenNotas(db, results.map((r) => r.code));
+  const notas = await resumenNotas(db, results.map((r) => ({ sku: r.code, raiz: raizTalle(r.code, r.talle, r.grupo_talle) })));
   // Las órdenes de compra de Finnegans de cada producto, por su código (ordenescompra.ts).
   const ocs = (await ocsDePedidos(db, [recordId])).get(recordId);
   // Un servicio (envío, setup, un adicional) no se produce: va sin estado de producción ni asignados (servicios.ts).

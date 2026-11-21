@@ -882,9 +882,10 @@ function FilaGrupoTalles({ g, p, v, ed, editarGrupo, provs, imps, listo, clic, c
   const cant = ts.reduce((n, a) => n + (a.cantidad ?? 0), 0);
   const listos = ts.every((a) => ['listo para entergar', 'entregados'].includes(a.estado));
   const atras = (f: string | null | undefined) => !!f && f < hoyIso() && !listos && !listo;
+  // En rojo, como en un artículo, solo la entrega real que ya pasó y no está lista.
   const fecha = (k: 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor', label: string) => {
     const x = de(k);
-    return <FechaCelda valor={x ?? null} varias={x === undefined} editable={ed} onChange={set(k)} label={`${label} de ${g.nombre}`} alerta={atras(x)} />;
+    return <FechaCelda valor={x ?? null} varias={x === undefined} editable={ed} onChange={set(k)} label={`${label} de ${g.nombre}`} alerta={k === 'entrega_real' && atras(x)} />;
   };
   const asignados = [...new Set(ts.flatMap((a) => a.asignados))];
   const ocs = [...new Map(ts.flatMap((a) => a.oc ?? []).map((o) => [o.nombre ?? o.numero, o])).values()];
@@ -942,7 +943,8 @@ function EstadoTalles({ ts, v, editable, onChange, nombre }: { ts: Articulo[]; v
   if (e !== undefined) return <EstadoCelda a={{ ...ts[0], estado: e, nombre }} v={v} editable={editable} onChange={onChange} />;
   const cuantos = [...ts.reduce((m, a) => m.set(a.estado, (m.get(a.estado) ?? 0) + 1), new Map<string, number>())].map(([x, n]) => `${n} ${nombreEstado(x).toLowerCase()}`).join(' · ');
   if (!editable) return <span className="prod-varios" title={cuantos}>Varios estados</span>;
-  return <span title={cuantos}><Select value={VARIOS} placeholder="Varios estados" onChange={(x) => onChange(x.target.value)} className="input sm st-select" aria-label={`Estado de todos los talles de ${nombre}`}>{lista}</Select></span>;
+  return <span title={cuantos}><Select value={VARIOS} placeholder="Varios estados" onChange={(x) => onChange(x.target.value)} className="input sm st-select prod-varios-sel" style={estiloEstado('#87909e')}
+    aria-label={`Estado de todos los talles de ${nombre}`}>{lista}</Select></span>;
 }
 
 // Las OC del pedido que no están en ninguno de los artículos que se ven (las que no se pudieron atar a un producto).

@@ -13,3 +13,8 @@ CREATE INDEX IF NOT EXISTS idx_produccion_talles_v ON produccion(es_pdv, talles_
 CREATE INDEX IF NOT EXISTS idx_line_item_sync_talles_v ON line_item_sync(talles_v);
 -- El renglón del pedido de cada artículo de Producción (también lo buscan las notas, las OC y los nombres de venta).
 CREATE INDEX IF NOT EXISTS idx_line_items_clickup_task ON line_items(clickup_task);
+-- Las notas de producto valen para todos los talles (pedido de Rodrigo del 20/11/2026): cada nota guarda la raíz de su SKU
+-- (el SKU sin el talle, talles.ts) y vale para cualquier SKU con la misma raíz. `talles_v`: con qué reglas se calculó.
+ALTER TABLE producto_notas ADD COLUMN raiz TEXT;
+ALTER TABLE producto_notas ADD COLUMN talles_v INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_producto_notas_raiz ON producto_notas(raiz) WHERE raiz IS NOT NULL;

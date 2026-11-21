@@ -247,8 +247,9 @@ export function FilasProductos({ p, r, columns, sel, onAbrir }: { p: ProduccionP
               <FotoProducto url={a.foto} nombre={a.nombre} />
               <span className="ped-art-n ellipsis" title={a.nombre}>{a.nombre}</span>
               {a.cantidad != null && <span className="muted small num ped-cant">{a.cantidad.toLocaleString('es-AR')} u.</span>}
-              {a.talles && <TallesProducto talles={a.talles} />}
             </span>
+            {/* Los talles, abajo del nombre: con muchos (un pantalón en 14) el nombre se sigue leyendo. */}
+            {a.talles && <div className="ped-art-talles"><TallesProducto talles={a.talles} /></div>}
           </td>
           {columns.map((col) => <td key={col} className={['__produccion', '__responsable', '__oc'].includes(col) ? 'ped-prod' : undefined}>{celda(a, col)}</td>)}
         </tr>

@@ -20,6 +20,15 @@ Fuera de la ropa no hay talles: el «Moleskine Large» y el «XL», la «Botella
 | Lista y tablero de Pedidos | Un renglón por producto con el desglose de talles; su estado es el de todos o, si están en etapas distintas, el del producto entero (la misma regla que el pedido). |
 | Cuentas | «2/3 listos», «N productos», los bocetos de la tarjeta («3/5») y «N artículos» de Producción cuentan el producto una vez. Está listo cuando lo están todos sus talles; tiene boceto si alguno de sus talles lo tiene. |
 | Claude (`get_record`) | Cada renglón de una prenda con talles trae `talle` y `producto` (el nombre sin el talle), igual para todos sus talles. |
+| Cronograma | La tarjeta (semana, día expandido y Colgados) muestra el producto una vez, con la suma y los talles como pastillas («XS 3 · S 4 …»); lo hecho de cada talle se tacha y un clic en un talle anota su demasía. Si los talles van a impresores distintos, cada tarjeta lleva los suyos. «Listos para entregar, sin fecha», igual. |
+| Ruta del día y app del chofer | Cada parada lista el producto una vez: «Egreso 85 Remera Regent Hombre - Blanco (S 11 · M 18 · L 35 …)». En la app del chofer, los talles van abajo del producto. |
+| Remito de traslado (egreso) | Un renglón por producto: «69 · Pantalón Cargo Unisex - Beige (34 2 · 36 3 · 38 5 …)». |
+| Celular (Producción y Logística) | Producción: el producto en un artículo; al tocarlo, la hoja cambia todos los talles a la vez y abajo lista cada talle para cambiarlo solo. Logística: tarjetas, paradas, «sin fecha» (un «Poner día» para todos los talles) y «Retiran», con el producto una vez. |
+| Entrega (remitos) | Cada talle sigue contándose aparte (cada uno es su renglón en el remito), pero se ve el producto con lo entregado de todos y abajo cada talle. «Falta entregar» lo resume por producto: «12 Campera Stone - Negro (M 8 · L 4)». |
+| Direcciones (entregar en varios lugares) | Se reparte talle por talle (cuántos de cada talle van a cada lugar), con el producto como encabezado y cada talle abajo; «N productos» y «Quedan N sin repartir» cuentan el producto una vez. |
+| Conversación del pedido | Los cambios de estado de los talles de una prenda hechos juntos (mismo cambio, misma persona, en el mismo par de minutos) van en uno: «pasó «Campera Stone - Negro» (5 talles: XS, S, M, L, XL) de … a …». |
+| Ficha del proveedor o impresor («En producción»), Inicio («Producciones en curso») y el detalle de producción del pedido («3 en el impresor») | Cuentan y muestran el producto una vez. |
+| Notas de producto | Valen para todos los talles (ver abajo). |
 
 ## Editar en Producción
 
@@ -36,11 +45,20 @@ El del producto entero, por unidad. El STP prorratea el setup en cada talle por 
 reparte entre todas las unidades ($239.998 / 30 = $8.000/u). Al pasar el mouse lo dice. Si los setups son distintos, se
 suman. (`costoLogoDeGrupo` en `talles.ts`.)
 
+## Notas de producto: de todos los talles
+
+Una nota escrita en un talle (o desde el renglón del producto) vale para **todos los talles** de esa prenda, del mismo
+color y material: guarda la **raíz** de su SKU (el SKU sin el talle: `ZEC_99030777273D··D62D54`) y se ve en cualquier SKU con
+la misma raíz, también en las ventas que vengan después en otros talles. El aviso a la vendedora y a Producción sale uno
+por producto (no uno por talle). La ficha del SKU dice «todos los talles» y «Dónde se vendió» suma todos los talles; la
+pantalla «Notas de productos» tiene una fila por producto. Las notas escritas antes se completan solas en el cron.
+(`raizTalle` en `talles.ts`, `raizDeSku` en `tallesdb.ts`, `APLICA` en `notasproducto.ts`; columna `producto_notas.raiz`.)
+
 ## Boceto y logo
 
 Uno por producto. Se guardan con el código de su primer talle (así el boceto aprobado va a ClickUp como siempre, a la
-subtarea de ese talle) y valen para todos: el logo elegido para el producto lo ven todos los talles en Producción («Sin
-logo», curvas) y los bocetos de cualquier talle se ven en el producto.
+subtarea de ese talle; alcanza, ClickUp se va a dejar de usar) y valen para todos: el logo elegido para el producto lo ven
+todos los talles en Producción («Sin logo», curvas) y los bocetos de cualquier talle se ven en el producto.
 
 ## Cómo se reconoce el talle
 
@@ -93,14 +111,15 @@ No van «polo» (hay gorros «Polo»), «polar» (mantas), «canguro» (la riño
 | Lista de Pedidos | `src/worker/pedidosprod.ts` (`juntarTalles`), `web/src/pages/PedidosProductos.tsx` |
 | Logo del producto en todos sus talles | `src/worker/logos.ts` (`logosDeArticulos`) |
 | Cuentas en SQL | `PRODUCTO_SQL` (`produccion.ts`), `RENGLON_SQL` (`productos.ts`) |
-| Pruebas | `test/talles.test.mjs` (las reglas, con SKU y nombres reales; no necesita el Hub corriendo) y `test/produccion.test.mjs` (de punta a punta) |
+| Cronograma, ruta, remito de traslado y app del chofer | `src/worker/cronograma.ts` (`talle`, `grupo`, `producto` en cada movimiento; `juntarTalles` para el texto), `src/worker/recorridos.ts` (`remitoEgreso`), `web/src/talles.ts` (`juntarTalles`, `lineasMovs` en las pantallas) |
+| Entrega, Direcciones, Conversación, ficha del proveedor | `src/worker/remitos.ts`, `src/worker/direcciones.ts`, `src/worker/conversacion.ts`, `produccionDeEmpresa` en `produccion.ts` |
+| Celular | `web/src/movil/ProduccionMovil.tsx`, `web/src/movil/LogisticaMovil.tsx` |
+| Pruebas | `test/talles.test.mjs` (las reglas, con SKU y nombres reales; no necesita el Hub corriendo) y `test/produccion.test.mjs` (de punta a punta: Producción, productos del pedido, Pedidos, notas por raíz, Cronograma y Conversación) |
 
 **Si cambia una regla** (un proveedor nuevo, una prenda que falta): se cambia en `talles.ts`, se suma el caso a
 `test/talles.test.mjs` y se sube `TALLES_VERSION`. El cron recalcula todo lo guardado con la regla nueva, de a tandas.
 
 ## Lo que sigue
 
-- **Notas de producto por prenda:** hoy una nota queda en el SKU del talle donde se cargó (en Zecat, el SKU de cada talle
-  es otro). En el renglón del producto se ve la de cualquiera de sus talles, pero la próxima venta en otro talle no la
-  trae. Se puede atar la nota a la raíz (el SKU sin el talle).
-- **Boceto en todos los talles de ClickUp:** hoy el boceto aprobado se adjunta a la subtarea del primer talle.
+- Si aparece un proveedor con otro formato de SKU, en general no hace falta nada (ver «Otro» arriba); si no se junta, se
+  suma su formato en `talleDeSku` con su caso en `test/talles.test.mjs` y se sube `TALLES_VERSION`.

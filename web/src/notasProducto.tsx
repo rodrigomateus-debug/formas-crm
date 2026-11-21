@@ -14,6 +14,7 @@ export type Gravedad = 'info' | 'ojo' | 'no';
 export interface ResumenNotas { n: number; gravedad: Gravedad; tipos: string[]; ultima: string }
 export interface NotaProducto {
   id: number; sku: string; modelo: string | null; producto: string | null; tipo: string; gravedad: Gravedad; texto: string;
+  raiz?: string | null;   // una prenda con talles: la nota vale para todos sus talles (talles.ts)
   record_id: number | null; pedido: string | null; task_id: string | null; fotos: number[]; user_id: number | null; autor: string | null;
   created_at: string; updated_at: string | null; archivada_at: string | null; archivada_por: number | null; puede_editar: boolean;
 }
@@ -21,6 +22,8 @@ interface Venta { id: number; name: string; created_at: string; etapa: string | 
 interface Ficha {
   sku: string; modelo: string | null; nombre: string | null; foto: string | null; notas: NotaProducto[]; ventas: Venta[]; ventas_total: number; unidades_total: number;
   puede_escribir: boolean; fotos: boolean; tipos: Record<string, string>;
+  raiz?: string | null;   // una prenda con talles: las notas y las ventas son de todos sus talles
+  talles?: number;        // cuántos SKU (talles) del producto se vendieron
 }
 
 export const GRAVEDAD: Record<Gravedad, { label: string; corto: string; cls: string }> = {
@@ -142,6 +145,7 @@ export function FichaProducto({ sku, nombre, foto, recordId, taskId, nueva, onCl
             <div className="nota-ficha-nombre">{titulo}</div>
             <div className="small muted">
               <span className="num">{sku}</span>
+              {f?.raiz && <span title={`Las notas valen para todos los talles del producto (${f.raiz}), y «Dónde se vendió» los cuenta a todos`}> · todos los talles</span>}
               {f && ` · ${f.ventas_total ? `se vendió en ${f.ventas_total === 1 ? 'un pedido' : `${f.ventas_total.toLocaleString('es-AR')} pedidos`}${f.unidades_total ? ` (${Math.round(f.unidades_total).toLocaleString('es-AR')} u.)` : ''}` : 'todavía no hay pedidos con este SKU en el CRM'}`}
             </div>
           </div>
@@ -242,6 +246,7 @@ function NuevaNota({ ficha, nombre, recordId, taskId, autoFocus, onGuardada }: {
         <ElegirGravedad value={gravedad} onChange={setGravedad} />
       </div>
       <div className="row" style={{ gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        {ficha.raiz && <span className="small muted" title={`La nota se ve en todos los talles del producto (${ficha.raiz})`}>Vale para todos los talles</span>}
         {ficha.modelo && (
           <label className="row small" style={{ gap: 6 }} title={`La nota se ve en todos los SKU que empiezan con ${ficha.modelo} (los otros colores del mismo producto)`}>
             <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} />
@@ -315,6 +320,7 @@ function Nota({ n, f, puede, onCambio }: { n: NotaProducto; f: Ficha; puede: boo
         <span className={`tag ${g.cls}`}>{g.label}</span>
         <span className="small nota-tipo">{f.tipos[n.tipo] ?? n.tipo}</span>
         {n.modelo && <span className="small muted" title={`Vale para todos los SKU que empiezan con ${n.modelo}`}>· todos los colores</span>}
+        {n.raiz && <span className="small muted" title={`Vale para todos los talles del producto (${n.raiz})`}>· todos los talles</span>}
         {deOtroSku && <span className="small muted">· escrita en {n.sku}</span>}
         {n.archivada_at && <span className="small muted">· ya no aplica desde {fmtDate(n.archivada_at)}</span>}
       </div>

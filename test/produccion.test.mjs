@@ -625,6 +625,33 @@ test('talles: la prenda en varios talles es un producto; otro color, otro produc
   assert.equal(prods.items.find((i) => i.name.startsWith('Gorro')).grupo, null);
 
   // La lista de Pedidos: un renglón por producto, con el desglose de talles.
+  // Las notas de producto valen para todos los talles: una nota en el XS se ve en los 5 talles negros, no en la azul.
+  const xs = ARTS_T.find((a) => a.nombre.includes('X Small')).codigo;
+  const nota = await api('POST', `/productos/sku/${encodeURIComponent(xs)}/notas`, { texto: `La capucha se descose ${RUN}`, tipo: 'calidad', gravedad: 'ojo' });
+  assert.equal(nota.status, 201, JSON.stringify(nota.data));
+  assert.equal(nota.data.raiz, 'ZEC_99030777273D··D62D54', 'atada a la raíz del SKU');
+  const conNota = pdvDe(await vista(), PDV_T);
+  assert.ok(conNota.articulos.filter((a) => a.grupo === negros[0].grupo).every((a) => a.notas?.gravedad === 'ojo'), 'en todos los talles negros');
+  assert.ok(conNota.articulos.filter((a) => a.grupo === azules[0].grupo).every((a) => !a.notas), 'no en la azul (otro color)');
+  const ficha = (await api('GET', `/productos/sku/${encodeURIComponent(ARTS_T[0].codigo)}`)).data;   // el L
+  assert.ok(ficha.notas.some((n) => n.texto.includes(RUN)), 'la ficha de otro talle la trae');
+  assert.equal(ficha.raiz, 'ZEC_99030777273D··D62D54');
+  assert.equal(ficha.ventas.find((v) => v.id === p.record_id)?.cantidad, 30, 'dónde se vendió: el pedido, con las 30 unidades de sus 5 talles');
+  assert.equal((await api('GET', '/productos/notas')).data.productos.filter((x) => x.raiz === 'ZEC_99030777273D··D62D54').length, 1, 'una fila por producto');
+
+  // El cronograma: cada movimiento con su talle y el producto (la tarjeta los junta).
+  const crono = (await api('GET', '/cronograma?desde=2026-11-16&hasta=2026-11-22')).data;
+  const entregas = crono.movimientos.filter((m) => m.npdv === PDV_T && m.tipo === 'entrega' && m.grupo === `pt${RUN}|${negros[0].grupo}`);
+  assert.equal(entregas.length, 5, JSON.stringify(crono.movimientos.filter((m) => m.npdv === PDV_T).map((m) => [m.articulo, m.grupo])));
+  assert.ok(entregas.every((m) => m.producto === 'Campera Stone - Negro - Algodon 100%'));
+  assert.deepEqual(entregas.map((m) => m.talle).sort(), ['L', 'M', 'S', 'XL', 'XS']);
+
+  // La conversación del pedido: el cambio de estado de los 5 talles, en un renglón.
+  const conv = (await api('GET', `/records/order/${p.record_id}/conversacion`)).data;
+  const art = conv.items.filter((i) => i.kind === 'articulo' && i.despues === 'en el impresor');
+  assert.equal(art.length, 1, JSON.stringify(art.map((i) => i.articulo)));
+  assert.match(art[0].articulo, /^Campera Stone - Negro - Algodon 100% - Proveedor \(5 talles: XS, S, M, L, XL\)$/);
+
   const lista = (await api('GET', `/pedidos/articulos?ids=${p.record_id}&adjuntos=1`)).data;
   const arts = lista.pedidos[p.record_id].articulos;
   assert.equal(arts.length, 3, JSON.stringify(arts.map((a) => a.nombre)));

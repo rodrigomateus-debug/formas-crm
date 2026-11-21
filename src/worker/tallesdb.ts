@@ -1,4 +1,4 @@
-import { agruparTalles, esGenerico, TALLES_VERSION } from './talles';
+import { agruparTalles, esGenerico, raizTalle, skuLimpio, talleDeSku, TALLES_VERSION } from './talles';
 import { TIPO_SQL } from './servicios';
 
 // Talle y grupo guardados (talles.ts, migración 0105): en cada artículo de Producción y en cada renglón del pedido. Se
@@ -86,6 +86,29 @@ export async function recalcularTallesPedidos(db: D1Database, recordIds: number[
   return ids.length;
 }
 
+// La raíz de un SKU (talles.ts, raizTalle), con lo que se sabe de él: lo que dice su formato (Soutex, Cardon, Maya) o el
+// talle con que se vendió (un renglón del pedido o un artículo de Producción con ese SKU). Null si no es un talle.
+export async function raizDeSku(db: D1Database, skuCrudo: string): Promise<string | null> {
+  const sku = skuLimpio(skuCrudo);
+  if (!sku) return null;
+  const s = talleDeSku(sku);
+  if (s?.seguro) return s.raiz;
+  const fila = await db.prepare(`SELECT talle, grupo_talle FROM (
+        SELECT talle, grupo_talle, 0 AS o FROM line_items WHERE UPPER(TRIM(code)) = ?1 AND talle IS NOT NULL
+        UNION ALL SELECT talle, grupo_talle, 1 FROM produccion WHERE es_pdv = 0 AND UPPER(TRIM(codigo)) = ?1 AND talle IS NOT NULL)
+      ORDER BY grupo_talle IS NULL, o LIMIT 1`).bind(sku).first<{ talle: string; grupo_talle: string | null }>();
+  return fila ? raizTalle(sku, fila.talle, fila.grupo_talle) : null;
+}
+
+// Las notas de producto escritas antes (o con reglas viejas): su raíz, para que valgan para todos los talles.
+async function completarNotas(db: D1Database, max: number) {
+  const { results } = await db.prepare('SELECT id, sku FROM producto_notas WHERE talles_v < ? AND borrada_at IS NULL LIMIT ?').bind(TALLES_VERSION, max).all<{ id: number; sku: string }>();
+  const stmts: D1PreparedStatement[] = [];
+  for (const n of results) stmts.push(db.prepare('UPDATE producto_notas SET raiz = ?, talles_v = ? WHERE id = ?').bind(await raizDeSku(db, n.sku), TALLES_VERSION, n.id));
+  await enTandas(db, stmts);
+  return results.length;
+}
+
 // En el cron: los PDV y los pedidos calculados con otra versión de las reglas (o nunca), de a tandas. Cuando no queda
 // ninguno son dos consultas que no devuelven nada.
 export async function completarTalles(db: D1Database, max = 150) {
@@ -95,5 +118,7 @@ export async function completarTalles(db: D1Database, max = 150) {
   ]);
   const p = await recalcularTallesPdvs(db, (pdvs.results as Array<{ task_id: string }>).map((r) => r.task_id));
   const o = await recalcularTallesPedidos(db, (pedidos.results as Array<{ record_id: number }>).map((r) => r.record_id));
-  return { pdvs: p, pedidos: o };
+  // Las notas, cuando ya están los talles de lo que se vendió (de eso sale la raíz de cada SKU).
+  const n = p || o ? 0 : await completarNotas(db, 50);
+  return { pdvs: p, pedidos: o, notas: n };
 }

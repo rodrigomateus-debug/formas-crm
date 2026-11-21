@@ -6,7 +6,8 @@ import { QuienPidio, alEsc, useEsc } from '../components';
 import { Select, useFloating } from '../Select';
 import { seguimientoExpreso } from '../expresos';
 import { claveOrden, dondeEntra, duracion, hhmm, optimizar, simular, type Destino, type ModoHora, type Simulacion, type TramosReales } from '../ruta';
-import { idsYLugares, lindo, carrilDe, cantidad, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
+import { lineasMovs } from '../talles';
+import { idsYLugares, lindo, carrilDe, diaCorto, diaLargo, sumar, NuevoTransportista, opcionesChofer, useLugares, CamposHora, ayudaHora, type Mov, type Tipo } from './Cronograma';
 import { LineaNota } from '../NotasLogistica';
 import { APARTE, EncargoModal, abrirRemitoEgreso, itemTexto, juntarEncargos, type Encargo, type SitioJuntar } from './Recorridos';
 import { EditarDireccion, LinkChofer, lindaDireccion } from './DireccionParada';
@@ -550,13 +551,14 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
                       </div>
                     ))}
                     {/* Primero qué se lleva o se trae y cuánto; abajo, de qué pedido es. */}
-                    {p.movimientos.map((m) => (
-                      <div key={m.id} className={`cr-k-${carrilDe(m.tipo).k}${m.hecho ? ' ok' : ''}`}>
-                        <i /><span><b>{carrilDe(m.tipo).uno}</b>{m.articulo ? <span className="cr-que">{cantidad(m)}</span> : null}
+                    {/* Una prenda en varios talles, en un renglón con sus talles (talles.ts). */}
+                    {lineasMovs(p.movimientos).map((l) => { const m = l.movs[0]; return (
+                      <div key={l.key} className={`cr-k-${carrilDe(m.tipo).k}${l.hecho ? ' ok' : ''}`}>
+                        <i /><span><b>{carrilDe(m.tipo).uno}</b>{m.articulo ? <span className="cr-que">{l.texto}</span> : null}
                           <span className="cr-pdv">{m.record_id ? <button type="button" className="cr-link" onClick={() => onAbrir(m.record_id!)}>PDV {m.npdv}</button> : `PDV ${m.npdv ?? '—'}`}
                             {m.tipo !== 'entrega' && m.cliente ? ` · ${lindo(m.cliente)}` : ''}{m.evento ? ' · evento' : ''}</span></span>
                       </div>
-                    ))}
+                    ); })}
                   </div>
                   {p.sugerencia && (
                     <div className="cr-sugerencia">
@@ -642,17 +644,17 @@ export default function CronogramaRuta({ fecha, semana, hoy, resumen, onFecha, o
           </div>
           <section className="cr-llegan cr-k-I">
             <h3>Llega al depósito <span className="muted">(no es parte del recorrido)</span></h3>
-            {datos.llegan.length ? datos.llegan.map((m) => <div key={m.id} className={m.hecho ? 'ok' : ''}><i /><span><b>{m.lugar ?? 'Proveedor'}</b>PDV {m.npdv ?? '—'} {m.cliente ?? ''}{m.articulo ? ` · ${cantidad(m)}` : ''}</span></div>)
+            {datos.llegan.length ? lineasMovs(datos.llegan).map((l) => { const m = l.movs[0]; return <div key={l.key} className={l.hecho ? 'ok' : ''}><i /><span><b>{m.lugar ?? 'Proveedor'}</b>PDV {m.npdv ?? '—'} {m.cliente ?? ''}{m.articulo ? ` · ${l.texto}` : ''}</span></div>; })
               : <div className="muted small">Nada para recibir este día.</div>}
           </section>
           {encargo && <EncargoModal id={encargo} onClose={() => setEncargo(null)} onListo={() => { setEncargo(null); void cargar(); onCambio(); }} />}
           {(datos.retiran?.length ?? 0) > 0 && (
             <section className="cr-llegan cr-k-E">
               <h3>Retiran en Formas <span className="muted">(lo retira el cliente: no es parte del recorrido)</span></h3>
-              {datos.retiran!.map((m) => (
-                <div key={m.id} className={m.hecho ? 'ok' : ''}><i /><span><b>{m.cliente ?? `PDV ${m.npdv ?? '—'}`}</b>PDV {m.npdv ?? '—'} · en {m.retira_en}
-                  {m.parcial ? ' (una parte; el resto se envía)' : ''}{m.articulo ? ` · ${cantidad(m)}` : ''}</span></div>
-              ))}
+              {lineasMovs(datos.retiran!).map((l) => { const m = l.movs[0]; return (
+                <div key={l.key} className={l.hecho ? 'ok' : ''}><i /><span><b>{m.cliente ?? `PDV ${m.npdv ?? '—'}`}</b>PDV {m.npdv ?? '—'} · en {m.retira_en}
+                  {m.parcial ? ' (una parte; el resto se envía)' : ''}{m.articulo ? ` · ${l.texto}` : ''}</span></div>
+              ); })}
             </section>
           )}
         </div>

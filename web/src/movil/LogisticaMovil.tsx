@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { juntarTalles, lineasMovs, textoTalles } from '../talles';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { http, qs, useMeta, useToast, Icon, Cargando, fmtDate, fmtRelative, userOf, recordUrl, type CrmRecord } from '../lib';
 import { Avatar } from '../components';
@@ -300,7 +301,10 @@ function MovimientosDia({ v, dia, pendientes, onPendientes, recargar }: { v: Vis
                     <b className={t.hecho ? 'tachada' : ''}>{t.titulo}</b>
                     <small className="muted">{[t.pdv, t.para].filter(Boolean).join(' · ')}</small>
                   </button>
-                  <div className="m-mov-arts">{t.movs.slice(0, 3).map((m) => <span key={m.id}>{cantidad(m)}</span>)}{t.movs.length > 3 && <span className="muted">y {t.movs.length - 3} más</span>}</div>
+                  {/* Una prenda en varios talles, en un renglón con sus talles (talles.ts). */}
+                  {(() => { const ls = lineasMovs(t.movs.filter((m) => m.articulo)); return (
+                    <div className="m-mov-arts">{ls.slice(0, 3).map((l) => <span key={l.key}>{l.texto}</span>)}{ls.length > 3 && <span className="muted">y {ls.length - 3} más</span>}</div>
+                  ); })()}
                   {(t.avisos.length > 0 || t.evento || t.retira_en) && (
                     <div className="m-mov-avisos">{t.evento && <span className="m-pill aviso">Evento</span>}{t.retira_en && <span className="m-pill">Retira en {t.retira_en}</span>}
                       {t.avisos.map((a) => <span key={a} className="m-pill aviso">{a}</span>)}</div>
@@ -360,7 +364,8 @@ function MovimientosDia({ v, dia, pendientes, onPendientes, recargar }: { v: Vis
 // Lo que está listo para entregar y todavía no tiene día: se le pone uno.
 function SinFecha({ v, onCambio }: { v: Vista | null; onCambio: () => void }) {
   const toast = useToast();
-  const [elegir, setElegir] = useState<Vista['sin_fecha'][number] | null>(null);
+  // Una prenda en varios talles es un producto: un renglón y un «Poner día» para todos sus talles (talles.ts).
+  const [elegir, setElegir] = useState<Vista['sin_fecha'] | null>(null);
   if (!v) return <Cargando />;
   const poner = async (ids: string[], fecha: string, pdv: string) => {
     try { await http('POST', '/cronograma/mover', { ids, tipo: 'entrega', fecha }); toast(`PDV ${pdv}: entrega el ${diaCorto(fecha)}. Ya está en ClickUp.`); }
@@ -371,13 +376,17 @@ function SinFecha({ v, onCambio }: { v: Vista | null; onCambio: () => void }) {
     <section className="m-sec" aria-label="Listos para entregar sin fecha">
       <div className="m-sec-cab"><h2>Listos para entregar, sin fecha</h2></div>
       {!v.sin_fecha.length && <div className="m-vacio">No hay nada listo sin fecha.</div>}
-      {v.sin_fecha.map((s) => (
-        <div key={s.task_id} className="m-item">
-          <div className="m-item-txt"><b>{lindo(s.cliente) || `PDV ${s.npdv}`}</b><small className="muted">PDV {s.npdv ?? '—'} · {cantidad(s)}</small></div>
-          {v.puede_editar && <button type="button" className="btn sm" onClick={() => setElegir(s)}><Icon name="calendar" size={14} />Poner día</button>}
-        </div>
-      ))}
-      {elegir && <HojaDia desde={hoyIso()} actual="" onClose={() => setElegir(null)} onElegir={(f) => void poner([elegir.task_id], f, elegir.npdv ?? '—')} />}
+      {juntarTalles(v.sin_fecha).map((e) => {
+        const ss = e.k === 'uno' ? [e.x] : e.xs, s = ss[0];
+        const que = e.k === 'uno' ? cantidad(s) : `${cantidad({ cantidad: ss.reduce((n, x) => n + (x.cantidad ?? 0), 0), articulo: s.producto || s.articulo })} (${textoTalles(ss)})`;
+        return (
+          <div key={s.task_id} className="m-item">
+            <div className="m-item-txt"><b>{lindo(s.cliente) || `PDV ${s.npdv}`}</b><small className="muted">PDV {s.npdv ?? '—'} · {que}</small></div>
+            {v.puede_editar && <button type="button" className="btn sm" onClick={() => setElegir(ss)}><Icon name="calendar" size={14} />Poner día</button>}
+          </div>
+        );
+      })}
+      {elegir && <HojaDia desde={hoyIso()} actual="" onClose={() => setElegir(null)} onElegir={(f) => void poner(elegir.map((x) => x.task_id), f, elegir[0].npdv ?? '—')} />}
     </section>
   );
 }
@@ -439,7 +448,7 @@ function RutaDia({ dia, recorrido, onRecorrido, onCambio }: { dia: string; recor
                 </div>
                 {abierto && (
                   <div className="m-parada-det">
-                    {p.movimientos.map((m) => <div key={m.id} className="small">{TIPO_CORTO[m.tipo]} · {cantidad(m)}{m.npdv ? ` · PDV ${m.npdv}` : ''}{m.hecho ? ' ✓' : ''}</div>)}
+                    {lineasMovs(p.movimientos).map((l) => { const m = l.movs[0]; return <div key={l.key} className="small">{TIPO_CORTO[m.tipo]} · {l.texto}{m.npdv ? ` · PDV ${m.npdv}` : ''}{l.hecho ? ' ✓' : ''}</div>; })}
                     {(p.encargos ?? []).map((e) => <div key={e.id} className="small">Encargo · {[...e.llevar.map((x) => `Llevar ${itemTexto(x)}`), ...e.retirar.map((x) => `Retirar ${itemTexto(x)}`)].join(' · ') || e.notas || 'Sin detalle'}</div>)}
                     {p.lugar?.contacto && <div className="small muted">Preguntar por {p.lugar.contacto}</div>}
                     {p.lugar?.observaciones && <div className="small muted">{p.lugar.observaciones}</div>}
@@ -472,7 +481,7 @@ function RutaDia({ dia, recorrido, onRecorrido, onCambio }: { dia: string; recor
       {(d.retiran?.length ?? 0) > 0 && (
         <section className="m-sec" aria-label="Retiran en Formas">
           <div className="m-sec-cab"><h2>Retiran en Formas</h2></div>
-          {d.retiran!.map((m) => <div key={m.id} className="m-item"><div className="m-item-txt"><b>{lindo(m.cliente)}</b><small className="muted">PDV {m.npdv} · {cantidad(m)} · en {m.retira_en}</small></div></div>)}
+          {lineasMovs(d.retiran!).map((l) => { const m = l.movs[0]; return <div key={l.key} className="m-item"><div className="m-item-txt"><b>{lindo(m.cliente)}</b><small className="muted">PDV {m.npdv} · {l.texto} · en {m.retira_en}</small></div></div>; })}
         </section>
       )}
       <p className="small muted m-nota-pie">Para ordenar las paradas, corregir un punto o fijar una hora, abrí la Ruta del día en la compu.</p>

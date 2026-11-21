@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { http, qs, useAsync, useDebounced, useMeta, useToast, Icon } from '../lib';
 import { Modal, alEsc } from '../components';
+import { juntarTalles } from '../talles';
 
 // Direcciones de entrega del pedido (src/worker/direcciones.ts), arriba de la tarjeta «Entrega».
 // Por defecto, una dirección y todo va ahí. Con varias, cuánto de cada producto lleva cada una; lo repartido se descuenta
@@ -13,7 +14,8 @@ interface Direccion { id: number; direccion: string; detalle: string | null; pla
   retira: string | null; retira_nombre: string | null;
   fecha: string | null; hecho_at: string | null;   // con varias direcciones: el día de este lugar en el cronograma y si ya se entregó acá
   nombre: string | null; observaciones: string | null; obs_por: string | null }   // cómo se llama el lugar y su anotación, con quién la escribió
-interface Producto { clave: string; nombre: string; codigo: string | null; total: number | null; asignado: number; quedan: number | null }
+interface Producto { clave: string; nombre: string; codigo: string | null; total: number | null; asignado: number; quedan: number | null;
+  talle?: string | null; grupo?: string | null; producto?: string | null }   // una prenda en varios talles (talles.ts): se reparte talle por talle
 interface Base { id: string; nombre: string; direccion: string }
 interface Datos { direcciones: Direccion[]; cantidades: Array<{ direccion_id: number; clave: string; cantidad: number }>; productos: Producto[]; varias: boolean;
   sugerida: string | null; maps: boolean; sin_repartir: number; bases: Base[] }
@@ -42,6 +44,9 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
   if (!d) return null;
   const dirs = d.direcciones;
   const items = (dirId: number) => d.cantidades.filter((c) => c.direccion_id === dirId && c.cantidad > 0);
+  // Cuántos productos van a un lugar: una prenda en varios talles cuenta una vez (talles.ts).
+  const grupoDe = (clave: string) => d.productos.find((p) => p.clave === clave)?.grupo ?? clave;
+  const nProductos = (dirId: number) => new Set(items(dirId).map((c) => grupoDe(c.clave))).size;
   const unidades = (dirId: number) => items(dirId).reduce((s, c) => s + c.cantidad, 0);
   // Retira en Formas, de un toque (sin abrir el cuadro): queda como la única «dirección» del pedido.
   const retirar = async (b: Base) => {
@@ -99,15 +104,18 @@ export function DireccionesEntrega({ orderId, onChange }: { orderId: number; onC
               {(x.validada || x.retira) && <a href={x.maps} target="_blank" rel="noreferrer">Ver en el mapa</a>}
               {dirs.length > 1 && x.hecho_at && <span className="tag ok" title="Ya se entregó en este lugar">Entregado</span>}
               {dirs.length > 1 && x.fecha && !x.hecho_at && <span className="tag info" title="El día de este lugar en el cronograma (lo mueve Logística)">Va el {diaLugar(x.fecha)}</span>}
-              {dirs.length > 1 && <span className="muted">{items(x.id).length ? `${items(x.id).length} ${items(x.id).length === 1 ? 'producto' : 'productos'} · ${cant(unidades(x.id))} u.` : 'Sin productos asignados'}</span>}
+              {dirs.length > 1 && <span className="muted">{items(x.id).length ? `${nProductos(x.id)} ${nProductos(x.id) === 1 ? 'producto' : 'productos'} · ${cant(unidades(x.id))} u.` : 'Sin productos asignados'}</span>}
             </div>
           </div>
         </div>
       ))}
-      {d.varias && d.sin_repartir > 0 && (
-        <div className="aviso warn small">{d.sin_repartir === 1 ? 'Queda 1 producto' : `Quedan ${d.sin_repartir} productos`} sin repartir entre las direcciones:
-          {' '}{d.productos.filter((p) => (p.quedan ?? 0) > 0).slice(0, 3).map((p) => `${cant(p.quedan!)} ${p.nombre}`).join(' · ')}{d.sin_repartir > 3 ? '…' : ''}</div>
-      )}
+      {d.varias && d.sin_repartir > 0 && (() => {
+        // Lo que falta repartir: una prenda en varios talles, en un renglón con lo que falta de cada talle.
+        const falta = juntarTalles(d.productos.filter((p) => (p.quedan ?? 0) > 0)).map((e) => (e.k === 'uno' ? `${cant(e.x.quedan!)} ${e.x.nombre}`
+          : `${cant(e.xs.reduce((n, p) => n + (p.quedan ?? 0), 0))} ${e.xs[0].producto ?? e.xs[0].nombre} (${e.xs.map((p) => `${p.talle} ${cant(p.quedan!)}`).join(' · ')})`));
+        return <div className="aviso warn small">{falta.length === 1 ? 'Queda 1 producto' : `Quedan ${falta.length} productos`} sin repartir entre las direcciones:
+          {' '}{falta.slice(0, 3).join(' · ')}{falta.length > 3 ? '…' : ''}</div>;
+      })()}
       {puede && dirs.length > 0 && (
         <div className="row wrap" style={{ gap: 6 }}>
           <button className="btn sm" onClick={() => setEditar({ varias: d.varias })}>{d.varias ? 'Cambiar direcciones y reparto' : soloRetira ? 'Cambiar' : 'Cambiar dirección'}</button>
@@ -236,11 +244,20 @@ function EditorDirecciones({ orderId, datos, varias: variasIn, onClose, onSaved 
                 {filas.map((f, i) => <th key={f.key} className="nosort num" title={f.retira ? `Retira en Formas: ${baseDe(f.retira)?.nombre ?? ''}` : f.texto}>{f.retira ? `Retira (${i + 1})` : `Dirección ${i + 1}`}
                   <button className="link-btn small" style={{ display: 'block', marginLeft: 'auto' }} onClick={() => restoA(f.key)} title="Pasar acá todo lo que falta repartir">+ lo que falta</button></th>)}
                 <th className="nosort num">Falta repartir</th></tr></thead>
-              <tbody>{datos.productos.map((p) => {
+              {/* Una prenda en varios talles: el producto arriba (con el total) y abajo cada talle, en orden (talles.ts). */}
+              <tbody>{juntarTalles(datos.productos).flatMap((e) => (e.k === 'uno' ? [{ p: e.x, enGrupo: false, cab: null as Producto[] | null }]
+                : [{ p: e.xs[0], enGrupo: false, cab: e.xs }, ...e.xs.map((p) => ({ p, enGrupo: true, cab: null }))])).map(({ p, enGrupo, cab }) => {
+                if (cab) return (
+                  <tr key={`g-${p.clave}`} className="reparto-grupo">
+                    <td colSpan={3 + filas.length}><b>{p.producto ?? p.nombre}</b> <span className="small muted">{cant(cab.reduce((n, x) => n + (x.total ?? 0), 0))} u. en {cab.length} talles</span></td>
+                  </tr>
+                );
                 const r = quedan(p);
                 return (
-                  <tr key={p.clave} className={r != null && r < 0 ? 'pasado' : undefined}>
-                    <td style={{ maxWidth: 260 }}><div className="ellipsis" title={p.nombre}>{p.nombre}</div>{p.codigo && <div className="small muted">{p.codigo}</div>}</td>
+                  <tr key={p.clave} className={`${r != null && r < 0 ? 'pasado' : ''}${enGrupo ? ' reparto-talle' : ''}`}>
+                    <td style={{ maxWidth: 260 }}>{enGrupo
+                      ? <div className="row" style={{ gap: 6 }} title={p.nombre}><span className="prod-talle grande">{p.talle}</span>{p.codigo && <span className="small muted ellipsis">{p.codigo}</span>}</div>
+                      : <><div className="ellipsis" title={p.nombre}>{p.nombre}</div>{p.codigo && <div className="small muted">{p.codigo}</div>}</>}</td>
                     <td className="num">{p.total == null ? '—' : cant(p.total)}</td>
                     {filas.map((f, i) => (
                       <td key={f.key} className="num"><input className="input sm num reparto-input" inputMode="decimal" value={q[f.key]?.[p.clave] ?? ''} placeholder="0"

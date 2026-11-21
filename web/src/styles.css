@@ -3328,8 +3328,38 @@ body.movil .sb-mickey { bottom: calc(58px + env(safe-area-inset-bottom)); }   /*
 /* Productos con talle en los productos del pedido (RecordPage.tsx, ProductoConTalles) y en la lista de Pedidos: el desglose
    de talles abajo del nombre y, con «Ver talles», cada renglón. */
 .product-item .prod-talles, .ped-hijos .prod-talles { margin-top: 3px; }
-.ped-art-t .prod-talles { flex-wrap: nowrap; overflow: hidden; margin-left: 4px; }
+.ped-art-talles { padding-left: 68px; margin-top: 3px; }
+.ped-art-talles .prod-talles { flex-wrap: wrap; row-gap: 3px; }
 .product-talles-lista { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding: 6px 8px; border-radius: var(--r-control); background: var(--ui-surface-sunken); }
 .product-talle-fila { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .product-talle-fila .grow { min-width: 0; }
 .product-talle-fila .num { white-space: nowrap; flex: none; }
+
+/* Productos con talle en las tarjetas del cronograma (Cronograma.tsx): el producto con la suma y, abajo, cada talle con lo
+   que va de ese talle; con permiso, un clic anota su demasía. */
+.cr-t-talles { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+.cr-t-prods .cr-t-talles span, .cr-t-talle { overflow-wrap: normal; }
+.cr-t-talle { display: inline-flex; align-items: baseline; gap: 3px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--k) 35%, var(--ui-line));
+  border-radius: var(--r-pill); background: var(--ui-surface); font: inherit; font-size: 10.5px; line-height: 15px; color: var(--ui-ink-2);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+button.cr-t-talle { cursor: pointer; }
+button.cr-t-talle:hover { border-color: var(--k); color: var(--ui-ink); }
+.cr-t-talle b { font-weight: 600; color: var(--ui-ink); text-align: left; }
+.cr-t-talle .cr-t-demasia { margin-left: 2px; }
+.cr-t-prods .ok .cr-t-talle, .cr-t-talle.ok { text-decoration: line-through; opacity: .7; }
+
+/* Productos con talle en el celular de Producción (ProduccionMovil.tsx): el desglose bajo el nombre y, en su hoja, cada talle. */
+.m-art-talles { font-size: 12px; color: var(--ui-ink-2); font-variant-numeric: tabular-nums; }
+.m-talles button { display: flex; align-items: center; gap: 8px; }
+.m-talles button .prod-talle { flex: none; }
+.m-talles button .estado-cu, .m-talles button > :last-child { margin-left: auto; }
+/* El reparto por direcciones (Direcciones.tsx): una prenda en varios talles, el producto arriba y cada talle abajo. */
+table.reparto-tabla tr.reparto-grupo td { background: var(--ui-surface-sunken); padding-top: 8px; padding-bottom: 6px; }
+table.reparto-tabla tr.reparto-talle td:first-child { padding-left: 22px; }
+/* La entrega del pedido (Remitos.tsx): una prenda en varios talles, el producto arriba con el total y cada talle abajo. */
+.entrega-linea.entrega-producto .entrega-nombre { font-weight: 600; }
+.entrega-linea.entrega-talle { padding-left: 18px; }
+/* Muchos talles (el pantalón en 14): en el renglón del producto, los talles bajan de renglón dentro de su celda. */
+table.prod-grid tr.prod-art-grupo .prod-art-chips > .prod-talles { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; row-gap: 3px; }
+/* «Varios estados»: los talles están en estados distintos; se ve como desplegable (elegir uno lo pone en todos). */
+.input.st-select.prod-varios-sel { padding-left: 8px; font-style: italic; color: var(--ui-ink-2); box-shadow: inset 0 0 0 1px var(--ui-line-strong); }

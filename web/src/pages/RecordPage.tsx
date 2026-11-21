@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { juntarTalles, textoTalles } from '../talles';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
@@ -1089,6 +1090,7 @@ interface FileRow { id: number; kind: string; name: string; source: string; crea
 // Compras de la empresa en Finnegans (las calcula el CRM cada noche): estado, última compra, cuánto compra y cuánto debe.
 // Proveedor o impresor (produccion.ts): lo que tiene ahora en producción, con las fechas de ingreso y retiro.
 interface ArticuloProveedor { task_id: string; nombre: string; estado: string; cantidad: number | null; npdv: string | null; cliente: string | null; record_id: number | null;
+  talle?: string | null; grupo?: string | null; producto?: string | null;
   rol: 'proveedor' | 'impresor'; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null }
 function ProduccionProveedorCard({ companyId }: { companyId: number }) {
   const res = useAsync(() => http<{ articulos: ArticuloProveedor[] }>('GET', `/records/company/${companyId}/produccion`), [companyId]);
@@ -1097,8 +1099,11 @@ function ProduccionProveedorCard({ companyId }: { companyId: number }) {
   const f = (v: string | null) => (v ? fmtDate(v) : null);
   return (
     <div className="panel assoc-card">
-      <div className="panel-head"><h3>En producción <span className="muted small">({arts.length})</span></h3><Link className="btn sm ghost" to="/produccion">Ver producción</Link></div>
-      {arts.slice(0, 12).map((a) => {
+      <div className="panel-head"><h3>En producción <span className="muted small">({juntarTalles(arts, (a) => `${a.grupo}|${a.rol}`).length})</span></h3><Link className="btn sm ghost" to="/produccion">Ver producción</Link></div>
+      {/* Una prenda en varios talles, en un renglón con sus talles (talles.ts). */}
+      {juntarTalles(arts, (a) => `${a.grupo}|${a.rol}`).slice(0, 12).map((e) => {
+        const a = e.k === 'uno' ? e.x : { ...e.xs[0], nombre: `${e.xs[0].producto ?? e.xs[0].nombre} (${textoTalles(e.xs)})`, cantidad: e.xs.reduce((n, x) => n + (x.cantidad ?? 0), 0),
+          estado: e.xs.every((x) => x.estado === e.xs[0].estado) ? e.xs[0].estado : 'varios estados' };
         const fechas = (a.rol === 'impresor'
           ? [f(a.egreso_impresor) && `fue ${f(a.egreso_impresor)}`, f(a.retiro_impresor) && `retiro ${f(a.retiro_impresor)}`, f(a.ingreso_impresor) && `lo trae ${f(a.ingreso_impresor)}`]
           : [f(a.ingreso_proveedor) && `ingreso ${f(a.ingreso_proveedor)}`, f(a.retiro_proveedor) && `retiro ${f(a.retiro_proveedor)}`]).filter(Boolean);

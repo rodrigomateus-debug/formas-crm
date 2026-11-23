@@ -331,6 +331,9 @@ hay que actualizarlo ahí. Para leer, también se reconoce por el nombre.
   familia elegida, la subfamilia ofrece solo las de esa familia (y elegir familias saca las subfamilias que ya no son de
   ninguna). Como los otros filtros de productos, de cada PDV quedan los productos de esa familia, y se guardan en las
   vistas. Para que un producto se reconozca mejor, se suman sus palabras a la subfamilia en `iconosProducto.ts`.
+- **Agrupar por familia o subfamilia** (mismo pedido): en «Agrupar por», en la tabla (un nivel más del árbol) y en el
+  tablero (una columna por familia o subfamilia). Un PDV con productos de varias familias aparece en cada una, con los
+  productos de esa familia; un PDV sin productos va al final, en «Sin productos». Se guarda en las vistas.
 - **Fechas**: el calendario del CRM (`web/src/Fecha.tsx`) en lugar del campo del navegador; elegir un día lo guarda.
 
 ## Fecha de creación del PDV

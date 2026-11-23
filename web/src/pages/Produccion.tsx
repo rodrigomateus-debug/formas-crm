@@ -12,6 +12,7 @@ import { RecordPreview } from './RecordPage';
 import { BotonVacias, useColapso } from './Board';
 import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasProducto';
 import { revisarFestejos } from '../Chispin';
+import { FAMILIAS, SUBFAMILIAS, subcategoriaDe } from '../iconosProducto';
 import { BotonColapsar, ElegirColumnas } from '../vistaControles';
 
 // Un clic en un renglón o una tarjeta abre la vista previa del pedido, salvo que sea en algo que se usa ahí mismo (un
@@ -93,8 +94,10 @@ interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?
 // Agrupar los PDV (pedido de Rodrigo del 20/11/2026): por unidad de negocio, vendedor, estado del PDV o cliente. En la
 // tabla es un nivel más del árbol (el grupo, sus PDV y los artículos de cada uno); en el tablero, las columnas (por
 // defecto, el estado).
-type AgruparProd = '' | 'etapa' | 'unidad' | 'vendedor' | 'cliente';
-const AGRUPAR_PROD: Array<[AgruparProd, string]> = [['etapa', 'Estado del PDV'], ['unidad', 'Unidad de negocio'], ['vendedor', 'Vendedor'], ['cliente', 'Cliente']];
+// También por familia o subfamilia del producto (pedido de Rodrigo del 23/11/2026, agruparPorProducto).
+type AgruparProd = '' | 'etapa' | 'unidad' | 'vendedor' | 'cliente' | 'familia' | 'subfamilia';
+const AGRUPAR_PROD: Array<[AgruparProd, string]> = [['etapa', 'Estado del PDV'], ['unidad', 'Unidad de negocio'], ['vendedor', 'Vendedor'], ['cliente', 'Cliente'],
+  ['familia', 'Familia'], ['subfamilia', 'Subfamilia']];
 // Las columnas de la tabla que se pueden sacar o agregar («Columnas»), en orden. «PDV / artículo» va siempre.
 const COLUMNAS_PROD: Array<[string, string]> = [['creado', 'Creado'], ['estado', 'Estado'], ['asignado', 'Asignado'], ['cantidad', 'Cantidad'], ['pactada', 'Pactada'],
   ['real', 'Real'], ['oc', 'OC'], ['proveedor', 'Proveedor'], ['impresor', 'Impresor'], ['ingreso_proveedor', 'Ingreso prov.'], ['retiro_proveedor', 'Retiro prov.'],
@@ -672,14 +675,46 @@ function grupoDe(meta: Meta, p: Pdv, agrupar: AgruparProd): { k: string; label: 
   const i = etapas.findIndex((o) => o.value === p.etapa);
   return { k: p.etapa, label: <EtapaPedido value={p.etapa} label={formatValue(meta, 'order', 'hs_pipeline_stage', p.etapa)} />, orden: String(i < 0 ? 999 : i + 1).padStart(3, '0') };
 }
+type GrupoProd = { k: string; label: ReactNode; orden: string; pdvs: Pdv[] };
 function agruparPdvs(meta: Meta, pdvs: Pdv[], agrupar: AgruparProd) {
-  const m = new Map<string, { k: string; label: ReactNode; orden: string; pdvs: Pdv[] }>();
+  if (agrupar === 'familia' || agrupar === 'subfamilia') return agruparPorProducto(pdvs, agrupar);
+  const m = new Map<string, GrupoProd>();
   for (const p of pdvs) {
     const g = grupoDe(meta, p, agrupar);
     const x = m.get(g.k) ?? { ...g, pdvs: [] };
     x.pdvs.push(p); m.set(g.k, x);
   }
   return [...m.values()].sort((a, b) => a.orden.localeCompare(b.orden, 'es'));
+}
+// Por familia o subfamilia (del nombre de cada producto, iconosProducto.ts): un PDV con productos de varias va en cada una,
+// con los productos de esa (como el filtro). Los grupos, en el orden de los filtros; un PDV sin productos, al final.
+function agruparPorProducto(pdvs: Pdv[], agrupar: 'familia' | 'subfamilia') {
+  const claves = agrupar === 'familia' ? FAMILIAS : SUBFAMILIAS.map((s) => s.tipo);
+  const grupo = (k: string): GrupoProd => {
+    const i = claves.indexOf(k);
+    const orden = String(i < 0 ? 999 : i).padStart(3, '0');
+    if (!k) return { k, label: 'Sin productos', orden: '999', pdvs: [] };
+    if (agrupar === 'familia') return { k, label: k, orden, pdvs: [] };
+    const familia = SUBFAMILIAS.find((s) => s.tipo === k)?.familia;
+    return { k, label: <>{k}{familia && familia !== k && <span className="muted"> · {familia}</span>}</>, orden, pdvs: [] };
+  };
+  const m = new Map<string, GrupoProd>();
+  for (const p of pdvs) {
+    const por = new Map<string, Articulo[]>();
+    for (const a of p.articulos) {
+      const s = subcategoriaDe(a.nombre);
+      const k = agrupar === 'familia' ? s.familia : s.tipo;
+      por.set(k, [...(por.get(k) ?? []), a]);
+    }
+    if (!por.size) por.set('', []);
+    for (const [k, arts] of por) {
+      const g = m.get(k) ?? grupo(k);
+      // Si todos sus productos son de este grupo, el mismo PDV (las filas y tarjetas no se vuelven a dibujar).
+      g.pdvs.push(arts.length === p.articulos.length ? p : { ...p, articulos: arts });
+      m.set(k, g);
+    }
+  }
+  return [...m.values()].sort((a, b) => a.orden.localeCompare(b.orden));
 }
 
 type EditarGrupo = (p: Pdv, tareas: string[], c: Campo, valor: unknown) => void;

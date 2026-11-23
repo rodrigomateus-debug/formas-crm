@@ -188,10 +188,27 @@ export const SUBCATEGORIAS: Subcategoria[] = [
 const OTRO: Subcategoria = { tipo: 'Otro', familia: 'Otro', plural: 'Productos', svg: IC.Otro, re: /$^/ };
 
 const normal = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+// Producción filtra por familia y subfamilia cada artículo de la pantalla, varias veces por cada cambio de filtro: el
+// resultado de cada nombre queda guardado (son unos cientos de nombres).
+const yaVistos = new Map<string, Subcategoria>();
 export function subcategoriaDe(nombre: string): Subcategoria {
-  const n = normal(nombre);
-  return SUBCATEGORIAS.find((s) => s.re.test(n)) ?? OTRO;
+  let s = yaVistos.get(nombre);
+  if (!s) {
+    const n = normal(nombre);
+    s = SUBCATEGORIAS.find((x) => x.re.test(n)) ?? OTRO;
+    if (yaVistos.size > 5000) yaVistos.clear();
+    yaVistos.set(nombre, s);
+  }
+  return s;
 }
+
+// Las familias y sus subfamilias para elegir en un filtro (Producción, pedido de Rodrigo del 23/11/2026): en orden
+// alfabético, con «Otro» (lo que no se reconoce por el nombre) al final. La subfamilia es el tipo («Botella», «Mochila»…).
+const alfa = (a: string, b: string) => (a === 'Otro' ? 1 : b === 'Otro' ? -1 : a.localeCompare(b, 'es'));
+export const FAMILIAS: string[] = [...new Set([...SUBCATEGORIAS, OTRO].map((s) => s.familia))].sort(alfa);
+export const SUBFAMILIAS: Array<{ tipo: string; familia: string }> = [...SUBCATEGORIAS, OTRO]
+  .map(({ tipo, familia }) => ({ tipo, familia }))
+  .sort((a, b) => alfa(a.familia, b.familia) || alfa(a.tipo, b.tipo));
 
 // Los productos de un pedido agrupados por subcategoría, con las cantidades sumadas (para embalar uno de cada tipo).
 export function agruparProductos(articulos: Array<{ nombre: string; cantidad: number | null }>) {

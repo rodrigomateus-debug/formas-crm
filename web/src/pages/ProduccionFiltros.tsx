@@ -4,15 +4,21 @@ import { Icon } from '../lib';
 import { EstadoClickup } from '../components';
 import { useFloating } from '../Select';
 import { SelectorFecha, isoDia } from '../Fecha';
+import { FAMILIAS, SUBFAMILIAS, subcategoriaDe } from '../iconosProducto';
 
 // Filtros por columna de Producción (pedido de Rodrigo del 12/11/2026): cada columna de la lista tiene el suyo (el embudo
 // del encabezado) y también se agregan desde «+ Filtro» (sirve en el tablero). Filtran PRODUCTOS: se ven solo los que
 // cumplen, cada uno con su PDV; los PDV que se quedan sin productos no se ven. Se guardan en las vistas.
 // La fecha de creación (pedido de Rodrigo del 19/11/2026) es del PDV, no de sus productos: filtra PDV enteros
 // (cumpleCreado), con rangos hacia atrás (últimos 7 o 30 días, este mes).
+// La familia y la subfamilia (pedido de Rodrigo del 23/11/2026) salen del nombre del producto, con la misma clasificación
+// que usan las consultas de Darwin y Chispín (iconosProducto.ts): Drinkware → Botella, Termo…; Textil → Remera, Gorra…
+// Con una familia elegida, la subfamilia ofrece solo las de esa familia.
 
 export type Rango = '' | 'vencidas' | 'hoy' | 'semana' | 'proximos' | 'ultimos7' | 'ultimos30' | 'mes' | 'con' | 'sin' | { desde?: string; hasta?: string };
 export interface FiltrosCol {
+  familia?: string[];      // del nombre del producto (iconosProducto.ts)
+  subfamilia?: string[];   // el tipo: «Botella», «Mochila»…
   estado?: string[];
   cantidad?: { min?: number | null; max?: number | null };
   proveedor?: string[];   // id de la opción de ClickUp; '' = sin proveedor
@@ -24,14 +30,14 @@ export type ColFiltro = keyof FiltrosCol;
 type ColFecha = 'entrega_real' | 'ingreso_proveedor' | 'retiro_proveedor' | 'egreso_impresor' | 'retiro_impresor' | 'ingreso_impresor' | 'creado';
 const FECHAS: Array<Exclude<ColFecha, 'creado'>> = ['entrega_real', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
 export const NOMBRE_COL: Record<ColFiltro, string> = {
-  creado: 'Creado', estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega real',
+  creado: 'Creado', familia: 'Familia', subfamilia: 'Subfamilia', estado: 'Estado', cantidad: 'Cantidad', proveedor: 'Proveedor', impresor: 'Impresor', entrega_real: 'Entrega real',
   ingreso_proveedor: 'Ingreso prov.', retiro_proveedor: 'Retiro prov.', egreso_impresor: 'Egreso imp.', retiro_impresor: 'Retiro imp.', ingreso_impresor: 'Ingreso imp.',
 };
-const COLUMNAS: ColFiltro[] = ['creado', 'estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
+const COLUMNAS: ColFiltro[] = ['creado', 'familia', 'subfamilia', 'estado', 'cantidad', 'entrega_real', 'proveedor', 'impresor', 'ingreso_proveedor', 'retiro_proveedor', 'egreso_impresor', 'retiro_impresor', 'ingreso_impresor'];
 
 // Lo que necesita saber de un producto.
 export interface ArticuloFiltrable {
-  estado: string; cantidad: number | null; proveedor: string | null; impresor: string | null;
+  nombre: string; estado: string; cantidad: number | null; proveedor: string | null; impresor: string | null;
   entrega_real: string | null; ingreso_proveedor: string | null; retiro_proveedor: string | null; egreso_impresor: string | null; retiro_impresor: string | null; ingreso_impresor: string | null;
 }
 export interface Ctx {
@@ -72,6 +78,11 @@ export function enRango(fecha: string | null, r: Rango, hoy = isoDia(new Date())
 }
 
 export function cumple(a: ArticuloFiltrable, f: FiltrosCol, ctx: Pick<Ctx, 'mismaEmpresa'>, hoy = isoDia(new Date())) {
+  if (f.familia?.length || f.subfamilia?.length) {
+    const sub = subcategoriaDe(a.nombre);
+    if (f.familia?.length && !f.familia.includes(sub.familia)) return false;
+    if (f.subfamilia?.length && !f.subfamilia.includes(sub.tipo)) return false;
+  }
   if (f.estado?.length && !f.estado.includes(a.estado)) return false;
   const c = f.cantidad;
   if (c?.min != null && (a.cantidad ?? 0) < c.min) return false;
@@ -88,6 +99,17 @@ export function cumple(a: ArticuloFiltrable, f: FiltrosCol, ctx: Pick<Ctx, 'mism
 // El filtro de la fecha de creación, sobre el PDV.
 export const cumpleCreado = (creado: string | null, f: FiltrosCol, hoy = isoDia(new Date())) => !f.creado || enRango(creado, f.creado, hoy);
 
+// Los filtros de valores elegidos de una lista (para contar cuántos productos tiene cada opción).
+export const DE_LISTA: ColFiltro[] = ['familia', 'subfamilia', 'estado', 'proveedor', 'impresor'];
+// Las subfamilias que se ofrecen: con familias elegidas, solo las de esas familias.
+const subfamiliasDe = (familias?: string[]) => SUBFAMILIAS.filter((s) => !familias?.length || familias.includes(s.familia));
+// Elegir familias saca las subfamilias elegidas que ya no son de ninguna (si no, no quedaría ningún producto).
+const coherente = (f: FiltrosCol): FiltrosCol => {
+  if (!f.familia?.length || !f.subfamilia?.length) return f;
+  const ok = new Set(subfamiliasDe(f.familia).map((s) => s.tipo));
+  return { ...f, subfamilia: f.subfamilia.filter((t) => ok.has(t)) };
+};
+
 // Cómo se lee un filtro en su chip.
 const RANGOS: Array<[Exclude<Rango, object>, string]> = [['vencidas', 'Ya pasó'], ['hoy', 'Hoy'], ['semana', 'Esta semana'], ['proximos', 'Próximos 7 días'], ['con', 'Con fecha'], ['sin', 'Sin fecha']];
 // La creación ya pasó: rangos hacia atrás.
@@ -97,6 +119,7 @@ const ddmm = (s?: string) => (s ? `${s.slice(8, 10)}/${s.slice(5, 7)}` : '');
 export function resumen(f: FiltrosCol, c: ColFiltro, ctx: Ctx) {
   const x = f[c];
   if (c === 'estado') return (x as string[]).map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(', ');
+  if (c === 'familia' || c === 'subfamilia') return (x as string[]).join(', ');
   if (c === 'proveedor' || c === 'impresor') return (x as string[]).map((id) => (id === '' ? `Sin ${c}` : ctx.opciones[c].find((o) => o.value === id)?.label ?? id)).join(', ');
   if (c === 'cantidad') { const r = x as NonNullable<FiltrosCol['cantidad']>; return r.min != null && r.max != null ? `${r.min} a ${r.max}` : r.min != null ? `${r.min} o más` : `hasta ${r.max}`; }
   if (typeof x === 'string') return rangosDe(c).find(([k]) => k === x)?.[1] ?? x;
@@ -133,6 +156,17 @@ function Lista({ opciones, sel, onChange, buscar, cuenta, render }: {
 }
 
 function Control({ col, f, set, ctx }: { col: ColFiltro; f: FiltrosCol; set: (x: FiltrosCol[ColFiltro] | undefined) => void; ctx: Ctx }) {
+  if (col === 'familia') {
+    return <Lista opciones={FAMILIAS.map((x) => ({ value: x, label: x }))} sel={f.familia ?? []} onChange={set} cuenta={(v) => ctx.cuenta('familia', v)} />;
+  }
+  if (col === 'subfamilia') {
+    // Sin familia elegida van todas, con su familia al lado para ubicarlas.
+    const subs = subfamiliasDe(f.familia);
+    const conFamilia = !f.familia?.length;
+    return <Lista buscar opciones={subs.map((s) => ({ value: s.tipo, label: conFamilia ? `${s.tipo} · ${s.familia}` : s.tipo }))} sel={f.subfamilia ?? []} onChange={set}
+      cuenta={(v) => ctx.cuenta('subfamilia', v)}
+      render={conFamilia ? (o) => { const s = subs.find((x) => x.tipo === o.value)!; return <>{s.tipo} <span className="muted">· {s.familia}</span></>; } : undefined} />;
+  }
   if (col === 'estado') {
     return <Lista opciones={ctx.estados.map((e) => ({ value: e.status, label: e.status }))} sel={f.estado ?? []} onChange={set} cuenta={(v) => ctx.cuenta('estado', v)}
       render={(o) => <EstadoClickup estado={o.value} color={ctx.estados.find((e) => e.status === o.value)?.color} />} />;
@@ -185,7 +219,7 @@ function Pop({ ancla, col, f, onChange, ctx, onClose }: { ancla: React.RefObject
     window.addEventListener('keydown', esc, true);
     return () => { document.removeEventListener('mousedown', fuera); window.removeEventListener('keydown', esc, true); };
   }, [ancla, onClose]);
-  const set = (x: FiltrosCol[ColFiltro] | undefined) => onChange({ ...f, [col]: x });
+  const set = (x: FiltrosCol[ColFiltro] | undefined) => onChange(coherente({ ...f, [col]: x }));
   return createPortal(
     <div ref={pop} className="popover fcol-pop" role="dialog" aria-label={`Filtrar por ${NOMBRE_COL[col]}`} style={{ ...style, minWidth: 260 }} onMouseDown={(e) => e.stopPropagation()}>
       <div className="fcol-head"><b>{NOMBRE_COL[col]}</b><span className="grow" />
@@ -232,7 +266,7 @@ export function FiltrosActivos({ f, onChange, ctx, extra }: { f: FiltrosCol; onC
   return (
     <>
       <button ref={(el) => { mas.current = el; anclas.current.set('+', el); }} type="button" className={`btn qf-btn${activos.length ? ' on' : ''}`} onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}
-        title="Filtrar por fecha de creación del PDV o los productos por estado, cantidad, fechas, proveedor o impresor">
+        title="Filtrar por fecha de creación del PDV o los productos por familia, subfamilia, estado, cantidad, fechas, proveedor o impresor">
         <Icon name="filter" size={15} />Filtros{activos.length ? ` (${activos.length})` : ''}
       </button>
       {extra}

@@ -324,6 +324,13 @@ hay que actualizarlo ahí. Para leer, también se reconoce por el nombre.
   (también en el tablero). Estado (varios), cantidad (desde/hasta), proveedor e impresor (varios, o «sin»; las opciones
   repetidas de ClickUp juntas) y cada fecha (ya pasó, hoy, esta semana, próximos 7 días, con o sin fecha, o entre dos
   fechas). Filtran **productos**: de cada PDV quedan los que cumplen y los PDV sin ninguno no se ven.
+- **Familia y subfamilia** (pedido de Rodrigo del 23/11/2026): en «Filtros → Familia» y «Filtros → Subfamilia» (varias de
+  cada una, con cuántos productos hay de cada una). Salen del **nombre del producto**, con la misma clasificación que las
+  consultas de Darwin y Chispín (`web/src/iconosProducto.ts`, `subcategoriaDe`): Drinkware → Botella, Termo, Taza…;
+  Textil → Remera, Buzo / Campera, Gorra…; Marroquinería → Mochila, Bolso…; lo que no se reconoce queda en «Otro». Con una
+  familia elegida, la subfamilia ofrece solo las de esa familia (y elegir familias saca las subfamilias que ya no son de
+  ninguna). Como los otros filtros de productos, de cada PDV quedan los productos de esa familia, y se guardan en las
+  vistas. Para que un producto se reconozca mejor, se suman sus palabras a la subfamilia en `iconosProducto.ts`.
 - **Fechas**: el calendario del CRM (`web/src/Fecha.tsx`) en lugar del campo del navegador; elegir un día lo guarda.
 
 ## Fecha de creación del PDV

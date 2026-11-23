@@ -6,7 +6,7 @@ import { UnidadFilter } from './QuickFilters';
 import { Avatar, UnidadBadge, UserAvatar, EtapaPedido, EstadoClickup, estiloEstado, etapaPedidoSlug, OcLinks, type OcRef } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
-import { cumple, cumpleCreado, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol, type Rango } from './ProduccionFiltros';
+import { cumple, cumpleCreado, DE_LISTA, FiltroEncabezado, FiltrosActivos, hayFiltros, limpiar, type ColFiltro, type Ctx as CtxFiltros, type FiltrosCol, type Rango } from './ProduccionFiltros';
 import { NombreProveedor } from '../proveedores';
 import { RecordPreview } from './RecordPage';
 import { BotonVacias, useColapso } from './Board';
@@ -85,7 +85,7 @@ const CERRADOS = ['entregados', 'anulado'];
 
 // Lo que guarda una vista de Producción (pestañas, como en Pedidos): búsqueda, unidades, a quién está asignado, vendedor,
 // cliente, si se ven los entregados y lista o tablero.
-// También los filtros por columna (ProduccionFiltros.tsx: estado, cantidad, fechas, proveedor, impresor).
+// También los filtros por columna (ProduccionFiltros.tsx: familia, subfamilia, estado, cantidad, fechas, proveedor, impresor).
 interface ConfigProd { q: string; unidades: string[]; persona: string; vendedor?: string; cliente?: string; cerrados: boolean; modo: 'lista' | 'tablero'; columnas?: FiltrosCol;
   vacias?: boolean;   // tablero: colapsar las columnas vacías (Board.tsx, useColapso)
   agrupar?: AgruparProd;   // agrupar los PDV (en la tabla, un nivel más del árbol; en el tablero, las columnas)
@@ -277,7 +277,7 @@ export default function ProduccionPage() {
       const k = `${col}:${valor}`;
       // La fecha de creación es del PDV: cuenta PDV.
       if (col === 'creado' && !cache.has(k)) cache.set(k, (v?.pdvs ?? []).filter((p) => cumpleCreado(p.creado, { creado: valor as Rango })).length);
-      if (!cache.has(k)) cache.set(k, arts.filter((a) => cumple(a, { [col]: ['estado', 'proveedor', 'impresor'].includes(col) ? [valor] : valor } as FiltrosCol, { mismaEmpresa })).length);
+      if (!cache.has(k)) cache.set(k, arts.filter((a) => cumple(a, { [col]: DE_LISTA.includes(col) ? [valor] : valor } as FiltrosCol, { mismaEmpresa })).length);
       return cache.get(k)!;
     };
     // Los estados de la lista y, por si alguno no está (se sumó en ClickUp después de leerla), los que tienen los productos.

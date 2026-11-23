@@ -11,6 +11,7 @@ import { MODELO } from './remitos';
 import { normalizarUbicacion } from '../../web/src/localidades';
 import { empresaDePedidos, notasPara, type NotaLogistica } from './logistica';
 import { fotosDeArticulos } from './productos';
+import { compararTalles, nombreSinTalle, talleCanonico } from './talles';
 import { vehiculos } from './vehiculos';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
 import { conPerfilSql, tienePerfil } from './alcance';
@@ -101,6 +102,32 @@ export interface Movimiento {
   bultos?: Bultos | null;    // los bultos que anotó Logística (cronograma_bultos); la tarjeta muestra la suma de los suyos
   foto?: string | null;      // la foto del producto, la misma que en el pedido y en Producción (fotosDeArticulos)
   despacho?: Despacho;       // si está listo para salir, qué falta y a quién le toca (ver «Estados de despacho» en docs/CRONOGRAMA.md)
+  // Una prenda en varios talles es un producto (talles.ts): su talle, la clave que comparten los talles del producto (del
+  // PDV) y el nombre del producto sin el talle. La tarjeta los muestra juntos: «30 Campera Stone (XS 3 · S 4 · M 8…)».
+  talle?: string | null; grupo?: string | null; producto?: string | null;
+}
+
+// Los movimientos de una lista, con los talles de cada producto juntos (en el orden de los talles): para el remito de
+// traslado y la app del chofer, que muestran texto. Van juntos los del mismo producto, tipo, PDV y lugar de entrega.
+export function juntarTalles<T extends Pick<Movimiento, 'id' | 'tipo' | 'pdv_task' | 'articulo' | 'cantidad' | 'hecho' | 'talle' | 'grupo' | 'producto' | 'dir'> & { enviado?: { cantidad: number } | null }>(movs: T[]) {
+  const out: Array<{ movs: T[]; cantidad: number | null; articulo: string; talles: string | null; hecho: boolean }> = [];
+  const de = new Map<string, number>();
+  for (const m of movs) {
+    const k = m.grupo ? `${m.tipo}|${m.grupo}|${m.dir ?? ''}` : null;
+    const i = k ? de.get(k) : undefined;
+    if (k && i != null) out[i].movs.push(m);
+    else { if (k) de.set(k, out.length); out.push({ movs: [m], cantidad: null, articulo: '', talles: null, hecho: true }); }
+  }
+  for (const x of out) {
+    x.movs.sort((a, b) => compararTalles(talleCanonico(a.talle), talleCanonico(b.talle)));
+    const cant = (m: T) => m.enviado?.cantidad ?? m.cantidad;
+    const varios = x.movs.length > 1;
+    x.cantidad = x.movs.some((m) => cant(m) != null) ? x.movs.reduce((n, m) => n + (cant(m) ?? 0), 0) : null;
+    x.articulo = varios ? x.movs[0].producto || x.movs[0].articulo : x.movs[0].articulo;
+    x.talles = varios ? x.movs.map((m) => `${m.talle}${cant(m) != null ? ` ${cant(m)!.toLocaleString('es-AR')}` : ''}`).join(' · ') : null;
+    x.hecho = x.movs.every((m) => m.hecho);
+  }
+  return out;
 }
 
 // ---------- Estados de despacho ----------
@@ -124,7 +151,7 @@ const pos = (estado: string) => POS.get(estado) ?? -1;
 const EN_DEPOSITO = pos('en control de depósito'), DE_VUELTA = pos('articulo con logo');
 const LISTOS_DESP = ['listo para entergar', 'listo para entregar', 'parcial entregado', 'entregados'];
 const plata = (n: number) => `$ ${Math.round(n).toLocaleString('es-AR')}`;
-type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; total?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
+type FilaDesp = FilaDb & { etapa?: string | null; saldo?: number | string | null; total?: number | string | null; cobrado?: number | string | null; remito_fin?: string | null; owner_id?: number | null };
 type Check = Despacho['checks'][number];
 
 export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolean, hechos: Map<string, unknown>, hoy: string,
@@ -151,11 +178,14 @@ export function despachoDe(f: FilaDesp, tipo: Tipo, fecha: string, hecho: boolea
     return { estado: extra.traslado ? 'remitido' : 'listo', checks, quien: 'logistica', owner_id, lugar: null };
   }
   // Entrega.
-  // El pago, como en Pedidos (cobroPedido): no pagó nada, pagó una parte (lo pagado pasa el 1 % del total) o pagó. El saldo
-  // y el total son sin IVA, de Finnegans.
-  const saldo = Number(f.saldo) || 0, total = Number(f.total) || 0;
+  // El pago, como en Pedidos (cobroPedido): no pagó nada, pagó una parte (lo cobrado de sus facturas pasa el 1 % de lo cobrado
+  // más el saldo) o pagó. Todo sin IVA, de Finnegans. Mientras no llegó lo cobrado, el total del pedido menos el saldo.
+  const saldo = Number(f.saldo) || 0;
+  const cobrado = f.cobrado == null || f.cobrado === '' ? null : Number(f.cobrado) || 0;
+  const total = cobrado != null ? cobrado + saldo : Number(f.total) || 0;
+  const pagado = cobrado ?? total - saldo;
   const pago: Check = f.etapa === ORDER_ANTICIPO ? { k: 'pago', v: 'no', t: 'No pagó nada: pendiente de anticipo' }
-    : saldo > 0.5 && total > 0 && total - saldo > total * 0.01 ? { k: 'pago', v: 'parcial', t: `Pagó una parte: falta ${plata(saldo)} de ${plata(total)} en Finnegans` }
+    : saldo > 0.5 && total > 0 && pagado > total * 0.01 ? { k: 'pago', v: 'parcial', t: `Pagó una parte: falta ${plata(saldo)} de ${plata(total)} en Finnegans` }
     : saldo > 0.5 ? { k: 'pago', v: 'no', t: `No pagó nada: falta ${plata(saldo)} en Finnegans` } : { k: 'pago', v: 'ok', t: 'Pagó' };
   const listo = LISTOS_DESP.includes(f.estado);
   const noVino = !listo && (noVinoProv || noVinoImp);
@@ -184,10 +214,14 @@ export const diaSemana = (dia: string) => new Date(`${dia}T12:00:00Z`).getUTCDay
 export const hoyBsAs = () => new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
 // El nombre del artículo sin la coletilla que le pone ClickUp («Necessaire - Proveedor»).
 const nombreArticulo = (s: string) => s.replace(/\s+-\s+(proveedor|impresor|stock)\s*$/i, '').trim();
+// El talle de un artículo de Producción, la clave de su producto (del PDV) y el nombre sin el talle (talles.ts).
+const talleDe = (f: FilaDb) => (f.es_pdv || !f.grupo_talle ? { talle: f.es_pdv ? null : f.talle ?? null, grupo: null, producto: null }
+  : { talle: f.talle ?? null, grupo: `${f.pdv_task}|${f.grupo_talle}`, producto: nombreSinTalle(nombreArticulo(f.nombre)) });
 
 const SELECT_MOV = `SELECT a.*, p.npdv AS pdv_npdv, p.cliente AS pdv_cliente, p.unidad AS pdv_unidad, p.record_id AS pdv_record, p.entrega_real AS pdv_entrega,
     json_extract(r.props, '$.tipo_de_pedido') AS evento, json_extract(r.props, '$.fecha_de_entrega') AS pactada,
     json_extract(r.props, '$.hs_pipeline_stage') AS etapa, json_extract(r.props, '$.saldo_pendiente_de_pago_mxn') AS saldo, json_extract(r.props, '$.hs_total_price') AS total,
+    json_extract(r.props, '$.importe_cobrado') AS cobrado,
     json_extract(r.props, '$.remito_finnegans') AS remito_fin, r.owner_id AS owner_id
   FROM produccion a JOIN produccion p ON p.task_id = a.pdv_task LEFT JOIN records r ON r.id = p.record_id AND r.archived = 0
   WHERE (a.es_pdv = 0 OR NOT EXISTS (SELECT 1 FROM produccion h WHERE h.pdv_task = a.task_id AND h.es_pdv = 0))
@@ -241,6 +275,7 @@ function armar(filas: FilaMov[], ops: Map<string, Opcion>, hechos: Map<string, {
         unidad: f.pdv_unidad ?? f.unidad, record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
         estado: f.estado, lugar: rol ? op?.empresa ?? op?.nombre ?? null : null, company_id: op?.company_id ?? null,
         hecho: !!marca || implicito, hecho_por: marca?.user_id ?? null, evento: String(f.evento ?? '').toUpperCase() === 'EVENTO', avisos, url: f.url,
+        ...talleDe(f),
       });
     }
   }
@@ -592,7 +627,7 @@ export async function vistaCronograma(db: D1Database, user: User, q: { desde: st
     feriados: Object.fromEntries(feriados), dias,
     sin_fecha: sinFecha.results.map((f) => ({
       task_id: f.task_id, pdv_task: f.pdv_task, npdv: f.pdv_npdv ?? f.npdv, cliente: f.cliente ?? f.pdv_cliente, unidad: f.pdv_unidad ?? f.unidad,
-      record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad,
+      record_id: f.pdv_record ?? f.record_id, articulo: f.es_pdv ? '' : nombreArticulo(f.nombre), cantidad: f.cantidad, ...talleDe(f),
     })),
     choferes: quienes.choferes, expresos: quienes.expresos.map((x) => x.nombre),
     puede_editar: puedeEditarCronograma(user),
@@ -1639,7 +1674,9 @@ export async function rutaDelChofer(env: Env, user: User, chofer: string) {
           // Las anotaciones de logística de lo que se hace en la parada (logistica.ts), sin repetir, y la cantidad que
           // realmente va si se anotó una demasía.
           notas: [...new Map([...p.movimientos.flatMap((m) => m.notas ?? []), ...p.encargos.flatMap((e) => e.anotaciones ?? [])].map((n) => [n.id, { texto: n.texto, por: n.por, siempre: n.alcance === 'siempre' }])).values()],
-          movimientos: p.movimientos.map((m) => ({ id: m.id, tipo: m.tipo, npdv: m.npdv, cliente: m.tipo === 'entrega' ? null : m.cliente, articulo: m.articulo, cantidad: m.enviado?.cantidad ?? m.cantidad, hecho: m.hecho })),
+          // Los talles de una prenda, en un renglón: «30 Campera Stone» con «XS 3 · S 4 · M 8…» (talles.ts).
+          movimientos: juntarTalles(p.movimientos).map((x) => ({ id: x.movs[0].id, tipo: x.movs[0].tipo, npdv: x.movs[0].npdv, cliente: x.movs[0].tipo === 'entrega' ? null : x.movs[0].cliente,
+            articulo: x.articulo, cantidad: x.cantidad, talles: x.talles, hecho: x.hecho })),
           encargos: p.encargos.map((e) => ({ id: e.id, llevar: e.llevar, retirar: e.retirar, desde: nombreBase(e.desde, r.bases), hacia: nombreBase(e.hacia, r.bases),
             horario: e.horario, contacto: e.contacto, notas: e.notas, urgente: e.urgente, quien: e.quien, quien_foto: e.quien_foto ?? null, estado: e.estado })),
         })),

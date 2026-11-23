@@ -400,7 +400,7 @@ function PantallaParada({ p, n, total, llega, sinUbicar, tarde, hecha, conFoto, 
           <h3>Qué hay que hacer</h3>
           <ul className="parada-que">
             {p.movimientos.map((m) => <li key={m.id} className={m.hecho ? 'hecho' : ''}><strong>{TIPO[m.tipo] ?? m.tipo}</strong>
-              <span>{m.articulo ? `${m.cantidad != null ? `${num.format(m.cantidad)} ` : ''}${m.articulo}` : 'Lo del pedido'}<small>PDV {m.npdv ?? '—'}{m.cliente ? ` · ${m.cliente}` : ''}</small></span></li>)}
+              <span>{m.articulo ? `${m.cantidad != null ? `${num.format(m.cantidad)} ` : ''}${m.articulo}` : 'Lo del pedido'}{m.talles && <small className="ruta-talles">Talles: {m.talles}</small>}<small>PDV {m.npdv ?? '—'}{m.cliente ? ` · ${m.cliente}` : ''}</small></span></li>)}
             {encs.flatMap((e) => [
               ...e.llevar.map((it, k) => <li key={`${e.id}l${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Dejar</strong><span>{item(it)}{e.desde ? <small>Lo buscás en {e.desde}</small> : null}</span></li>),
               ...e.retirar.map((it, k) => <li key={`${e.id}r${k}`} className={e.estado === 'hecho' ? 'hecho' : ''}><strong>Retirar</strong><span>{item(it)}{e.hacia ? <small>Va a {e.hacia}</small> : null}</span></li>),

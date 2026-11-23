@@ -23,7 +23,7 @@ import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDe
 import { textoPactada, type ModoHora } from '../../web/src/ruta';
 import { fotoVehiculo, guardarFotoVehiculo, guardarVehiculo, quitarFotoVehiculo, vehiculos } from './vehiculos';
 import { asignarChofer, colgarMovimiento, revisarColgados, guardarEnviado, guardarBultos, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
-import { editarProduccion, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
+import { editarProduccion, editarProduccionGrupo, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
 import { numeroPdv, vincularNegocio } from './vinculos';
@@ -1614,6 +1614,11 @@ api.get('/produccion/config', async (c) => c.json(await produccionConfig(c.env.D
 api.put('/produccion/config', async (c) => {
   requireRole(c.get('ctx'), 'admin');
   return c.json(await guardarProduccionConfig(c.env.DB, await c.req.json()));
+});
+// Un producto con talles, todos sus talles a la vez (talles.ts): { tareas: [...], campo, valor }. Va antes que «/:task».
+api.patch('/produccion/grupo', async (c) => {
+  const b = await c.req.json<{ tareas?: unknown; campo?: string; valor?: unknown }>();
+  return c.json(await editarProduccionGrupo(c.env, c.get('ctx'), b.tareas, String(b.campo ?? ''), b.valor));
 });
 api.patch('/produccion/:task', async (c) => {
   const b = await c.req.json<{ campo?: string; valor?: unknown }>();

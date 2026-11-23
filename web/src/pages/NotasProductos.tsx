@@ -9,7 +9,7 @@ import { FichaProducto, GRAVEDAD, useCambioNotas, type Gravedad } from '../notas
 // cargar una nota de un SKU que no está en producción ahora («Abrir un SKU»). Un clic abre la ficha del SKU.
 
 interface Fila {
-  sku: string; modelo: string | null; nombre: string | null; vigentes: number; total: number; gravedad: Gravedad | null; tipos: string[];
+  sku: string; modelo: string | null; raiz?: string | null; nombre: string | null; vigentes: number; total: number; gravedad: Gravedad | null; tipos: string[];
   ultima: string; texto: string | null; foto: string | null;
 }
 
@@ -73,7 +73,7 @@ export default function NotasProductosPage() {
                   {f.gravedad ? <span className={`tag ${GRAVEDAD[f.gravedad].cls}`}>{GRAVEDAD[f.gravedad].label}</span> : <span className="tag">Ya no aplica</span>}
                 </span>
                 <span className="small muted ellipsis" style={{ display: 'block' }}>
-                  <span className="num">{f.sku}</span>{f.modelo ? ' y sus colores' : ''} · {f.tipos.map((t) => datos!.tipos[t] ?? t).join(', ')}
+                  <span className="num">{f.sku}</span>{f.modelo ? ' y sus colores' : ''}{f.raiz ? ' y sus talles' : ''} · {f.tipos.map((t) => datos!.tipos[t] ?? t).join(', ')}
                 </span>
                 {f.texto && <span className="small ellipsis" style={{ display: 'block' }}>{f.texto}</span>}
               </span>

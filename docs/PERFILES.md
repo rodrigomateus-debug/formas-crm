@@ -103,7 +103,7 @@ Lo de ellas lo trata como suyo:
 - **Inicio**: elige «Mis números» o «Los de Mili», etc.
 - **Claude**: lo mismo (`list_users` dice a quiénes atiende).
 
-Carmen Donoso arranca con Comercial + Back office de Mili Formosa y Sonia Andersen (migración `0105_que_ve.sql`).
+Carmen Donoso arranca con Comercial + Back office de Mili Formosa y Sonia Andersen (migración `0106_que_ve.sql`).
 
 ### Con el equipo
 

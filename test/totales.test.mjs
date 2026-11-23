@@ -151,3 +151,39 @@ test('por facturar, sin IVA y al centavo: lo pendiente en Finnegans, los remitos
   assert.deepEqual(crm['EMPRE01|FCVTAELECT - 1'], { pedido: 'PEDVTASTP - 31277', factor: 1.245 });
   assert.deepEqual(crm['EMPRE01|FCVTAELECT - 7'], { pedido: null, factor: 1.21 });
 });
+
+test('lo cobrado de cada pedido sale de sus facturas, no de restar el saldo del total del pedido', () => {
+  // Una factura que no coincide con su pedido (aviso del 20/11/2026, PDV 31748): pedido de 432.361,80 sin IVA, factura de
+  // neto 357.323,80 sin cobrar nada. Restando el saldo (357.323,80) del total del pedido parecía que ya había pagado el 17 %.
+  const ped = (doc, neto, pend, total) => ({ DOCNROINT: doc, IMPORTEMONPRINCIPAL: neto, IMPORTEPENDIENTEDESTINO: pend, TOTAL: total, ESTADO: 'Activa' });
+  const resumen = T.resumenPedidos([[ped('PEDVTASTP - 31748', 432361.8, 0, 523157.78), ped('PEDVTAFP - 2500', 10000, 0, 12100), ped('PEDVTAFP - 2501', 1000, 1000, 1210)]]);
+  const fac = (doc, neto, total, desc) => ({ DOCNROINT: doc, IMPORTEMONPRINCIPAL: neto, TOTAL: total, DESCRIPCION: desc, ESTADO: 'Activa', IDENTIFICACIONEXTERNA: doc });
+  const docs = T.docsDeFacturas([{ emp: 'EMPRE01', filas: [
+    fac('FCVTAELECT - 20', 357323.8, 432361.8, '31748'),
+    fac('FACTVENANTMASIVO - 21', 5000, 6050, '2500'),   // el anticipo, cobrado entero: ya no está en el informe de saldos
+    fac('FCVTAELECT - 22', 5000, 6050, '2500'),          // la final, sin cobrar
+    fac('NCVEE - 23', -1000, -1210, '2500'),             // una nota de crédito sin aplicar: no es un pago
+  ] }]);
+  const asignadas = T.asignarFacturas(docs, new Map(), resumen);
+  const fila = (doc, importe) => ({ CUENTA: 'Deudores en Cta. Cte.', EMPRESA: 'FORMAS PUBLICITARIAS SA', IDENTIFICACIONEXTERNA: doc, DOCUMENTO: doc, DESCRIPCION: '', IMPORTEMONPPAL: importe });
+  const filas = T.filasDeSaldo([fila('FCVTAELECT - 0000020', 432361.8), fila('FCVTAELECT - 0000022', 6050), fila('NCVEE - 23', -1210),
+    fila('COBRANZAFORMAS - 1', -500)]);   // una cobranza sin aplicar no es de ninguna factura: no cuenta hasta que se aplica
+  assert.deepEqual(T.cobradoDe(resumen, docs, asignadas, filas), { 'PEDVTASTP - 31748': 0, 'PEDVTAFP - 2500': 5000, 'PEDVTAFP - 2501': 0 });
+});
+
+test('una factura sin IVA (FP DEMO) cuyos renglones suman una nada más que el total sigue siendo sin IVA', () => {
+  // FCVTAELECT - 2726 del PDV 31748 (20/11/2026): 3 renglones de 144.120,60 suman 432.361,80000000005 en coma flotante,
+  // contra un total de 432.361,80. El total/neto daba 0,9999999999999999 y se descartaba: el CRM le sacaba un 21 % de IVA
+  // al saldo y lo cobrado daba 253.699,90 en vez de 216.180,90 (el 50 % de adelanto).
+  const resumen = T.resumenPedidos([[], [1, 2, 3].map(() => ({ DOCNROINT: 'PEDVTASTP - 31748', IMPORTEMONPRINCIPAL: 144120.6, IMPORTEPENDIENTEDESTINO: 0, TOTAL: 523157.78, ESTADO: 'Activa' }))]);
+  const docs = T.docsDeFacturas([{ emp: '7', filas: [1, 2, 3].map(() => ({ DOCNROINT: 'FCVTAELECT - 2726', IMPORTEMONPRINCIPAL: 144120.6, TOTAL: 432361.8,
+    DESCRIPCION: '31748', ESTADO: 'Activa', IDENTIFICACIONEXTERNA: 'FC PEDVTASTP-00031748 1' })) }]);
+  assert.ok(docs.get('7|FCVTAELECT - 2726').neto > 432361.8, 'el neto, sumado en coma flotante, se pasa del total');
+  const asignadas = T.asignarFacturas(docs, new Map(), resumen);
+  assert.deepEqual(T.facturasParaCrm(docs, asignadas)['7|FCVTAELECT - 2726'], { pedido: 'PEDVTASTP - 31748', factor: 1 });
+  const filas = T.filasDeSaldo([{ CUENTA: 'Deudores en Cta. Cte.', EMPRESA: 'FP DEMO', IDENTIFICACIONEXTERNA: 'FC PEDVTASTP-00031748 1', DOCUMENTO: 'FCVTAELECT - 2726',
+    DESCRIPCION: '31748', IMPORTEMONPPAL: 216180.9 }]);
+  assert.deepEqual(T.cobradoDe(resumen, docs, asignadas, filas), { 'PEDVTASTP - 31748': 216180.9 });
+  assert.ok(Math.abs(T.factorTotalNeto(523157.78, 432361.8) - 1.21) < 1e-6);
+  assert.equal(T.factorTotalNeto(100, 0), null);
+});

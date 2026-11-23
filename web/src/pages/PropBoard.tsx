@@ -54,8 +54,9 @@ function OrderLine({ r }: { r: CrmRecord }) {
 // en rojo «· total» si no pagó nada; en ámbar «· parcial» si ya pagó algo (el anticipo), con cuánto al pasar el mouse
 // (aviso de Rodrigo del 13/11/2026); en verde, con un tilde, si está todo pago. Sin dato de Finnegans (o anulado), no se
 // muestra: no saber no es lo mismo que estar pago.
-// `corto`: en la lista de pedidos, «Debe $ 1,5 M» en lugar de «Saldo pendiente $ 1,5 M».
-export function Saldo({ r, corto }: { r: CrmRecord; corto?: boolean }) {
+// Dice «Debe $ 1,5 M · parcial», no «Saldo pendiente $ 1,5 M · parcial»: en la tarjeta no entraba y salía cortado (aviso de
+// Rodrigo del 20/11/2026). La explicación larga queda al pasar el mouse.
+export function Saldo({ r }: { r: CrmRecord }) {
   const p = r.props;
   const num = (v: unknown) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
   const saldo = num(p.saldo_pendiente_de_pago_mxn);
@@ -69,7 +70,7 @@ export function Saldo({ r, corto }: { r: CrmRecord; corto?: boolean }) {
     : `Saldo pendiente en Finnegans: ${fmtMoneyExact(saldo, 'ARS')} sin IVA.${detalle}`;
   return (
     <div className={`saldo debe${c?.parcial ? ' parcial' : ''}`} title={title}>
-      {corto ? 'Debe' : 'Saldo pendiente'} <span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
+      <span>Debe</span><span className="num">{fmtMoney(saldo)}</span>{c && <span className="saldo-tipo">· {c.parcial ? 'parcial' : 'total'}</span>}
     </div>
   );
 }

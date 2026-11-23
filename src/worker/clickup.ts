@@ -337,7 +337,9 @@ async function anulacionPorSalir(db: D1Database, recordId: number) {
 // Datos del PDV que necesita el pedido.
 // `servicios`: los artículos que son un servicio (envío, setup, un adicional: servicios.ts). No se producen ni se entregan,
 // así que no pesan en el estado del pedido (un adicional en «ingreso de pedido» no deja el PDV en «Entregado parcial»).
-export function readPdv(t: CuTask, servicios: Set<string> = new Set()) {
+// `grupos`: la prenda de cada talle (talles.ts, el grupo guardado en `produccion`): en el detalle («3 en el impresor») una
+// prenda en varios talles cuenta una vez por estado.
+export function readPdv(t: CuTask, servicios: Set<string> = new Set(), grupos: Map<string, string> = new Map()) {
   const f = fields(t);
   const text = t.text_content || t.description || '';
   const line = (k: string) => text.match(new RegExp(`${k}:\\s*(.+)`, 'i'))?.[1]?.trim() ?? '';
@@ -349,7 +351,13 @@ export function readPdv(t: CuTask, servicios: Set<string> = new Set()) {
   const items = reales.length ? reales : [t];
   const statuses = ANULADOS.includes((t.status?.status ?? '').toLowerCase()) ? ['anulado'] : items.map((x) => x.status?.status ?? '');
   const count = new Map<string, number>();
-  for (const st of statuses) count.set(st, (count.get(st) ?? 0) + 1);
+  const vistos = new Set<string>();
+  // El PDV anulado tiene un solo estado (el suyo); si no, uno por artículo.
+  statuses.forEach((st, i) => {
+    const g = statuses.length === items.length ? grupos.get(items[i].id) : undefined;
+    if (g) { if (vistos.has(`${g}|${st}`)) return; vistos.add(`${g}|${st}`); }
+    count.set(st, (count.get(st) ?? 0) + 1);
+  });
   return {
     npdv, unidad, url: t.url,
     pedido: pedidoDe(text, npdv),
@@ -459,7 +467,10 @@ export async function upsertPdv(env: Env, ctx: Ctx, t: CuTask, fin: string | nul
   const existing = await findOrder(db, pdv);
   // Los artículos que son un servicio no pesan en el estado (por el renglón del pedido o por el código del artículo).
   const servicios = t.subtasks?.length ? await articulosServicio(db, existing?.id ?? null, t.subtasks.map((s) => ({ task_id: s.id, code: leerArticulo(s).code }))) : new Set<string>();
-  if (servicios.size) pdv = readPdv(t, servicios);
+  // Los talles de cada prenda (talles.ts, guardados al leer las tareas): en el detalle cuenta una vez.
+  const grupos = t.subtasks?.length ? new Map((await db.prepare('SELECT task_id, grupo_talle FROM produccion WHERE pdv_task = ? AND grupo_talle IS NOT NULL').bind(t.id)
+    .all<{ task_id: string; grupo_talle: string }>()).results.map((r) => [r.task_id, r.grupo_talle])) : new Map<string, string>();
+  if (servicios.size || grupos.size) pdv = readPdv(t, servicios, grupos);
   let id: number;
   let result: 'creado' | 'actualizado' | 'igual' = 'igual';
   let entregadoAhora = false;   // pasó a «Entregado» en esta lectura: va la tarea post-entrega

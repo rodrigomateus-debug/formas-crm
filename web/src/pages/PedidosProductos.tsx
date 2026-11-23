@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { http, useAsync, useMeta, formatValue, type CrmRecord } from '../lib';
-import { EtapaPedido, OcLinks, PersonaProd, type OcRef, type PersonaProduccion } from '../components';
+import { EtapaPedido, OcLinks, PersonaProd, TallesProducto, type OcRef, type PersonaProduccion } from '../components';
 import { dia, Flecha, FotoProducto, hoyIso } from './Produccion';
 
 // Producción en la lista y el tablero de Pedidos (pedido de Rodrigo del 17/11/2026): el pantallazo de la vendedora, como
@@ -15,6 +15,7 @@ export interface ArticuloPedido {
   asignados: PersonaProduccion[]; entrega_real: string | null;
   entregado?: number; vendido?: number | null;   // según los remitos, en los pedidos con entregas a medias
   oc?: OcRef[];   // sus órdenes de compra de Finnegans, con link (ordenescompra.ts)
+  talles?: Array<{ talle: string; cantidad: number | null }>;   // una prenda en varios talles es un producto (talles.ts): sus talles
 }
 export interface ProduccionPedido { asignados: PersonaProduccion[]; listos: number; total: number; entrega_real: string | null; articulos: ArticuloPedido[]; ocs?: OcRef[] }
 
@@ -247,6 +248,8 @@ export function FilasProductos({ p, r, columns, sel, onAbrir }: { p: ProduccionP
               <span className="ped-art-n ellipsis" title={a.nombre}>{a.nombre}</span>
               {a.cantidad != null && <span className="muted small num ped-cant">{a.cantidad.toLocaleString('es-AR')} u.</span>}
             </span>
+            {/* Los talles, abajo del nombre: con muchos (un pantalón en 14) el nombre se sigue leyendo. */}
+            {a.talles && <div className="ped-art-talles"><TallesProducto talles={a.talles} /></div>}
           </td>
           {columns.map((col) => <td key={col} className={['__produccion', '__responsable', '__oc'].includes(col) ? 'ped-prod' : undefined}>{celda(a, col)}</td>)}
         </tr>
@@ -281,6 +284,7 @@ export function ProductosTarjeta({ p, r, abierto, onToggle }: { p?: ProduccionPe
                 <FotoProducto url={a.foto} nombre={a.nombre} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="prod-hijo-t" title={a.nombre}>{a.nombre}</div>
+                  {a.talles && <TallesProducto talles={a.talles} />}
                   <div className="small muted ped-hijo-sub">
                     {a.cantidad != null && <span className="num">{a.cantidad.toLocaleString('es-AR')} u.</span>}
                     <Entregado a={a} />

@@ -3,6 +3,8 @@ import { HttpError, now } from './env';
 import { conPerfilSql, tienePerfil, visibleSql } from './alcance';
 import { STAGE } from './clickup';
 import { bajarArchivo, driveConfig, subirArchivo } from './drive';
+import { nombreSinTalle, raizTalle, TALLES_VERSION } from './talles';
+import { raizDeSku } from './tallesdb';
 
 // Notas de producto (pedido de Rodrigo del 16/11/2026). Producción documenta lo que va pasando con un producto de
 // importador («la serigrafía se sale», «el bordado tapa el bolsillo», «la tinta se borra», «es de mala calidad») y queda
@@ -12,6 +14,8 @@ import { bajarArchivo, driveConfig, subirArchivo } from './drive';
 // - Los SKU genéricos (`_GE_`: «PICPS_GE_6000», «PS_GE_2000») no llevan notas: el mismo código es vasos, naipes y paletas.
 // - Una nota es del SKU exacto (ese color) o, si se marca, de todo el modelo: el SKU sin la variante del final
 //   («IMP_P18.030» de «IMP_P18.030.03»), y vale para cualquier SKU que empiece así seguido de un separador.
+// - Una prenda con talles (talles.ts) es un producto: la nota vale siempre para todos sus talles (pedido de Rodrigo del
+//   20/11/2026). Guarda la raíz de su SKU (el SKU sin el talle) y vale para cualquier SKU con la misma raíz.
 
 export const TIPOS: Record<string, string> = {
   serigrafia: 'Serigrafía', bordado: 'Bordado', laser: 'Grabado láser', tampografia: 'Tampografía', sublimacion: 'Sublimación',
@@ -43,22 +47,29 @@ export function modeloDe(sku: string): string | null {
 // Puede escribir notas: Producción y los administradores (no los de solo lectura).
 export const puedeEscribirNotas = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || tienePerfil(u, 'produccion'));
 
-// La nota `n` vale para el SKU `s` (una expresión SQL): el mismo SKU o, si es del modelo, uno que empieza con el modelo y
-// sigue con un separador.
-const APLICA = (n: string, s: string) => `(${n}.sku = ${s} OR (${n}.modelo IS NOT NULL AND substr(${s}, 1, length(${n}.modelo)) = ${n}.modelo
-  AND substr(${s}, length(${n}.modelo) + 1, 1) IN ('.', '-', '_', ' ')))`;
+// La nota `n` vale para el SKU `s` (una expresión SQL): el mismo SKU, uno que empieza con su modelo y sigue con un
+// separador (todos los colores) o, si `r` es la raíz de ese SKU (talles.ts), otro talle del mismo producto.
+const APLICA = (n: string, s: string, r?: string) => `(${n}.sku = ${s} OR (${n}.modelo IS NOT NULL AND substr(${s}, 1, length(${n}.modelo)) = ${n}.modelo
+  AND substr(${s}, length(${n}.modelo) + 1, 1) IN ('.', '-', '_', ' '))${r ? ` OR (${n}.raiz IS NOT NULL AND ${n}.raiz = ${r})` : ''})`;
 const VIGENTE = (n: string) => `${n}.borrada_at IS NULL AND ${n}.archivada_at IS NULL`;
 
 // ---------- El resumen (para el aviso en Producción y en los productos del pedido) ----------
 
 export interface ResumenNotas { n: number; gravedad: Gravedad; tipos: string[]; ultima: string }
-export async function resumenNotas(db: D1Database, skus: Array<string | null | undefined>) {
+// Cada SKU puede venir con su raíz (talles.ts), si es un talle: así trae también las notas escritas en los otros talles.
+export async function resumenNotas(db: D1Database, skus: Array<string | null | undefined | { sku: string | null | undefined; raiz?: string | null }>) {
   const out = new Map<string, ResumenNotas>();
-  const lista = [...new Set(skus.filter(admiteNotas).map(skuDe))];
-  if (!lista.length) return out;
-  const { results } = await db.prepare(`SELECT j.value AS sku, n.gravedad, n.tipo, n.texto FROM json_each(?1) j
-      JOIN producto_notas n ON ${VIGENTE('n')} AND ${APLICA('n', 'j.value')} ORDER BY n.id`)
-    .bind(JSON.stringify(lista)).all<{ sku: string; gravedad: Gravedad; tipo: string; texto: string }>();
+  const pares = new Map<string, string | null>();
+  for (const x of skus) {
+    const s = typeof x === 'object' && x ? x.sku : x;
+    if (!admiteNotas(s)) continue;
+    const r = typeof x === 'object' && x ? x.raiz ?? null : null;
+    if (!pares.get(skuDe(s))) pares.set(skuDe(s), r);
+  }
+  if (!pares.size) return out;
+  const { results } = await db.prepare(`SELECT json_extract(j.value, '$[0]') AS sku, n.gravedad, n.tipo, n.texto FROM json_each(?1) j
+      JOIN producto_notas n ON ${VIGENTE('n')} AND ${APLICA('n', "json_extract(j.value, '$[0]')", "json_extract(j.value, '$[1]')")} ORDER BY n.id`)
+    .bind(JSON.stringify([...pares])).all<{ sku: string; gravedad: Gravedad; tipo: string; texto: string }>();
   for (const r of results) {
     const a = out.get(r.sku) ?? { n: 0, gravedad: 'info' as Gravedad, tipos: [], ultima: '' };
     a.n++;
@@ -87,7 +98,7 @@ export async function skusDeArticulos(db: D1Database, arts: Array<{ task_id: str
 // ---------- La ficha del SKU ----------
 
 export interface NotaProducto {
-  id: number; sku: string; modelo: string | null; producto: string | null; tipo: string; gravedad: Gravedad; texto: string;
+  id: number; sku: string; modelo: string | null; raiz: string | null; producto: string | null; tipo: string; gravedad: Gravedad; texto: string;
   record_id: number | null; pedido: string | null; task_id: string | null; fotos: number[]; user_id: number | null; autor: string | null;
   created_at: string; updated_at: string | null; archivada_at: string | null; archivada_por: number | null; puede_editar: boolean;
 }
@@ -102,21 +113,35 @@ function validarSku(sku: string) {
 
 // Las notas que valen para un SKU (las de ese SKU y las de su modelo), con las archivadas al final. El pedido donde pasó
 // se muestra solo si quien mira lo ve (una vendedora no ve los pedidos de otra).
-async function notasDe(db: D1Database, user: User, sku: string): Promise<NotaProducto[]> {
-  const { results } = await db.prepare(`SELECT n.id, n.sku, n.modelo, n.producto, n.tipo, n.gravedad, n.texto, n.task_id,
+async function notasDe(db: D1Database, user: User, sku: string, raiz?: string | null): Promise<NotaProducto[]> {
+  if (raiz === undefined) raiz = await raizDeSku(db, sku);
+  const { results } = await db.prepare(`SELECT n.id, n.sku, n.modelo, n.raiz, n.producto, n.tipo, n.gravedad, n.texto, n.task_id,
         (SELECT json_group_array(f.id) FROM (SELECT id FROM producto_nota_fotos WHERE nota_id = n.id AND borrada_at IS NULL ORDER BY id) f) AS fotos, n.user_id, u.name AS autor, n.created_at, n.updated_at, n.archivada_at, n.archivada_por,
         CASE WHEN r.id IS NOT NULL AND ${visibleSql('r', user)} THEN r.id END AS record_id,
         CASE WHEN r.id IS NOT NULL AND ${visibleSql('r', user)} THEN r.name END AS pedido
       FROM producto_notas n LEFT JOIN users u ON u.id = n.user_id LEFT JOIN records r ON r.id = n.record_id AND r.archived = 0
-      WHERE n.borrada_at IS NULL AND ${APLICA('n', '?1')}
+      WHERE n.borrada_at IS NULL AND ${APLICA('n', '?1', '?2')}
       ORDER BY n.archivada_at IS NOT NULL, CASE n.gravedad WHEN 'no' THEN 0 WHEN 'ojo' THEN 1 ELSE 2 END, n.created_at DESC`)
-    .bind(sku).all<Omit<NotaProducto, 'fotos' | 'puede_editar'> & { fotos: string | null }>();
+    .bind(sku, raiz).all<Omit<NotaProducto, 'fotos' | 'puede_editar'> & { fotos: string | null }>();
   return results.map((n) => ({ ...n, fotos: JSON.parse(n.fotos ?? '[]') as number[], puede_editar: puedeEscribirNotas(user) && (user.role === 'admin' || n.user_id === user.id) }));
+}
+
+// Los SKU de los otros talles del mismo producto que se vendieron (los de la misma raíz). Se buscan los que empiezan como la
+// raíz (hasta donde va el talle) y tienen talle, y se quedan los que dan esa raíz.
+async function skusDeRaiz(db: D1Database, sku: string, raiz: string) {
+  const prefijo = raiz.split(/[·*]/)[0];
+  const { results } = await db.prepare(`SELECT DISTINCT UPPER(TRIM(code)) AS code, talle, grupo_talle FROM line_items
+      WHERE talle IS NOT NULL AND substr(UPPER(TRIM(code)), 1, ?2) = ?1 LIMIT 500`).bind(prefijo, prefijo.length)
+    .all<{ code: string; talle: string; grupo_talle: string | null }>();
+  return [...new Set([sku, ...results.filter((r) => raizTalle(r.code, r.talle, r.grupo_talle) === raiz).map((r) => r.code)])];
 }
 
 export async function fichaProducto(env: Env, user: User, skuCrudo: string) {
   const db = env.DB;
   const sku = validarSku(skuCrudo);
+  // Una prenda con talles: las notas y dónde se vendió, de todos sus talles (los SKU con la misma raíz).
+  const raiz = await raizDeSku(db, sku);
+  const skus = raiz ? await skusDeRaiz(db, sku, raiz) : [sku];
   const [ficha, ventas, total, notas, drive] = await Promise.all([
     // El nombre y la foto: la ficha de Finnegans, si no la foto del SKU en las cotizaciones del STP y el nombre de algún
     // renglón o artículo de ClickUp.
@@ -131,19 +156,19 @@ export async function fichaProducto(env: Env, user: User, skuCrudo: string) {
     db.prepare(`SELECT r.id, r.name, r.created_at, json_extract(r.props, '$.hs_pipeline_stage') AS etapa, SUM(li.quantity) AS cantidad,
         (SELECT c.name FROM associations x JOIN records c ON c.id = x.to_id AND c.archived = 0 WHERE x.from_id = r.id AND x.to_type = 'company'
           ORDER BY x.is_primary DESC, x.created_at LIMIT 1) AS empresa,
-        (SELECT COUNT(*) FROM producto_notas n WHERE n.record_id = r.id AND n.borrada_at IS NULL AND ${APLICA('n', '?1')}) AS notas
+        (SELECT COUNT(*) FROM producto_notas n WHERE n.record_id = r.id AND n.borrada_at IS NULL AND ${APLICA('n', '?1', '?3')}) AS notas
       FROM line_items li JOIN records r ON r.id = li.record_id AND r.object_type = 'order' AND r.archived = 0
-      WHERE UPPER(TRIM(li.code)) = ?1 AND ${visibleSql('r', user)}
-      GROUP BY r.id ORDER BY r.created_at DESC LIMIT 100`).bind(sku)
+      WHERE UPPER(TRIM(li.code)) IN (SELECT value FROM json_each(?2)) AND ${visibleSql('r', user)}
+      GROUP BY r.id ORDER BY r.created_at DESC LIMIT 100`).bind(sku, JSON.stringify(skus), raiz)
       .all<{ id: number; name: string; created_at: string; etapa: string | null; cantidad: number | null; empresa: string | null; notas: number }>(),
     db.prepare(`SELECT COUNT(DISTINCT li.record_id) AS n, SUM(li.quantity) AS unidades FROM line_items li
-      JOIN records r ON r.id = li.record_id AND r.object_type = 'order' AND r.archived = 0 WHERE UPPER(TRIM(li.code)) = ?`).bind(sku)
+      JOIN records r ON r.id = li.record_id AND r.object_type = 'order' AND r.archived = 0 WHERE UPPER(TRIM(li.code)) IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(skus))
       .first<{ n: number; unidades: number | null }>(),
-    notasDe(db, user, sku),
+    notasDe(db, user, sku, raiz),
     driveConfig(env),
   ]);
   return {
-    sku, modelo: modeloDe(sku), nombre: ficha?.nombre_fin ?? ficha?.nombre_li ?? ficha?.nombre_nota ?? null, foto: ficha?.foto_fin ?? ficha?.foto_stp ?? null,
+    sku, modelo: modeloDe(sku), raiz, talles: skus.length, nombre: ficha?.nombre_fin ?? ficha?.nombre_li ?? ficha?.nombre_nota ?? null, foto: ficha?.foto_fin ?? ficha?.foto_stp ?? null,
     notas, ventas: ventas.results, ventas_total: total?.n ?? 0, unidades_total: total?.unidades ?? 0,
     puede_escribir: puedeEscribirNotas(user), fotos: !!(drive.carpeta && drive.usuario && env.GOOGLE_SA_JSON), tipos: TIPOS,
   };
@@ -152,22 +177,25 @@ export async function fichaProducto(env: Env, user: User, skuCrudo: string) {
 // La lista de los productos con notas (pantalla «Notas de productos»): un renglón por SKU con lo vigente.
 export async function productosConNotas(db: D1Database, q: { buscar?: string; tipo?: string; gravedad?: string; archivadas?: boolean }) {
   const buscar = String(q.buscar ?? '').trim().toLowerCase();
-  const { results } = await db.prepare(`SELECT n.sku, MAX(n.modelo) AS modelo, MAX(n.producto) AS producto,
-        SUM(n.archivada_at IS NULL) AS vigentes, COUNT(*) AS total,
-        MAX(CASE WHEN n.archivada_at IS NULL THEN CASE n.gravedad WHEN 'no' THEN 2 WHEN 'ojo' THEN 1 ELSE 0 END END) AS peso,
-        json_group_array(DISTINCT n.tipo) AS tipos, MAX(n.created_at) AS ultima,
-        (SELECT x.texto FROM producto_notas x WHERE x.sku = n.sku AND x.borrada_at IS NULL ORDER BY x.archivada_at IS NOT NULL, x.created_at DESC LIMIT 1) AS texto,
-        (SELECT image_url FROM products p WHERE UPPER(TRIM(p.code)) = n.sku AND p.image_url IS NOT NULL LIMIT 1) AS foto,
-        (SELECT name FROM products p WHERE UPPER(TRIM(p.code)) = n.sku AND p.name IS NOT NULL LIMIT 1) AS nombre
-      FROM producto_notas n WHERE n.borrada_at IS NULL
-        AND (?1 = '' OR LOWER(n.sku) LIKE '%' || ?1 || '%' OR LOWER(COALESCE(n.producto, '')) LIKE '%' || ?1 || '%' OR LOWER(n.texto) LIKE '%' || ?1 || '%')
-        AND (?2 = '' OR n.tipo = ?2) AND (?3 = '' OR n.gravedad = ?3) AND (?4 = 1 OR n.archivada_at IS NULL)
-      GROUP BY n.sku ORDER BY peso DESC, ultima DESC LIMIT 500`)
+  // Una fila por producto: las notas de los talles de una prenda, juntas (por su raíz).
+  const { results } = await db.prepare(`SELECT g.*,
+        (SELECT x.texto FROM producto_notas x WHERE COALESCE(x.raiz, x.sku) = g.clave AND x.borrada_at IS NULL ORDER BY x.archivada_at IS NOT NULL, x.created_at DESC LIMIT 1) AS texto,
+        (SELECT image_url FROM products p WHERE UPPER(TRIM(p.code)) = g.sku AND p.image_url IS NOT NULL LIMIT 1) AS foto,
+        (SELECT name FROM products p WHERE UPPER(TRIM(p.code)) = g.sku AND p.name IS NOT NULL LIMIT 1) AS nombre
+      FROM (SELECT COALESCE(n.raiz, n.sku) AS clave, MAX(n.sku) AS sku, MAX(n.modelo) AS modelo, MAX(n.raiz) AS raiz, MAX(n.producto) AS producto,
+          SUM(n.archivada_at IS NULL) AS vigentes, COUNT(*) AS total,
+          MAX(CASE WHEN n.archivada_at IS NULL THEN CASE n.gravedad WHEN 'no' THEN 2 WHEN 'ojo' THEN 1 ELSE 0 END END) AS peso,
+          json_group_array(DISTINCT n.tipo) AS tipos, MAX(n.created_at) AS ultima
+        FROM producto_notas n WHERE n.borrada_at IS NULL
+          AND (?1 = '' OR LOWER(n.sku) LIKE '%' || ?1 || '%' OR LOWER(COALESCE(n.producto, '')) LIKE '%' || ?1 || '%' OR LOWER(n.texto) LIKE '%' || ?1 || '%')
+          AND (?2 = '' OR n.tipo = ?2) AND (?3 = '' OR n.gravedad = ?3) AND (?4 = 1 OR n.archivada_at IS NULL)
+        GROUP BY COALESCE(n.raiz, n.sku)) g
+      ORDER BY g.peso DESC, g.ultima DESC LIMIT 500`)
     .bind(buscar, q.tipo && TIPOS[q.tipo] ? q.tipo : '', q.gravedad && (GRAVEDADES as readonly string[]).includes(q.gravedad) ? q.gravedad : '', q.archivadas ? 1 : 0)
-    .all<{ sku: string; modelo: string | null; producto: string | null; vigentes: number; total: number; peso: number | null; tipos: string; ultima: string;
+    .all<{ clave: string; sku: string; modelo: string | null; raiz: string | null; producto: string | null; vigentes: number; total: number; peso: number | null; tipos: string; ultima: string;
       texto: string | null; foto: string | null; nombre: string | null }>();
   return {
-    productos: results.map(({ peso, tipos, ...r }) => ({
+    productos: results.map(({ peso, tipos, clave: _clave, ...r }) => ({
       ...r, nombre: r.nombre ?? r.producto, tipos: JSON.parse(tipos) as string[], gravedad: peso == null ? null : GRAVEDADES[peso],
     })),
     tipos: TIPOS,
@@ -236,13 +264,15 @@ export async function crearNotaProducto(env: Env, ctx: Ctx, skuCrudo: string, d:
   const fotos = soloFotos(fotosCrudas);
   await validarFotos(env, fotos);
   const producto = String(d.producto ?? '').trim().slice(0, 200) || null;
-  const row = await db.prepare(`INSERT INTO producto_notas (sku, modelo, producto, tipo, gravedad, texto, record_id, task_id, user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
-    .bind(sku, modelo, producto, v.tipo, v.gravedad, v.texto, recordId, String(d.task_id ?? '').trim() || null, ctx.user.id)
+  // Una prenda con talles: la nota vale para todos sus talles (la raíz de su SKU, talles.ts).
+  const raiz = await raizDeSku(db, sku);
+  const row = await db.prepare(`INSERT INTO producto_notas (sku, modelo, raiz, talles_v, producto, tipo, gravedad, texto, record_id, task_id, user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`)
+    .bind(sku, modelo, raiz, TALLES_VERSION, producto, v.tipo, v.gravedad, v.texto, recordId, String(d.task_id ?? '').trim() || null, ctx.user.id)
     .first<{ id: number }>();
   // Si Drive falla a mitad de camino, la nota queda con las fotos que llegaron a subir (y se pueden agregar las otras).
   await guardarFotos(env, row!.id, sku, fotos, ctx.user.id);
-  return (await notasDe(db, ctx.user, sku)).find((n) => n.id === row!.id)!;
+  return (await notasDe(db, ctx.user, sku, raiz)).find((n) => n.id === row!.id)!;
 }
 
 async function notaPorId(db: D1Database, id: number) {
@@ -345,16 +375,28 @@ export async function avisarNotasDelPedido(db: D1Database, recordId: number) {
   const r = await db.prepare(`SELECT owner_id, json_extract(props, '$.hs_pipeline_stage') AS etapa FROM records WHERE id = ? AND object_type = 'order' AND archived = 0`)
     .bind(recordId).first<{ owner_id: number | null; etapa: string | null }>();
   if (!r || [STAGE.entregado, STAGE.anulado].includes(r.etapa ?? '')) return 0;
-  const { results } = await db.prepare(`SELECT s.sku, s.nombre, n.gravedad, n.texto FROM
-        (SELECT UPPER(TRIM(li.code)) AS sku, MAX(COALESCE(p.name, li.name, li.description)) AS nombre FROM line_items li LEFT JOIN products p ON p.code = li.code
-          WHERE li.record_id = ?1 AND TRIM(COALESCE(li.code, '')) != '' GROUP BY 1) s
-      JOIN producto_notas n ON ${VIGENTE('n')} AND n.gravedad IN ('ojo', 'no') AND COALESCE(n.record_id, 0) != ?1 AND ${APLICA('n', 's.sku')}
-      ORDER BY s.sku, CASE n.gravedad WHEN 'no' THEN 0 ELSE 1 END, n.created_at DESC`)
-    .bind(recordId).all<{ sku: string; nombre: string | null; gravedad: Gravedad; texto: string }>();
+  // Un aviso por producto: los talles de una prenda (talles.ts) van juntos, con el nombre sin el talle y el SKU de uno
+  // de ellos (siempre el mismo, así no se repite el aviso).
+  const lineas = (await db.prepare(`SELECT UPPER(TRIM(li.code)) AS sku, COALESCE(p.name, li.name, li.description) AS nombre, li.talle, li.grupo_talle
+      FROM line_items li LEFT JOIN products p ON p.code = li.code WHERE li.record_id = ? AND TRIM(COALESCE(li.code, '')) != ''`).bind(recordId)
+    .all<{ sku: string; nombre: string | null; talle: string | null; grupo_talle: string | null }>()).results;
+  const productos = new Map<string, { sku: string; nombre: string | null; raiz: string | null }>();
+  for (const l of lineas) {
+    if (esGenerico(l.sku)) continue;
+    const raiz = raizTalle(l.sku, l.talle, l.grupo_talle);
+    const k = raiz ?? l.sku, antes = productos.get(k);
+    if (!antes || l.sku < antes.sku) productos.set(k, { sku: l.sku, nombre: raiz && l.nombre ? nombreSinTalle(l.nombre) : l.nombre, raiz });
+  }
+  if (!productos.size) return 0;
+  const nombreDe = new Map([...productos.values()].map((x) => [x.sku, x.nombre]));
+  const { results } = await db.prepare(`SELECT json_extract(j.value, '$[0]') AS sku, n.gravedad, n.texto FROM json_each(?2) j
+      JOIN producto_notas n ON ${VIGENTE('n')} AND n.gravedad IN ('ojo', 'no') AND COALESCE(n.record_id, 0) != ?1
+        AND ${APLICA('n', "json_extract(j.value, '$[0]')", "json_extract(j.value, '$[1]')")}
+      ORDER BY 1, CASE n.gravedad WHEN 'no' THEN 0 ELSE 1 END, n.created_at DESC`)
+    .bind(recordId, JSON.stringify([...productos.values()].map((x) => [x.sku, x.raiz]))).all<{ sku: string; gravedad: Gravedad; texto: string }>();
   const porSku = new Map<string, { nombre: string | null; gravedad: Gravedad; textos: string[] }>();
   for (const x of results) {
-    if (esGenerico(x.sku)) continue;
-    const a = porSku.get(x.sku) ?? { nombre: x.nombre, gravedad: x.gravedad, textos: [] };
+    const a = porSku.get(x.sku) ?? { nombre: nombreDe.get(x.sku) ?? null, gravedad: x.gravedad, textos: [] };
     a.textos.push(x.texto);
     porSku.set(x.sku, a);
   }

@@ -26,7 +26,8 @@ async function unidadDelNegocio(db: D1Database, pipelineId: string | null) {
   const p = await db.prepare('SELECT team_id FROM pipelines WHERE id = ?').bind(pipelineId).first<{ team_id: number | null }>();
   return Object.values(UNIDADES).find((u) => u.team === p?.team_id)?.pedido ?? null;
 }
-// Un pedido de FP DEMO (pruebas, pedidosfin.ts) se puede asociar con un negocio de cualquier unidad.
+// Un pedido viejo con unidad «FP DEMO» (los que entraron aparte del 13 al 20/11/2026, pedidosfin.ts) se puede asociar con
+// un negocio de cualquier unidad.
 const esDemo = (unidad: unknown) => String(unidad ?? '').toUpperCase() === 'FP DEMO';
 const mismaUnidad = (unidades: string[] | null, unidad: unknown) => !unidades || !unidad || esDemo(unidad) || unidades.includes(String(unidad).toUpperCase());
 

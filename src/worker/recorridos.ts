@@ -7,7 +7,7 @@ import { serviceToken } from './google';
 import {
   SELECT_ENC, aEncargo, actualizarLugares, anfitrion, avisarEncargo, claveCalle, claveEncargo, claveParada, cronogramaConfig, diaSemana, direccionLugar, encargosEntre,
   esDeLaParada, esDia, hoyBsAs, infoLugar, claveDireccion, llega, ubicar, lugaresPara, lugaresPorId, mismaCalle, mismoSitio, movimientos, parecidas, puedeEditarCronograma, reindexarLugares,
-  sumarDias, unicoLugar, APARTE, type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio, type SitioJuntar,
+  sumarDias, unicoLugar, juntarTalles, APARTE, type EncargoDia, type EncargoFila, type EstadoEnc, type ItemEnc, type Lugar, type Sitio, type SitioJuntar,
 } from './cronograma';
 import { direccionesDePedidos, lugar as lugarGoogle } from './direcciones';
 import { esTipo } from './destinos';
@@ -967,8 +967,9 @@ export async function remitoEgreso(env: Env, ctx: Ctx, b: { fecha?: unknown; cla
   const db = env.DB;
   const egresos = (await movimientos(db, b.fecha, b.fecha)).movs.filter((m) => m.tipo === 'egreso' && claveParada(m) === clave);
   if (!egresos.length) throw new HttpError(404, 'Ese día no hay egresos para ese impresor.');
-  // Con lo que realmente se manda, si se anotó una demasía (cronograma_enviados).
-  const items: ItemEnc[] = egresos.map((m) => ({ cant: m.enviado?.cantidad ?? m.cantidad, que: m.articulo || 'Artículo', pdv: m.npdv }));
+  // Con lo que realmente se manda, si se anotó una demasía (cronograma_enviados). Una prenda en varios talles va en un
+  // renglón, con el desglose: «30 · Campera Stone - Negro (XS 3 · S 4 · M 8 · L 12 · XL 3)» (talles.ts).
+  const items: ItemEnc[] = juntarTalles(egresos).map((x) => ({ cant: x.cantidad, que: `${x.articulo || 'Artículo'}${x.talles ? ` (${x.talles})` : ''}`, pdv: x.movs[0].npdv }));
   const destino = egresos[0].lugar ?? 'Impresor';
   // La dirección: la de la ficha del impresor o, si no tiene, la de la libreta si hay un lugar que se llama igual.
   const emp = egresos[0].company_id ? await db.prepare("SELECT json_extract(props, '$.address') AS address, json_extract(props, '$.city') AS city FROM records WHERE id = ?")

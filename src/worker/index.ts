@@ -19,6 +19,7 @@ import { revisarRemitos, syncFacturas } from './finnegans';
 import { revisarColgados } from './cronograma';
 import { sincronizarOrdenesCompra } from './ordenescompra';
 import { reatarPendientes } from './productos';
+import { completarTalles } from './tallesdb';
 import { refrescarFce } from './facturar';
 import { StageError } from './pipelines';
 import { leerPendientes } from './remitos';
@@ -160,6 +161,8 @@ export default {
         }
         else await safe(() => (turno === 0 ? syncFacturas(env, { barrido }) : syncClickup(env)));
         if (turno === 1) await safe(() => refrescarFce(env));   // la lista de empresas grandes de ARCA, una vez por día
+        // Los talles de lo que todavía no se calculó o se calculó con reglas viejas (tallesdb.ts; solo la base de datos).
+        await safe(() => completarTalles(env.DB));
       }
     })());
   },

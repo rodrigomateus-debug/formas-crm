@@ -134,13 +134,22 @@ Mercado Libre no cuentan. Cada hora se recalculan los pedidos de los últimos 12
 cobranzas sin aplicar (un pago que todavía no se imputó a ninguna factura) son del cliente, no de un pedido. Si un
 informe falla, no se manda nada. Es solo lectura: en Finnegans no se escribe.
 
-**Total o parcial** (pedido de Rodrigo del 13/11/2026: que el saldo aclare si ya pagó algo, el anticipo). Lo pagado es el
-total del pedido menos el saldo, los dos sin IVA de Finnegans (`cobroPedido` en `web/src/lib.tsx`). En la tarjeta del
-tablero: «Saldo pendiente $ 3,5 M · total» en rojo si no pagó nada, «· parcial» en ámbar si ya pagó algo (al pasar el
-mouse, cuánto y qué porcentaje), «Pagado» en verde si no queda nada. En la vista previa: «$ 1,8 M · parcial: ya pagó
-$ 1,7 M (49 %)». Una diferencia de menos del 1 % del total cuenta como que no pagó nada (redondeos, percepciones). Sin
-total del pedido no se puede saber y se muestra solo el saldo. Un pago que todavía no se imputó a ninguna factura
-(cobranza sin aplicar) no baja el saldo del pedido, así que hasta que se aplica el pedido sigue diciendo «total».
+**Total o parcial** (pedido de Rodrigo del 13/11/2026: que el saldo aclare si ya pagó algo, el anticipo). Lo pagado es lo
+**cobrado de sus facturas** («Cobrado», `importe_cobrado`): de cada comprobante del pedido, su neto menos lo que falta
+cobrar de él (el saldo del informe, pasado a sin IVA con el total/neto de ese comprobante); las notas de crédito restan.
+Lo calcula `scripts/pedidos-totales.mjs` (`cobradoDe`) con los mismos comprobantes y saldos, y el CRM lo guarda como el
+por facturar: los pedidos que no vienen en la corrida conservan el último. El porcentaje es sobre lo cobrado más el saldo,
+todo sin IVA (`cobroPedido` en `web/src/lib.tsx`; el cronograma usa lo mismo). En la tarjeta del tablero: «Saldo
+pendiente $ 3,5 M · total» en rojo si no pagó nada, «· parcial» en ámbar si ya pagó algo (al pasar el mouse, cuánto y qué
+porcentaje), «Pagado» en verde si no queda nada. En la vista previa: «$ 1,8 M · parcial: ya pagó $ 1,7 M (49 %)». Menos
+del 1 % cuenta como que no pagó nada (redondeos, percepciones). Un pago que todavía no se imputó a ninguna factura
+(cobranza sin aplicar) no es de ningún comprobante, así que hasta que se aplica el pedido sigue diciendo «total».
+
+Antes lo pagado era el total del pedido menos el saldo, y si la factura no coincidía con el pedido la diferencia parecía un
+pago (aviso de Rodrigo del 20/11/2026: el PDV 31748, de $ 432.361,80, figuraba con «ya pagó $ 75.038 (17 %)» cuando su
+factura de FP DEMO, sin IVA, se debía entera: el CRM le había sacado un IVA que no tenía, $ 432.361,80 / 1,21 =
+$ 357.323,80). Esa resta queda solo para los pedidos a los que
+todavía no les llegó lo cobrado; sin eso ni total del pedido, se muestra solo el saldo.
 
 ## Los productos de cada pedido en la lista
 
@@ -391,10 +400,17 @@ Finnegans.
   anulación está por salir, la sincronización no le cambia la etapa al pedido. **En Finnegans hay que anularlo a mano**:
   la API de Finnegans no tiene «anular» para el pedido de venta (solo `DELETE pedidoVenta/{codigo}`, «Elimina la
   entidad», sin probar). Prueba: `test/pedidos.test.mjs`.
-- **FP DEMO.** Los pedidos de la empresa de pruebas de Finnegans también entran, para probar el circuito entero. Usan
-  los mismos tipos de documento y una numeración que se pisa con la de Formas, así que van aparte: unidad «FP DEMO»,
-  «DEMO» en el nombre y el pedido de Finnegans como «DEMO PEDVTASTP - 10741». No entran en los totales, las facturas ni
-  los filtros por unidad de los pedidos de verdad; sí se pueden asociar a un negocio por su número.
+- **FP DEMO.** Es la empresa de Finnegans (código `7`) donde se factura lo que no lleva IVA: el mismo negocio que Formas
+  Publicitarias (Rodrigo, 20/11/2026: «fp demo y formas es lo mismo, solo cambia que en demo va lo que no lleva IVA»).
+  Comparte la numeración de pedidos y de facturas: desde 2023 ningún número se repite entre las dos (revisado en
+  Finnegans el 20/11/2026: 3.449 pedidos de Formas, 332 de FP DEMO, 0 en las dos). Sus pedidos entran como los de Formas,
+  con la unidad de su tipo de documento, y sus totales, facturas, saldos y cobros van al mismo pedido. Sus facturas van
+  sin IVA (el saldo no se divide por 1,21) y no tienen CAE, así que no se adjuntan.
+  Del 13 al 20/11/2026 entraron aparte, como si fueran de prueba (unidad «FP DEMO», «DEMO» en el nombre y el pedido de
+  Finnegans como «DEMO PEDVTASTP - 31748»). Esa forma se sigue reconociendo como el mismo pedido (`llavePedido` en
+  `pedidosfin.ts`): si el pedido ya tiene su registro de ClickUp, los dos salen en la lista de repetidos para combinarlos;
+  si no, cuando llega del informe de cada hora pasa a ser un pedido normal de su unidad. Prueba:
+  `test/negocio-pedido.test.mjs`.
 
 ### El N° de PDV en el negocio
 

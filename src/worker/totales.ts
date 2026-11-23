@@ -105,13 +105,16 @@ const ANULADO = '3c85a297-e9ce-400b-b42e-9f16853d69d6';
 
 // `porFacturar` ({"PEDVTAFP - 2413": 1234.5}): lo que falta facturar de cada pedido, sin IVA (scripts/pedidos-totales.mjs);
 // queda en el pedido («Por facturar») y se suma al saldo. Los pedidos que no vienen conservan el último que llegó.
+// `cobrado` ({"PEDVTAFP - 2413": 500}): lo cobrado de cada pedido, sin IVA (de cada comprobante, su neto menos lo que falta
+// cobrar de él). Queda en «Cobrado» (importe_cobrado) y con eso el CRM dice si el saldo es total o parcial (cobroPedido en
+// web/src/lib.tsx). Igual que el por facturar, los pedidos que no vienen conservan el último.
 // `factores` ({"PEDVTAFP - 2413": 1.21}): total con IVA / neto de cada pedido.
 // `facturas` ({"EMPRE01|FCVTAELECT - 2583": {pedido: "PEDVTAFP - 2413", factor: 1.2345}}): de qué pedido es cada comprobante
 // y su total/neto exacto, del análisis de facturas (scripts/pedidos-totales.mjs). Manda sobre las otras formas de cruzarlo.
 const IVA = 1.21;
 // `ie` y `cae`: la identificación de la factura en Finnegans y si ya tiene CAE (para adjuntarla al pedido, finnegans.ts).
 type FacturaCrm = { pedido?: string | null; factor?: number | null; ie?: string | null; cae?: boolean };
-export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFacturar?: Record<string, number>; factores?: Record<string, number>;
+export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFacturar?: Record<string, number>; cobrado?: Record<string, number>; factores?: Record<string, number>;
   facturas?: Record<string, FacturaCrm>; completo?: boolean }): Promise<SaldosEstado> {
   if (!Array.isArray(body?.filas)) throw new HttpError(400, 'Falta filas: [{ie, doc, desc, importe}, …].');
   const filas = (body.filas as FilaSaldo[]).filter((f) => f && Number.isFinite(Number(f.importe)));
@@ -119,17 +122,23 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
   const [pedidos, facturas] = await db.batch([
     db.prepare(`SELECT id, json_extract(props, '$.pedido_finnegans') AS pedido, json_extract(props, '$.pdv_finnegans') AS pdv,
         json_extract(props, '$.factura_numero') AS factura, json_extract(props, '$.saldo_pendiente_de_pago_mxn') AS saldo,
-        json_extract(props, '$.importe_por_facturar') AS por_facturar, json_extract(props, '$.hs_pipeline_stage') AS etapa
+        json_extract(props, '$.importe_por_facturar') AS por_facturar, json_extract(props, '$.importe_cobrado') AS cobrado,
+        json_extract(props, '$.hs_pipeline_stage') AS etapa
       FROM records WHERE object_type = 'order' AND archived = 0 AND json_extract(props, '$.pedido_finnegans') IS NOT NULL`),
     db.prepare("SELECT record_id, source_ref, json_extract(meta, '$.documento') AS documento FROM files WHERE kind = 'factura' AND source = 'finnegans'"),
   ]);
   const ped = pedidos.results as Array<{ id: number; pedido: string; pdv: string | number | null; factura: string | null; saldo: number | string | null;
-    por_facturar: number | string | null; etapa: string | null }>;
-  const porFacturar = new Map<string, number>();
-  for (const [k, v] of Object.entries(body.porFacturar && typeof body.porFacturar === 'object' ? body.porFacturar : {})) {
-    const c = clavePedido(k);
-    if (c && Number.isFinite(Number(v))) porFacturar.set(c, Math.max(0, Math.round(Number(v) * 100) / 100));
-  }
+    por_facturar: number | string | null; cobrado: number | string | null; etapa: string | null }>;
+  const montos = (m: unknown) => {
+    const out = new Map<string, number>();
+    for (const [k, v] of Object.entries(m && typeof m === 'object' && !Array.isArray(m) ? m : {})) {
+      const c = clavePedido(k);
+      if (c && Number.isFinite(Number(v))) out.set(c, Math.max(0, Math.round(Number(v) * 100) / 100));
+    }
+    return out;
+  };
+  const porFacturar = montos(body.porFacturar);
+  const cobrado = montos(body.cobrado);
   const fac = facturas.results as Array<{ record_id: number; source_ref: string; documento: string | null }>;
   const porIe = new Map(fac.map((f) => [norm(f.source_ref), f.record_id]));
   const porDoc = new Map(fac.filter((f) => claveDoc(f.documento)).map((f) => [claveDoc(f.documento)!, f.record_id]));
@@ -154,7 +163,10 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
     return d ? facturasCrm[`${f.emp || 'EMPRE01'}|${d}`] : undefined;
   };
   const factorOk = (v: unknown) => (Number(v) >= 1 && Number(v) < 2 ? Number(v) : undefined);
-  const sinIva = (id: number, importe: number, f?: FilaSaldo) => importe / (factorOk(f && deFactura(f)?.factor) ?? factorDe.get(id) ?? IVA);
+  // FP DEMO (empresa '7') es donde se factura lo que no lleva IVA (Rodrigo, 20/11/2026): sin el total/neto de la factura, su
+  // saldo va tal cual, no con el del pedido, que sí lleva IVA (PDV 31748: la factura de $ 432.361,80 quedaba en $ 357.323,80).
+  const sinIva = (id: number, importe: number, f?: FilaSaldo) =>
+    importe / (factorOk(f && deFactura(f)?.factor) ?? (f?.emp === '7' ? 1 : undefined) ?? factorDe.get(id) ?? IVA);
 
   const pedidoDe = (f: FilaSaldo): number | undefined => {
     const fx = deFactura(f)?.pedido;
@@ -219,8 +231,9 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
   for (const p of ped) {
     const clave = clavePedido(p.pedido);
     const llega = clave != null && porFacturar.has(clave);
+    const llegaCobrado = clave != null && cobrado.has(clave);
     // Sin la lista completa (body.completo), solo se tocan los pedidos que aparecen.
-    if (!saldo.has(p.id) && !llega && !body.completo) continue;
+    if (!saldo.has(p.id) && !llega && !llegaCobrado && !body.completo) continue;
     // Anulado: ni saldo ni nada por facturar.
     const anulado = p.etapa === ANULADO;
     const pf = anulado ? null : llega ? porFacturar.get(clave!)! : num(p.por_facturar);
@@ -230,7 +243,8 @@ export async function aplicarSaldos(env: Env, body: { filas?: unknown; porFactur
       : Math.max(0, Math.round(((facturas ?? 0) + (pf ?? 0)) * 100) / 100);
     const a = cambiar(p.id, 'importe_por_facturar', num(p.por_facturar), pf);
     const b = cambiar(p.id, 'saldo_pendiente_de_pago_mxn', num(p.saldo), nuevo);
-    if (a || b) actualizados++;
+    const c = cambiar(p.id, 'importe_cobrado', num(p.cobrado), anulado ? null : llegaCobrado ? cobrado.get(clave!)! : num(p.cobrado));
+    if (a || b || c) actualizados++;
   }
   for (let i = 0; i < stmts.length; i += 200) await db.batch(stmts.slice(i, i + 200));
   // Las facturas con CAE que todavía no están adjuntas a su pedido: la sincronización de facturas (finnegans.ts) lee solo

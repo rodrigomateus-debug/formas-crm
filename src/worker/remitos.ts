@@ -7,6 +7,7 @@ import { clickupAttachment } from './clickup';
 import { finnegansPedido, finnegansRemitos, finnegansToken } from './finnegans';
 import { orderProducts } from './productos';
 import { conPerfilSql, tienePerfil } from './alcance';
+import { compararTalles, nombreSinTalle, talleCanonico } from './talles';
 
 // Remitos de entrega (pedido de Rodrigo del 10/11/2026). Cada foto del remito firmado llega por ClickUp (como hasta
 // ahora), por el CRM (ficha del pedido) o por la app del chofer (/hooks/chofer), y todas van a la misma lista del pedido.
@@ -327,7 +328,7 @@ async function empresaDelPedido(db: D1Database, id: number) {
     WHERE (a.from_id = ?1 AND a.to_type = 'company') OR (a.to_id = ?1 AND a.from_type = 'company') ORDER BY a.is_primary DESC LIMIT 1`)
     .bind(id).first<{ id: number; name: string; cuit: string | null }>();
 }
-interface Renglon { code: string | null; name: string; quantity: number | null; detalle?: string | null }
+interface Renglon { code: string | null; name: string; quantity: number | null; detalle?: string | null; talle?: string | null; grupo_talle?: string | null }
 async function renglones(env: Env, p: Pedido, b?: Budget): Promise<Renglon[]> {
   const leer = async () => (await env.DB.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code) AS name, li.quantity, li.description AS detalle
     FROM line_items li LEFT JOIN products pr ON pr.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(p.id).all<Renglon>()).results;
@@ -733,7 +734,10 @@ export const ETIQUETA_ENTREGA: Record<EstadoEntrega, string> = {
   completa: 'Completa', parcial: 'Faltan entregas', diferencias: 'Con diferencias', cerrada_con_faltante: 'Finalizada con faltante',
   falta_remito: 'Falta el remito', por_revisar: 'Remito por revisar',
 };
-export interface LineaEntrega { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number }
+// `talle`, `grupo`, `producto`: una prenda en varios talles (talles.ts). Se cuenta talle por talle (cada talle es su
+// renglón en el remito), pero la pantalla los muestra juntos bajo el nombre del producto.
+export interface LineaEntrega { code: string | null; name: string; vendido: number | null; entregado: number; falta: number; excede: number;
+  talle?: string | null; grupo?: string | null; producto?: string | null }
 // Un renglón de remito: clave es cuál es (la que usa la asignación a mano). En un remito de varios pedidos, quantity es
 // lo que queda para este pedido (lo que dice el remito menos lo asignado a los otros).
 interface ItemEntrega { clave: string; code: string | null; description: string | null; quantity: number | null; remito_id: number; numero: string | null }
@@ -760,7 +764,7 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
   const row = await getRow(db, orderId, 'order');
   const props = JSON.parse(row.props) as Record<string, unknown>;
   const [lin, its, cuenta, comp] = await db.batch([
-    db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity, li.description AS detalle
+    db.prepare(`SELECT li.code, COALESCE(pr.name, li.name, li.description, li.code, 'Producto') AS name, li.quantity, li.description AS detalle, li.talle, li.grupo_talle
       FROM line_items li LEFT JOIN products pr ON pr.code = li.code WHERE li.record_id = ? ORDER BY li.position`).bind(orderId),
     db.prepare(`SELECT i.code, i.description, i.quantity, i.position, r.id AS remito_id, r.numero FROM remito_items i JOIN remitos r ON r.id = i.remito_id
       WHERE ${DEL_PEDIDO} AND r.estado = 'ok' AND r.duplicado_de IS NULL ORDER BY r.id, i.position`).bind(orderId),
@@ -832,10 +836,15 @@ export async function calcularEntrega(db: D1Database, orderId: number): Promise<
   libres.forEach((it, k) => { if (pares[k] >= 0) entregado[pares[k]] += Number(it.quantity ?? 0); else out.extras.push(it); });
   out.lineas = lineas.map((l, i) => {
     const vendido = l.quantity == null ? null : Number(l.quantity);
-    return { code: l.code, name: l.name, vendido, entregado: entregado[i], falta: vendido == null ? 0 : Math.max(0, vendido - entregado[i]), excede: vendido == null ? 0 : Math.max(0, entregado[i] - vendido) };
+    return { code: l.code, name: l.name, vendido, entregado: entregado[i], falta: vendido == null ? 0 : Math.max(0, vendido - entregado[i]), excede: vendido == null ? 0 : Math.max(0, entregado[i] - vendido),
+      ...(l.grupo_talle ? { talle: l.talle ?? null, grupo: l.grupo_talle, producto: nombreSinTalle(l.name) } : {}) };
   });
   const faltan = out.lineas.filter((l) => l.falta > 0);
-  out.falta_texto = faltan.length ? faltan.map((l) => `${qty(l.falta)} ${l.name}`).join(' · ') : null;
+  // Una prenda en varios talles, en un renglón con lo que falta de cada talle: «12 Campera Stone - Negro (M 8 · L 4)».
+  const porProducto: Array<LineaEntrega[]> = [];
+  for (const l of faltan) { const g = l.grupo ? porProducto.find((x) => x[0].grupo === l.grupo) : undefined; if (g) g.push(l); else porProducto.push([l]); }
+  out.falta_texto = porProducto.length ? porProducto.map((ls) => (ls.length === 1 ? `${qty(ls[0].falta)} ${ls[0].name}`
+    : `${qty(ls.reduce((n, l) => n + l.falta, 0))} ${ls[0].producto} (${[...ls].sort((a, b) => compararTalles(talleCanonico(a.talle), talleCanonico(b.talle))).map((l) => `${l.talle} ${qty(l.falta)}`).join(' · ')})`)).join(' · ') : null;
   const diferencias = out.extras.some((x) => !x.compartido) || out.lineas.some((l) => l.excede > 0);
   if (!out.remitos_ok) out.estado = out.pendientes ? 'por_revisar' : clickupEntregado ? 'falta_remito' : null;
   else if (!lineas.length) out.estado = 'por_revisar';

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Bultos } from '../bultos';
 import { useSearchParams } from 'react-router-dom';
-import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials } from '../lib';
+import { http, qs, useMeta, useToast, Icon, fmtRelative, Cargando, initials, atiende, tienePerfil } from '../lib';
 import { InfoTip, Modal, QuienPidio, alEsc } from '../components';
 import { Select } from '../Select';
 import { SelectorFecha } from '../Fecha';
@@ -295,7 +295,7 @@ export const resumen = (e: Pick<Encargo, 'llevar' | 'retirar' | 'notas'>) => [
 export function ListaEncargos({ version, onAbrir }: { version: number; onAbrir: (id: number) => void }) {
   const { meta } = useMeta();
   const toast = useToast();
-  const organiza = meta.me.role === 'admin' || (meta.me.role !== 'viewer' && ['logistica', 'produccion'].includes(meta.me.profile));
+  const organiza = meta.me.role === 'admin' || (meta.me.role !== 'viewer' && (tienePerfil(meta.me, 'logistica') || tienePerfil(meta.me, 'produccion')));
   const [todos, setTodos] = useState(false);
   const [estado, setEstado] = useState('');
   const [historial, setHistorial] = useState(false);
@@ -441,6 +441,8 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
   const [llevar, setLlevar] = useState<ItemForm[]>([vacio()]);
   const [retirar, setRetirar] = useState<ItemForm[]>([vacio()]);
   const [extra, setExtra] = useState({ desde: '', hacia: '', horario: '', contacto: '', notas: '', urgente: false, record_id: null as number | null, motivo: '' });
+  // «Lo pide»: el back office carga el encargo a nombre de una persona que atiende (Logística, de cualquiera).
+  const [aNombre, setANombre] = useState('');
   const [ocupado, setOcupado] = useState(false);
   const [error, setError] = useState('');
   const fechaElegida = useRef(!!inicial?.fecha);
@@ -458,7 +460,10 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
   }, [id]);
 
   const organiza = !!sug?.organiza;
-  const esSuyo = !enc || enc.user_id === meta.me.id;
+  const atendidas = atiende(meta.me);
+  const esSuyo = !enc || enc.user_id === meta.me.id || (enc.user_id != null && atendidas.includes(enc.user_id));
+  const pidenPor = organiza ? meta.users.filter((u) => u.active && !u.deleted_at && u.id !== meta.me.id)
+    : meta.users.filter((u) => atendidas.includes(u.id) && u.active && !u.deleted_at);
   const editable = meta.me.role !== 'viewer' && (!enc || (enc.origen === 'hub' && (organiza || (esSuyo && ['pendiente', 'no_se_pudo'].includes(enc.estado)))));
   const elegirDestino = (d: DestinoOpcion | null) => {
     setDestino(d);
@@ -471,12 +476,13 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
     setOcupado(true); setError('');
     const body = {
       fecha, llevar: llevar.filter((i) => i.que.trim() || i.pdv), retirar: retirar.filter((i) => i.que.trim() || i.pdv), ...extra,
-      desde: extra.desde || null, hacia: extra.hacia || null, motivo: undefined,
+      desde: extra.desde || null, hacia: extra.hacia || null, motivo: undefined, ...(!enc && aNombre ? { en_nombre_de: Number(aNombre) } : {}),
       destino: { lugar_id: destino.lugar_id, company_id: destino.company_id, nombre: destino.nombre, direccion: destino.direccion, guardar: destino.tipo === 'suelto' && !!(destino as DestinoOpcion & { guardar?: boolean }).guardar },
     };
     try {
       const r = await http<Encargo>(enc ? 'PATCH' : 'POST', enc ? `/recorridos/encargos/${enc.id}` : '/recorridos/encargos', enc && enc.destino === destino.nombre && enc.direccion === destino.direccion ? { ...body, destino: undefined } : body);
-      toast(enc ? 'Encargo guardado.' : `Listo: ${lindo(r.destino)}, ${cuando(r.fecha).toLowerCase()}. Logística lo ve en el cronograma.`);
+      const de = !enc && aNombre ? meta.users.find((u) => u.id === Number(aNombre))?.name.split(' ')[0] : null;
+      toast(enc ? 'Encargo guardado.' : `Listo: ${lindo(r.destino)}, ${cuando(r.fecha).toLowerCase()}${de ? `, a nombre de ${de}` : ''}. Logística lo ve en el cronograma.`);
       onListo();
     } catch (e) { setError((e as Error).message); setOcupado(false); }
   }
@@ -506,6 +512,15 @@ export function EncargoModal({ id, inicial, onClose, onListo }: { id?: number; i
             <span className="muted small">Lo pidió {enc.quien ? <QuienPidio id={enc.user_id} name={enc.quien} /> : 'alguien'} {fmtRelative(enc.created_at)}{enc.hecho_chofer ? ` · lo marcó ${enc.hecho_chofer}` : ''}{enc.motivo ? ` · ${enc.motivo}` : ''}{enc.chofer ? ` · va con ${enc.chofer}` : ''}</span>
             {enc.origen === 'planilla' && <span className="cr-tag">De la planilla vieja</span>}
           </div>
+        )}
+        {!enc && pidenPor.length > 0 && (
+          <label className="field rc-lo-pide">Lo pide
+            <Select className="input" value={aNombre} onChange={(e) => setANombre(e.target.value)} aria-label="Lo pide">
+              <option value="">Yo ({meta.me.name.split(' ')[0]})</option>
+              {pidenPor.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </Select>
+            <span className="small muted">{organiza ? 'A nombre de quien lo necesita: le llega el aviso y lo ve en sus encargos.' : 'Como back office, podés pedirlo a nombre de las personas que atendés: le llega el aviso y lo ve en sus encargos.'}</span>
+          </label>
         )}
         <section className="rc-paso">
           <h3><span>1</span>¿A dónde?</h3>

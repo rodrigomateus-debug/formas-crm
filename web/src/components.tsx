@@ -3,9 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   http, qs, useMeta, useToast, useDebounced, propsOf, propOf, recordUrl, OBJECTS, initials, Icon, type CrmRecord, type Filter, type ObjectType, type Property, type Meta, defaultPipeline, faltanObligatorias, UNIDADES, type UnidadKey,
-  userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney,
+  userOf, userName, type User, safeUrl, whatsappUrl, fmtMoney, propietariosPosibles,
 } from './lib';
-import { Select } from './Select';
+import { Select, useFloating } from './Select';
 
 // Las empresas muestran el favicon de su dominio y los contactos la foto de su mail, como en HubSpot; los usuarios, la
 // de su cuenta de Google (`photo`). Si no hay, las iniciales.
@@ -372,13 +372,16 @@ export function PropertyInput({ prop, value, onChange, autoFocus, type, onCerrar
     );
   }
   switch (prop.type) {
-    case 'owner':
+    case 'owner': {
+      // Una vendedora: ella, a quienes atiende como back office y su equipo si es gerenta (el servidor no deja otros).
+      const posibles = propietariosPosibles(meta);
       return (
         <Select className="input" value={v} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} autoFocus={autoFocus} onCerrar={onCerrar}>
           <option value="">Sin asignar</option>
-          {meta.users.filter((u) => u.active || u.id === Number(v)).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
+          {meta.users.filter((u) => u.id === Number(v) || (u.active && (!posibles || posibles.has(u.id)))).map((u) => <option key={u.id} value={u.id}>{userOption(u)}</option>)}
         </Select>
       );
+    }
     case 'enum':
     case 'bool':
       return (
@@ -681,29 +684,38 @@ export function FilterRow({ type, f, onChange, onRemove }: { type: ObjectType; f
 }
 
 // `resumen`: lo que se lee en el botón en lugar de la lista de lo elegido (por ejemplo, «Todos»).
-export function MultiPick({ options, values, onChange, small, resumen }: { options: { value: string; label: string }[]; values: string[]; onChange: (v: string[]) => void; small?: boolean; resumen?: string }) {
+// Lista para marcar varias opciones. La lista flota sobre la pantalla (como el desplegable del DS, `useFloating`), así no la
+// corta una tabla con su propio desplazamiento ni hace crecer la página.
+// `pie`: algo debajo de las opciones (por ejemplo, «Volver a según sus equipos»).
+export function MultiPick({ options, values, onChange, small, resumen, title, ariaLabel, pie }: { options: { value: string; label: string }[]; values: string[]; onChange: (v: string[]) => void; small?: boolean; resumen?: string; title?: string; ariaLabel?: string; pie?: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  const { style } = useFloating(btn, pop, open, () => setOpen(false));
   useEffect(() => {
-    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
+    if (!open) return;
+    const fuera = (e: MouseEvent) => { const t = e.target as Node; if (!btn.current?.contains(t) && !pop.current?.contains(t)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); btn.current?.focus(); } };
+    document.addEventListener('mousedown', fuera);
+    document.addEventListener('keydown', esc, true);
+    return () => { document.removeEventListener('mousedown', fuera); document.removeEventListener('keydown', esc, true); };
+  }, [open]);
   const lista = values.map((v) => options.find((o) => o.value === v)?.label ?? v).join(', ');
   const label = resumen ?? (values.length ? lista : 'Elegir…');
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}`} onClick={() => setOpen(!open)} aria-haspopup="listbox" aria-expanded={open} title={values.length ? lista : undefined}><span className="select-value">{label}</span></button>
-      {open && (
-        <div className="popover" style={{ top: 38, left: 0 }}>
+    <div className="multipick">
+      <button ref={btn} type="button" className={`input select-like ellipsis${small ? ' sm' : ''}${values.length ? '' : ' placeholder'}${open ? ' open' : ''}`} onClick={() => setOpen(!open)}
+        aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel} title={title ?? (values.length ? lista : undefined)}><span className="select-value">{label}</span></button>
+      {open && createPortal(
+        <div ref={pop} className="popover multipick-pop" style={style} role="listbox" aria-multiselectable aria-label={ariaLabel}>
           {options.map((o) => (
             <label key={o.value} className="opt small">
               <input type="checkbox" checked={values.includes(o.value)} onChange={(e) => onChange(e.target.checked ? [...values, o.value] : values.filter((v) => v !== o.value))} />
               {o.label}
             </label>
           ))}
-        </div>
-      )}
+          {pie && <div className="multipick-pie">{pie}</div>}
+        </div>, document.body)}
     </div>
   );
 }

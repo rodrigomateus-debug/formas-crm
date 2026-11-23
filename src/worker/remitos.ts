@@ -6,6 +6,7 @@ import { Budget, OutOfBudget } from './budget';
 import { clickupAttachment } from './clickup';
 import { finnegansPedido, finnegansRemitos, finnegansToken } from './finnegans';
 import { orderProducts } from './productos';
+import { conPerfilSql, tienePerfil } from './alcance';
 import { compararTalles, nombreSinTalle, talleCanonico } from './talles';
 
 // Remitos de entrega (pedido de Rodrigo del 10/11/2026). Cada foto del remito firmado llega por ClickUp (como hasta
@@ -928,7 +929,7 @@ export async function recalcularEntrega(env: Env, orderId: number, opts: { ctx?:
 
 async function avisarLogistica(db: D1Database, orderId: number, ctx: Ctx | null) {
   // A Logística y a los administradores (que ven todo), si tienen «Avisos por mail» prendido (Configuración → Usuarios).
-  const { results } = await db.prepare("SELECT id FROM users WHERE active = 1 AND avisos_mail = 1 AND (profile = 'logistica' OR role = 'admin')").all<{ id: number }>();
+  const { results } = await db.prepare(`SELECT id FROM users WHERE active = 1 AND avisos_mail = 1 AND (${conPerfilSql('logistica')} OR role = 'admin')`).all<{ id: number }>();
   const stmts = results.map((u) => db.prepare(`INSERT INTO avisos (user_id, kind, record_id, by_user)
     SELECT ?, 'entrega', ?, ? WHERE NOT EXISTS (SELECT 1 FROM avisos WHERE user_id = ? AND kind = 'entrega' AND record_id = ? AND sent_at IS NULL)`)
     .bind(u.id, orderId, ctx?.user.id ?? null, u.id, orderId));
@@ -937,7 +938,7 @@ async function avisarLogistica(db: D1Database, orderId: number, ctx: Ctx | null)
 
 // Logística (o un administrador) finaliza la entrega aceptando lo que falta, con el motivo; o la vuelve a abrir.
 export function puedeFinalizar(ctx: Ctx) {
-  return ctx.user.role === 'admin' || ctx.user.profile === 'logistica';
+  return ctx.user.role === 'admin' || tienePerfil(ctx.user, 'logistica');
 }
 export async function finalizarEntrega(env: Env, ctx: Ctx, orderId: number, motivo: string | null) {
   if (!puedeFinalizar(ctx)) throw new HttpError(403, 'Solo Logística o un administrador pueden finalizar una entrega con faltante.');

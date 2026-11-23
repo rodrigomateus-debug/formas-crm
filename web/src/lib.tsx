@@ -19,20 +19,51 @@ export interface PipelineConfig {
 export interface Stage { id: string; pipeline_id: string; label: string; display_order: number; probability: number; is_closed: number; is_won: number; config: StageConfig }
 export interface Pipeline { id: string; label: string; display_order: number; team_id: number | null; config: PipelineConfig; stages: Stage[] }
 // photo_url: la foto de su cuenta de Google (la trae el CRM, src/worker/fotos.ts); sin foto, se ven sus iniciales.
-export interface User { id: number; email: string; name: string; role: string; profile: string; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number; direccion?: number }
+// perfiles: todos sus perfiles (JSON), el primero el principal; profile, por compatibilidad. ve / ve_usuarios / gerencia_team: Qué ve y
+// la gerencia (src/worker/alcance.ts); vienen en el usuario de la sesión (meta.me) y en Configuración → Usuarios.
+export interface User { id: number; email: string; name: string; role: string; profile: string; perfiles?: string | null; team_id: number | null; extra_teams?: string; pipelines?: string | null; active: number; photo_url?: string | null; deleted_at?: string | null; superadmin?: number; direccion?: number;
+  ve?: string; ve_usuarios?: string; gerencia_team?: number | null }
 // Perfiles: el área de cada usuario (por ahora todos ven todo; más adelante cada uno va a ver lo suyo). Permisos: qué puede hacer.
-export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', produccion: 'Producción', logistica: 'Logística' };
+export const PROFILE_LABEL: Record<string, string> = { admin: 'Admin', comercial: 'Comercial', backoffice: 'Back office', produccion: 'Producción', logistica: 'Logística' };
+// Varios perfiles (pedido de Rodrigo del 20/11/2026): el principal y los extra. Del lado comercial, Comercial y Back office;
+// del de operaciones, Producción y Logística. Quien tiene de los dos lados tiene las pantallas de los dos (src/worker/alcance.ts).
+type ConPerfil = Pick<User, 'profile' | 'role'> & { perfiles?: string | null };
+export function perfilesDe(u: Pick<User, 'profile'> & { perfiles?: string | null }): string[] {
+  let lista: unknown[] = [];
+  try { const a = JSON.parse(u.perfiles || '[]'); if (Array.isArray(a)) lista = a; } catch { /* sin lista: el de profile */ }
+  const ok = [...new Set(lista.filter((p): p is string => typeof p === 'string' && p in PROFILE_LABEL))];
+  return u.profile === 'admin' || !ok.length ? [u.profile] : ok;
+}
+export const tienePerfil = (u: Pick<User, 'profile'> & { perfiles?: string | null }, p: string) => perfilesDe(u).includes(p);
+export const nombresPerfiles = (u: Pick<User, 'profile'> & { perfiles?: string | null }) => perfilesDe(u).map((p) => PROFILE_LABEL[p] ?? p).join(' + ');
+const ladoComercial = (u: ConPerfil) => u.role !== 'admin' && perfilesDe(u).some((p) => p === 'comercial' || p === 'backoffice');
+const ladoOperaciones = (u: ConPerfil) => u.role !== 'admin' && perfilesDe(u).some((p) => p === 'produccion' || p === 'logistica');
+// Back office: las personas que atiende (las de «Qué ve» → «Lo de estas personas»): ve y edita lo de ellas, se lo asigna y
+// carga a su nombre.
+export function atiende(u: Pick<User, 'profile' | 'role' | 'id'> & { perfiles?: string | null; ve_usuarios?: string }): number[] {
+  if (u.role === 'admin' || !tienePerfil(u, 'backoffice')) return [];
+  try { const a = JSON.parse(u.ve_usuarios || '[]'); return Array.isArray(a) ? a.map(Number).filter((n) => Number.isInteger(n) && n !== u.id) : []; } catch { return []; }
+}
 export const ROLE_LABEL: Record<string, string> = { member: 'Edita', manager: 'Edita y borra', viewer: 'Solo mira' };
 // Perfil Ventas (perfil Comercial que no es administrador): ve lo suyo, lo sin propietario y lo asociado a lo suyo; no ve
 // Producción, la bandeja de Entregas ni el ranking del equipo, y no importa ni exporta. Lo controla el servidor (src/worker/alcance.ts);
 // la pantalla solo esconde lo que no va a poder abrir.
-export const esVentas = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'comercial' && u.role !== 'admin';
+export const esVentas = (u: ConPerfil) => ladoComercial(u) && !ladoOperaciones(u);
+// A quiénes puede poner como propietario (src/worker/alcance.ts, esDeSuEquipo): del lado comercial, ella, las personas que
+// atiende como back office y, si es gerenta, las de su equipo. null: a cualquiera.
+export function propietariosPosibles(meta: Pick<Meta, 'me' | 'users'>): Set<number> | null {
+  const me = meta.me;
+  if (!ladoComercial(me)) return null;
+  const ids = new Set([me.id, ...atiende(me)]);
+  if (me.gerencia_team) for (const u of meta.users) if (teamsOf(u).includes(Number(me.gerencia_team))) ids.add(u.id);
+  return ids;
+}
 // Perfil Producción: los pedidos, Producción, Entregas y Cronograma; sin la parte comercial (contactos, empresas y negocios
 // solo los que están en un pedido o son proveedores, y sin sus listas). Lo controla el servidor (alcance.ts).
-export const esProduccion = (u: Pick<User, 'profile' | 'role'>) => u.profile === 'produccion' && u.role !== 'admin';
+export const esProduccion = (u: ConPerfil) => !ladoComercial(u) && u.role !== 'admin' && tienePerfil(u, 'produccion');
 // Producción y Logística (pedido de Rodrigo del 16/11/2026): Producción, Pedidos, Entregas, Recorridos y Cronograma, sin la
 // parte comercial (src/worker/alcance.ts).
-export const esOperaciones = (u: Pick<User, 'profile' | 'role'>) => (u.profile === 'produccion' || u.profile === 'logistica') && u.role !== 'admin';
+export const esOperaciones = (u: ConPerfil) => ladoOperaciones(u) && !ladoComercial(u);
 // Etiqueta de color con regla: se pone sola a los registros que cumplen sus filtros (en los pipelines elegidos).
 export interface Tag { id: number; name: string; color: string; object_type: ObjectType; description: string; rule: { groups?: Filter[][]; pipelines?: string[] } }
 export interface Meta {

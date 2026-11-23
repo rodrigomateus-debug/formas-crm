@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { UnidadFilter } from './QuickFilters';
-import { http, qs, useMeta, esVentas, esOperaciones, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
+import { http, qs, useMeta, esVentas, esOperaciones, atiende, useAsync, fmtMoney, fmtDate, recordUrl, stageOf, type Activity, type CrmRecord } from '../lib';
 import { UserChip, userOption } from '../components';
 import { Select } from '../Select';
 import InicioDireccion from './InicioDireccion';
@@ -81,6 +81,11 @@ function InicioEquipo() {
       <div className="page-head">
         <h1>Hola, {meta.me.name.split(' ')[0]}</h1>
         <UnidadFilter value={unidades} onChange={setUnidades} />
+        {/* Back office: sus números o los de una persona que atiende (el servidor no le da otros). */}
+        {ventas && atiende(meta.me).length > 0 && <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
+          <option value="me">Mis números</option>
+          {meta.users.filter((u) => atiende(meta.me).includes(u.id)).map((u) => <option key={u.id} value={u.id}>Los de {u.name}</option>)}
+        </Select>}
         {!ventas && !prod && <Select className="input" style={{ width: 220 }} value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Ver datos de">
           <option value="me">Mis números</option>
           <option value="all">Todo el equipo</option>

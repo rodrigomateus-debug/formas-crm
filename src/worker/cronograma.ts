@@ -14,7 +14,7 @@ import { fotosDeArticulos } from './productos';
 import { compararTalles, nombreSinTalle, talleCanonico } from './talles';
 import { vehiculos } from './vehiculos';
 import { dondeEntra as posicionNueva, optimizar, textoPactada, ventanaPactada, type Destino, type ModoHora, type Pactada, type Punto } from '../../web/src/ruta';
-import { conPerfilSql, tienePerfil } from './alcance';
+import { atiende, conPerfilSql, tienePerfil } from './alcance';
 
 // Cronograma (pedido de Rodrigo del 12/11/2026): reemplaza la planilla «Cronograma Semanal» de Logística. La planilla
 // repetía a mano lo que ya está en ClickUp, y las dos se desfasaban. Acá los movimientos no se cargan: salen de las
@@ -517,6 +517,46 @@ export async function revisarColgados(env: Env) {
   const stmts = [...avisos.values(), ...marcas];
   if (stmts.length) await db.batch(stmts);
   return out;
+}
+
+// Aviso de entregas del día siguiente (pedido de Rodrigo del 24/11/2026): a las 16 de cada día hábil, a cada vendedora le
+// llega a la campanita y al mail lo que se entrega de sus pedidos el próximo día hábil (el viernes, lo del lunes; saltea
+// feriados). Solo entregas al cliente (tipo «entrega»), nunca los movimientos intermedios de producción (retiros, ingresos,
+// egresos), ni lo ya hecho ni lo colgado. A la responsable del pedido y a quien la atiende como Back office (`atiende`).
+// Uno por persona y pedido; el mail sale en la misma corrida (avisos.ts).
+export const HORA_ENTREGAS_MANANA = 16;
+export async function avisarEntregasManana(env: Env, opts: { now?: Date; force?: boolean } = {}) {
+  const db = env.DB;
+  const local = new Date((opts.now ?? new Date()).getTime() - 3 * 3600_000);
+  const hoy = local.toISOString().slice(0, 10);
+  if (!opts.force && (local.getUTCDay() === 0 || local.getUTCDay() === 6 || local.getUTCHours() < HORA_ENTREGAS_MANANA)) return { avisos: 0 };
+  const estado = await db.prepare("SELECT value FROM settings WHERE key = 'avisos_entregas_manana'").first<{ value: string }>();
+  if (!opts.force && estado?.value === hoy) return { avisos: 0 };
+  // El próximo día hábil.
+  const feriados = new Set((await db.prepare('SELECT fecha FROM feriados WHERE fecha > ? AND fecha <= ?').bind(hoy, sumarDias(hoy, 15)).all<{ fecha: string }>()).results.map((f) => f.fecha));
+  let dia = sumarDias(hoy, 1);
+  while ([0, 6].includes(diaSemana(dia)) || feriados.has(dia)) dia = sumarDias(dia, 1);
+  const movs = (await movimientos(db, dia, dia)).movs.filter((m) => m.tipo === 'entrega' && !m.hecho && m.record_id);
+  const porPedido = new Map<number, Movimiento[]>();
+  for (const m of movs) porPedido.set(m.record_id!, [...(porPedido.get(m.record_id!) ?? []), m]);
+  const duenios = new Map((await db.prepare('SELECT id, owner_id FROM records WHERE id IN (SELECT value FROM json_each(?))')
+    .bind(JSON.stringify([...porPedido.keys()])).all<{ id: number; owner_id: number | null }>()).results.map((r) => [r.id, r.owner_id]));
+  const { results: users } = await db.prepare('SELECT * FROM users WHERE active = 1 AND deleted_at IS NULL').all<User>();
+  const nombre = new Map(users.map((u) => [Number(u.id), u.name.split(' ')[0]]));
+  const nombreDia = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][diaSemana(dia)];
+  const stmts: D1PreparedStatement[] = [];
+  for (const [rec, ms] of porPedido) {
+    const owner = duenios.get(rec);
+    if (!owner || !nombre.has(owner)) continue;
+    const arts = [...new Set(ms.map((m) => [m.cantidad, m.articulo, m.talle, m.sitio && `(${m.sitio})`].filter(Boolean).join(' ')).filter(Boolean))];
+    const que = `${nombreDia} ${diaMes(dia)} · ${ms[0].cliente ?? 'Sin cliente'} · PDV ${ms[0].npdv ?? '—'}${arts.length ? ` · ${arts.slice(0, 8).join(', ')}${arts.length > 8 ? ` y ${arts.length - 8} más` : ''}` : ''}`;
+    stmts.push(db.prepare("INSERT INTO avisos (user_id, kind, record_id, detalle) VALUES (?, 'entrega_manana', ?, ?)").bind(owner, rec, que));
+    for (const u of users) if (atiende(u).includes(owner)) stmts.push(db.prepare("INSERT INTO avisos (user_id, kind, record_id, detalle) VALUES (?, 'entrega_manana', ?, ?)")
+      .bind(u.id, rec, `${que} · de ${nombre.get(owner)}`));
+  }
+  stmts.push(db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('avisos_entregas_manana', ?)").bind(hoy));
+  await db.batch(stmts);
+  return { dia, avisos: stmts.length - 1 };
 }
 
 const diaMes = (d: string) => `${Number(d.slice(8))}/${Number(d.slice(5, 7))}`;

@@ -66,6 +66,8 @@ function describir(n: Notificacion, quien: string): { titulo: ReactNode; detalle
     // Se destrabó lo que lo colgó (a Logística) o lleva una semana colgado (al responsable del pedido).
     case 'colgado_listo': return { titulo: <>Ya se puede reprogramar {reg}</>, detalle: n.texto, icono: 'calendar', destino: '/cronograma' };
     case 'colgado_reaviso': return { titulo: <>Sigue colgado en el cronograma {reg}</>, detalle: n.texto, icono: 'alert', destino: aReg };
+    // Lo que se entrega el próximo día hábil de sus pedidos (cronograma.ts, avisarEntregasManana): el texto trae el día y qué va.
+    case 'entrega_manana': return { titulo: <>Se entrega {reg}</>, detalle: n.texto, icono: 'truck', destino: aReg };
     case 'entrega': return { titulo: <>Faltan entregas en {reg}</>, detalle: 'Según los remitos, todavía falta entregar algo.', icono: 'truck', destino: aReg };
     default: return { titulo: <><b>{quien}</b> te asignó {reg}</>, detalle: null, icono: n.object_type ?? 'note', destino: aReg };
   }

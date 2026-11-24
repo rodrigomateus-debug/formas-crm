@@ -1084,6 +1084,34 @@ test('cronograma: un colgado destrabado avisa a Logística, y una anotación «s
   await api('DELETE', `/logistica/notas/${nota.data.id}`);
   await api('DELETE', `/logistica/notas/${siempre.data.id}`);
 
+  // Aviso de entregas del próximo día hábil: el lunes 23/11 a las 16 avisa lo del 24 (la caja) a la responsable del pedido y
+  // a su Back office. El 24 avisa lo del 25: el ingreso del impresor de la bolsa es intermedio, no se avisa.
+  const vm = (await api('POST', '/users', { email: `vm.${RUN}@formas.ar`, name: `Vm ${RUN}`, role: 'member' })).data;
+  const bo = (await api('POST', '/users', { email: `bo.${RUN}@formas.ar`, name: `Bo ${RUN}`, perfiles: ['comercial', 'backoffice'] })).data;
+  assert.equal((await api('PATCH', `/users/${bo.id}`, { ve_usuarios: [vm.id] })).status, 200);
+  assert.equal((await api('PATCH', `/records/order/${caja.record_id}`, { props: { owner_id: vm.id } })).status, 200);
+  const manana = async (quien = `vm.${RUN}@formas.ar`) => {
+    asUser = quien;
+    const r = (await api('GET', '/notificaciones?limite=100')).data.items.filter((x) => x.kind === 'entrega_manana' && x.record_id === caja.record_id);
+    asUser = null;
+    return r;
+  };
+  const av = await api('POST', '/cronograma/entregas-manana/avisar?hoy=2026-11-23');
+  assert.equal(av.status, 200, JSON.stringify(av.data));
+  assert.equal(av.data.dia, '2026-11-24');
+  const mias = await manana();
+  assert.equal(mias.length, 1, 'a la responsable, una vez por pedido');
+  assert.match(mias[0].texto, new RegExp(`martes 24/11 · Nestle ${RUN} S\.A\. · PDV ${PDV} · 40 Caja ${RUN}`));
+  assert.doesNotMatch(mias[0].texto, /Termo|Bolsa/, 'solo lo que se entrega ese día');
+  const delBo = await manana(`bo.${RUN}@formas.ar`);
+  assert.equal(delBo.length, 1, 'a su Back office');
+  assert.match(delBo[0].texto, new RegExp(`· de Vm$`));
+  assert.equal((await api('POST', '/cronograma/entregas-manana/avisar?hoy=2026-11-24')).data.dia, '2026-11-25');
+  assert.equal((await manana()).length, 1, 'lo intermedio de producción no se avisa');
+  // El viernes avisa lo del lunes; si el lunes es feriado (el 23/11 de «notas del día y feriados»), lo del martes.
+  assert.equal((await api('POST', '/cronograma/entregas-manana/avisar?hoy=2026-11-13')).data.dia, '2026-11-16');
+  assert.equal((await api('POST', '/cronograma/entregas-manana/avisar?hoy=2026-11-20')).data.dia, '2026-11-24');
+
   // La caja ya está remitida (prueba de los estados de despacho): se cuelga igual (el cliente pidió reprogramar) y, como
   // no la traba nada, a Logística le llega «ya se puede reprogramar». Una sola vez.
   await api('POST', '/users', { email: `logi2.${RUN}@formas.ar`, name: `Logi2 ${RUN}`, profile: 'logistica' });

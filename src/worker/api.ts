@@ -22,7 +22,7 @@ import { agrupar, desagrupar, editarGrupo, listarDestinos, ubicarDestinos } from
 import { borrarNota as borrarNotaLogistica, crearNota, horariosDePedido, notasDeDestino, notasDePedido, type Destino as DestinoNota } from './logistica';
 import { textoPactada, type ModoHora } from '../../web/src/ruta';
 import { fotoVehiculo, guardarFotoVehiculo, guardarVehiculo, quitarFotoVehiculo, vehiculos } from './vehiculos';
-import { asignarChofer, colgarMovimiento, revisarColgados, guardarEnviado, guardarBultos, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
+import { asignarChofer, avisarEntregasManana, esDia, colgarMovimiento, revisarColgados, guardarEnviado, guardarBultos, direccionesSemana, guardarHora, guardarExpreso, guardarTransportista, quitarTransportista, soltarPunto, actualizarLugares, buscarLugares, guardarLugaresConfig, lugaresConfig, puedeEditarCronograma, borrarNota, cronogramaConfig, fijarPunto, guardarCronogramaConfig, guardarDireccion, guardarFeriado, guardarNota, guardarRutas, marcarHecho, moverMovimiento, resolverSugerencia, rutaDelDia, vistaCronograma } from './cronograma';
 import { editarProduccion, editarProduccionGrupo, guardarProduccionConfig, opcionesAEmpresa, produccionConfig, produccionDeEmpresa, produccionDePedido, vistaProduccion } from './produccion';
 import { adjuntosSql, armarAdjuntos, armarFotos, extrasDePedidos, fotosSql, orderProducts, type Adjuntos } from './productos';
 import { cambiarTipo, pedirRelectura } from './servicios';
@@ -1761,6 +1761,13 @@ api.delete('/logistica/notas/:id', async (c) => c.json(await borrarNotaLogistica
 api.post('/cronograma/colgar', async (c) => c.json(await colgarMovimiento(c.env, c.get('ctx'), await c.req.json())));
 // Los avisos de los colgados (lo corre la tarea de cada hora; acá, para probarlo o forzarlo).
 api.post('/cronograma/colgados/revisar', async (c) => { requireRole(c.get('ctx'), 'admin'); return c.json(await revisarColgados(c.env)); });
+// El aviso de entregas del próximo día hábil, a mano (para probar o reenviar): sin mirar la hora ni si ya salió hoy; `hoy`
+// (AAAA-MM-DD) para hacer de cuenta que es otro día.
+api.post('/cronograma/entregas-manana/avisar', async (c) => {
+  requireRole(c.get('ctx'), 'admin');
+  const hoy = c.req.query('hoy');
+  return c.json(await avisarEntregasManana(c.env, { force: true, now: hoy && esDia(hoy) ? new Date(`${hoy}T19:00:00Z`) : undefined }));
+});
 api.post('/cronograma/mover', async (c) => c.json(await moverMovimiento(c.env, c.get('ctx'), await c.req.json())));
 api.post('/cronograma/hecho', async (c) => c.json(await marcarHecho(c.env, c.get('ctx'), await c.req.json(), { enFondo: (p) => c.executionCtx.waitUntil(p) })));
 api.post('/cronograma/notas', async (c) => c.json(await guardarNota(c.env.DB, c.get('ctx'), null, await c.req.json())));

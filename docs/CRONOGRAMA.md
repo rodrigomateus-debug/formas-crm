@@ -405,6 +405,21 @@ En cada parada marca cómo le fue (se ve en el momento; si no se pudo guardar, v
 Sin señal no se puede marcar, pero el recorrido se sigue viendo (queda guardado en el celular); las fotos de los remitos siguen saliendo solas cuando
 vuelve, como siempre.
 
+## Aviso a las vendedoras de lo que se entrega mañana
+
+Pedido de Rodrigo del 24/11/2026. A las 16 de cada día hábil, a cada vendedora le llega a la campanita y al mail (si
+tiene «Avisos por mail» prendido) qué pedidos suyos se entregan el próximo día hábil: el viernes, lo del lunes, y se
+saltean los feriados cargados en el cronograma. Un aviso por pedido, con el cliente, el PDV y los artículos («martes 24/11 · Nestlé
+S.A. · PDV 12345 · 40 Caja»).
+
+- Solo **entregas al cliente** (tipo `entrega`): nunca los retiros, ingresos ni egresos de producción. Tampoco lo ya
+  entregado ni lo colgado.
+- A la **responsable del pedido** y a quien la atiende como **Back office** ([PERFILES.md](PERFILES.md#back-office)), con
+  «· de Fulana» al final.
+- Sale una vez por día (`settings.avisos_entregas_manana`), en la corrida de los :05 de las 16 (`index.ts`), y el mail en
+  esa misma corrida (`avisos.ts`). Un administrador lo puede forzar con `POST /api/cronograma/entregas-manana/avisar`
+  (`?hoy=AAAA-MM-DD` para hacer de cuenta que es otro día). Código: `avisarEntregasManana` en `cronograma.ts`.
+
 ## Cómo está hecho
 
 | Qué | Dónde |

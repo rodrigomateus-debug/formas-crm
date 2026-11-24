@@ -16,7 +16,7 @@ import { Budget } from './budget';
 import { actualizarFotos } from './fotos';
 import { procesarSalidaClickup, syncClickup } from './clickup';
 import { revisarRemitos, syncFacturas } from './finnegans';
-import { revisarColgados } from './cronograma';
+import { avisarEntregasManana, revisarColgados } from './cronograma';
 import { sincronizarOrdenesCompra } from './ordenescompra';
 import { reatarPendientes } from './productos';
 import { completarTalles } from './tallesdb';
@@ -127,6 +127,8 @@ export default {
         const b = Budget.of(env);
         // Los colgados del cronograma que ya se pueden reprogramar o que llevan una semana (solo la base), una vez por hora.
         if (turno === 2) await safe(() => revisarColgados(env));
+        // Lo que se entrega el próximo día hábil, a cada vendedora (a las 16, una vez por día): sale en los avisos de abajo.
+        await safe(() => avisarEntregasManana(env));
         await safe(() => correrAvisos(env, b));
         await safe(() => procesarSalidaClickup(env, b));   // lo que quedó pendiente para ClickUp (pedidos a «pdv»)
         await safe(() => actualizarFotos(env, b));          // fotos de Google de los usuarios: unas pocas, una vez por semana

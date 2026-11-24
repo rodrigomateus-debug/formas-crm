@@ -2,7 +2,7 @@ import { procesarSalidaClickup } from './clickup';
 import { buscarConsultas, conectarDarwin, estadoDarwin, pendientesDeRespuesta, resumirPendientes, suscripcionDarwin } from './darwin';
 import { datosParaFacturar } from './facturar';
 import { Hono } from 'hono';
-import type { Ctx, Env, ObjectType, User } from './env';
+import type { Ctx, Env, ObjectType, Profile, User } from './env';
 import { assertType, HttpError, now, OBJECT_TYPES, PROFILES } from './env';
 import { requireRole, canWrite, esSuperadmin, newToken, sha256 } from './auth';
 import { Meta } from './meta';
@@ -48,7 +48,7 @@ import { inicioVendedora } from './forecast';
 import { direccionesDe, guardarDirecciones, mapsConfigurado, sugerencias, type GuardarInput } from './direcciones';
 import { adjuntosDePedidos, produccionDePedidos } from './pedidosprod';
 import { festejosDePedidos } from './festejos';
-import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, nombrePerfil, restringido, sinVentas } from './alcance';
+import { assertActividadVisible, assertVisible, atiende, profileDeLista, esDeSuEquipo, esOperaciones, esSuyo, esVentas, gerenciaDe, idsVisibles, ladoComercial, ladoOperaciones, nombrePerfil, perfilesDe, restringido, sinVentas, VE } from './alcance';
 import { agenda, buscarDestinos, crearEncargo, diasDelDestino, editarEncargo, encargoPorId, guardarDestino, guardarRecorridosConfig, importarHistorial, listarEncargos,
   numerarRemito, recorridosConfig, remitoEgreso, remitoEgresoHtml, remitoHtml, sugerencias as sugerenciasRecorrido } from './recorridos';
 import { archivoDeRemito, cambiarTipoRemito, remitoPorId, asignarRenglon, calcularEntrega, finalizarEntrega, recalcularEntrega, guardarRemito, itemsDe, leerPendientes, leerRemito, puedeFinalizar, remitoPublico, remitosDelPedido, remitosParaRevisar, remitosRevisados, revisarRemito } from './remitos';
@@ -133,7 +133,7 @@ api.get('/meta', async (c) => {
   const me = c.get('ctx').user;
   const [users, teams, tags, mine, keyProps, ordenVistas] = await db.batch([
     // Los eliminados también vienen (para el nombre en el historial y en sus actividades viejas); la pantalla no los ofrece.
-    db.prepare('SELECT id, email, name, role, profile, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin, direccion FROM users ORDER BY active DESC, name'),
+    db.prepare('SELECT id, email, name, role, profile, perfiles, team_id, extra_teams, pipelines, active, photo_url, deleted_at, superadmin, direccion FROM users ORDER BY active DESC, name'),
     db.prepare('SELECT id, name FROM teams ORDER BY name'),
     db.prepare('SELECT id, name, color, object_type, description, rule FROM tags ORDER BY display_order, name'),
     // Pipelines donde el usuario tiene negocios, de más a menos: si no tiene equipo, Negocios arranca en el primero.
@@ -260,6 +260,9 @@ api.post('/records/:type', async (c) => {
     requireCompany(ctx, pipeline, companies.length);
     for (const co of companies) if (!assoc.includes(co)) assoc.push(co);
   }
+  // Perfil comercial: a su nombre o, si es back office, al de quienes atiende (gerenta: al de su equipo). Sin elegir, queda suyo.
+  const ownerPedido = body.props?.owner_id;
+  if (ladoComercial(ctx.user) && ownerPedido != null && ownerPedido !== '' && !(await esDeSuEquipo(c.env.DB, ctx.user, ownerPedido))) throw new HttpError(403, mensajeAsignar(ctx.user));
   const row = await createRecord(c.env.DB, ctx, type, body.props ?? {});
   for (const id of assoc) await associate(c.env.DB, ctx, row.id, id);
   if (type === 'contact') {
@@ -299,7 +302,13 @@ api.get('/records/:type/:id', async (c) => {
   // de Rodrigo del 17/11/2026).
   const prod = type === 'order' ? await produccionDePedido(c.env.DB, row.id) : null;
   const produccion = prod && (prod.total || prod.asignados.length) ? { asignados: prod.asignados, listos: prod.listos, total: prod.total } : null;
-  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user), ...(produccion ? { produccion } : {}) });
+  // Perfil Ventas: lo ve pero no lo puede cambiar (es de otra persona: lo ve por Qué ve o porque está asociado a lo suyo).
+  // La ficha lo avisa arriba, en lugar de rebotar recién al guardar.
+  const user = c.get('ctx').user;
+  const soloVer = esVentas(user) && !(await esSuyo(c.env.DB, user, row))
+    ? { de: (await c.env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(row.owner_id).first<{ name: string }>())?.name ?? null } : null;
+  return c.json({ record: { ...rowToRecord(row), tags }, associations: await associationsOf(c.env.DB, row.id, await hiddenPipelines(c.env.DB, c.get('ctx')), c.get('ctx').user),
+    ...(produccion ? { produccion } : {}), ...(soloVer ? { solo_ver: soloVer } : {}) });
 });
 
 // Anular pedidos desde la pantalla (pedido de Rodrigo del 20/11/2026): antes de hacerlo se pide confirmación, con lo que
@@ -564,8 +573,8 @@ api.get('/search', async (c) => {
   OBJECT_TYPES.forEach((t, i) => { out[t] = found[i].results; });
   // Perfil Ventas: los contactos y empresas que ya existen pero son de otra vendedora aparecen igual, sin abrirse y sin
   // sus datos (solo el nombre y de quién es), para que no los carguen de nuevo.
-  if (esVentas(ctx.user)) {
-    const admin: Ctx = { ...ctx, user: { ...ctx.user, profile: 'admin' as const } };
+  if (ladoComercial(ctx.user)) {
+    const admin: Ctx = { ...ctx, user: { ...ctx.user, profile: 'admin' as const, perfiles: null } };
     for (const t of ['contact', 'company'] as const) {
       const todos = await searchRecords(c.env.DB, admin, t, { q, limit: 6, noCount: true });
       const propios = new Set((out[t] as CrmRecord[]).map((r) => r.id));
@@ -905,8 +914,8 @@ api.get('/board-prop/:type', async (c) => {
 api.get('/dashboard', async (c) => {
   const db = c.env.DB;
   const ctx = c.get('ctx');
-  // Perfil Ventas: Inicio con sus números, no los del equipo (alcance.ts).
-  const owner = restringido(ctx.user) ? 'me' : c.req.query('owner');
+  // Perfil Ventas: Inicio con sus números, no los del equipo (alcance.ts); el back office, también los de quienes atiende.
+  const owner = ownerInicio(ctx.user, c.req.query('owner'));
   const ownerId = owner === 'all' ? null : owner ? Number(owner === 'me' ? ctx.user.id : owner) : null;
   const month = new Date(); month.setUTCDate(1); month.setUTCHours(3, 0, 0, 0);
   const m = month.toISOString();
@@ -931,11 +940,18 @@ api.get('/dashboard', async (c) => {
   return c.json({ month: m, open: open.results, won: won.results, created: created.results, lost: lost.results, tasks: tasks.results[0] });
 });
 
+// De quién son los números de Inicio: los perfiles que no ven todo, los suyos; el back office puede elegir los de una persona
+// que atiende (pedido de Rodrigo del 20/11/2026).
+function ownerInicio(user: User, q: string | undefined) {
+  if (!restringido(user)) return q;
+  return q && atiende(user).includes(Number(q)) ? q : 'me';
+}
+
 // Inicio de Ventas (forecast.ts): estimación de la semana y del mes, negocios y pedidos abiertos y producciones en curso. Como
 // /dashboard: el perfil Ventas, siempre lo suyo.
 api.get('/dashboard/vendedora', async (c) => {
   const ctx = c.get('ctx');
-  const owner = restringido(ctx.user) ? 'me' : c.req.query('owner') ?? 'me';
+  const owner = ownerInicio(ctx.user, c.req.query('owner')) ?? 'me';
   return c.json(await inicioVendedora(c.env.DB, owner === 'all' ? null : Number(owner === 'me' ? ctx.user.id : owner)));
 });
 
@@ -1418,19 +1434,23 @@ api.post('/referidos', async (c) => {
 // propietario (para tomarlo), y como propietario se pone solo a sí misma (o lo deja sin). Ver una empresa ajena porque
 // está asociada a lo suyo no la habilita a editarla ni a quedársela: se la pide a un administrador (docs/PERFILES.md).
 // Es la misma regla que ya tenía Claude para todos (soloLoSuyo en mcp.ts).
-async function soloLoSuyoVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, rec: { id?: number; name: string; owner_id: number | null }, props?: Record<string, unknown>) {
+async function soloLoSuyoVentas(c: { env: Env; get: (k: 'ctx') => Ctx }, rec: { id?: number; object_type?: string; name: string; owner_id: number | null }, props?: Record<string, unknown>) {
   const user = c.get('ctx').user;
-  if (!esVentas(user)) return;
-  // Gerenta (alcance.ts): también lo de su equipo y su unidad, y lo puede asignar a cualquiera del equipo.
+  if (!ladoComercial(user)) return;
+  // Con Producción o Logística además, los pedidos los cambia como ellos (todos).
+  if (ladoOperaciones(user) && rec.object_type === 'order') return;
+  // Back office y gerenta (alcance.ts): también lo de quienes atiende o lo de su equipo, y se lo puede asignar a ellas.
   if (!(await esSuyo(c.env.DB, user, rec))) {
     const de = (await c.env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(rec.owner_id).first<{ name: string }>())?.name ?? 'otra persona';
-    throw new HttpError(403, `«${rec.name}» es de ${de}: lo puede cambiar ella o un administrador.`);
+    throw new HttpError(403, `«${rec.name}» es de ${de}: lo puede cambiar ella, su back office o un administrador.`);
   }
   const owner = props?.owner_id;
-  if (owner != null && owner !== '' && !(await esDeSuEquipo(c.env.DB, user, owner))) {
-    throw new HttpError(403, gerenciaDe(user) ? 'Como propietario podés poner a alguien de tu equipo. Para pasárselo a otra persona, pedíselo a un administrador.'
-      : 'Como propietario solo podés ponerte a vos. Para pasárselo a otra persona, pedíselo a un administrador.');
-  }
+  if (owner != null && owner !== '' && !(await esDeSuEquipo(c.env.DB, user, owner))) throw new HttpError(403, mensajeAsignar(user));
+}
+// A quién puede poner como propietario una vendedora (alcance.ts): ella, a quienes atiende como back office y su equipo si es gerenta.
+function mensajeAsignar(user: User) {
+  const a = [atiende(user).length ? 'a las personas que atendés como back office' : '', gerenciaDe(user) ? 'a alguien de tu equipo' : ''].filter(Boolean);
+  return `Como propietario ${a.length ? `podés ponerte a vos o ${a.join(' o ')}` : 'solo podés ponerte a vos'}. Para pasárselo a otra persona, pedíselo a un administrador.`;
 }
 
 async function registroVisible(c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) {
@@ -1687,7 +1707,8 @@ api.post('/recorridos/encargos', async (c) => c.json(await crearEncargo(c.env, c
 // Uno solo: el propio o, fuera del perfil Ventas, cualquiera.
 const encargoVisible = async (c: { env: Env; get: (k: 'ctx') => Ctx }, id: number) => {
   const e = await encargoPorId(c.env.DB, id);
-  if (esVentas(c.get('ctx').user) && e.user_id !== c.get('ctx').user.id) throw new HttpError(403, 'Es un encargo de otra persona.');
+  const u = c.get('ctx').user;
+  if (esVentas(u) && e.user_id !== u.id && (e.user_id == null || !atiende(u).includes(e.user_id))) throw new HttpError(403, 'Es un encargo de otra persona.');
   return e;
 };
 api.get('/recorridos/encargos/:id', async (c) => c.json(await encargoVisible(c, Number(c.req.param('id')))));
@@ -2060,21 +2081,29 @@ function equiposDe(b: { teams?: number[]; team_id?: number | null; extra_teams?:
 
 // Perfil y permisos van juntos en un punto: el perfil admin es el rol admin. Pasar a admin (por cualquiera de los dos) da
 // los dos; dejar de serlo vuelve a «edita» (member) y, si no se elige otro, al perfil comercial.
+// Varios perfiles (20/11/2026; alcance.ts): `perfiles` es la lista, el primero el principal. Admin va solo: si está en la
+// lista, queda solo Admin. `profile` suelto sigue andando (cambia el principal y deja los demás).
 const ROLES = ['admin', 'manager', 'member', 'viewer'];
-function profileAndRole(b: { profile?: string; role?: string }, cur: { profile: string; role: string }) {
-  if (b.profile !== undefined && !(PROFILES as readonly string[]).includes(b.profile)) throw new HttpError(400, `Perfil desconocido: ${b.profile}.`);
+function profileAndRole(b: { profile?: string; perfiles?: string[]; role?: string }, cur: { profile: string; role: string; perfiles?: string | null }) {
+  const extraCur = perfilesDe({ profile: cur.profile as Profile, perfiles: cur.perfiles }).slice(1);
+  let lista: string[] | undefined;
+  if (b.perfiles !== undefined) {
+    if (!Array.isArray(b.perfiles) || !b.perfiles.length) throw new HttpError(400, 'Elegí al menos un perfil.');
+    lista = [...new Set(b.perfiles.map(String))];
+  } else if (b.profile !== undefined) lista = [b.profile, ...extraCur.filter((p) => p !== b.profile)];
+  for (const p of lista ?? []) if (!(PROFILES as readonly string[]).includes(p)) throw new HttpError(400, `Perfil desconocido: ${p}.`);
   if (b.role !== undefined && !ROLES.includes(b.role)) throw new HttpError(400, `Permiso desconocido: ${b.role}.`);
-  if (b.profile === undefined && b.role === undefined) return cur;
-  if (b.profile === 'admin' || (b.role === 'admin' && b.profile === undefined)) return { profile: 'admin', role: 'admin' };
-  const profile = b.profile ?? (cur.profile === 'admin' ? 'comercial' : cur.profile);
+  if (lista === undefined && b.role === undefined) return { profile: cur.profile, role: cur.role, perfiles: cur.perfiles ?? null };
+  if (lista?.includes('admin') || (b.role === 'admin' && lista === undefined)) return { profile: 'admin', role: 'admin', perfiles: null };
+  if (!lista) lista = cur.profile === 'admin' ? ['comercial'] : [cur.profile, ...extraCur];
   const role = b.role && b.role !== 'admin' ? b.role : cur.role === 'admin' || b.role === 'admin' ? 'member' : cur.role;
-  return { profile, role };
+  return { profile: profileDeLista(lista), role, perfiles: JSON.stringify(lista) };
 }
 
 api.post('/users', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; team_id?: number | null; teams?: number[]; avisos_mail?: boolean }>();
-  const { profile, role } = profileAndRole(b, { profile: 'comercial', role: 'member' });
+  const b = await c.req.json<{ email: string; name: string; role?: string; profile?: string; perfiles?: string[]; team_id?: number | null; teams?: number[]; avisos_mail?: boolean }>();
+  const { profile, role, perfiles } = profileAndRole(b, { profile: 'comercial', role: 'member' });
   const avisos = b.avisos_mail ? 1 : 0;   // los avisos por mail arrancan apagados
   const email = String(b.email ?? '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Falta un mail válido.');
@@ -2084,10 +2113,10 @@ api.post('/users', async (c) => {
   const prev = await c.env.DB.prepare('SELECT id, deleted_at FROM users WHERE email = ?').bind(email).first<{ id: number; deleted_at: string | null }>();
   if (prev && !prev.deleted_at) throw new HttpError(400, `Ya hay un usuario con ese mail (${email}).`);
   const row = prev
-    ? await c.env.DB.prepare(`UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, avisos_mail = ?, active = 1, deleted_at = NULL
-        WHERE id = ? RETURNING *`).bind(name, role, profile, team_id, extra_teams, avisos, prev.id).first<{ id: number }>()
-    : await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, team_id, extra_teams, avisos_mail) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *')
-      .bind(email, name, role, profile, team_id, extra_teams, avisos).first<{ id: number }>();
+    ? await c.env.DB.prepare(`UPDATE users SET name = ?, role = ?, profile = ?, perfiles = ?, team_id = ?, extra_teams = ?, avisos_mail = ?, active = 1, deleted_at = NULL
+        WHERE id = ? RETURNING *`).bind(name, role, profile, perfiles, team_id, extra_teams, avisos, prev.id).first<{ id: number }>()
+    : await c.env.DB.prepare('INSERT INTO users (email, name, role, profile, perfiles, team_id, extra_teams, avisos_mail) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *')
+      .bind(email, name, role, profile, perfiles, team_id, extra_teams, avisos).first<{ id: number }>();
   // Su foto de Google, ya (si no se puede, la trae el cron).
   if (c.env.GOOGLE_SA_JSON) c.executionCtx.waitUntil(actualizarFotos(c.env, Budget.of(c.env), { ids: [row!.id] }).catch((e) => console.error((e as Error).message)));
   return c.json(row, 201);
@@ -2105,7 +2134,7 @@ api.post('/users/fotos', async (c) => {
 
 api.patch('/users/:id', async (c) => {
   requireRole(c.get('ctx'), 'admin');
-  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null }>();
+  const b = await c.req.json<{ name?: string; role?: string; profile?: string; team_id?: number | null; extra_teams?: number[]; teams?: number[]; active?: boolean; avisos_mail?: boolean; superadmin?: boolean; direccion?: boolean; gerencia_team?: number | null; pipelines?: string[] | null; ve?: string; ve_usuarios?: number[]; perfiles?: string[] }>();
   const cur = await c.env.DB.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').bind(Number(c.req.param('id'))).first<Record<string, unknown>>();
   if (!cur) throw new HttpError(404, 'No existe el usuario.');
   // Superadmin: lo dan y lo sacan solo los superadmins; el administrador principal (ADMIN_EMAIL) lo es siempre.
@@ -2124,7 +2153,20 @@ api.patch('/users/:id', async (c) => {
     if (t != null && !(await c.env.DB.prepare('SELECT 1 FROM teams WHERE id = ?').bind(t).first())) throw new HttpError(400, 'No existe ese equipo.');
     await c.env.DB.prepare('UPDATE users SET gerencia_team = ? WHERE id = ?').bind(t, cur.id).run();
   }
-  const { profile, role } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role) });
+  // Qué ve (alcance.ts): lo suyo, lo de su equipo o todo, y además lo de las personas elegidas (solo usuarios que existen).
+  if (b.ve !== undefined) {
+    if (!(VE as readonly string[]).includes(b.ve)) throw new HttpError(400, `«Qué ve» desconocido: ${b.ve}.`);
+    await c.env.DB.prepare('UPDATE users SET ve = ? WHERE id = ?').bind(b.ve, cur.id).run();
+  }
+  if (b.ve_usuarios !== undefined) {
+    if (!Array.isArray(b.ve_usuarios)) throw new HttpError(400, 'Las personas que ve van en una lista.');
+    const pedidos = [...new Set(b.ve_usuarios.map(Number))].filter((n) => Number.isInteger(n) && n !== Number(cur.id));
+    const { results } = pedidos.length ? await c.env.DB.prepare('SELECT id FROM users WHERE deleted_at IS NULL AND id IN (SELECT value FROM json_each(?))')
+      .bind(JSON.stringify(pedidos)).all<{ id: number }>() : { results: [] as Array<{ id: number }> };
+    const existen = new Set(results.map((r) => r.id));
+    await c.env.DB.prepare('UPDATE users SET ve_usuarios = ? WHERE id = ?').bind(JSON.stringify(pedidos.filter((n) => existen.has(n))), cur.id).run();
+  }
+  const { profile, role, perfiles } = profileAndRole(b, { profile: String(cur.profile), role: String(cur.role), perfiles: cur.perfiles == null ? null : String(cur.perfiles) });
   if (cur.role === 'admin' && (role !== 'admin' || b.active === false)) {
     const otros = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND active = 1 AND id != ?").bind(cur.id).first<{ n: number }>();
     if (!otros?.n) throw new HttpError(400, 'Es el único administrador activo: primero hacé administrador a otra persona.');
@@ -2136,8 +2178,8 @@ api.patch('/users/:id', async (c) => {
     await c.env.DB.prepare('UPDATE users SET pipelines = ? WHERE id = ?').bind(ids ? JSON.stringify(ids) : null, cur.id).run();
   }
   const { team_id, extra_teams } = equiposDe(b, cur);
-  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, team_id = ?, extra_teams = ?, active = ?, avisos_mail = ? WHERE id = ?')
-    .bind(b.name ?? cur.name, role, profile, team_id, extra_teams, b.active === undefined ? cur.active : b.active ? 1 : 0,
+  await c.env.DB.prepare('UPDATE users SET name = ?, role = ?, profile = ?, perfiles = ?, team_id = ?, extra_teams = ?, active = ?, avisos_mail = ? WHERE id = ?')
+    .bind(b.name ?? cur.name, role, profile, perfiles, team_id, extra_teams, b.active === undefined ? cur.active : b.active ? 1 : 0,
       b.avisos_mail === undefined ? cur.avisos_mail : b.avisos_mail ? 1 : 0, cur.id).run();
   return c.json({ ok: true });
 });

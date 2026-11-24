@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { juntarTalles, productosParaElegir, textoTalles } from '../talles';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  http, qs, useMeta, esVentas, esOperaciones, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
+  http, qs, useMeta, esVentas, esOperaciones, tienePerfil, useToast, useAsync, useDebounced, typeFromPath, OBJECTS, propsOf, propOf, formatValue, recordUrl, stageOf, fmtDate, fmtMoney, cobroPedido, Icon, ACTIVITY_LABEL, safeUrl, TagChips, type Activity, type CrmRecord, type ObjectType, type Property, missingFor, type Stage, whatsappUrl, Cargando, KEY_PROPS, keyPropsFor
 } from '../lib';
 import { Avatar, EditarEnLinea, alEsc, ChatDarwin, ChatWhatsApp, telDeDarwin, CreateRecord, Drawer, EstadoCliente, EtapaPedido, Modal, EstadoClickup, PersonaProd, TallesProducto, PropertyInput, QuienProduce, MultiPick, RecordPicker, StageSelect, toLocalInput, UserChip, userOption, ValorEditable, NombreEditable, WhatsAppLink, type PersonaProduccion, type OcRef } from '../components';
 import { StageProps } from './Board';
@@ -18,7 +18,8 @@ import { NotasDelProducto, useCambioNotas, type ResumenNotas } from '../notasPro
 import { siFestejaPedido, siGano } from '../Chispin';
 
 type Assoc = Record<ObjectType, Array<CrmRecord & { label: string | null; primary: boolean }>>;
-interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number } }
+interface Loaded { record: CrmRecord; associations: Assoc; redirect?: number; produccion?: { asignados: PersonaProduccion[]; listos: number; total: number };
+  solo_ver?: { de: string | null } }   // perfil Ventas: lo ve pero es de otra persona (no lo puede cambiar)
 
 const RELATED: Record<ObjectType, ObjectType[]> = {
   contact: ['company', 'deal', 'order'],
@@ -44,7 +45,7 @@ export default function RecordPage() {
   return (
     <div className="content flush record-wrap">
       <div className="record">
-        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} /></aside>
+        <aside className="left"><LeftPanel type={type} record={record} associations={associations} onChange={refresh} produccion={data.data.produccion} soloVer={data.data.solo_ver} /></aside>
         <section className="center">
           {record.archived && <div className="panel panel-body" style={{ marginBottom: 12, background: 'var(--warn-soft)' }}>Este registro está borrado. <RestoreButton type={type} id={record.id} onDone={refresh} /></div>}
           {type === 'deal' && <StageBar record={record} onChange={refresh} />}
@@ -167,7 +168,7 @@ function subtitle(meta: ReturnType<typeof useMeta>['meta'], type: ObjectType, r:
   return r.props.pdv_finnegans ? `PDV ${r.props.pdv_finnegans}` : '';
 }
 
-function LeftPanel({ type, record, associations, onChange, produccion }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion'] }) {
+function LeftPanel({ type, record, associations, onChange, produccion, soloVer }: { type: ObjectType; record: CrmRecord; associations?: Assoc; onChange: () => void; produccion?: Loaded['produccion']; soloVer?: Loaded['solo_ver'] }) {
   const { meta } = useMeta();
   const toast = useToast();
   const navigate = useNavigate();
@@ -217,7 +218,9 @@ function LeftPanel({ type, record, associations, onChange, produccion }: { type:
                 {produccion && <QuienProduce {...produccion} />}
               </div>
             )}
-            <TagChips meta={meta} ids={record.tags} /></div>
+            <TagChips meta={meta} ids={record.tags} />
+            {soloVer && <div className="rec-solo-ver small" title={`Lo ves por tu permiso para ver lo de otras personas (o porque está asociado a lo tuyo). Lo cambia${soloVer.de ? ` ${soloVer.de}` : ' quien lo tiene'} o un administrador.`}>
+              <Icon name="eye" size={13} />Solo para ver{soloVer.de ? ` · es de ${soloVer.de}` : ''}</div>}</div>
           <RecordMenu items={[
             ...(meta.me.role !== 'viewer' ? [{ label: 'Cambiar nombre', icon: 'edit', onClick: () => setEditNombre(true) }] : []),
             { label: 'Combinar con otro…', icon: 'merge', onClick: () => setMerge(true) },
@@ -885,7 +888,7 @@ function ProductsCard({ recordId, max, onCambio, empresas = '' }: { recordId: nu
   const me = useMeta().meta.me;
   const admin = me.role === 'admin';
   // Notas de producto: las escriben Producción y los administradores (notasproducto.ts).
-  const puedeNotas = me.role !== 'viewer' && (admin || me.profile === 'produccion');
+  const puedeNotas = me.role !== 'viewer' && (admin || tienePerfil(me, 'produccion'));
   // Solo un administrador cambia el tipo de un renglón; vale para ese código en este pedido.
   const cambiarTipo = async (it: ProductRow) => {
     const tipo = esServicio(it) ? 'producto' : 'servicio';

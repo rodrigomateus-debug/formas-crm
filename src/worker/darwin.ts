@@ -6,7 +6,7 @@ import { createActivity } from './activities';
 import { primaryCompanyId } from './associations';
 import { systemCtx, usuarioPorNombre } from './clickup';
 import { Budget, OutOfBudget } from './budget';
-import { visibleSql } from './alcance';
+import { ladoComercial, propiosSql, visibleSql } from './alcance';
 import { newToken, sha256 } from './auth';
 
 // Actividad diaria de Darwin en el CRM (pedido de Rodrigo del 18/11/2026; docs/DARWIN.md § 4).
@@ -426,7 +426,7 @@ export async function pendientesDeRespuesta(db: D1Database, user: User, horas = 
       AND dc.ultima_respuesta_cliente <= ?
       AND (dc.cerrada_at IS NULL OR dc.cerrada_at < dc.ultima_respuesta_cliente)
       AND (dc.contact_id IS NULL OR ${visibleSql('ct', user)})
-      ${user.profile === 'comercial' && user.role !== 'admin' ? `AND (dc.asignada_user_id = ${Number(user.id)} OR ct.owner_id = ${Number(user.id)})` : ''}
+      ${ladoComercial(user) ? `AND (dc.asignada_user_id IN ${propiosSql(user)} OR ct.owner_id IN ${propiosSql(user)})` : ''}
     ORDER BY dc.ultima_respuesta_cliente LIMIT 200`).bind(limite).all<Record<string, unknown>>();
   return { pendientes: results, horas };
 }

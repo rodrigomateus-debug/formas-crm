@@ -1,6 +1,6 @@
 import type { Ctx, Env, User } from './env';
 import { HttpError, now } from './env';
-import { esVentas, visibleSql } from './alcance';
+import { atiende, conPerfilSql, duenosVistos, esDeSuEquipo, esVentas, ladoComercial, visibleSql } from './alcance';
 import { norm } from './clickup';
 import { CERRADOS } from './produccion';
 import { serviceToken } from './google';
@@ -62,7 +62,7 @@ export async function encargoPorId(db: D1Database, id: number) {
 async function avisarLogistica(db: D1Database, ctx: Ctx, e: EncargoDia, que: string) {
   const armado = e.fecha === hoyBsAs() || !!(await db.prepare('SELECT 1 FROM cronograma_rutas WHERE fecha = ? LIMIT 1').bind(e.fecha).first());
   if (!armado) return;
-  const { results } = await db.prepare("SELECT id FROM users WHERE active = 1 AND deleted_at IS NULL AND profile = 'logistica'").all<{ id: number }>();
+  const { results } = await db.prepare(`SELECT id FROM users WHERE active = 1 AND deleted_at IS NULL AND ${conPerfilSql('logistica')}`).all<{ id: number }>();
   await avisarEncargo(db, results.map((u) => u.id), e.id, `${ctx.user.name} ${que} para el ${fechaCorta(e.fecha)}, que ya tiene el recorrido armado.`, ctx.user.id);
 }
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -109,6 +109,7 @@ async function crearLugar(db: D1Database, ctx: Ctx, l: { nombre: string; direcci
 }
 
 export interface EncargoInput extends DestinoInput {
+  en_nombre_de?: unknown;   // back office: lo pide a nombre de una persona que atiende (Logística, de cualquiera)
   fecha?: unknown; llevar?: unknown; retirar?: unknown; desde?: unknown; hacia?: unknown; horario?: unknown; contacto?: unknown; notas?: unknown;
   urgente?: unknown; record_id?: unknown; destino?: DestinoInput;
   junto_a?: unknown;   // la parada con la que va ese día, «aparte» o null (lo decide el Hub): solo quien organiza
@@ -128,16 +129,33 @@ export async function crearEncargo(env: Env, ctx: Ctx, b: EncargoInput) {
   if (!llevar.length && !retirar.length && !notas) throw new HttpError(400, 'Decí qué hay que llevar o retirar (o qué hay que hacer, en las notas).');
   const d = await resolverDestino(env, ctx, b.destino ?? b);
   const recordId = await registroValido(db, ctx.user, b.record_id);
+  const quien = await aNombreDe(db, ctx, b.en_nombre_de);
   const ts = now();
   const r = await db.prepare(`INSERT INTO encargos (fecha, user_id, lugar_id, company_id, destino, direccion, llevar, retirar, desde, hacia, horario, contacto, notas, urgente, record_id,
       estado, origen, created_at, updated_at, updated_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', 'hub', ?, ?, ?) RETURNING id`)
-    .bind(b.fecha, ctx.user.id, d.lugar_id, d.company_id, d.destino, d.direccion, JSON.stringify(llevar), JSON.stringify(retirar),
+    .bind(b.fecha, quien?.id ?? ctx.user.id, d.lugar_id, d.company_id, d.destino, d.direccion, JSON.stringify(llevar), JSON.stringify(retirar),
       await base(db, b.desde), await base(db, b.hacia), texto(b.horario, 120), texto(b.contacto, 200), notas, b.urgente ? 1 : 0, recordId, ts, ts, ctx.user.id).first<{ id: number }>();
   const e = await encargoPorId(db, r!.id);
-  await avisarLogistica(db, ctx, e, `cargó un encargo a ${e.destino}`);
+  await avisarLogistica(db, ctx, e, quien ? `cargó un encargo de ${quien.name} a ${e.destino}` : `cargó un encargo a ${e.destino}`);
+  if (quien) await avisarEncargo(db, [quien.id], e.id, `${ctx.user.name} cargó un encargo a tu nombre: ${e.destino}.`, ctx.user.id);
   return e;
 }
+
+// «Lo pide»: el back office carga el encargo a nombre de una vendedora que atiende (pedido de Rodrigo del 20/11/2026: «pedir
+// en nombre de ellas»); quien organiza (Logística), a nombre de cualquiera. Queda como si lo hubiera pedido ella: lo ve en
+// sus encargos y le llega el aviso.
+async function aNombreDe(db: D1Database, ctx: Ctx, v: unknown) {
+  const id = Number(v) || null;
+  if (!id || id === ctx.user.id) return null;
+  const ok = organiza(ctx.user) || (ladoComercial(ctx.user) && atiende(ctx.user).includes(id)) || (ladoComercial(ctx.user) && await esDeSuEquipo(db, ctx.user, id));
+  if (!ok) throw new HttpError(403, 'Podés pedir a tu nombre o al de las personas que atendés como back office.');
+  const u = await db.prepare('SELECT id, name FROM users WHERE id = ? AND active = 1 AND deleted_at IS NULL').bind(id).first<{ id: number; name: string }>();
+  if (!u) throw new HttpError(400, 'Esa persona no está activa en el Hub.');
+  return u;
+}
+// Lo suyo en Recorridos: los encargos que pidió ella y, si es back office, los de las personas que atiende.
+const susEncargos = (user: User, e: { user_id: number | null }) => e.user_id != null && (e.user_id === user.id || atiende(user).includes(e.user_id));
 
 // El pedido o negocio al que corresponde: tiene que ser uno que la persona ve.
 async function registroValido(db: D1Database, user: User, v: unknown) {
@@ -154,7 +172,7 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
   exigirPedir(ctx);
   const db = env.DB;
   const e = await encargoPorId(db, id);
-  const esSuyo = e.user_id === ctx.user.id, org = organiza(ctx.user);
+  const esSuyo = susEncargos(ctx.user, e), org = organiza(ctx.user);
   if (!esSuyo && !org) throw new HttpError(403, 'Ese encargo lo cambia quien lo pidió o Logística.');
   if (e.origen !== 'hub') throw new HttpError(400, 'Es del historial de la planilla: no se cambia.');
   // Quien lo pidió (sin organizar): mientras está pendiente o no se pudo, lo cambia o lo cancela; cancelado, solo lo vuelve
@@ -237,7 +255,7 @@ export async function editarEncargo(env: Env, ctx: Ctx, id: number, b: EncargoIn
 export async function listarEncargos(db: D1Database, user: User, q: { desde?: string; hasta?: string; todos?: boolean; estado?: string; usuario?: number }) {
   const desde = esDia(q.desde) ? q.desde : sumarDias(hoyBsAs(), -30), hasta = esDia(q.hasta) ? q.hasta : sumarDias(hoyBsAs(), 60);
   const conds = ['e.fecha BETWEEN ? AND ?'], vals: unknown[] = [desde, hasta];
-  if (!(q.todos && organiza(user))) { conds.push('e.user_id = ?'); vals.push(user.id); }
+  if (!(q.todos && organiza(user))) { conds.push('e.user_id IN (SELECT value FROM json_each(?))'); vals.push(JSON.stringify([user.id, ...atiende(user)])); }
   else if (q.usuario) { conds.push('e.user_id = ?'); vals.push(q.usuario); }
   if (q.estado && ESTADOS.includes(q.estado as EstadoEnc)) { conds.push('e.estado = ?'); vals.push(q.estado); }
   const { results } = await db.prepare(`${SELECT_ENC} WHERE ${conds.join(' AND ')} ORDER BY e.fecha DESC, e.id DESC LIMIT 400`).bind(...vals).all<EncargoFila>();
@@ -420,13 +438,15 @@ async function viajesEntre(db: D1Database, user: User, desde: string, hasta: str
       .then((r) => new Map(r.results.map((x) => [x.id, x]))) : Promise.resolve(new Map<number, { id: number; owner_id: number | null; company_id: number | null }>()),
   ]);
   const ventas = esVentas(user);
+  // De quiénes ve los pedidos (Qué ve, alcance.ts): lo suyo y lo de quienes tiene permiso para ver.
+  const vistos = ventas ? await duenosVistos(db, user) : null;
   for (const m of movs) {
     if (llega(m.tipo)) continue;
     if (m.tipo === 'entrega') {
       const p = m.record_id ? pedidoInfo.get(m.record_id) : undefined;
       const ds = m.record_id ? dirs.get(m.record_id) ?? [] : [];
       if (ds.length && ds.every((d) => d.retira)) continue;
-      const suyo = !ventas || (p?.owner_id ?? null) === user.id;
+      const suyo = !vistos || (p?.owner_id != null && vistos.has(Number(p.owner_id)));
       const dir = ds.find((d) => !d.retira);
       viajes.push({ fecha: m.fecha, tipo: 'entrega', clave: claveParada(m), nombre: m.cliente ?? '', company_id: p?.company_id ?? null, direccion: dir?.direccion ?? null,
         lat: dir?.validada ? dir.lat : null, lng: dir?.validada ? dir.lng : null, anonimo: !suyo,
@@ -437,9 +457,10 @@ async function viajesEntre(db: D1Database, user: User, desde: string, hasta: str
     }
   }
   for (const e of encs) {
-    const propio = e.user_id === user.id;
+    // Los de las personas que atiende como back office cuentan como propios (se ve a dónde van), con el nombre de quien lo pidió.
+    const propio = susEncargos(user, e);
     viajes.push({ fecha: e.fecha, tipo: 'encargo', clave: claveEncargo(e), nombre: e.destino, company_id: e.company_id, lugar_id: e.lugar_id, direccion: e.direccion,
-      detalle: propio ? 'Tu encargo' : `Encargo de ${e.quien?.split(' ')[0] ?? 'alguien'}`, propio, encargo_id: e.id });
+      detalle: e.user_id === user.id ? 'Tu encargo' : `Encargo de ${e.quien?.split(' ')[0] ?? 'alguien'}`, propio, encargo_id: e.id });
   }
   return { viajes, movs, encs };
 }
@@ -733,7 +754,7 @@ export async function diasDelDestino(env: Env, user: User, q: { lugar_id?: strin
   }
   const ultimos = (await db.prepare(`${SELECT_ENC} WHERE (e.lugar_id = ?1 OR (?2 IS NOT NULL AND e.company_id = ?2) OR lower(e.destino) = lower(?3)) AND e.estado <> 'cancelado'
       ORDER BY e.fecha DESC LIMIT 25`).bind(destino.lugar_id ?? -1, destino.company_id, destino.nombre).all<EncargoFila>()).results.map(aEncargo)
-    .filter((e) => !esVentas(user) || e.user_id === user.id).slice(0, 4);
+    .filter((e) => !esVentas(user) || susEncargos(user, e)).slice(0, 4);
   // Cómo se coordina la entrega (turnos, seguros) lo ve solo quien organiza, como en la ruta del día.
   const info = lugar ? { ...infoLugar(lugar), localidad: lugar.localidad, coordinacion: organiza(user) ? lugar.coordinacion : null } : null;
   return { destino, lugar: info, dias, habitual: destino.habitual ?? null, ultimos };
@@ -777,7 +798,7 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
         const otra = dirDe.get(v);
         // Se ve el nombre si la arma algo propio o un proveedor o impresor (o, fuera del perfil Ventas, siempre).
         p = { clave, nombre: v.nombre, localidad: l?.localidad ?? otra?.localidad ?? localidadDe(v.direccion ?? otra?.direccion), direccion: v.direccion ?? otra?.direccion ?? null,
-          tipos: {}, detalle: [], encargos: [], anonima: ventas && !v.propio && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null,
+          tipos: {}, detalle: [], encargos: [], anonima: ventas && (v.tipo === 'entrega' ? !!v.anonimo : !v.propio) && v.tipo !== 'retiro' && v.tipo !== 'egreso', chofer: null, company_id: v.company_id ?? null,
           lugar_id: v.lugar_id ?? null, zona: null, dominio: null, zona_libreta: l?.zona ?? otra?.zona ?? null };
         paradas.push(p);
       }
@@ -787,7 +808,7 @@ export async function agenda(env: Env, user: User, q: { desde?: string; dias?: s
       // destapa: se ve con el nombre que le puso ella.
       if (v.tipo === 'retiro' || v.tipo === 'egreso') p.anonima = false;
       else if (v.propio && p.anonima && !p.propio) p.propio = { nombre: v.nombre, direccion: v.direccion ?? null };
-      if (v.tipo === 'encargo') { const e = encs.find((x) => x.id === v.encargo_id)!; if (!ventas || e.user_id === user.id) p.encargos.push(e); }
+      if (v.tipo === 'encargo') { const e = encs.find((x) => x.id === v.encargo_id)!; if (!ventas || susEncargos(user, e)) p.encargos.push(e); }
       if (!p.localidad && v.direccion) p.localidad = localidadDe(v.direccion);
     }
     for (const p of paradas) { p.zona = zonaDe({ zona: p.zona_libreta, localidad: p.localidad, direccion: p.direccion }); delete p.zona_libreta; }
@@ -926,7 +947,7 @@ export async function htmlRemito(db: D1Database, d: DatosRemito) {
 // El remito de traslado de un encargo: lo que se lleva (o, si solo retira, lo que se retira).
 export async function remitoHtml(db: D1Database, user: User, id: number) {
   const e = await encargoPorId(db, id);
-  if (esVentas(user) && e.user_id !== user.id) throw new HttpError(403, 'Es un encargo de otra persona.');
+  if (esVentas(user) && !susEncargos(user, e)) throw new HttpError(403, 'Es un encargo de otra persona.');
   const texto = (i: ItemEnc) => [i.cant, i.que, i.pdv ? `(PDV ${i.pdv})` : ''].filter(Boolean).join(' ');
   return htmlRemito(db, {
     titulo: e.llevar.length ? 'Remito de traslado de mercadería' : 'Constancia de retiro de mercadería', numero: e.remito, fecha: e.fecha,

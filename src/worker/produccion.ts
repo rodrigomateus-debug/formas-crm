@@ -9,6 +9,7 @@ import { TAREAS_SERVICIO_SQL, tareasServicio } from './servicios';
 import { admiteNotas, resumenNotas, skusDeArticulos, type ResumenNotas } from './notasproducto';
 import { costosLogoDeArticulos, type CostoLogo } from './costoslogo';
 import { ocsDeCodigo, ocsDePedidos, sinCodigos, type OcRef } from './ordenescompra';
+import { conPerfilSql, tienePerfil } from './alcance';
 import { recalcularTallesPdvs } from './tallesdb';
 import { compararTalles, costoLogoDeGrupo, nombreSinTalle, raizTalle, talleCanonico, TALLES_VERSION, type CostoLogoTalles } from './talles';
 
@@ -433,7 +434,7 @@ export async function guardarProduccionConfig(db: D1Database, cfg: ProduccionCon
   return { unidades };
 }
 // Producción (el perfil) y los administradores editan; los de «Solo mira», no.
-export const puedeEditarProduccion = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || u.profile === 'produccion');
+export const puedeEditarProduccion = (u: User) => u.role !== 'viewer' && (u.role === 'admin' || tienePerfil(u, 'produccion'));
 
 // El color de un estado como lo pinta ClickUp: hex, o uno de sus colores con nombre («var(--cu-status-red)», como
 // «ingreso de pedido»). Si no se reconoce, el que tenía ese estado en la lista de noviembre de 2026.
@@ -634,7 +635,7 @@ export async function vistaProduccion(db: D1Database, user: User, q: { unidades?
 
 // A quién se le asigna en Producción (pedido de Rodrigo del 17/11/2026): a las usuarias con perfil Producción que
 // tienen usuario en ClickUp (Ceci, Sole y quien entre después). Sobre `u`, el usuario del CRM de la persona de ClickUp.
-const ES_PRODUCCION_SQL = "u.id IS NOT NULL AND u.active = 1 AND u.profile = 'produccion' AND u.role != 'viewer'";
+const ES_PRODUCCION_SQL = `u.id IS NOT NULL AND u.active = 1 AND u.role != 'viewer' AND ${conPerfilSql('produccion', 'u')}`;
 async function personasProduccion(db: D1Database) {
   const { results } = await db.prepare(`SELECT cp.clickup_id FROM clickup_personas cp JOIN users u ON u.id = cp.user_id AND u.deleted_at IS NULL WHERE ${ES_PRODUCCION_SQL}`)
     .all<{ clickup_id: number }>();

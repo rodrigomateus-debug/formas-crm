@@ -670,6 +670,8 @@ table.grid td.name .peek { position: absolute; right: 8px; top: 50%; transform: 
 table.grid tr:hover td.name .peek, table.grid td.name .peek:focus-visible { display: inline-flex; }
 .popover { position: absolute; z-index: 40; background: var(--ui-surface); border-radius: var(--r-panel); box-shadow: var(--shadow-pop); padding: 4px; min-width: 220px; max-height: 360px; overflow: auto;
   color: var(--ui-ink); animation: fade-in var(--dur) var(--ease-out); }
+/* MultiPick: flota sobre la pantalla (fixed) y queda arriba de los modales. */
+.popover.multipick-pop { z-index: 200; }
 .popover .opt { min-height: 32px; padding: 6px 10px; border-radius: var(--r-control); cursor: pointer; display: flex; gap: 8px; align-items: center; transition: background var(--dur-fast) var(--ease); }
 .popover .opt:hover, .popover .opt.on { background: var(--ui-surface-sunken); }
 .popover .opt.muted { cursor: default; }
@@ -1180,6 +1182,8 @@ table.prod-grid td.opcion-cell .input { width: 100%; }
 .btn.xs.prod-mas { align-self: flex-start; margin: 4px 0 0 12px; width: auto; padding: 0 8px; white-space: nowrap; }
 /* Pedidos: quién lo tiene en producción (tarjeta del tablero y productos del pedido). */
 .rec-prod { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 6px; }
+/* Perfil Ventas: la ficha de algo que ve pero es de otra persona (Qué ve, docs/PERFILES.md). */
+.rec-solo-ver { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 2px 8px; border-radius: 999px; background: var(--ui-surface-sunken); color: var(--text-3); }
 .prod-quien { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ui-ink-2); min-width: 0; }
 @media (max-width: 700px) {
   table.prod-grid th.prod-nombre, table.prod-grid td.prod-nombre { min-width: 200px; max-width: 220px; }
@@ -3324,6 +3328,51 @@ body.movil .sb-mickey { bottom: calc(58px + env(safe-area-inset-bottom)); }   /*
 .prod-grupo td { background: var(--sunken); border-top: 1px solid var(--line); padding: 6px 8px !important; }
 .prod-grupo td > * { vertical-align: middle; }
 .prod-grupo-t { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; margin: 0 10px 0 4px; }
+
+/* ---------- Configuración → Usuarios (pedido de Rodrigo del 20/11/2026: «quedó raro, desfasado») ----------
+   La tabla se desplaza sola de costado, con el usuario fijo a la izquierda: antes desbordaba y se corría toda la página
+   (título y pestañas incluidos). Cada celda va en una sola línea, así los controles de una fila quedan a la misma altura. */
+.usuarios-tabla table.grid { table-layout: fixed; min-width: 1168px; }
+.usuarios-tabla table.grid td { height: 52px; padding: 0 6px; max-width: none; }
+.usuarios-tabla table.grid th { padding-left: 6px; padding-right: 6px; overflow: hidden; text-overflow: ellipsis; }
+.usuarios-tabla table.grid th:first-child, .usuarios-tabla table.grid td:first-child { position: sticky; left: 0; padding-left: 14px; box-shadow: 1px 0 0 var(--ui-line); }
+.usuarios-tabla table.grid td:first-child { z-index: 1; background: var(--ui-surface); }
+.usuarios-tabla table.grid th:first-child { z-index: 2; }
+.usuarios-tabla table.grid tr:hover td:first-child { background: var(--row-hover); }
+.usuarios-tabla td.usuario .user-chip { gap: 10px; width: 100%; }
+.usuarios-tabla .usuario-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.usuarios-tabla .usuario-txt .muted { font-size: 12px; }
+.usuarios-tabla td .input.select-like, .usuarios-tabla td .multipick { width: 100%; }
+.usuarios-tabla td .input.select-like { padding-right: 28px; }
+.usuarios-tabla td .input.select-like::after { right: 8px; }
+.usuarios-tabla td.ancho > .ellipsis { display: block; }
+.usuarios-tabla th.centro, .usuarios-tabla td.centro { text-align: center; }
+.usuarios-tabla td.acciones { white-space: nowrap; text-align: right; }
+.multipick-pie { border-top: 1px solid var(--ui-line); margin: 4px -4px -4px; padding: 8px 10px; font-size: 12px; }
+.usuarios-tabla tr.inactivo td.usuario .usuario-txt { opacity: .6; }
+.usuarios-ayuda { margin-top: 12px; max-width: 980px; }
+.usuarios-ayuda p { margin: 0 0 6px; }
+
+/* Qué ve y edita (Configuración → Usuarios): lo suyo o todo, el back office, las personas y la gerencia. */
+.que-ve { display: flex; flex-direction: column; gap: 16px; }
+.que-ve-op { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--ui-line); border-radius: var(--r-control); cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease); }
+.que-ve-op:hover { border-color: var(--ui-ink-3); }
+.que-ve-op.on { border-color: var(--accent-ink); background: var(--accent-soft); }
+.que-ve-op input { margin-top: 3px; }
+.que-ve-op > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.que-ve-lista { border: 1px solid var(--ui-line); border-radius: var(--r-control); max-height: 280px; overflow: auto; padding: 4px; }
+.que-ve-lista .grp { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); padding: 10px 10px 4px; }
+.que-ve-lista .opt { min-height: 36px; padding: 4px 10px; border-radius: var(--r-control); cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.que-ve-lista .opt:hover { background: var(--ui-surface-sunken); }
+.que-ve-lista .opt.muted { cursor: default; }
+.que-ve-lista .opt.muted:hover { background: none; }
+.aviso-que-ve { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--r-control); background: var(--ui-warning-soft); color: var(--ui-warning-ink); }
+.aviso-que-ve > svg { flex: none; }
+.aviso-que-ve.ok { background: var(--ui-positive-soft); color: var(--ui-positive-ink); }
+.aviso-que-ve .btn { flex: none; }
+.que-ve-edita { border-top: 1px solid var(--ui-line); padding-top: 14px; }
+.usuarios-tabla td.acciones .btn.icon { width: 28px; min-width: 28px; height: 28px; padding: 0; flex: none; }
 
 /* Productos con talle en los productos del pedido (RecordPage.tsx, ProductoConTalles) y en la lista de Pedidos: el desglose
    de talles abajo del nombre y, con «Ver talles», cada renglón. */

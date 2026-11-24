@@ -1,4 +1,4 @@
-import type { Ctx, Env, ObjectType } from './env';
+import type { Ctx, Env, ObjectType, Profile } from './env';
 import { assertType, HttpError, OBJECT_TYPES } from './env';
 import { Meta } from './meta';
 import { createRecord, getRow, mergeRecords, rowToRecord, searchRecords, sqlFor, updateRecord, type Filter } from './records';
@@ -11,7 +11,7 @@ import { comentar, comentarios, resumenTareas } from './tareas';
 import { canSee, companiesFor, requireCompany, visiblePipelineIds } from './pipelines';
 import { buscarConsultas, cargarConversacion, CATALOGO, OCASIONES, pendientesDeRespuesta } from './darwin';
 import { cambiarEstadoIdea, listarIdeas } from './ideas';
-import { assertActividadVisible, assertVisible, esDeSuEquipo, esOperaciones, esSuyo, nombrePerfil, puedeVer, restringido, visibleSql } from './alcance';
+import { assertActividadVisible, assertVisible, atiende, esDeSuEquipo, esOperaciones, esSuyo, nombrePerfil, perfilesDe, puedeVer, restringido, visibleSql } from './alcance';
 
 // Servidor MCP (Streamable HTTP, respuestas JSON) para que Claude y Cowork lean y actualicen el CRM.
 // Reemplaza al conector de HubSpot: mismas ideas (buscar, crear, actualizar, asociar, registrar actividad).
@@ -330,12 +330,13 @@ const TOOLS: Tool[] = [
   },
   {
     name: 'list_users',
-    description: 'Usuarios del CRM (propietarios posibles): id, nombre, mail, rol, perfil (admin, comercial, produccion, logistica) y equipo. También dice quién es el usuario de este token.',
+    description: 'Usuarios del CRM (propietarios posibles): id, nombre, mail, rol, perfil principal y perfiles (admin, comercial, backoffice, produccion, logistica) y equipo. También dice quién es el usuario de este token y, si es back office, a quiénes atiende (a esas personas les puede asignar y cargar cosas a su nombre).',
     readOnly: true,
     inputSchema: { type: 'object', properties: {} },
     run: async (_a, ctx, env) => {
-      const { results } = await env.DB.prepare('SELECT u.id, u.name, u.email, u.role, u.profile, u.active, t.name AS team FROM users u LEFT JOIN teams t ON t.id = u.team_id WHERE u.deleted_at IS NULL ORDER BY u.active DESC, u.name').all();
-      return { me: { id: ctx.user.id, name: ctx.user.name }, users: results };
+      const { results } = await env.DB.prepare('SELECT u.id, u.name, u.email, u.role, u.profile, u.perfiles AS lista, u.active, t.name AS team FROM users u LEFT JOIN teams t ON t.id = u.team_id WHERE u.deleted_at IS NULL ORDER BY u.active DESC, u.name').all<Record<string, unknown>>();
+      const users = results.map(({ lista, ...u }) => ({ ...u, perfiles: perfilesDe({ profile: u.profile as Profile, perfiles: lista == null ? null : String(lista) }) }));
+      return { me: { id: ctx.user.id, name: ctx.user.name, ...(atiende(ctx.user).length ? { atiende: atiende(ctx.user) } : {}) }, users };
     },
   },
   {
@@ -579,7 +580,7 @@ async function soloLoSuyo(tool: string, a: Record<string, any>, ctx: Ctx, env: E
   // Asignar a otra persona, no: desde Claude cada uno se asigna a sí mismo (o lo deja sin propietario).
   const owner = tool === 'create_record' || tool === 'update_record' ? a.properties?.owner_id : a.owner_id;
   if (owner != null && owner !== '' && owner !== 'me' && Number(owner) !== me && !(await esDeSuEquipo(env.DB, ctx.user, owner))) {
-    throw new HttpError(403, 'Desde Claude solo podés asignarte cosas a vos. Para asignarle algo a otra persona, hacelo en el CRM.');
+    throw new HttpError(403, 'Desde Claude podés asignarte cosas a vos (y, si sos back office, a las personas que atendés). Para asignarle algo a otra persona, hacelo en el CRM.');
   }
   if (Array.isArray(a.colaboradores) && a.colaboradores.some((u: unknown) => Number(u) !== me)) {
     throw new HttpError(403, 'Desde Claude solo podés sumarte vos como colaborador. Para sumar a otras personas, hacelo en el CRM.');
